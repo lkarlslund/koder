@@ -15,7 +15,6 @@ func TestDefaultRegistryRoleSpecs(t *testing.T) {
 		prompt      string
 	}{
 		{name: "orchestrator", role: Orchestrator, displayName: "Orchestrate", prompt: "main orchestration thread"},
-		{name: "decomposition", role: Decomposition, displayName: "Decompose", prompt: "decomposition worker"},
 		{name: "execution", role: Execution, displayName: "Execute", prompt: "execution worker"},
 	}
 	for _, tt := range tests {
@@ -41,10 +40,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		tool domain.ToolKind
 		want bool
 	}{
-		{"decomposition read", Decomposition, domain.ToolKindRead, true},
-		{"decomposition add todos", Decomposition, domain.ToolKindTodoAddItems, true},
-		{"decomposition rejects bash", Decomposition, domain.ToolKindBash, false},
-		{"decomposition rejects chat poll", Decomposition, domain.ToolKindChatPoll, false},
+		{"legacy decomposition allows orchestrator tools", domain.WorkflowRole("decomposition"), domain.ToolKindChatPoll, true},
 		{"execution allows edit", Execution, domain.ToolKindEdit, true},
 		{"execution rejects chat start", Execution, domain.ToolKindChatStart, false},
 		{"execution rejects milestone add", Execution, domain.ToolKindMilestoneAdd, false},

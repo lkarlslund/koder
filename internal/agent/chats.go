@@ -110,14 +110,8 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 			return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
 		}
 	}
-	if role == chatrole.Decomposition && milestoneRef == "" {
-		return tools.ChatStatus{}, fmt.Errorf("decomposition chat requires milestone_ref or todo_ref")
-	}
 	if role == chatrole.Execution && milestoneRef == "" {
 		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or todo_ref")
-	}
-	if role == chatrole.Decomposition && milestone.Status != domain.MilestoneStatusPending && milestone.Status != domain.MilestoneStatusReady {
-		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected pending or ready", milestoneRef, milestone.Status)
 	}
 	if role == chatrole.Execution && milestone.Status != domain.MilestoneStatusReady {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
@@ -232,8 +226,6 @@ func updateMilestoneStatus(plan store.MilestonePlan, ref string, status domain.M
 
 func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
 	switch role {
-	case chatrole.Decomposition:
-		return domain.MilestoneStatusDecomposing
 	case chatrole.Execution:
 		return domain.MilestoneStatusExecuting
 	default:
@@ -470,8 +462,6 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, miles
 		}
 	}
 	switch role {
-	case chatrole.Decomposition:
-		lines = append(lines, "", "Decompose only this milestone into concrete todo items.", "Use milestone and todo tools only for this milestone.", "When decomposition is complete, set the milestone status to ready and then go idle.", "Do not edit code in this chat.")
 	case chatrole.Execution:
 		lines = append(lines, "", "Execute only this milestone using its todo bucket as the working queue.", "Update todo statuses as you make progress and keep the milestone status accurate.", "When finished, set the milestone status to completed or blocked and then go idle.")
 	}

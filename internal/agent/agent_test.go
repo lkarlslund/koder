@@ -705,7 +705,7 @@ func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Decomposition, &parentID)
+	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Orchestrator, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,7 +739,7 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Decomposition, &parentID)
+	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Orchestrator, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,20 +825,20 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	chat.WorkflowRole = chatrole.Decomposition
+	chat.WorkflowRole = chatrole.Execution
 	if err := st.UpdateChat(context.Background(), chat); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
 
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindBash,
-		Args: map[string]string{"command": "echo no"},
+		Tool: domain.ToolKindChatStart,
+		Args: map[string]string{"profile": string(chatrole.Execution), "objective": "no"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evt.Kind != domain.EventKindToolResult || !strings.Contains(evt.Text, "not available to decomposition chats") {
+	if evt.Kind != domain.EventKindToolResult || !strings.Contains(evt.Text, "not available to execution chats") {
 		t.Fatalf("expected role denied tool result, got %#v", evt)
 	}
 }

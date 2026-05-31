@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	General       domain.WorkflowRole = "general"
-	Orchestrator  domain.WorkflowRole = "orchestrator"
-	Planning      domain.WorkflowRole = "planning"
-	Decomposition domain.WorkflowRole = "decomposition"
-	Execution     domain.WorkflowRole = "execution"
+	General      domain.WorkflowRole = "general"
+	Orchestrator domain.WorkflowRole = "orchestrator"
+	Planning     domain.WorkflowRole = "planning"
+	Execution    domain.WorkflowRole = "execution"
 )
+
+const legacyDecomposition domain.WorkflowRole = "decomposition"
 
 // Spec describes a chat role's behavior contract.
 type Spec struct {
@@ -50,29 +51,6 @@ func DefaultRegistry() Registry {
 		General:      orchestrationSpec(General, "Chat"),
 		Orchestrator: orchestrationSpec(Orchestrator, "Orchestrate"),
 		Planning:     orchestrationSpec(Planning, "Plan"),
-		Decomposition: {
-			Registered:  true,
-			Name:        Decomposition,
-			DisplayName: "Decompose",
-			SystemPrompt: strings.TrimSpace(`This chat is a decomposition worker.
-
-Focus on one assigned milestone and its todo bucket.
-- Break that milestone into concrete todo items.
-- Update only that milestone and its todo bucket.
-- Do not edit code in this chat unless the user explicitly changes the workflow.`),
-			AllowTools: toolSet(
-				domain.ToolKindRead,
-				domain.ToolKindGlob,
-				domain.ToolKindGrep,
-				domain.ToolKindCodeSearch,
-				domain.ToolKindLint,
-				domain.ToolKindMilestoneList,
-				domain.ToolKindMilestoneUpdate,
-				domain.ToolKindTodoList,
-				domain.ToolKindTodoAddItems,
-				domain.ToolKindTodoUpdateItem,
-			),
-		},
 		Execution: {
 			Registered:  true,
 			Name:        Execution,
@@ -105,6 +83,9 @@ func (r Registry) Lookup(name domain.WorkflowRole) (Spec, bool) {
 
 // SpecFor returns the registered role spec.
 func SpecFor(role domain.WorkflowRole) Spec {
+	if role == legacyDecomposition {
+		return orchestrationSpec(Orchestrator, "Orchestrate")
+	}
 	if spec, ok := DefaultRegistry().Lookup(role); ok {
 		return spec
 	}
@@ -152,10 +133,10 @@ func orchestrationSpec(name domain.WorkflowRole, display string) Spec {
 		DisplayName: display,
 		SystemPrompt: strings.TrimSpace(`This chat is the main orchestration thread.
 
-You may discuss, ask clarifying questions, manage milestones, decompose work inline, and start background decomposition or execution chats when helpful.
+You may discuss, ask clarifying questions, manage milestones, decompose work inline, and start background execution chats when helpful.
 - Use milestones for longer-horizon work.
 - Use todos for concrete execution steps.
-- For small changes, inline decomposition is fine; a separate decomposition chat is optional.`),
+- Decompose work inline before starting execution chats.`),
 	}
 }
 

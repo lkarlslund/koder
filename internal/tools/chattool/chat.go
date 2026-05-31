@@ -14,7 +14,7 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List chats",
 		Description: "List chats in the current session.",
-		Usage:       "List chats in the current session, including worker chats started for decomposition or execution.",
+		Usage:       "List chats in the current session, including worker chats started for execution.",
 		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -22,7 +22,7 @@ func init() {
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
 		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or todo_ref to scope what the child chat can see. A todo_ref scopes the child to that single todo item. After starting it, go idle unless you have unrelated work; subchat idle/completion updates will be sent to you automatically.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as decomposition, execution, or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"todo_ref":{"type":"string","description":"Optional todo item UUID to scope the child chat to one todo"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"todo_ref":{"type":"string","description":"Optional todo item UUID to scope the child chat to one todo"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(pollTool{}, tools.ToolSpec{

@@ -63,8 +63,8 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
 	}
-	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Decomposition}); enabled {
-		t.Fatal("expected plan definition to be disabled in decomposition chats")
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
+		t.Fatal("expected plan definition to be disabled in execution chats")
 	}
 	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled"})
 	if err != nil {

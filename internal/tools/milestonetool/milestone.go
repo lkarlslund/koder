@@ -70,7 +70,7 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 	if tools.AssignedMilestoneRef(runtime) != "" {
 		return tools.ToolSpec{}, false
 	}
-	if runtime.ChatRole == chatrole.Decomposition || runtime.ChatRole == chatrole.Execution {
+	if runtime.ChatRole == chatrole.Execution {
 		return tools.ToolSpec{}, false
 	}
 	return spec, true
@@ -536,10 +536,6 @@ func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStat
 		return fmt.Errorf("milestone %q is owned by chat %s", milestone.Ref, *milestone.OwnerChatID)
 	}
 	switch next {
-	case domain.MilestoneStatusDecomposing:
-		if actor.WorkflowRole != chatrole.Decomposition {
-			return fmt.Errorf("milestone %q can only be set to decomposing by a decomposition chat", milestone.Ref)
-		}
 	case domain.MilestoneStatusExecuting:
 		if actor.WorkflowRole != chatrole.Execution {
 			return fmt.Errorf("milestone %q can only be set to executing by an execution chat", milestone.Ref)
@@ -550,7 +546,7 @@ func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStat
 
 func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
 	switch status {
-	case domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
+	case domain.MilestoneStatusExecuting:
 		if actor.ID != "" && actor.WorkflowRole != chatrole.Orchestrator {
 			owner := actor.ID
 			milestone.OwnerChatID = &owner
