@@ -168,13 +168,6 @@ func (e *Engine) loadSessionOwner(ctx context.Context, sessionID domain.ID) (*Se
 		todosByRef: todosByRef,
 		tasks:      slices.Clone(tasks),
 	}
-	for _, chatRecord := range chats {
-		rt, err := e.Chat(ctx, session, chatRecord)
-		if err != nil {
-			return nil, err
-		}
-		owner.runtimes[chatRecord.ID] = rt
-	}
 	return owner, nil
 }
 

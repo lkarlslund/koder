@@ -48,6 +48,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry(t.TempDir())
+	registry.SetSessionControl(tools.NewStoreSessionControl(st))
 
 	_, err = executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -139,6 +140,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry(t.TempDir())
+	registry.SetSessionControl(tools.NewStoreSessionControl(st))
 
 	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -194,6 +196,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		AssignedTodoRef:       todos[0].ID,
 	}
 	registry := tools.NewRegistry(t.TempDir())
+	registry.SetSessionControl(tools.NewStoreSessionControl(st))
 
 	listed, err := registry.ExecuteWithChat(ctx, st, session.ID, chat, tools.Request{
 		Tool: domain.ToolKindTodoList,

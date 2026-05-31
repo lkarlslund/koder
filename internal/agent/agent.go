@@ -1118,7 +1118,16 @@ func normalizeSessionTitle(raw string) string {
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	beforePlan, trackMilestones := e.milestonePlanForNotification(ctx, sessionID, req.Tool)
-	events, err := e.registry.PersistResultInChat(ctx, e.store, sessionID, chatID, req, result)
+	session, chat, err := e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
+	if err != nil {
+		return nil, err
+	}
+	if session.ID != "" {
+		if _, err := e.LoadSession(ctx, session.ID); err != nil {
+			return nil, err
+		}
+	}
+	events, err := e.registry.PersistResultWithRuntime(ctx, e.toolRuntime(session, chat), req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -3379,6 +3388,11 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 		session, chat, chatErr = e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
 		if chatErr != nil {
 			return nil, chatErr
+		}
+	}
+	if session.ID != "" {
+		if _, err := e.LoadSession(ctx, session.ID); err != nil {
+			return nil, err
 		}
 	}
 	result, err := e.registry.ExecuteWithRuntime(ctx, e.toolRuntime(session, chat), req)
