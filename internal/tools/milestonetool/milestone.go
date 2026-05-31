@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -88,18 +89,18 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 	if raw == "" {
 		return nil, errors.New("items is empty")
 	}
-	if _, err := tools.ParseMilestoneAddItems(raw); err != nil {
+	if _, err := planning.ParseMilestoneAddItems(raw); err != nil {
 		return nil, err
 	}
 	return map[string]string{"items": raw}, nil
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref, err := tools.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
 	if err != nil {
 		return nil, err
 	}
-	status, err := tools.ParseMilestoneStatus(tools.FirstArg(args, "status"))
+	status, err := planning.ParseMilestoneStatus(tools.FirstArg(args, "status"))
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 }
 
 func (planTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref, err := tools.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +130,7 @@ func (planTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	if rawItems == "" {
 		return nil, errors.New("items is empty")
 	}
-	if _, err := tools.ParseTodoAddItems(rawItems); err != nil {
+	if _, err := planning.ParseTodoAddItems(rawItems); err != nil {
 		return nil, err
 	}
 	out := map[string]string{
@@ -141,7 +142,7 @@ func (planTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 		out["notes"] = strings.TrimSpace(notes)
 	}
 	if status := strings.TrimSpace(tools.FirstArg(args, "status")); status != "" {
-		parsed, err := tools.ParseMilestoneStatus(status)
+		parsed, err := planning.ParseMilestoneStatus(status)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +156,7 @@ func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if raw == "" {
 		return nil, errors.New("milestones is empty")
 	}
-	if _, err := tools.ParseMilestones(raw); err != nil {
+	if _, err := planning.ParseMilestones(raw); err != nil {
 		return nil, err
 	}
 	out := map[string]string{"milestones": raw}
@@ -189,7 +190,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if tools.AssignedMilestoneRef(runtime) != "" {
 		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneRef(runtime))
 	}
-	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
+	items, err := planning.ParseMilestoneAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -257,13 +258,13 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
 	})
-	if err := tools.ValidateMilestoneProgress(nextMilestones); err != nil {
+	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return tools.Result{}, err
 	}
 	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, nextMilestones); err != nil {
 		return tools.Result{}, err
 	}
-	items, err := tools.ParseTodoAddItems(req.Args["items"])
+	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -275,7 +276,7 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 }
 
 func (writeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	milestones, err := tools.ParseMilestones(req.Args["milestones"])
+	milestones, err := planning.ParseMilestones(req.Args["milestones"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -332,7 +333,7 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 	if err != nil {
 		return nil, err
 	}
-	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
+	items, err := planning.ParseMilestoneAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +397,7 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
 	})
-	if err := tools.ValidateMilestoneProgress(nextMilestones); err != nil {
+	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return nil, err
 	}
 	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, nextMilestones); err != nil {
@@ -405,7 +406,7 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 	if _, err := control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, nextMilestones); err != nil {
 		return nil, err
 	}
-	items, err := tools.ParseTodoAddItems(req.Args["items"])
+	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +428,7 @@ func (writeTool) PersistResult(ctx context.Context, runtime tools.Runtime, req t
 	if err != nil {
 		return nil, err
 	}
-	milestones, err := tools.ParseMilestones(req.Args["milestones"])
+	milestones, err := planning.ParseMilestones(req.Args["milestones"])
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +519,7 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor dom
 	if !found {
 		return store.MilestonePlan{}, fmt.Errorf("milestone %q not found", ref)
 	}
-	if err := tools.ValidateMilestoneProgress(milestones); err != nil {
+	if err := planning.ValidateMilestoneProgress(milestones); err != nil {
 		return store.MilestonePlan{}, err
 	}
 	return store.MilestonePlan{
@@ -559,7 +560,7 @@ func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStat
 	}
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID domain.ID, milestones []store.Milestone) error {
+func validateCompletedMilestoneTodos(ctx context.Context, control planning.Control, sessionID domain.ID, milestones []store.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != domain.MilestoneStatusCompleted {
 			continue

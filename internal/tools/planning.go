@@ -2,221 +2,17 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
-type SessionControl interface {
-	GetMilestonePlan(context.Context, domain.ID) (store.MilestonePlan, error)
-	SetMilestonePlan(context.Context, domain.ID, string, []store.Milestone) (store.MilestonePlan, error)
-	AddTodoItems(context.Context, domain.ID, string, []string) ([]store.TodoItem, error)
-	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (store.TodoItem, error)
-	ListTodos(context.Context, domain.ID, string) ([]store.TodoItem, error)
+type TaskControl interface {
 	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (store.Task, error)
-}
-
-type MilestoneInput struct {
-	Ref    string `json:"ref"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Notes  string `json:"notes,omitempty"`
-}
-
-type MilestoneAddInput struct {
-	Ref   string `json:"ref"`
-	Title string `json:"title"`
-	Notes string `json:"notes,omitempty"`
-}
-
-type TodoAddInput struct {
-	Content string `json:"content"`
-}
-
-func ParseMilestones(raw string) ([]store.Milestone, error) {
-	var items []MilestoneInput
-	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil, errors.New("milestones must be a JSON array of milestone objects")
-	}
-	out := make([]store.Milestone, 0, len(items))
-	seenRefs := map[string]struct{}{}
-	for idx, item := range items {
-		ref := strings.TrimSpace(item.Ref)
-		title := strings.TrimSpace(item.Title)
-		status := domain.MilestoneStatus(strings.TrimSpace(item.Status))
-		notes := strings.TrimSpace(item.Notes)
-		if ref == "" || title == "" {
-			return nil, errors.New("each milestone requires ref and title")
-		}
-		if _, exists := seenRefs[ref]; exists {
-			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
-		}
-		seenRefs[ref] = struct{}{}
-		if !ValidMilestoneStatus(status) {
-			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
-		}
-		out = append(out, store.Milestone{
-			Ref:      ref,
-			Title:    title,
-			Status:   status,
-			Notes:    notes,
-			Position: idx,
-		})
-	}
-	if len(out) == 0 {
-		return nil, errors.New("milestones list is empty")
-	}
-	return out, nil
-}
-
-func ParseMilestoneAddItems(raw string) ([]store.Milestone, error) {
-	var items []MilestoneAddInput
-	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil, errors.New("items must be a JSON array of milestone objects")
-	}
-	out := make([]store.Milestone, 0, len(items))
-	seenRefs := map[string]struct{}{}
-	for _, item := range items {
-		ref := strings.TrimSpace(item.Ref)
-		title := strings.TrimSpace(item.Title)
-		notes := strings.TrimSpace(item.Notes)
-		if ref == "" || title == "" {
-			return nil, errors.New("each milestone requires ref and title")
-		}
-		if _, exists := seenRefs[ref]; exists {
-			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
-		}
-		seenRefs[ref] = struct{}{}
-		out = append(out, store.Milestone{
-			Ref:    ref,
-			Title:  title,
-			Status: domain.MilestoneStatusPending,
-			Notes:  notes,
-		})
-	}
-	if len(out) == 0 {
-		return nil, errors.New("items list is empty")
-	}
-	return out, nil
-}
-
-func ParseMilestoneRef(raw string) (string, error) {
-	ref := strings.TrimSpace(raw)
-	if ref == "" {
-		return "", errors.New("ref is empty")
-	}
-	return ref, nil
-}
-
-func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
-	status := domain.MilestoneStatus(strings.TrimSpace(raw))
-	if ValidMilestoneStatus(status) {
-		return status, nil
-	}
-	return "", fmt.Errorf("invalid milestone status %q", raw)
-}
-
-func ValidMilestoneStatus(status domain.MilestoneStatus) bool {
-	switch status {
-	case domain.MilestoneStatusPending, domain.MilestoneStatusDecomposing, domain.MilestoneStatusReady, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
-		return true
-	default:
-		return false
-	}
-}
-
-func ParseTodoAddItems(raw string) ([]string, error) {
-	var items []TodoAddInput
-	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil, errors.New("items must be a JSON array of todo item objects")
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		content := strings.TrimSpace(item.Content)
-		if content == "" {
-			continue
-		}
-		out = append(out, content)
-	}
-	if len(out) == 0 {
-		return nil, errors.New("items list is empty")
-	}
-	return out, nil
-}
-
-func ParseTodoID(raw string) (domain.ID, error) {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return "", errors.New("id is required")
-	}
-	return value, nil
-}
-
-func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
-	status := domain.TodoStatus(strings.TrimSpace(raw))
-	switch status {
-	case domain.TodoStatusPending, domain.TodoStatusInProgress, domain.TodoStatusCompleted:
-		return status, nil
-	default:
-		return "", fmt.Errorf("invalid todo status %q", raw)
-	}
-}
-
-func ActiveMilestone(plan store.MilestonePlan) (store.Milestone, bool) {
-	for _, item := range plan.Milestones {
-		if item.Status == domain.MilestoneStatusExecuting {
-			return item, true
-		}
-	}
-	for _, item := range plan.Milestones {
-		if item.Status == domain.MilestoneStatusDecomposing {
-			return item, true
-		}
-	}
-	return store.Milestone{}, false
-}
-
-func MilestoneTitle(plan store.MilestonePlan, ref string) string {
-	for _, item := range plan.Milestones {
-		if item.Ref == ref {
-			return item.Title
-		}
-	}
-	return ""
-}
-
-func ValidateTodoProgress(items []store.TodoItem) error {
-	inProgress := 0
-	for _, item := range items {
-		if item.Status == domain.TodoStatusInProgress {
-			inProgress++
-		}
-	}
-	if inProgress > 1 {
-		return errors.New("todo bucket may contain at most one in_progress item")
-	}
-	return nil
-}
-
-func ValidateMilestoneProgress(items []store.Milestone) error {
-	seenRefs := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item.Ref == "" {
-			return errors.New("milestone ref is empty")
-		}
-		if !ValidMilestoneStatus(item.Status) {
-			return fmt.Errorf("invalid milestone status %q", item.Status)
-		}
-		if _, exists := seenRefs[item.Ref]; exists {
-			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
-		}
-		seenRefs[item.Ref] = struct{}{}
-	}
-	return nil
 }
 
 func RequireSessionStore(runtime Runtime) (*store.Store, error) {
@@ -226,11 +22,18 @@ func RequireSessionStore(runtime Runtime) (*store.Store, error) {
 	return runtime.Store, nil
 }
 
-func RequireSessionControl(runtime Runtime) (SessionControl, error) {
+func RequireSessionControl(runtime Runtime) (planning.Control, error) {
 	if runtime.SessionControl == nil || runtime.SessionID == "" {
 		return nil, errors.New("planning tools require a loaded session")
 	}
 	return runtime.SessionControl, nil
+}
+
+func RequireTaskControl(runtime Runtime) (TaskControl, error) {
+	if runtime.TaskControl == nil || runtime.SessionID == "" {
+		return nil, errors.New("task tools require a loaded session")
+	}
+	return runtime.TaskControl, nil
 }
 
 func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
@@ -265,12 +68,12 @@ func TodoScopeAllows(runtime Runtime, todoID domain.ID) error {
 	return fmt.Errorf("chat is scoped to todo %q", assigned)
 }
 
-func ScopedTodos(runtime Runtime, todos []store.TodoItem) []store.TodoItem {
+func ScopedTodos(runtime Runtime, todos []planning.TodoItem) []planning.TodoItem {
 	assigned := AssignedTodoRef(runtime)
 	if assigned == "" {
 		return todos
 	}
-	out := make([]store.TodoItem, 0, 1)
+	out := make([]planning.TodoItem, 0, 1)
 	for _, item := range todos {
 		if item.ID == assigned {
 			out = append(out, item)
@@ -280,7 +83,7 @@ func ScopedTodos(runtime Runtime, todos []store.TodoItem) []store.TodoItem {
 	return out
 }
 
-func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.MilestonePlan {
+func ScopedMilestonePlan(runtime Runtime, plan planning.Plan) planning.Plan {
 	assigned := AssignedMilestoneRef(runtime)
 	if assigned == "" {
 		return plan
@@ -289,49 +92,37 @@ func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.Milest
 	scoped.Milestones = nil
 	for _, milestone := range plan.Milestones {
 		if milestone.Ref == assigned {
-			scoped.Milestones = []store.Milestone{milestone}
+			scoped.Milestones = []planning.Milestone{milestone}
 			return scoped
 		}
 	}
 	return scoped
 }
 
-func MilestonePlanForRef(plan store.MilestonePlan, ref string) store.MilestonePlan {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return plan
-	}
-	scoped := plan
-	scoped.Milestones = nil
-	for _, milestone := range plan.Milestones {
-		if milestone.Ref == ref {
-			scoped.Milestones = []store.Milestone{milestone}
-			return scoped
-		}
-	}
-	return scoped
+func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
+	return planning.PlanForRef(plan, ref)
 }
 
-func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return store.MilestonePlan{}, nil, "", err
+		return planning.Plan{}, nil, "", err
 	}
 	if ref == "" {
-		active, ok := ActiveMilestone(plan)
+		active, ok := planning.ActiveMilestone(plan)
 		if !ok {
-			return store.MilestonePlan{}, nil, "", errors.New("no active milestone; read milestones first or provide milestone_ref")
+			return planning.Plan{}, nil, "", errors.New("no active milestone; read milestones first or provide milestone_ref")
 		}
 		ref = active.Ref
 	}
 	todos, err := st.ListTodos(ctx, sessionID, ref)
 	if err != nil {
-		return store.MilestonePlan{}, nil, "", err
+		return planning.Plan{}, nil, "", err
 	}
 	return plan, todos, ref, nil
 }
 
-func MilestoneStoredResult(plan store.MilestonePlan) MilestonePlanStoredResult {
+func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
 	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
 	for _, item := range plan.Milestones {
 		ownerChatID := ""
@@ -352,7 +143,7 @@ func MilestoneStoredResult(plan store.MilestonePlan) MilestonePlanStoredResult {
 	}
 }
 
-func TodoStoredResult(plan store.MilestonePlan, ref string, todos []store.TodoItem, message string) TodoListStoredResult {
+func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem, message string) TodoListStoredResult {
 	items := make([]TodoStoredItem, 0, len(todos))
 	for _, item := range todos {
 		items = append(items, TodoStoredItem{
@@ -363,7 +154,7 @@ func TodoStoredResult(plan store.MilestonePlan, ref string, todos []store.TodoIt
 	}
 	return TodoListStoredResult{
 		MilestoneRef:   ref,
-		MilestoneTitle: MilestoneTitle(plan, ref),
+		MilestoneTitle: planning.MilestoneTitle(plan, ref),
 		Message:        message,
 		Items:          items,
 	}
@@ -386,7 +177,7 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 	return ChatListStoredResult{Items: items}
 }
 
-func MilestonePlanResult(plan store.MilestonePlan) Result {
+func MilestonePlanResult(plan planning.Plan) Result {
 	stored := MilestoneStoredResult(plan)
 	output := FormatMilestoneOutput(stored)
 	if strings.TrimSpace(output) == "" {
@@ -399,12 +190,12 @@ func MilestonePlanResult(plan store.MilestonePlan) Result {
 	}
 }
 
-func TodoBucketResult(plan store.MilestonePlan, ref string, todos []store.TodoItem, message string) Result {
-	return TodoBucketResultWithTitle(ref, MilestoneTitle(plan, ref), todos, message)
+func TodoBucketResult(plan planning.Plan, ref string, todos []planning.TodoItem, message string) Result {
+	return TodoBucketResultWithTitle(ref, planning.MilestoneTitle(plan, ref), todos, message)
 }
 
-func TodoBucketResultWithTitle(ref, title string, todos []store.TodoItem, message string) Result {
-	stored := TodoStoredResult(store.MilestonePlan{Milestones: []store.Milestone{{Ref: ref, Title: title}}}, ref, todos, message)
+func TodoBucketResultWithTitle(ref, title string, todos []planning.TodoItem, message string) Result {
+	stored := TodoStoredResult(planning.Plan{Milestones: []planning.Milestone{{Ref: ref, Title: title}}}, ref, todos, message)
 	output := FormatTodoOutput(stored)
 	if strings.TrimSpace(output) == "" {
 		output = "No todo items found."

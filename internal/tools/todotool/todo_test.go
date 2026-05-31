@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestTodoUpdateItemParsesStringID(t *testing.T) {
-	id, err := tools.ParseTodoID("019aa000-0000-7000-8000-000000000001")
+	id, err := planning.ParseTodoID("019aa000-0000-7000-8000-000000000001")
 	if err != nil {
 		t.Fatalf("expected todo id to parse, got %v", err)
 	}

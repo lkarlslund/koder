@@ -11,6 +11,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -884,4 +885,4 @@ func flattenTodos(src map[string][]store.TodoItem) []store.TodoItem {
 	return out
 }
 
-var _ tools.SessionControl = (*Session)(nil)
+var _ planning.Control = (*Session)(nil)

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -80,18 +81,18 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 	if raw == "" {
 		return nil, fmt.Errorf("items is empty")
 	}
-	if _, err := tools.ParseTodoAddItems(raw); err != nil {
+	if _, err := planning.ParseTodoAddItems(raw); err != nil {
 		return nil, err
 	}
 	return map[string]string{"milestone_ref": ref, "items": raw}, nil
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	id, err := tools.ParseTodoID(tools.FirstArg(args, "id"))
+	id, err := planning.ParseTodoID(tools.FirstArg(args, "id"))
 	if err != nil {
 		return nil, err
 	}
-	status, err := tools.ParseTodoStatus(tools.FirstArg(args, "status"))
+	status, err := planning.ParseTodoStatus(tools.FirstArg(args, "status"))
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +141,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if tools.AssignedTodoRef(runtime) != "" {
 		return tools.Result{}, fmt.Errorf("chat is scoped to todo %q", tools.AssignedTodoRef(runtime))
 	}
-	items, err := tools.ParseTodoAddItems(req.Args["items"])
+	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -156,7 +157,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	title := tools.MilestoneTitle(plan, ref)
+	title := planning.MilestoneTitle(plan, ref)
 	todos := make([]store.TodoItem, 0, len(items))
 	for _, content := range items {
 		todos = append(todos, store.TodoItem{
@@ -172,7 +173,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	id, _ := tools.ParseTodoID(req.Args["id"])
+	id, _ := planning.ParseTodoID(req.Args["id"])
 	if err := tools.TodoScopeAllows(runtime, id); err != nil {
 		return tools.Result{}, err
 	}
@@ -200,7 +201,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				todos[idx].Content = content
 			}
-			if err := tools.ValidateTodoProgress(todos); err != nil {
+			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
 			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
@@ -278,7 +279,7 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 	if err != nil {
 		return nil, err
 	}
-	items, err := tools.ParseTodoAddItems(req.Args["items"])
+	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +302,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 	if err != nil {
 		return nil, err
 	}
-	id, _ := tools.ParseTodoID(req.Args["id"])
+	id, _ := planning.ParseTodoID(req.Args["id"])
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return nil, err
@@ -319,7 +320,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				todos[idx].Content = content
 			}
-			if err := tools.ValidateTodoProgress(todos); err != nil {
+			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return nil, err
 			}
 			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
@@ -363,14 +364,14 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func persistedTodoBucket(ctx context.Context, control tools.SessionControl, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+func persistedTodoBucket(ctx context.Context, control planning.Control, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
 	plan, err := control.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return store.MilestonePlan{}, nil, "", err
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		active, ok := tools.ActiveMilestone(plan)
+		active, ok := planning.ActiveMilestone(plan)
 		if !ok {
 			return store.MilestonePlan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_ref")
 		}

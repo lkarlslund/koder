@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -138,7 +139,8 @@ type Runtime struct {
 	AssignedTodoBucketRef string
 	AssignedTodoRef       domain.ID
 	ChatControl           ChatControl
-	SessionControl        SessionControl
+	SessionControl        planning.Control
+	TaskControl           TaskControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	SandboxProfile        permissionprofile.Profile

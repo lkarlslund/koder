@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
@@ -82,7 +83,7 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 }
 
 func TestAppendAndValidationHelpers(t *testing.T) {
-	parsed, err := tools.ParseMilestones(`[{"ref":"alpha","title":"Alpha","status":"cancelled"}]`)
+	parsed, err := planning.ParseMilestones(`[{"ref":"alpha","title":"Alpha","status":"cancelled"}]`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err := ensureMilestoneRefsAvailable(existing, []store.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
 		t.Fatal("expected duplicate ref error")
 	}
-	if err := tools.ValidateMilestoneProgress([]store.Milestone{
+	if err := planning.ValidateMilestoneProgress([]store.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting},
 	}); err != nil {

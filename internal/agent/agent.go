@@ -2027,6 +2027,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner
+		runtime.TaskControl = owner
 	}
 	return runtime
 }

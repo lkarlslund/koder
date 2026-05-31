@@ -35,7 +35,7 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 	return "task", req.Args["body"]
 }
 func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	control, err := tools.RequireSessionControl(runtime)
+	control, err := tools.RequireTaskControl(runtime)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -1662,7 +1663,7 @@ func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (st
 		}
 		todosByRef[ref] = slices.Clone(todos)
 	}
-	active, ok := tools.ActiveMilestone(plan)
+	active, ok := planning.ActiveMilestone(plan)
 	if !ok {
 		return plan, nil, todosByRef
 	}
