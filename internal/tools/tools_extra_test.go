@@ -53,12 +53,31 @@ func TestRequestJSONRoundTrip(t *testing.T) {
 func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
 	_, err := tools.ParseProviderCall(provider.ToolCall{
 		Function: provider.FunctionCall{
-			Name:  domain.ToolKindWrite.String(),
+			Name:      domain.ToolKindWrite.String(),
 			Arguments: `{"path":"notes.txt","content":"hello"}`,
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing id") {
 		t.Fatalf("expected missing id error, got %v", err)
+	}
+}
+
+func TestParseProviderCallStoresNormalizedArguments(t *testing.T) {
+	req, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_1",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindRead.String(),
+			Arguments: `{"path":"README.md","start_line":"150.0000","end_line":"175.0000"}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Args["start_line"]; got != "150" {
+		t.Fatalf("expected normalized start_line, got %q", got)
+	}
+	if got := req.Args["end_line"]; got != "175" {
+		t.Fatalf("expected normalized end_line, got %q", got)
 	}
 }
 

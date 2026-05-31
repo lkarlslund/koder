@@ -962,6 +962,53 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	}
 }
 
+func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	calls, err := engine.parseProviderToolCalls([]provider.ToolCall{{
+		ID: "call_1",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindRead.String(),
+			Arguments: `{"path":"README.md","start_line":"150.0000","end_line":"175.0000"}`,
+		},
+	}}, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemSeed := domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if _, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, calls, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one assistant item, got %d", len(items))
+	}
+	assistant, ok := items[0].Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 1 {
+		t.Fatalf("expected assistant tool call, got %#v", items[0].Content)
+	}
+	args := assistant.Tools[0].Args
+	if args["start_line"] != "150" || args["end_line"] != "175" {
+		t.Fatalf("expected persisted normalized line args, got %#v", args)
+	}
+}
+
 func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

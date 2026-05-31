@@ -422,7 +422,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if req.ToolCallID == "" {
 		return Request{}, fmt.Errorf("provider tool call for %s missing id", kind)
 	}
-	return req, nil
+	return Normalize(req)
 }
 
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
@@ -465,9 +465,9 @@ func RequestFromMetaMap(raw map[string]string) (Request, error) {
 		return Request{}, fmt.Errorf("unknown tool %q", toolName)
 	}
 	req := Request{
-		Tool:  kind,
+		Tool:       kind,
 		ToolCallID: strings.TrimSpace(raw["tool_call_id"]),
-		Args:  map[string]string{},
+		Args:       map[string]string{},
 	}
 	for key, value := range raw {
 		if key == "tool" || key == "tool_call_id" {
@@ -539,10 +539,10 @@ func SummarizeResult(req Request, result Result) (string, string) {
 
 func ToolCall(req Request) provider.ToolCall {
 	return provider.ToolCall{
-		ID:  req.ToolCallID,
+		ID:   req.ToolCallID,
 		Type: "function",
 		Function: provider.FunctionCall{
-			Name:  req.Tool.String(),
+			Name:      req.Tool.String(),
 			Arguments: req.ArgumentsJSON(),
 		},
 	}
@@ -556,7 +556,7 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 	return provider.ToolDefinition{
 		Type: "function",
 		Function: provider.FunctionDefinition{
-			Name:  kind.String(),
+			Name:        kind.String(),
 			Description: description,
 			Parameters:  json.RawMessage(spec.Parameters),
 		},
