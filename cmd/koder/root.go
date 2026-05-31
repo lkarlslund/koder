@@ -26,7 +26,6 @@ import (
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/webui"
@@ -136,9 +135,8 @@ func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startup
 		_ = mcpManager.ConnectAll(context.Background())
 	}()
 
-	registry := tools.NewRegistry()
-	engine := agent.New(cfg, st, registry, recorder, mcpManager)
-	return runWeb(ctx, cfg, st, engine, registry, mode, recorder, workdir, startupOpts)
+	engine := agent.New(cfg, st, recorder, mcpManager)
+	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
 }
 
 func syncManagedUserAssets(ctx context.Context) error {
@@ -154,7 +152,7 @@ func syncManagedUserAssets(ctx context.Context) error {
 	return err
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, registry *tools.Registry, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
 	controller := app.New(cfg, st, engine)
 	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err

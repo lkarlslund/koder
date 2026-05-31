@@ -49,9 +49,7 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	registry := tools.NewRegistry()
-	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": "."},
 	})
@@ -74,9 +72,8 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 
 func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry()
 
-	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
@@ -95,12 +92,11 @@ func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 }
 
 func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
-	registry := tools.NewRegistry()
 	fake := &fakeMCPExecutor{
 		result: tools.Result{Output: "mcp ok"},
 	}
 
-	result, err := registry.Execute(context.Background(), tools.Runtime{MCP: fake}, tools.Request{
+	result, err := tools.Execute(context.Background(), tools.Runtime{MCP: fake}, tools.Request{
 		Tool: domain.ToolKindMCP,
 		Args: map[string]string{
 			"server":        "exa",
@@ -124,9 +120,8 @@ func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
 
 func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry()
 
-	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
@@ -146,9 +141,8 @@ func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 
 func TestBashFractionalTimeoutStillFails(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry()
 
-	_, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	_, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
@@ -166,9 +160,8 @@ func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 	if err := os.WriteFile(path, []byte("1\n2\n3\n4\n5\n6\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry()
 
-	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
 			"path":       "file.txt",
@@ -202,9 +195,8 @@ func TestReadFractionalStartLineFails(t *testing.T) {
 	if err := os.WriteFile(path, []byte("1\n2\n3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry()
 
-	_, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
+	_, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
 			"path":       "file.txt",

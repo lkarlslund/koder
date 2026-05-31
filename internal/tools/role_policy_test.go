@@ -36,9 +36,7 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-
-	registry := tools.NewRegistry()
-	_, err = registry.Execute(context.Background(), tools.Runtime{
+	_, err = tools.Execute(context.Background(), tools.Runtime{
 		Store:     st,
 		SessionID: "session-1",
 		ChatID:    "chat-1",

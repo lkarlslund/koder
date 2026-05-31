@@ -38,7 +38,6 @@ type execOptions struct {
 type execRunner struct {
 	cfg    config.Config
 	client *provider.Client
-	tools  *tools.Registry
 }
 
 type structuredOutputSchema struct {
@@ -126,12 +125,11 @@ func runExec(ctx context.Context, opts execOptions, prompt string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	registry := tools.NewRegistry()
 	schema, err := loadStructuredOutputSchema(opts)
 	if err != nil {
 		return "", err
 	}
-	runner := execRunner{cfg: cfg, client: client, tools: registry}
+	runner := execRunner{cfg: cfg, client: client}
 	return runner.run(ctx, prompt, providerID, modelID, workdir, schema, max(1, opts.maxTurns))
 }
 
@@ -388,7 +386,7 @@ func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime
 			*messages = append(*messages, provider.Message{Role: domain.MessageRoleTool, ToolCallID: strings.TrimSpace(call.ID), Content: "Error: " + err.Error()})
 			continue
 		}
-		result, err := r.tools.Execute(ctx, runtime, req)
+		result, err := tools.Execute(ctx, runtime, req)
 		content := strings.TrimSpace(result.Output)
 		if err != nil {
 			content = "Error: " + err.Error()

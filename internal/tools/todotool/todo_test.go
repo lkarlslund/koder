@@ -48,10 +48,9 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry()
 	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
-	_, err = executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	_, err = executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{
 			"items": `[{"ref":"investigate","title":"Investigate"},{"ref":"implement","title":"Implement"}]`,
@@ -60,20 +59,20 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "investigate", "status": "completed"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "implement", "status": "ready"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	_, err = executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoAddItems,
 		Args: map[string]string{
 			"milestone_ref": "implement",
@@ -84,7 +83,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	next, err := registry.Execute(ctx, runtime, tools.Request{
+	next, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
@@ -102,26 +101,26 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	if len(todos) != 2 {
 		t.Fatalf("unexpected todos: %#v", todos)
 	}
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "in_progress"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "completed"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[1].ID), "status": "completed"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	done, err := registry.Execute(ctx, runtime, tools.Request{
+	done, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
@@ -140,10 +139,9 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry()
 	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
-	if _, err := executeAndPersist(ctx, t, registry, runtime, tools.Request{
+	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{"items": `[{"ref":"implement","title":"Implement"}]`},
 	}); err != nil {
@@ -156,14 +154,14 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 			"items":         `[{"content":"Write tests"},{"content":"Fix bug"}]`,
 		},
 	}
-	result, err := registry.Execute(ctx, runtime, req)
+	result, err := tools.Execute(ctx, runtime, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(result.Output, "# Write tests") {
 		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
 	}
-	events, err := registry.PersistResult(ctx, runtime, req, result)
+	events, err := tools.PersistResult(ctx, runtime, req, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +194,6 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		AssignedTodoBucketRef: "implement",
 		AssignedTodoRef:       todos[0].ID,
 	}
-	registry := tools.NewRegistry()
 	runtime := tools.Runtime{
 		Store:                 st,
 		SessionID:             session.ID,
@@ -208,7 +205,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		SessionControl:        tooltest.NewSessionControl(st),
 	}
 
-	listed, err := registry.Execute(ctx, runtime, tools.Request{
+	listed, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoList,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
@@ -219,13 +216,13 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		t.Fatalf("expected single scoped todo, got %q", listed.Output)
 	}
 
-	if _, err := registry.Execute(ctx, runtime, tools.Request{
+	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
 		Args: map[string]string{"id": string(todos[1].ID), "status": string(domain.TodoStatusCompleted)},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected scoped todo error, got %v", err)
 	}
-	if _, err := registry.Execute(ctx, runtime, tools.Request{
+	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoAddItems,
 		Args: map[string]string{"milestone_ref": "implement", "items": `[{"content":"Third"}]`},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
@@ -265,13 +262,13 @@ func openPlanningTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func executeAndPersist(ctx context.Context, t *testing.T, registry *tools.Registry, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func executeAndPersist(ctx context.Context, t *testing.T, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	t.Helper()
-	result, err := registry.Execute(ctx, runtime, req)
+	result, err := tools.Execute(ctx, runtime, req)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if _, err := registry.PersistResult(ctx, runtime, req, result); err != nil {
+	if _, err := tools.PersistResult(ctx, runtime, req, result); err != nil {
 		return tools.Result{}, err
 	}
 	return result, nil

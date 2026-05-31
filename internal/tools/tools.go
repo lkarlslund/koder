@@ -183,9 +183,6 @@ type resultPersister interface {
 	PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error)
 }
 
-type Registry struct {
-}
-
 var (
 	regMu    sync.RWMutex
 	registry = map[domain.ToolKind]Tool{}
@@ -235,11 +232,7 @@ func Info(kind domain.ToolKind) ToolSpec {
 	return normalizeToolSpec(kind, ToolSpec{})
 }
 
-func NewRegistry() *Registry {
-	return &Registry{}
-}
-
-func (r *Registry) Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) {
+func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) {
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
 		return Result{}, err
@@ -274,7 +267,7 @@ func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, 
 	return permissionprofile.Normalize(permissionprofile.Profile{})
 }
 
-func (r *Registry) PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
+func PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
 	if req.Tool == "" {
 		return nil, errors.New("tool is empty")
 	}

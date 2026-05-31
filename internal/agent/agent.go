@@ -41,7 +41,6 @@ import (
 type Engine struct {
 	cfg        config.Config
 	store      *store.Store
-	registry   *tools.Registry
 	debug      *debugsrv.Recorder
 	files      *attachment.Manager
 	caps       *provider.CapabilityStore
@@ -64,7 +63,7 @@ const (
 	defaultTransientRetryWait = 250 * time.Millisecond
 )
 
-func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
+func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
 	var mcpManager *mcp.Manager
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
@@ -72,7 +71,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 	return &Engine{
 		cfg:        cfg,
 		store:      st,
-		registry:   registry,
 		debug:      debug,
 		files:      attachment.NewManager(cfg.StateDir()),
 		caps:       provider.NewCapabilityStore(cfg.StateDir()),
@@ -1119,7 +1117,7 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 			return nil, err
 		}
 	}
-	events, err := e.registry.PersistResult(ctx, e.toolRuntime(session, chat), req, result)
+	events, err := tools.PersistResult(ctx, e.toolRuntime(session, chat), req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -3371,7 +3369,7 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 			return nil, err
 		}
 	}
-	result, err := e.registry.Execute(ctx, e.toolRuntime(session, chat), req)
+	result, err := tools.Execute(ctx, e.toolRuntime(session, chat), req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 		if interruptedErr(err) {
