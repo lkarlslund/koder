@@ -66,6 +66,18 @@ func (e *Engine) detachChat(chatID domain.ID) {
 }
 
 func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
+	if owner, err := e.LoadSession(ctx, sessionID); err == nil {
+		snapshot := owner.Snapshot()
+		statuses := make([]tools.ChatStatus, 0, len(snapshot.Chats))
+		for _, item := range snapshot.Chats {
+			status, err := owner.PollChat(ctx, item.ID)
+			if err != nil {
+				return nil, err
+			}
+			statuses = append(statuses, status)
+		}
+		return statuses, nil
+	}
 	chats, err := e.store.ListChats(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -82,6 +94,9 @@ func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.Ch
 }
 
 func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+	if owner, err := e.LoadSession(ctx, sessionID); err == nil {
+		return owner.PollChat(ctx, chatID)
+	}
 	chatRecord, err := e.store.GetChat(ctx, chatID)
 	if err != nil {
 		return tools.ChatStatus{}, err
@@ -165,6 +180,9 @@ func (e *Engine) StartPreparedChat(ctx context.Context, session domain.Session, 
 	activeChat, err := e.Chat(ctx, session, chatRecord)
 	if err != nil {
 		return tools.ChatStatus{}, err
+	}
+	if owner := e.loadedSession(session.ID); owner != nil {
+		owner.adoptChat(chatRecord, activeChat)
 	}
 	e.setRunState(chatRecord.ID, chatRunState{state: tools.ChatRunStateRunning, statusText: "Starting background chat"})
 	updates, unsub := activeChat.Subscribe()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -251,6 +252,206 @@ func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, er
 	return rt, nil
 }
 
+func (s *Session) adoptChat(chatRecord domain.Chat, rt *chatpkg.Chat) {
+	if s == nil || chatRecord.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	if s.runtimes == nil {
+		s.runtimes = map[domain.ID]*chatpkg.Chat{}
+	}
+	if rt != nil {
+		s.runtimes[chatRecord.ID] = rt
+	}
+	s.mu.Unlock()
+}
+
+// NewChat creates a new orchestrator chat under parentChatID.
+func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title string) (*chatpkg.Chat, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Chat"
+	}
+	s.mu.RLock()
+	session := s.session
+	parent, ok := chatByID(s.chats, parentChatID)
+	position := len(s.chats)
+	s.mu.RUnlock()
+	if session.ID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if !ok {
+		return nil, fmt.Errorf("parent chat %s not found", parentChatID)
+	}
+	parentID := parent.ID
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                domain.NewID(),
+		SessionID:         session.ID,
+		ParentChatID:      &parentID,
+		Title:             title,
+		WorkflowRole:      chatrole.Orchestrator,
+		ProviderID:        strings.TrimSpace(parent.ProviderID),
+		ModelID:           strings.TrimSpace(parent.ModelID),
+		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
+		ToolStates:        cloneToolStateMap(session.ToolStates),
+		Position:          position,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := s.engine.store.PutChat(ctx, chatRecord); err != nil {
+		return nil, err
+	}
+	rt, err := s.engine.Chat(ctx, session, chatRecord)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	s.runtimes[chatRecord.ID] = rt
+	s.mu.Unlock()
+	return rt, nil
+}
+
+// ArchiveChat marks a chat archived, preserving its history.
+func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, domain.ID, error) {
+	if s == nil {
+		return tools.ChatStatus{}, "", fmt.Errorf("session is required")
+	}
+	if chatID == "" {
+		return tools.ChatStatus{}, "", fmt.Errorf("chat id is required")
+	}
+	s.mu.RLock()
+	target, ok := chatByID(s.chats, chatID)
+	nextChatID := fallbackVisibleChatID(s.chats, target)
+	if !ok {
+		s.mu.RUnlock()
+		return tools.ChatStatus{}, "", fmt.Errorf("chat %s not found", chatID)
+	}
+	s.mu.RUnlock()
+	if nextChatID == "" {
+		return tools.ChatStatus{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
+	}
+	target.Archived = true
+	target.UpdatedAt = time.Now().UTC()
+	if err := s.engine.store.UpdateChat(ctx, target); err != nil {
+		return tools.ChatStatus{}, "", err
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, target)
+	if rt := s.runtimes[target.ID]; rt != nil {
+		rt.SetChat(target)
+	}
+	status := s.chatStatusLocked(target.ID)
+	s.mu.Unlock()
+	status.Chat = target
+	status.StatusText = "Archived"
+	return status, nextChatID, nil
+}
+
+// ReorderChats persists and applies the complete chat order.
+func (s *Session) ReorderChats(ctx context.Context, ids []domain.ID) ([]domain.Chat, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	s.mu.RUnlock()
+	ordered, err := s.engine.store.ReorderChats(ctx, sessionID, ids)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.chats = slices.Clone(ordered)
+	for _, item := range ordered {
+		if rt := s.runtimes[item.ID]; rt != nil {
+			rt.SetChat(item)
+		}
+	}
+	s.mu.Unlock()
+	return slices.Clone(ordered), nil
+}
+
+// Rename updates the live and persisted session title.
+func (s *Session) Rename(ctx context.Context, title string) (domain.Session, error) {
+	if s == nil {
+		return domain.Session{}, fmt.Errorf("session is required")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return domain.Session{}, fmt.Errorf("session title is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	s.mu.RUnlock()
+	if err := s.engine.store.UpdateSessionTitle(ctx, sessionID, title, time.Time{}, 0); err != nil {
+		return domain.Session{}, err
+	}
+	updated, err := s.engine.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	s.mu.Lock()
+	s.session = updated
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(updated)
+		}
+	}
+	s.mu.Unlock()
+	return updated, nil
+}
+
+// SetChatModel persists the provider/model used by a chat and updates its runtime.
+func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID, modelID string) (domain.Chat, error) {
+	if s == nil {
+		return domain.Chat{}, fmt.Errorf("session is required")
+	}
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" {
+		return domain.Chat{}, fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return domain.Chat{}, fmt.Errorf("model id is required")
+	}
+	s.mu.RLock()
+	chatRecord, ok := chatByID(s.chats, chatID)
+	s.mu.RUnlock()
+	if !ok {
+		return domain.Chat{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	chatRecord.ProviderID = providerID
+	chatRecord.ModelID = modelID
+	chatRecord.UpdatedAt = time.Now().UTC()
+	if err := s.engine.store.UpdateChat(ctx, chatRecord); err != nil {
+		return domain.Chat{}, err
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	if rt := s.runtimes[chatID]; rt != nil {
+		rt.SetChat(chatRecord)
+	}
+	s.mu.Unlock()
+	return chatRecord, nil
+}
+
+func (s *Session) PollChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, error) {
+	if s == nil {
+		return tools.ChatStatus{}, fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := chatByID(s.chats, chatID); !ok {
+		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	return s.chatStatusLocked(chatID), nil
+}
+
 // Close closes all chat runtimes currently owned by this session.
 func (s *Session) Close(ctx context.Context) error {
 	if s == nil {
@@ -433,6 +634,48 @@ func (s *Session) requireSession(sessionID domain.ID) error {
 	return nil
 }
 
+func (s *Session) chatStatusLocked(chatID domain.ID) tools.ChatStatus {
+	chatRecord, _ := chatByID(s.chats, chatID)
+	status := tools.ChatRunStateIdle
+	statusText := string(chatpkg.StatusIdle)
+	busy := false
+	pending := 0
+	if rt := s.runtimes[chatID]; rt != nil {
+		snapshot := rt.Snapshot()
+		chatRecord = snapshot.Chat
+		pending = len(snapshot.Approvals)
+		statusText = snapshot.StatusText
+		switch snapshot.Status {
+		case chatpkg.StatusWaitingApproval:
+			status = tools.ChatRunStateWaitingApproval
+			busy = true
+		case chatpkg.StatusErrored:
+			status = tools.ChatRunStateFailed
+		default:
+			if snapshot.Active {
+				status = tools.ChatRunStateRunning
+				busy = true
+			}
+		}
+		if strings.TrimSpace(statusText) == "" {
+			statusText = string(snapshot.Status)
+		}
+	}
+	if pending > 0 && status == tools.ChatRunStateIdle {
+		status = tools.ChatRunStateWaitingApproval
+		busy = true
+		statusText = "Waiting for approval"
+	}
+	return tools.ChatStatus{
+		Chat:             chatRecord,
+		State:            status,
+		Status:           string(status),
+		Busy:             busy,
+		PendingApprovals: pending,
+		StatusText:       statusText,
+	}
+}
+
 func chatByID(chats []domain.Chat, id domain.ID) (domain.Chat, bool) {
 	for _, item := range chats {
 		if item.ID == id {
@@ -440,6 +683,49 @@ func chatByID(chats []domain.Chat, id domain.ID) (domain.Chat, bool) {
 		}
 	}
 	return domain.Chat{}, false
+}
+
+func upsertSessionChatLocked(chats *[]domain.Chat, chatRecord domain.Chat) {
+	for idx := range *chats {
+		if (*chats)[idx].ID == chatRecord.ID {
+			(*chats)[idx] = chatRecord
+			return
+		}
+	}
+	*chats = append(*chats, chatRecord)
+	slices.SortFunc(*chats, func(a, b domain.Chat) int {
+		if a.Position != b.Position {
+			return a.Position - b.Position
+		}
+		return strings.Compare(string(a.ID), string(b.ID))
+	})
+}
+
+func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) domain.ID {
+	if archiving.ParentChatID != nil {
+		for _, item := range chats {
+			if item.ID == *archiving.ParentChatID && item.ID != archiving.ID && !item.Archived {
+				return item.ID
+			}
+		}
+	}
+	for _, item := range chats {
+		if item.ID != archiving.ID && !item.Archived {
+			return item.ID
+		}
+	}
+	return ""
+}
+
+func cloneToolStateMap(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	if len(src) == 0 {
+		return map[domain.ToolKind]bool{}
+	}
+	out := make(map[domain.ToolKind]bool, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }
 
 func cloneMilestonePlan(plan store.MilestonePlan) store.MilestonePlan {

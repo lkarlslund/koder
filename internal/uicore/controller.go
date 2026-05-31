@@ -668,7 +668,6 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	c.mu.RLock()
 	session := c.session
 	parent := c.chat
-	position := len(c.chats)
 	c.mu.RUnlock()
 	if session.ID == "" {
 		return fmt.Errorf("no active session")
@@ -676,30 +675,18 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	if parent.ID == "" {
 		return fmt.Errorf("no active chat")
 	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "Chat"
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
 	}
-	parentID := parent.ID
-	now := time.Now().UTC()
-	chatRecord := domain.Chat{
-		ID:                domain.NewID(),
-		SessionID:         session.ID,
-		ParentChatID:      &parentID,
-		Title:             title,
-		WorkflowRole:      chatrole.Orchestrator,
-		ProviderID:        strings.TrimSpace(parent.ProviderID),
-		ModelID:           strings.TrimSpace(parent.ModelID),
-		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
-		ToolStates:        cloneToolStateMap(session.ToolStates),
-		Position:          position,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	}
-	if err := c.store.PutChat(ctx, chatRecord); err != nil {
+	owner, err := c.agent.LoadSession(ctx, session.ID)
+	if err != nil {
 		return err
 	}
-	return c.loadSession(ctx, session.ID, chatRecord.ID)
+	rt, err := owner.NewChat(ctx, parent.ID, title)
+	if err != nil {
+		return err
+	}
+	return c.loadSession(ctx, session.ID, rt.Snapshot().Chat.ID)
 }
 
 // ListChats returns the controller's live chat list for the active session.
@@ -1249,30 +1236,19 @@ func (c *Controller) ArchiveChat(ctx context.Context, sessionID domain.ID, chatI
 	if sessionID == "" {
 		return tools.ChatStatus{}, fmt.Errorf("no active session")
 	}
-	chats, err := c.store.ListChats(ctx, sessionID)
+	if c.agent == nil {
+		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	target, ok := chatByID(chats, chatID)
-	if !ok {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
-	}
-	if target.SessionID != sessionID {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
-	}
 	archivingActive := chatID == activeChatID
-	nextChatID := activeChatID
-	if archivingActive {
-		nextChatID = fallbackVisibleChatID(chats, target)
-		if nextChatID == "" {
-			return tools.ChatStatus{}, fmt.Errorf("cannot archive the only visible chat in a session")
-		}
-	}
-	target.Archived = true
-	target.UpdatedAt = time.Now().UTC()
-	if err := c.store.UpdateChat(ctx, target); err != nil {
+	status, nextChatID, err := owner.ArchiveChat(ctx, chatID)
+	if err != nil {
 		return tools.ChatStatus{}, err
 	}
+	target := status.Chat
 	c.mu.Lock()
 	upsertChat(&c.chats, target)
 	if c.chat.ID == target.ID {
@@ -1291,14 +1267,7 @@ func (c *Controller) ArchiveChat(ctx context.Context, sessionID domain.ID, chatI
 		c.refreshChatStatuses(ctx, sessionID)
 		c.broadcast("snapshot", c.State())
 	}
-	if c.agent != nil {
-		status, err := c.agent.PollChat(ctx, sessionID, chatID)
-		if err == nil {
-			status.Chat.Archived = true
-			return status, nil
-		}
-	}
-	return tools.ChatStatus{Chat: target, State: tools.ChatRunStateIdle, Status: string(chat.StatusIdle), StatusText: "Archived"}, nil
+	return status, nil
 }
 
 // ReorderChats persists the sidebar chat order for the active session.
@@ -1306,22 +1275,20 @@ func (c *Controller) ReorderChats(ctx context.Context, chatIDs []domain.ID) erro
 	c.mu.RLock()
 	sessionID := c.session.ID
 	activeChatID := c.chat.ID
-	runtimes := make(map[domain.ID]*chat.Chat, len(c.runtimes))
-	for id, rt := range c.runtimes {
-		runtimes[id] = rt
-	}
 	c.mu.RUnlock()
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
 	}
-	ordered, err := c.store.ReorderChats(ctx, sessionID, chatIDs)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	for _, item := range ordered {
-		if rt := runtimes[item.ID]; rt != nil {
-			rt.SetChat(item)
-		}
+	ordered, err := owner.ReorderChats(ctx, chatIDs)
+	if err != nil {
+		return err
 	}
 	c.mu.Lock()
 	c.chats = ordered
@@ -1379,11 +1346,14 @@ func (c *Controller) NewSessionWithProjectRoot(ctx context.Context, title string
 		projectRoot = c.session.ProjectRoot
 		c.mu.RUnlock()
 	}
-	session, err := c.createWorkspaceSession(ctx, title, projectRoot)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.CreateSession(ctx, title, projectRoot)
 	if err != nil {
 		return err
 	}
-	return c.loadSession(ctx, session.ID, "")
+	return c.loadSession(ctx, owner.Snapshot().Session.ID, "")
 }
 
 // RenameSession updates a session title.
@@ -1395,21 +1365,22 @@ func (c *Controller) RenameSession(ctx context.Context, sessionID domain.ID, tit
 	if title == "" {
 		return fmt.Errorf("session title is required")
 	}
-	session, err := c.store.GetSession(ctx, sessionID)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	session := owner.Snapshot().Session
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
-	if err := c.store.UpdateSessionTitle(ctx, sessionID, title, time.Time{}, 0); err != nil {
-		return err
-	}
-	sessions, err := c.workspaceSessions(ctx)
+	updated, err := owner.Rename(ctx, title)
 	if err != nil {
 		return err
 	}
-	updated, err := c.store.GetSession(ctx, sessionID)
+	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return err
 	}
@@ -1417,11 +1388,6 @@ func (c *Controller) RenameSession(ctx context.Context, sessionID domain.ID, tit
 	c.sessions = sessions
 	if c.session.ID == sessionID {
 		c.session = updated
-		for _, rt := range c.runtimes {
-			if rt != nil {
-				rt.SetSession(updated)
-			}
-		}
 	}
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
@@ -1433,28 +1399,26 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 	if sessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
-	session, err := c.store.GetSession(ctx, sessionID)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	snapshot := owner.Snapshot()
+	session := snapshot.Session
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
-	chats, err := c.store.ListChats(ctx, sessionID)
-	if err != nil {
-		return err
-	}
+	chats := snapshot.Chats
 	if err := c.ensureSessionIdle(ctx, sessionID, chats); err != nil {
 		return err
 	}
 	c.mu.RLock()
 	deletingSelected := c.session.ID == sessionID
-	runtimes := make([]*chat.Chat, 0, len(chats))
 	unsubs := make([]func(), 0, len(chats))
 	for _, chatRecord := range chats {
-		if rt := c.runtimes[chatRecord.ID]; rt != nil {
-			runtimes = append(runtimes, rt)
-		}
 		if unsub := c.unsubs[chatRecord.ID]; unsub != nil {
 			unsubs = append(unsubs, unsub)
 		}
@@ -1463,10 +1427,7 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 	for _, unsub := range unsubs {
 		unsub()
 	}
-	for _, rt := range runtimes {
-		rt.Close()
-	}
-	if err := c.store.DeleteSession(ctx, sessionID); err != nil {
+	if err := c.agent.DeleteSession(ctx, sessionID); err != nil {
 		return err
 	}
 	if deletingSelected {
@@ -1475,11 +1436,11 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 			return err
 		}
 		if len(sessions) == 0 {
-			next, err := c.createWorkspaceSession(ctx, "New Session", session.ProjectRoot)
+			next, err := c.agent.CreateSession(ctx, "New Session", session.ProjectRoot)
 			if err != nil {
 				return err
 			}
-			return c.loadSession(ctx, next.ID, "")
+			return c.loadSession(ctx, next.Snapshot().Session.ID, "")
 		}
 		return c.loadSession(ctx, newestSession(sessions).ID, "")
 	}
@@ -2004,7 +1965,6 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	c.mu.RLock()
 	sessionID := c.session.ID
 	chatID := c.chat.ID
-	rt := c.runtimes[chatID]
 	c.mu.RUnlock()
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
@@ -2012,17 +1972,18 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	if chatID == "" {
 		return fmt.Errorf("no active chat")
 	}
-	if err := c.store.SetChatModel(ctx, chatID, providerID, modelID); err != nil {
-		return err
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
 	}
-	session, err := c.store.GetSession(ctx, sessionID)
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	chatRecord, err := c.store.GetChat(ctx, chatID)
+	chatRecord, err := owner.SetChatModel(ctx, chatID, providerID, modelID)
 	if err != nil {
 		return err
 	}
+	session := owner.Snapshot().Session
 	c.mu.Lock()
 	c.session = session
 	c.chat = chatRecord
@@ -2044,10 +2005,6 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
-	if rt != nil {
-		rt.SetChat(chatRecord)
-		rt.SetSession(session)
-	}
 	c.broadcast("snapshot", c.State())
 	return nil
 }
