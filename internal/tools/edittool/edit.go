@@ -79,7 +79,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
+	abs, rel, err := tools.WritablePath(runtime, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err
 	}

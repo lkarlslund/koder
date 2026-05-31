@@ -19,8 +19,8 @@ import (
 
 	"github.com/creack/pty"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -73,7 +73,7 @@ type StartRequest struct {
 	Timeout        time.Duration
 	YieldTime      time.Duration
 	PreviewBytes   int
-	SandboxProfile permissionprofile.Profile
+	AccessSettings accesssettings.Settings
 }
 
 type StatusRequest struct {
@@ -235,7 +235,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		Executable: shell,
 		Args:       args,
 		Workdir:    req.Workdir,
-		Profile:    req.SandboxProfile,
+		Settings:   req.AccessSettings,
 	})
 	if err != nil {
 		return Snapshot{}, err

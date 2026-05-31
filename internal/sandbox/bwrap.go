@@ -3,12 +3,13 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
 // Command describes an executable that should run inside a sandbox profile.
@@ -16,7 +17,7 @@ type Command struct {
 	Executable string
 	Args       []string
 	Workdir    string
-	Profile    permissionprofile.Profile
+	Settings   accesssettings.Settings
 }
 
 // WrapCommand returns an executable and arguments that run cmd through bwrap.
@@ -45,18 +46,22 @@ func Args(cmd Command) ([]string, error) {
 	if err != nil || workdir == "" {
 		return nil, errors.New("sandbox workdir is required")
 	}
-	profile := permissionprofile.Normalize(cmd.Profile)
-	if err := permissionprofile.ValidateSandbox(profile); err != nil {
+	settings := accesssettings.Normalize(cmd.Settings)
+	if err := accesssettings.Validate(settings); err != nil {
 		return nil, err
 	}
 	args := []string{"--die-with-parent", "--new-session"}
-	if !profile.Network {
+	if !settings.Network {
 		args = append(args, "--unshare-net")
 	}
-	args = appendBind(args, permissionprofile.MountMode(profile.Root), "/", "/")
-	args = append(args, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
-	args = appendBind(args, permissionprofile.MountMode(profile.Workspace), workdir, workdir)
-	for _, mount := range profile.Mounts {
+	args = appendBind(args, settings.Root, "/", "/")
+	args = append(args, "--dev", "/dev", "--proc", "/proc")
+	args = appendTmp(args, settings)
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		args = appendAccess(args, settings.Home, filepath.Clean(home))
+	}
+	args = appendAccess(args, settings.Project, workdir)
+	for _, mount := range settings.Mounts {
 		path, err := filepath.Abs(strings.TrimSpace(mount.Path))
 		if err != nil || path == "" {
 			return nil, fmt.Errorf("invalid mount path %q", mount.Path)
@@ -68,9 +73,32 @@ func Args(cmd Command) ([]string, error) {
 	return args, nil
 }
 
-func appendBind(args []string, mode permissionprofile.MountMode, src, dst string) []string {
-	if mode == permissionprofile.ModeReadWrite {
+func appendBind(args []string, mode accesssettings.Mode, src, dst string) []string {
+	if mode == accesssettings.ModeNone {
+		return args
+	}
+	if mode == accesssettings.ModeReadWrite {
 		return append(args, "--bind", src, dst)
 	}
 	return append(args, "--ro-bind", src, dst)
+}
+
+func appendAccess(args []string, mode accesssettings.Mode, path string) []string {
+	if mode == accesssettings.ModeNone {
+		return append(args, "--tmpfs", path)
+	}
+	return appendBind(args, mode, path, path)
+}
+
+func appendTmp(args []string, settings accesssettings.Settings) []string {
+	switch settings.Tmp {
+	case accesssettings.TmpHost:
+		return append(args, "--bind", "/tmp", "/tmp")
+	case accesssettings.TmpSession:
+		tmpDir := strings.TrimSpace(settings.TmpDir)
+		if tmpDir != "" {
+			return append(args, "--bind", filepath.Clean(tmpDir), "/tmp")
+		}
+	}
+	return append(args, "--tmpfs", "/tmp")
 }

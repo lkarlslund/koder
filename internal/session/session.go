@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/chatstore"
@@ -234,18 +235,17 @@ func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title str
 	parentID := parent.ID
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:                domain.NewID(),
-		SessionID:         session.ID,
-		ParentChatID:      &parentID,
-		Title:             title,
-		WorkflowRole:      chatrole.Orchestrator,
-		ProviderID:        strings.TrimSpace(parent.ProviderID),
-		ModelID:           strings.TrimSpace(parent.ModelID),
-		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
-		ToolStates:        cloneToolStateMap(session.ToolStates),
-		Position:          position,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:           domain.NewID(),
+		SessionID:    session.ID,
+		ParentChatID: &parentID,
+		Title:        title,
+		WorkflowRole: chatrole.Orchestrator,
+		ProviderID:   strings.TrimSpace(parent.ProviderID),
+		ModelID:      strings.TrimSpace(parent.ModelID),
+		ToolStates:   cloneToolStateMap(session.ToolStates),
+		Position:     position,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	return s.createChat(ctx, session, chatRecord)
 }
@@ -406,19 +406,19 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	return updated, nil
 }
 
-// SetPermissionProfile updates the session permission profile and loaded runtimes.
-func (s *Session) SetPermissionProfile(ctx context.Context, profile string) (domain.Session, error) {
+// SetAccessSettings updates the session access settings and loaded runtimes.
+func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings.Settings) (domain.Session, error) {
 	if s == nil {
 		return domain.Session{}, fmt.Errorf("session is required")
 	}
-	profile = strings.TrimSpace(profile)
-	if profile == "" {
-		return domain.Session{}, fmt.Errorf("permission profile is required")
+	settings = accesssettings.Normalize(settings)
+	if err := accesssettings.Validate(settings); err != nil {
+		return domain.Session{}, err
 	}
 	s.mu.RLock()
 	sessionID := s.session.ID
 	s.mu.RUnlock()
-	if err := sessionstore.UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) { session.PermissionProfile = strings.TrimSpace(profile) }); err != nil {
+	if err := sessionstore.UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) { session.AccessSettings = settings }); err != nil {
 		return domain.Session{}, err
 	}
 	updated, err := sessionstore.GetSession(ctx, s.store, sessionID)

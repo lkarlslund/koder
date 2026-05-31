@@ -24,6 +24,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
@@ -696,14 +697,12 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"providers": providers, "state": s.controller.State()}, nil
-	case "set_permission_profile":
-		var in struct {
-			Profile string `json:"profile"`
-		}
+	case "set_access_settings":
+		var in accesssettings.Settings
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SetPermissionProfile(ctx, in.Profile); err != nil {
+		if err := s.controller.SetAccessSettings(ctx, in); err != nil {
 			return nil, err
 		}
 		return s.controller.State(), nil
@@ -805,7 +804,7 @@ func rpcUsesActiveSelection(method string) bool {
 	case "send_prompt", "continue", "stop", "stop_after_turn", "compact",
 		"reorder_queue", "delete_queue_item", "send_queue_item_now",
 		"switch_chat", "new_chat", "delete_chat", "reorder_chats",
-		"approve", "deny", "set_model", "set_permission_profile":
+		"approve", "deny", "set_model", "set_access_settings":
 		return true
 	default:
 		return false
@@ -853,7 +852,7 @@ type stateDelta struct {
 	Chats         any       `json:"chats,omitempty"`
 	ChatStatuses  any       `json:"chat_statuses,omitempty"`
 	ActiveChatID  domain.ID `json:"active_chat_id,omitempty"`
-	Permissions   any       `json:"permissions,omitempty"`
+	Access        any       `json:"access,omitempty"`
 	Milestones    any       `json:"milestones,omitempty"`
 	Todos         any       `json:"todos,omitempty"`
 	TodosByRef    any       `json:"todos_by_milestone,omitempty"`
@@ -969,7 +968,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		Chats:         state.Chats,
 		ChatStatuses:  state.ChatStatuses,
 		ActiveChatID:  state.ActiveChatID,
-		Permissions:   state.Permissions,
+		Access:        state.Access,
 		Milestones:    state.Milestones,
 		Todos:         state.Todos,
 		TodosByRef:    state.TodosByRef,

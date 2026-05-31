@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
@@ -263,7 +263,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
-	if err := applyPermissionPreferences(&next, prefs.Permissions); err != nil {
+	if err := applyAccessPreferences(&next, prefs.Access); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
@@ -453,20 +453,14 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	return nil
 }
 
-// SetPermissionProfile updates the active session permission profile.
-func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) error {
-	profile = strings.TrimSpace(profile)
-	if profile == "" {
-		return fmt.Errorf("permission profile is required")
-	}
-	if !permissionprofile.IsBuiltinProfile(profile) {
-		if _, ok := c.cfg.Permissions.Profiles[profile]; !ok {
-			return fmt.Errorf("unknown permission profile %q", profile)
-		}
+// SetAccessSettings updates the active session sandbox access settings.
+func (c *Controller) SetAccessSettings(ctx context.Context, settings accesssettings.Settings) error {
+	settings = accesssettings.Normalize(settings)
+	if err := accesssettings.Validate(settings); err != nil {
+		return err
 	}
 	c.mu.Lock()
 	session := c.session
-	chatRecord := c.chat
 	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
 	for _, rt := range c.runtimes {
 		if rt != nil {
@@ -479,38 +473,25 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 		if err != nil {
 			return err
 		}
-		session, err = owner.SetPermissionProfile(ctx, profile)
+		session, err = owner.SetAccessSettings(ctx, settings)
 		if err != nil {
 			return err
 		}
 	}
-	chatRecord.PermissionProfile = ""
 	c.mu.Lock()
 	c.session = session
-	c.chat = chatRecord
 	for idx := range c.sessions {
 		if c.sessions[idx].ID == session.ID {
-			c.sessions[idx].PermissionProfile = profile
+			c.sessions[idx] = session
 		}
-	}
-	for idx := range c.chats {
-		c.chats[idx].PermissionProfile = ""
 	}
 	for id, snapshot := range c.snapshots {
 		snapshot.Session = session
-		if snapshot.Chat.ID == chatRecord.ID {
-			snapshot.Chat = chatRecord
-		} else {
-			snapshot.Chat.PermissionProfile = ""
-		}
 		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
 	for _, rt := range runtimes {
 		rt.SetSession(session)
-		if snapshot := rt.Snapshot(); snapshot.Chat.ID == chatRecord.ID {
-			rt.SetChat(chatRecord)
-		}
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -623,7 +604,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Models:       models,
 		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models),
 		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
-		Permissions:  permissionPreferencesFromConfig(c.cfg.Permissions),
+		Access:       accessPreferencesFromConfig(c.cfg.Access),
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
 	}
 	if c.cfg.Store.Backend != config.Default().Store.Backend {
@@ -883,32 +864,11 @@ func mcpPreferencesFromConfig(src map[string]config.MCPServer) []MCPServerPrefer
 	return out
 }
 
-func permissionPreferencesFromConfig(src config.PermissionRules) PermissionPreferences {
-	names := make([]string, 0, len(src.Profiles))
-	for name := range src.Profiles {
-		names = append(names, name)
+func accessPreferencesFromConfig(src accesssettings.Settings) AccessPreferences {
+	return AccessPreferences{
+		Settings: accesssettings.Normalize(src),
+		Presets:  accesssettings.Presets(),
 	}
-	slices.Sort(names)
-	profiles := make([]PermissionProfilePreference, 0, len(names))
-	for _, name := range names {
-		profile := permissionprofile.Normalize(src.Profiles[name])
-		profiles = append(profiles, PermissionProfilePreference{
-			Name:      name,
-			Network:   profile.Network,
-			Root:      profile.Root,
-			Workspace: profile.Workspace,
-			Mounts:    permissionMountPreferences(profile.Mounts),
-		})
-	}
-	return PermissionPreferences{Active: strings.TrimSpace(src.Profile), Profiles: profiles}
-}
-
-func permissionMountPreferences(src []permissionprofile.Mount) []PermissionMountPreference {
-	out := make([]PermissionMountPreference, 0, len(src))
-	for _, mount := range src {
-		out = append(out, PermissionMountPreference{Path: mount.Path, Mode: string(mount.Mode)})
-	}
-	return out
 }
 
 func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
@@ -1051,42 +1011,16 @@ func applyMCPPreferences(cfg *config.Config, prefs []MCPServerPreference) error 
 	return nil
 }
 
-func applyPermissionPreferences(cfg *config.Config, prefs PermissionPreferences) error {
-	profiles := map[string]config.PermissionProfile{}
-	for _, item := range prefs.Profiles {
-		name := strings.TrimSpace(item.Name)
-		if name == "" {
-			continue
-		}
-		profile := config.PermissionProfile{
-			Network:   item.Network,
-			Root:      strings.TrimSpace(item.Root),
-			Workspace: strings.TrimSpace(item.Workspace),
-		}
-		for _, mount := range item.Mounts {
-			path := strings.TrimSpace(mount.Path)
-			if path == "" {
-				continue
-			}
-			profile.Mounts = append(profile.Mounts, permissionprofile.Mount{
-				Path: path,
-				Mode: permissionprofile.MountMode(strings.TrimSpace(mount.Mode)),
-			})
-		}
-		profile = permissionprofile.Normalize(profile)
-		if err := permissionprofile.ValidateSandbox(profile); err != nil {
-			return fmt.Errorf("permission profile %q: %w", name, err)
-		}
-		profiles[name] = profile
+func applyAccessPreferences(cfg *config.Config, prefs AccessPreferences) error {
+	settings := prefs.Settings
+	if accesssettings.IsZero(settings) {
+		settings = accesssettings.Default()
 	}
-	if len(profiles) == 0 {
-		profiles = config.Default().Permissions.Profiles
+	settings = accesssettings.Normalize(settings)
+	if err := accesssettings.Validate(settings); err != nil {
+		return err
 	}
-	active := strings.TrimSpace(prefs.Active)
-	if active == "" {
-		active = config.Default().Permissions.Profile
-	}
-	cfg.Permissions = config.PermissionRules{Profile: active, Profiles: profiles}
+	cfg.Access = settings
 	return nil
 }
 

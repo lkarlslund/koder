@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
 func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
@@ -16,9 +16,10 @@ func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
 		Executable: "/bin/bash",
 		Args:       []string{"-lc", "pwd"},
 		Workdir:    t.TempDir(),
-		Profile: permissionprofile.Profile{
-			Root:      string(permissionprofile.ModeReadOnly),
-			Workspace: string(permissionprofile.ModeReadWrite),
+		Settings: accesssettings.Settings{
+			Root:    accesssettings.ModeReadOnly,
+			Project: accesssettings.ModeReadWrite,
+			Tmp:     accesssettings.TmpEphemeral,
 		},
 	})
 	if err != nil {
@@ -37,13 +38,14 @@ func TestArgsHonorsNetworkAndExtraMounts(t *testing.T) {
 	args, err := Args(Command{
 		Executable: "/bin/sh",
 		Workdir:    t.TempDir(),
-		Profile: permissionprofile.Profile{
-			Network:   true,
-			Root:      string(permissionprofile.ModeReadWrite),
-			Workspace: string(permissionprofile.ModeReadOnly),
-			Mounts: []permissionprofile.Mount{{
+		Settings: accesssettings.Settings{
+			Network: true,
+			Root:    accesssettings.ModeReadWrite,
+			Project: accesssettings.ModeReadOnly,
+			Tmp:     accesssettings.TmpEphemeral,
+			Mounts: []accesssettings.Mount{{
 				Path: extra,
-				Mode: permissionprofile.ModeReadWrite,
+				Mode: accesssettings.ModeReadWrite,
 			}},
 		},
 	})
@@ -65,9 +67,9 @@ func TestArgsRejectsInvalidMountMode(t *testing.T) {
 	_, err := Args(Command{
 		Executable: "/bin/sh",
 		Workdir:    t.TempDir(),
-		Profile: permissionprofile.Profile{
-			Root:      "bogus",
-			Workspace: string(permissionprofile.ModeReadOnly),
+		Settings: accesssettings.Settings{
+			Root:    "bogus",
+			Project: accesssettings.ModeReadOnly,
 		},
 	})
 	if err != nil {
@@ -76,10 +78,10 @@ func TestArgsRejectsInvalidMountMode(t *testing.T) {
 	_, err = Args(Command{
 		Executable: "/bin/sh",
 		Workdir:    t.TempDir(),
-		Profile: permissionprofile.Profile{
-			Root:      string(permissionprofile.ModeReadOnly),
-			Workspace: string(permissionprofile.ModeReadOnly),
-			Mounts: []permissionprofile.Mount{{
+		Settings: accesssettings.Settings{
+			Root:    accesssettings.ModeReadOnly,
+			Project: accesssettings.ModeReadOnly,
+			Mounts: []accesssettings.Mount{{
 				Path: t.TempDir(),
 				Mode: "bogus",
 			}},
@@ -95,14 +97,14 @@ func TestBwrapEnforcesWorkspaceMode(t *testing.T) {
 		t.Skip("bwrap not installed")
 	}
 	workdir := t.TempDir()
-	run := func(mode permissionprofile.MountMode) error {
+	run := func(mode accesssettings.Mode) error {
 		exe, args, err := WrapCommand(Command{
 			Executable: "bash",
 			Args:       []string{"-lc", "echo ok > sandbox-write-test"},
 			Workdir:    workdir,
-			Profile: permissionprofile.Profile{
-				Root:      string(permissionprofile.ModeReadOnly),
-				Workspace: string(mode),
+			Settings: accesssettings.Settings{
+				Root:    accesssettings.ModeReadOnly,
+				Project: mode,
 			},
 		})
 		if err != nil {
@@ -110,7 +112,7 @@ func TestBwrapEnforcesWorkspaceMode(t *testing.T) {
 		}
 		return exec.Command(exe, args...).Run()
 	}
-	if err := run(permissionprofile.ModeReadWrite); err != nil {
+	if err := run(accesssettings.ModeReadWrite); err != nil {
 		t.Fatalf("expected workspace readwrite to allow write: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(workdir, "sandbox-write-test")); err != nil {
@@ -119,7 +121,7 @@ func TestBwrapEnforcesWorkspaceMode(t *testing.T) {
 	if err := os.Remove(filepath.Join(workdir, "sandbox-write-test")); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(permissionprofile.ModeReadOnly); err == nil {
+	if err := run(accesssettings.ModeReadOnly); err == nil {
 		t.Fatal("expected workspace readonly to block write")
 	}
 }

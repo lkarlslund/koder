@@ -332,9 +332,9 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -922,7 +922,7 @@
         openDialogName() {
           const modal = this.modalOpenName();
           if (modal) return modal;
-          if (this.showPermissions) return 'permissions';
+          if (this.showAccess) return 'access';
           return '';
         },
         modalOpenName() {
@@ -1451,7 +1451,7 @@
             .catch(() => { this.preserveComposerDraftDuringSend = false; this.draft = text; this.composerAttachments = attachments; });
         },
         handleSlash(text) {
-          if (text === '/permissions') { this.showPermissions = true; return true; }
+          if (text === '/permissions') { this.openAccessDialog(); return true; }
           if (text === '/compact') { this.rpc('compact', {}); return true; }
           if (text === '/chat new') { this.newChat(); return true; }
           if (text === '/model') { this.openModelDialog(); return true; }
@@ -1512,11 +1512,42 @@
           if (this.toastTimer) clearTimeout(this.toastTimer);
           this.toastTimer = setTimeout(() => { this.toast = ''; this.toastTimer = null; }, 4500);
         },
-        permissionProfiles() { return this.state.permissions?.profiles || this.state.Permissions?.Profiles || []; },
-        activePermission() { return this.state.permissions?.active || this.state.Permissions?.Active || ''; },
-        permissionName(profile) { return profile.Name || profile.name; },
-        permissionLabel(name) { const p = this.permissionProfiles().find(p => this.permissionName(p) === name); return p ? (p.Label || p.label || name) : (name || '-'); },
-        setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; this.reportClientStateSoon(); }); },
+        activeAccessSettings() { return this.state.access?.settings || this.state.Access?.Settings || {}; },
+        accessPresets() { return this.state.access?.presets || this.state.Access?.Presets || []; },
+        accessSummary(settings) {
+          settings = settings || {};
+          return (settings.network ? 'net on' : 'net off') + ', project ' + (settings.project || 'readwrite');
+        },
+        cloneAccessSettings(settings) {
+          const src = settings || {};
+          return {
+            network: !!src.network,
+            project: src.project || 'readwrite',
+            home: src.home || 'none',
+            root: src.root || 'readonly',
+            tmp: src.tmp || 'session',
+            mounts: Array.isArray(src.mounts) ? src.mounts.map(m => ({path: m.path || '', mode: m.mode || 'readonly'})) : [],
+          };
+        },
+        openAccessDialog() {
+          this.accessDraft = this.cloneAccessSettings(this.activeAccessSettings());
+          this.showAccess = true;
+          this.showModels = false; this.showSettings = false; this.reportClientStateSoon();
+        },
+        closeAccessDialog() { this.showAccess = false; this.reportClientStateSoon(); },
+        applyAccessPreset(settings) { this.accessDraft = this.cloneAccessSettings(settings); },
+        addAccessMount(settings) {
+          if (!settings) return;
+          if (!Array.isArray(settings.mounts)) settings.mounts = [];
+          settings.mounts.push({path: '', mode: 'readonly'});
+        },
+        deleteAccessMount(settings, index) {
+          if (!settings?.mounts) return;
+          settings.mounts.splice(index, 1);
+        },
+        saveAccessSettings() {
+          this.rpc('set_access_settings', this.accessDraft).then(s => { this.applyState(s); this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
+        },
         openModelDialog() {
           this.showModels = true; this.modelQuery = '';
           this.reportClientStateSoon();
@@ -1707,12 +1738,10 @@
         setSettingsState(state) {
           this.settings = state || {};
           this.providerState = this.settings.providers || this.providerState;
-          const profiles = this.permissionSettingsProfiles();
-          this.selectedPermissionProfile = this.settings?.permissions?.active || profiles[0]?.name || '';
         },
-        settingsTabs() { return ['general', 'compaction', 'prompts', 'providers', 'models', 'mcp', 'permissions']; },
+        settingsTabs() { return ['general', 'access', 'compaction', 'prompts', 'providers', 'models', 'mcp']; },
         settingsTabLabel(tab) {
-          return {general: 'General', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP', permissions: 'Permissions'}[tab] || tab;
+          return {general: 'General', access: 'Access', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
         compactionModelValue() {
           const c = this.settings?.compaction || {};
@@ -1922,62 +1951,6 @@
         deleteMCPServer(id) {
           if (!this.settings || !id || !confirm('Delete this MCP server?')) return;
           this.settings.mcp_servers = this.mcpRows().filter(item => item.id !== id);
-        },
-        permissionSettingsProfiles() { return this.settings?.permissions?.profiles || []; },
-        activePermissionProfile() {
-          const profiles = this.permissionSettingsProfiles();
-          return profiles.find(profile => profile.name === this.selectedPermissionProfile) || profiles[0] || null;
-        },
-        selectPermissionProfile(name) {
-          this.selectedPermissionProfile = name || '';
-        },
-        permissionProfileSummary(profile) {
-          if (!profile) return '';
-          const network = profile.network ? 'network on' : 'network off';
-          return network + ', root ' + (profile.root || 'readonly') + ', workspace ' + (profile.workspace || 'readwrite');
-        },
-        setActivePermissionProfile(name) {
-          if (this.settings?.permissions) this.settings.permissions.active = name || '';
-          this.selectPermissionProfile(name);
-        },
-        renameActivePermissionProfile(name) {
-          const profile = this.activePermissionProfile();
-          if (!profile) return;
-          const next = String(name || '').trim();
-          if (!next) return;
-          const wasActive = this.settings?.permissions?.active === profile.name;
-          profile.name = next;
-          this.selectedPermissionProfile = next;
-          if (wasActive && this.settings?.permissions) this.settings.permissions.active = next;
-        },
-        addPermissionProfile() {
-          if (!this.settings) return;
-          if (!this.settings.permissions) this.settings.permissions = {active: '', profiles: []};
-          const profiles = this.permissionSettingsProfiles();
-          let idx = profiles.length + 1;
-          let name = 'custom';
-          while (profiles.some(profile => profile.name === name)) name = 'custom-' + idx++;
-          profiles.push({name, network: false, root: 'readonly', workspace: 'readwrite', mounts: []});
-          this.setActivePermissionProfile(name);
-        },
-        deletePermissionProfile(name) {
-          if (!this.settings?.permissions || !name || !confirm('Delete this permission profile?')) return;
-          const profiles = this.permissionSettingsProfiles().filter(profile => profile.name !== name);
-          this.settings.permissions.profiles = profiles;
-          this.selectPermissionProfile(profiles[0]?.name || '');
-        },
-        addPermissionMount(profile) {
-          if (!profile) return;
-          if (!Array.isArray(profile.mounts)) profile.mounts = [];
-          profile.mounts.push({path: '', mode: 'readonly'});
-        },
-        deletePermissionMount(profile, index) {
-          if (!profile?.mounts) return;
-          profile.mounts.splice(index, 1);
-        },
-        permissionToolOptions() {
-          const tools = new Set((this.settings?.tool_defaults || []).map(item => String(item.tool || item.Tool || '').trim()).filter(Boolean));
-          return Array.from(tools).sort();
         },
         toolDefaultRows() { return this.settings?.tool_defaults || []; },
         toolDefaultTool(item) { return item.tool || item.Tool || ''; },

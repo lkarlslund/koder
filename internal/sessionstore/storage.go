@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -42,6 +43,7 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 		PermissionProfile: "",
 		PermissionRules:   nil,
 		ToolStates:        map[domain.ToolKind]bool{},
+		AccessSettings:    accesssettings.Default(),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}

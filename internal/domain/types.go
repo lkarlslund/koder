@@ -3,6 +3,8 @@ package domain
 import (
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
 type MessageRole string
@@ -196,6 +198,7 @@ type Session struct {
 	PermissionProfile string
 	PermissionRules   []PermissionOverride
 	ToolStates        map[ToolKind]bool
+	AccessSettings    accesssettings.Settings
 	ProjectRoot       string
 	ProjectChecksum   string
 	AgentsResolved    string

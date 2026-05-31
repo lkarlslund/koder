@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -47,7 +47,7 @@ type State struct {
 	Chats         []domain.Chat                  `json:"chats"`
 	ChatStatuses  []ChatSidebarStatus            `json:"chat_statuses"`
 	ActiveChatID  domain.ID                      `json:"active_chat_id"`
-	Permissions   PermissionsState               `json:"permissions"`
+	Access        AccessState                    `json:"access"`
 	Snapshot      chat.Snapshot                  `json:"snapshot"`
 	Snapshots     map[domain.ID]chat.Snapshot    `json:"snapshots"`
 	Milestones    planning.Plan                  `json:"milestones"`
@@ -93,10 +93,10 @@ type ModelInfo struct {
 	CapabilitySource  string `json:"capability_source,omitempty"`
 }
 
-// PermissionsState describes permission profiles available to web clients.
-type PermissionsState struct {
-	Active   string                            `json:"active"`
-	Profiles []permissionprofile.ProfileOption `json:"profiles"`
+// AccessState describes the active session sandbox access settings.
+type AccessState struct {
+	Settings accesssettings.Settings `json:"settings"`
+	Presets  []accesssettings.Preset `json:"presets"`
 }
 
 // ProviderState describes configured and available provider templates.
@@ -181,7 +181,7 @@ type PreferencesState struct {
 	Models       []ModelOption           `json:"models"`
 	ModelConfigs []ModelConfigPreference `json:"model_configs"`
 	MCPServers   []MCPServerPreference   `json:"mcp_servers"`
-	Permissions  PermissionPreferences   `json:"permissions"`
+	Access       AccessPreferences       `json:"access"`
 	ToolDefaults []ToolDefaultPreference `json:"tool_defaults"`
 	RestartKeys  []string                `json:"restart_keys,omitempty"`
 }
@@ -232,25 +232,10 @@ type MCPServerPreference struct {
 	BearerTokenEnv       string            `json:"bearer_token_env"`
 }
 
-// PermissionPreferences is the editable permission profile config.
-type PermissionPreferences struct {
-	Active   string                        `json:"active"`
-	Profiles []PermissionProfilePreference `json:"profiles"`
-}
-
-// PermissionProfilePreference is one named permission profile.
-type PermissionProfilePreference struct {
-	Name      string                      `json:"name"`
-	Network   bool                        `json:"network"`
-	Root      string                      `json:"root"`
-	Workspace string                      `json:"workspace"`
-	Mounts    []PermissionMountPreference `json:"mounts"`
-}
-
-// PermissionMountPreference is one extra sandbox folder mount.
-type PermissionMountPreference struct {
-	Path string `json:"path"`
-	Mode string `json:"mode"`
+// AccessPreferences is the default sandbox access settings for new sessions.
+type AccessPreferences struct {
+	Settings accesssettings.Settings `json:"settings"`
+	Presets  []accesssettings.Preset `json:"presets"`
 }
 
 // ToolDefaultPreference is one default per-session tool enabled toggle.
@@ -428,7 +413,7 @@ func (c *Controller) stateLocked() State {
 		Chats:         slices.Clone(c.chats),
 		ChatStatuses:  c.chatStatusesLocked(),
 		ActiveChatID:  c.chat.ID,
-		Permissions:   c.permissionsStateLocked(),
+		Access:        c.accessStateLocked(),
 		Snapshots:     map[domain.ID]chat.Snapshot{},
 		Milestones:    c.milestone,
 		Todos:         slices.Clone(c.todos),
@@ -1291,7 +1276,7 @@ var composerCommands = []composerCommand{
 	{Command: "/chat new", Description: "Start a new chat"},
 	{Command: "/compact", Description: "Compact the active chat"},
 	{Command: "/model", Description: "Select the chat model"},
-	{Command: "/permissions", Description: "Change permission profile"},
+	{Command: "/permissions", Description: "Change access settings"},
 	{Command: "/providers", Description: "Configure providers"},
 	{Command: "/sessions", Description: "Switch sessions"},
 	{Command: "/settings", Description: "Open settings"},
@@ -1933,21 +1918,15 @@ func (c *Controller) currentRuntime() *chat.Chat {
 	return c.runtime
 }
 
-func (c *Controller) permissionsStateLocked() PermissionsState {
-	active := strings.TrimSpace(c.session.PermissionProfile)
-	if active == "" {
-		active = c.cfg.Permissions.Profile
+func (c *Controller) accessStateLocked() AccessState {
+	settings := c.session.AccessSettings
+	if accesssettings.IsZero(settings) {
+		settings = c.cfg.Access
 	}
-	names := permissionprofile.ProfileNames(c.cfg.Permissions)
-	profiles := make([]permissionprofile.ProfileOption, 0, len(names))
-	for _, name := range names {
-		profiles = append(profiles, permissionprofile.ProfileOption{
-			Name:        name,
-			Label:       permissionprofile.DisplayName(name),
-			Description: permissionprofile.Description(name, c.cfg.Permissions),
-		})
+	return AccessState{
+		Settings: accesssettings.Normalize(settings),
+		Presets:  accesssettings.Presets(),
 	}
-	return PermissionsState{Active: active, Profiles: profiles}
 }
 
 func (c *Controller) contextWindowLocked() int {

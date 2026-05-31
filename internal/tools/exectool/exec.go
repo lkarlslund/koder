@@ -213,6 +213,11 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	if rel == "" {
 		rel = "."
 	}
+	settings := runtime.AccessSettings
+	settings.TmpDir = runtime.SessionTmpDir()
+	if err := tools.EnsureSessionTmpDir(settings); err != nil {
+		return tools.Result{}, err
+	}
 	snap, err := control.Start(ctx, execruntime.StartRequest{
 		SessionID:      runtime.SessionID,
 		ChatID:         runtime.ChatID,
@@ -225,7 +230,7 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 		Timeout:        time.Duration(firstInt(req.Args["timeout_ms"])) * time.Millisecond,
 		YieldTime:      durationOrDefault(req.Args["yield_time_ms"], defaultYieldTime),
 		PreviewBytes:   firstInt(req.Args["max_output_bytes"]),
-		SandboxProfile: runtime.SandboxProfile,
+		AccessSettings: settings,
 	})
 	if err != nil {
 		return tools.Result{}, err

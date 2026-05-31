@@ -80,7 +80,7 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 	}
 	if err := sessionstore.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
 		session.ProjectRoot = projectRoot
-		session.PermissionProfile = strings.TrimSpace(e.cfg.Permissions.Profile)
+		session.AccessSettings = e.cfg.Access
 		session.ToolStates = maps.Clone(e.cfg.ToolDefaults)
 	}); err != nil {
 		return nil, err

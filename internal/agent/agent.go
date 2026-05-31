@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -2029,8 +2030,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ChatControl:           e,
 		Exec:                  e.exec,
 		MCP:                   e.mcp,
-		SandboxProfiles:       normalizedSandboxProfiles(e.cfg.Permissions),
-		DefaultSandboxProfile: strings.TrimSpace(e.cfg.Permissions.Profile),
+		AccessSettings:        sessionAccessSettings(session, e.cfg),
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
@@ -2039,12 +2039,12 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	return runtime
 }
 
-func normalizedSandboxProfiles(rules permissionprofile.Rules) map[string]permissionprofile.Profile {
-	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
-	for name, profile := range rules.Profiles {
-		profiles[name] = permissionprofile.Normalize(profile)
+func sessionAccessSettings(session domain.Session, cfg config.Config) accesssettings.Settings {
+	settings := session.AccessSettings
+	if accesssettings.IsZero(settings) {
+		settings = cfg.Access
 	}
-	return profiles
+	return accesssettings.Normalize(settings)
 }
 
 func (e *Engine) loadedSession(sessionID domain.ID) *sessionpkg.Session {
@@ -3214,47 +3214,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		return out, nil
 	}
 
-	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
-	if !toolSpec.BypassesPermission() {
-		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
-	}
-	if decision.Mode == domain.PermissionModeDeny {
-		text := fmt.Sprintf("%s denied by policy", req.Tool)
-		if strings.TrimSpace(decision.Reason) != "" {
-			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
-		}
-		item, err := e.recordDeniedToolResult(ctx, chat.ID, req, text)
-		if err != nil {
-			return preparedToolCall{}, err
-		}
-		out.event = domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}
-		return out, nil
-	}
-	if decision.Mode == domain.PermissionModeAsk {
-		preview := tools.Preview(req)
-		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, session.ID, req.Tool, req.ToolCallID, preview, req.ToolCallID)
-		if err != nil {
-			return preparedToolCall{}, err
-		}
-		text := fmt.Sprintf("%s requires approval", req.Tool)
-		if strings.TrimSpace(decision.Reason) != "" {
-			text += ": " + decision.Reason
-		}
-		out.event = domain.Event{
-			Kind: domain.EventKindApprovalAsk,
-			Text: text,
-			Tool: req.Tool,
-			Item: approvalItem,
-			Meta: map[string]string{
-				"approval_id":  chatstore.SyntheticApprovalID(req.ToolCallID),
-				"tool":         string(req.Tool),
-				"command":      preview,
-				"reason":       decision.Reason,
-				"tool_call_id": req.ToolCallID,
-			},
-		}
-		return out, nil
-	}
+	_ = toolSpec
 	out.run = true
 	return out, nil
 }
@@ -3414,48 +3374,6 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 		out = append(out, evt)
 	}
 	return out, nil
-}
-
-func (e *Engine) effectivePermissionProfile(_ context.Context, session domain.Session, _ domain.Chat) string {
-	cfg := config.Config{}
-	if e != nil {
-		cfg = e.cfg
-	}
-	if strings.TrimSpace(session.PermissionProfile) != "" {
-		return session.PermissionProfile
-	}
-	return cfg.Permissions.Profile
-}
-
-func (e *Engine) permissionRequest(session domain.Session, req tools.Request) permissionprofile.Request {
-	projectRoot := strings.TrimSpace(session.ProjectRoot)
-	pattern := tools.Preview(req)
-	if req.Tool == domain.ToolKindMCP {
-		pattern = strings.TrimSpace(req.Args["server"]) + "/" + strings.TrimSpace(req.Args["tool"])
-	}
-	targets, outsideProject, ambiguous := e.resolvePermissionTargets(projectRoot, req)
-	return permissionprofile.Request{
-		Tool:           req.Tool,
-		Access:         permissionAccessForTool(req.Tool),
-		Pattern:        pattern,
-		ProjectRoot:    projectRoot,
-		Targets:        targets,
-		OutsideProject: outsideProject,
-		Ambiguous:      ambiguous,
-	}
-}
-
-func permissionAccessForTool(kind domain.ToolKind) permissionprofile.AccessKind {
-	switch kind {
-	case domain.ToolKindBash, domain.ToolKindExecCommand:
-		return permissionprofile.AccessShell
-	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
-		return permissionprofile.AccessRead
-	case domain.ToolKindEdit, domain.ToolKindWrite:
-		return permissionprofile.AccessWrite
-	default:
-		return permissionprofile.AccessUnknown
-	}
 }
 
 func serializeRequest(req tools.Request) (string, error) {

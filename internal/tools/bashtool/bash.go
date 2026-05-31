@@ -59,6 +59,11 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	if err != nil {
 		return tools.Result{}, err
 	}
+	settings := runtime.AccessSettings
+	settings.TmpDir = runtime.SessionTmpDir()
+	if err := tools.EnsureSessionTmpDir(settings); err != nil {
+		return tools.Result{}, err
+	}
 	timeout := tools.DefaultBashTimeout
 	if raw := strings.TrimSpace(req.Args["timeout_ms"]); raw != "" {
 		ms, err := strconv.Atoi(raw)
@@ -69,7 +74,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			timeout = time.Duration(ms) * time.Millisecond
 		}
 	}
-	output, exitCode, err := tools.ShellResult(ctx, workdir, timeout, req.Args["command"], runtime.SandboxProfile)
+	output, exitCode, err := tools.ShellResult(ctx, workdir, timeout, req.Args["command"], settings)
 	result := tools.Result{
 		Output: output,
 		Meta: map[string]string{

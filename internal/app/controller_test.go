@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -631,38 +632,39 @@ func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	}
 }
 
-func TestControllerSetPermissionProfileUpdatesActiveSession(t *testing.T) {
+func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
 	sessionID := ctrl.State().Session.ID
-	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
-		t.Fatalf("set permission profile: %v", err)
+	settings := accesssettings.AllowAll()
+	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+		t.Fatalf("set access settings: %v", err)
 	}
 	session, err := sessionstore.GetSession(context.Background(), st, sessionID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.PermissionProfile != "dev-network" {
-		t.Fatalf("expected session permission profile dev-network, got %q", session.PermissionProfile)
+	if session.AccessSettings.Root != accesssettings.ModeReadWrite || !session.AccessSettings.Network {
+		t.Fatalf("expected allow-all access settings, got %#v", session.AccessSettings)
 	}
-	if got := ctrl.State().Permissions.Active; got != "dev-network" {
-		t.Fatalf("expected active permission profile dev-network, got %q", got)
+	if got := ctrl.State().Access.Settings.Root; got != accesssettings.ModeReadWrite {
+		t.Fatalf("expected root readwrite, got %q", got)
 	}
 }
 
-func TestControllerPermissionOptionsMatchConfiguredProfiles(t *testing.T) {
+func TestControllerAccessPresetsAreExposed(t *testing.T) {
 	ctrl, _ := newTestController(t)
 
 	var got []string
-	for _, profile := range ctrl.State().Permissions.Profiles {
-		got = append(got, profile.Name)
+	for _, preset := range ctrl.State().Access.Presets {
+		got = append(got, preset.ID)
 	}
-	want := []string{"default", "dev-network", "full-access", "readonly"}
+	want := []string{"locked-down", "normal-coding", "allow-all"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("expected configured profiles before builtin extras, got %v", got)
+		t.Fatalf("expected access presets, got %v", got)
 	}
 }
 
-func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
+func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 	workdir := t.TempDir()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
@@ -676,8 +678,9 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
-		t.Fatalf("set permission profile: %v", err)
+	settings := accesssettings.LockedDown()
+	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+		t.Fatalf("set access settings: %v", err)
 	}
 	sessionID := ctrl.State().Session.ID
 	if err := ctrl.Shutdown(context.Background()); err != nil {
@@ -689,15 +692,16 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 	if err := next.loadSession(context.Background(), sessionID, ""); err != nil {
 		t.Fatalf("start next controller: %v", err)
 	}
-	if got := next.State().Permissions.Active; got != "dev-network" {
-		t.Fatalf("expected session permission profile to persist, got %q", got)
+	if got := next.State().Access.Settings.Network; got {
+		t.Fatalf("expected access settings to persist with network disabled")
 	}
 }
 
-func TestControllerSetPermissionProfileSurvivesRuntimeUpdate(t *testing.T) {
+func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 	ctrl, _ := newTestController(t)
-	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
-		t.Fatalf("set permission profile: %v", err)
+	settings := accesssettings.LockedDown()
+	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+		t.Fatalf("set access settings: %v", err)
 	}
 	rt := ctrl.currentRuntime()
 	if rt == nil {
@@ -714,20 +718,22 @@ func TestControllerSetPermissionProfileSurvivesRuntimeUpdate(t *testing.T) {
 			if event.Type != "snapshot" && event.Type != "chat_update" {
 				continue
 			}
-			if got := ctrl.State().Permissions.Active; got != "dev-network" {
-				t.Fatalf("expected runtime update to preserve active permission profile, got %q", got)
+			if got := ctrl.State().Access.Settings.Network; got {
+				t.Fatalf("expected runtime update to preserve network disabled")
 			}
 			return
 		case <-deadline:
-			t.Fatalf("expected runtime update to preserve active permission profile, got %q", ctrl.State().Permissions.Active)
+			t.Fatalf("expected runtime update to preserve access settings")
 		}
 	}
 }
 
-func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
+func TestControllerSetAccessSettingsRejectsRelativeMount(t *testing.T) {
 	ctrl, _ := newTestController(t)
-	if err := ctrl.SetPermissionProfile(context.Background(), "nope"); err == nil {
-		t.Fatal("expected unknown permission profile error")
+	settings := accesssettings.Default()
+	settings.Mounts = []accesssettings.Mount{{Path: "relative", Mode: accesssettings.ModeReadOnly}}
+	if err := ctrl.SetAccessSettings(context.Background(), settings); err == nil {
+		t.Fatal("expected relative mount error")
 	}
 }
 

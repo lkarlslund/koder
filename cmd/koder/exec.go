@@ -17,7 +17,6 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -235,10 +234,9 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 		{Role: domain.MessageRoleUser, Content: prompt},
 	}
 	runtime := tools.Runtime{
-		Workdir:               workdir,
-		Exec:                  execruntime.NewManager(),
-		SandboxProfiles:       normalizedExecSandboxProfiles(r.cfg.Permissions),
-		DefaultSandboxProfile: strings.TrimSpace(r.cfg.Permissions.Profile),
+		Workdir:        workdir,
+		Exec:           execruntime.NewManager(),
+		AccessSettings: r.cfg.Access,
 	}
 	defs := tools.Definitions(runtime)
 	if schema != nil {
@@ -366,14 +364,6 @@ func structuredOutputFromCalls(calls []provider.ToolCall, schema *structuredOutp
 		firstErr = errors.New("structured output was not valid")
 	}
 	return "", structuredCalls, firstErr
-}
-
-func normalizedExecSandboxProfiles(rules permissionprofile.Rules) map[string]permissionprofile.Profile {
-	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
-	for name, profile := range rules.Profiles {
-		profiles[name] = permissionprofile.Normalize(profile)
-	}
-	return profiles
 }
 
 func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime, messages *[]provider.Message, calls []provider.ToolCall) error {

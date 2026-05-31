@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
@@ -144,9 +146,7 @@ type Runtime struct {
 	TaskControl           TaskControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
-	SandboxProfile        permissionprofile.Profile
-	SandboxProfiles       map[string]permissionprofile.Profile
-	DefaultSandboxProfile string
+	AccessSettings        accesssettings.Settings
 }
 
 type MCPExecutor interface {
@@ -244,38 +244,50 @@ func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) 
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err
 	}
+	if err := checkRuntimeAccess(runtime, req); err != nil {
+		return Result{}, err
+	}
 	return tool.Execute(ctx, runtime, req)
+}
+
+func checkRuntimeAccess(runtime Runtime, req Request) error {
+	switch req.Tool {
+	case domain.ToolKindWebFetch, domain.ToolKindWebSearch, domain.ToolKindMCP:
+		return runtime.CheckNetworkAccess()
+	case domain.ToolKindWrite, domain.ToolKindEdit:
+		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
+	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch, domain.ToolKindLint:
+		return checkRequestPath(runtime, req, accesssettings.AccessRead)
+	default:
+		return nil
+	}
+}
+
+func checkRequestPath(runtime Runtime, req Request, kind accesssettings.AccessKind) error {
+	path := strings.TrimSpace(FirstArg(req.Args, "path", "file", "file_path", "filepath", "root", "dir", "workdir"))
+	if path == "" {
+		path = "."
+	}
+	abs, _, err := ReadablePath(runtime.Workdir, path)
+	if kind == accesssettings.AccessWrite {
+		abs, _, err = WritablePath(runtime, path)
+	}
+	if err != nil {
+		return err
+	}
+	return runtime.CheckPathAccess(kind, abs)
 }
 
 func normalizeRuntime(runtime Runtime) Runtime {
 	if runtime.HTTPClient == nil {
 		runtime.HTTPClient = &http.Client{}
 	}
+	if accesssettings.IsZero(runtime.AccessSettings) {
+		runtime.AccessSettings = accesssettings.Default()
+	} else {
+		runtime.AccessSettings = accesssettings.Normalize(runtime.AccessSettings)
+	}
 	return runtime
-}
-
-func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, sessionID domain.ID) permissionprofile.Profile {
-	profileName := strings.TrimSpace(r.DefaultSandboxProfile)
-	if st != nil && sessionID != "" {
-		if session, err := toolSessionCollection(st).Get(ctx, sessionID); err == nil && strings.TrimSpace(session.PermissionProfile) != "" {
-			profileName = strings.TrimSpace(session.PermissionProfile)
-		}
-	}
-	if profile, ok := r.SandboxProfiles[profileName]; ok {
-		return permissionprofile.Normalize(profile)
-	}
-	if profile, ok := r.SandboxProfiles[r.DefaultSandboxProfile]; ok {
-		return permissionprofile.Normalize(profile)
-	}
-	return permissionprofile.Normalize(permissionprofile.Profile{})
-}
-
-func toolSessionCollection(st *store.Store) store.Collection[domain.Session] {
-	return store.NewCollection(st, store.CollectionSpec[domain.Session]{
-		Namespace: "sessions",
-		GetID:     func(v domain.Session) string { return v.ID },
-		SetID:     func(v *domain.Session, id string) { v.ID = id },
-	})
 }
 
 func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
@@ -310,6 +322,29 @@ func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID do
 		return chats[0], nil
 	}
 	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
+}
+
+func (r Runtime) CheckNetworkAccess() error {
+	return accesssettings.Allows(r.AccessSettings, accesssettings.Request{Kind: accesssettings.AccessNetwork})
+}
+
+func (r Runtime) CheckPathAccess(kind accesssettings.AccessKind, abs string) error {
+	return accesssettings.Allows(r.AccessSettings, accesssettings.Request{Kind: kind, Path: abs, ProjectRoot: r.Workdir})
+}
+
+func (r Runtime) SessionTmpDir() string {
+	if r.SessionID == "" {
+		return ""
+	}
+	return filepath.Join(os.TempDir(), "koder-session-tmp", string(r.SessionID))
+}
+
+func EnsureSessionTmpDir(settings accesssettings.Settings) error {
+	settings = accesssettings.Normalize(settings)
+	if settings.Tmp != accesssettings.TmpSession || strings.TrimSpace(settings.TmpDir) == "" {
+		return nil
+	}
+	return os.MkdirAll(settings.TmpDir, 0o700)
 }
 
 func PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {

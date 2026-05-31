@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	toml "github.com/pelletier/go-toml/v2"
@@ -77,6 +78,7 @@ type Config struct {
 	Models                    []ModelConfig            `toml:"models"`
 	MCPServers                map[string]MCPServer     `toml:"mcp_servers"`
 	Permissions               PermissionRules          `toml:"permissions"`
+	Access                    accesssettings.Settings  `toml:"access"`
 	Store                     Store                    `toml:"store"`
 	UI                        UI                       `toml:"ui"`
 	path                      string
@@ -154,6 +156,7 @@ func Default() Config {
 		Providers:                 map[string]Provider{},
 		Models:                    []ModelConfig{},
 		MCPServers:                map[string]MCPServer{},
+		Access:                    accesssettings.Default(),
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -214,6 +217,10 @@ func (c *Config) applyDefaults() {
 	if c.Permissions.Profile == "" {
 		c.Permissions.Profile = def.Permissions.Profile
 	}
+	if accesssettings.IsZero(c.Access) {
+		c.Access = def.Access
+	}
+	c.Access = accesssettings.Normalize(c.Access)
 	if c.Store.Backend == "" {
 		c.Store.Backend = def.Store.Backend
 	}

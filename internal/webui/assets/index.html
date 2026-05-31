@@ -118,17 +118,9 @@
       </div>
       <div class="sidebar-section">
         <div class="sidebar-info-row">
-          <span class="sidebar-label">Permissions</span>
-          <span class="sidebar-value text-truncate" x-text="permissionLabel(activePermission())"></span>
-          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions; reportClientStateSoon()"><i class="bi bi-shield-lock"></i></button>
-        </div>
-        <div class="list-group list-group-flush sidebar-list" x-show="showPermissions">
-          <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
-            <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
-              <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
-              <div class="small opacity-75" x-text="profile.Description || profile.description || ''"></div>
-            </button>
-          </template>
+          <span class="sidebar-label">Access</span>
+          <span class="sidebar-value text-truncate" x-text="accessSummary(activeAccessSettings())"></span>
+          <button class="btn btn-sm btn-outline-secondary" @click="openAccessDialog()"><i class="bi bi-shield-lock"></i></button>
         </div>
       </div>
       <div class="sidebar-section">
@@ -345,6 +337,87 @@
             <i class="bi bi-check-lg" x-show="model.current"></i>
           </button>
         </template>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showAccess" x-transition @keydown.escape.window="closeAccessDialog()" style="display: none;">
+    <section class="model-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-shield-lock me-1"></i> Access</div>
+          <div class="small text-secondary" x-text="state.project_root || ''"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-primary" @click="saveAccessSettings()"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeAccessDialog()"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </header>
+      <div class="p-3">
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <template x-for="preset in accessPresets()" :key="preset.id">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="applyAccessPreset(preset.settings)" x-text="preset.label"></button>
+          </template>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label small text-secondary">Network</label>
+            <select class="form-select" x-model="accessDraft.network">
+              <option :value="false">disabled</option>
+              <option :value="true">enabled</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-secondary">Project folder</label>
+            <select class="form-select" x-model="accessDraft.project">
+              <option value="none">none</option>
+              <option value="readonly">readonly</option>
+              <option value="readwrite">readwrite</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-secondary">Home folder</label>
+            <select class="form-select" x-model="accessDraft.home">
+              <option value="none">none</option>
+              <option value="readonly">readonly</option>
+              <option value="readwrite">readwrite</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-secondary">System root</label>
+            <select class="form-select" x-model="accessDraft.root">
+              <option value="readonly">readonly</option>
+              <option value="readwrite">readwrite</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-secondary">/tmp</label>
+            <select class="form-select" x-model="accessDraft.tmp">
+              <option value="ephemeral">fresh each call</option>
+              <option value="session">persistent per session</option>
+              <option value="host">real /tmp</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-list-header mt-4">
+          <div class="fw-semibold">Extra folders</div>
+          <button type="button" class="btn btn-sm btn-outline-primary" @click="addAccessMount(accessDraft)"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="settings-rule-list">
+          <template x-if="(accessDraft.mounts || []).length === 0">
+            <div class="settings-empty">No extra folders mounted</div>
+          </template>
+          <template x-for="(mount, idx) in accessDraft.mounts || []" :key="idx">
+            <div class="settings-rule-row">
+              <input class="form-control form-control-sm" x-model="mount.path" placeholder="/path/to/folder" autocomplete="off">
+              <select class="form-select form-select-sm" x-model="mount.mode">
+                <option value="readonly">readonly</option>
+                <option value="readwrite">readwrite</option>
+              </select>
+              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deleteAccessMount(accessDraft, idx)"><i class="bi bi-trash"></i></button>
+            </div>
+          </template>
+        </div>
       </div>
     </section>
   </div>
@@ -589,107 +662,92 @@
                 </div>
               </div>
 
-              <div x-show="settingsTab === 'permissions'">
+              <div x-show="settingsTab === 'access'">
                 <div class="settings-list-header">
                   <div>
-                    <div class="fw-semibold">Permission profiles</div>
-                    <div class="small text-secondary" x-text="(permissionSettingsProfiles().length || 0) + ' profiles'"></div>
+                    <div class="fw-semibold">Access defaults</div>
+                    <div class="small text-secondary">Used when creating new sessions</div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionProfile()"><i class="bi bi-plus-lg"></i></button>
                 </div>
-                <datalist id="permission-tool-options">
-                  <template x-for="tool in permissionToolOptions()" :key="tool">
-                    <option :value="tool"></option>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  <template x-for="preset in settings?.access?.presets || []" :key="preset.id">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="settings.access.settings = cloneAccessSettings(preset.settings)" x-text="preset.label"></button>
                   </template>
-                </datalist>
-                <div class="row g-3">
-                  <div class="col-md-4">
-                    <div class="settings-item-list">
-                      <template x-for="profile in permissionSettingsProfiles()" :key="profile.name">
-                        <div class="settings-item-row settings-profile-row" :class="{'active': selectedPermissionProfile === profile.name}">
-                          <button type="button" class="settings-item-main" @click="selectPermissionProfile(profile.name)">
-                            <span class="settings-item-title" x-text="profile.name"></span>
-                            <span class="settings-item-subtitle" x-text="permissionProfileSummary(profile)"></span>
-                          </button>
-                          <button type="button" class="btn btn-sm btn-outline-danger" title="Delete profile" @click="deletePermissionProfile(profile.name)"><i class="bi bi-trash"></i></button>
+                </div>
+                <template x-if="settings?.access?.settings">
+                  <div>
+                    <div class="row g-3 mb-3">
+                      <div class="col-md-4">
+                        <label class="form-label small text-secondary">Network</label>
+                        <select class="form-select" x-model="settings.access.settings.network">
+                          <option :value="false">disabled</option>
+                          <option :value="true">enabled</option>
+                        </select>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label small text-secondary">Project folder</label>
+                        <select class="form-select" x-model="settings.access.settings.project">
+                          <option value="none">none</option>
+                          <option value="readonly">readonly</option>
+                          <option value="readwrite">readwrite</option>
+                        </select>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label small text-secondary">/tmp</label>
+                        <select class="form-select" x-model="settings.access.settings.tmp">
+                          <option value="ephemeral">fresh each call</option>
+                          <option value="session">persistent per session</option>
+                          <option value="host">real /tmp</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label small text-secondary">Home folder</label>
+                        <select class="form-select" x-model="settings.access.settings.home">
+                          <option value="none">none</option>
+                          <option value="readonly">readonly</option>
+                          <option value="readwrite">readwrite</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label small text-secondary">System root</label>
+                        <select class="form-select" x-model="settings.access.settings.root">
+                          <option value="readonly">readonly</option>
+                          <option value="readwrite">readwrite</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="settings-list-header">
+                      <div class="fw-semibold">Extra folders</div>
+                      <button type="button" class="btn btn-sm btn-outline-primary" @click="addAccessMount(settings.access.settings)"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                    <div class="settings-rule-list">
+                      <template x-if="(settings.access.settings.mounts || []).length === 0">
+                        <div class="settings-empty">No extra folders mounted</div>
+                      </template>
+                      <template x-for="(mount, idx) in settings.access.settings.mounts || []" :key="idx">
+                        <div class="settings-rule-row">
+                          <input class="form-control form-control-sm" x-model="mount.path" placeholder="/path/to/folder" autocomplete="off">
+                          <select class="form-select form-select-sm" x-model="mount.mode">
+                            <option value="readonly">readonly</option>
+                            <option value="readwrite">readwrite</option>
+                          </select>
+                          <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deleteAccessMount(settings.access.settings, idx)"><i class="bi bi-trash"></i></button>
                         </div>
                       </template>
                     </div>
-                  </div>
-                  <div class="col-md-8">
-                    <template x-if="activePermissionProfile()">
-                      <div>
-                        <div class="row g-3 mb-3">
-                          <div class="col-md-6">
-                            <label class="form-label small text-secondary">Profile name</label>
-                            <input class="form-control" :value="activePermissionProfile().name" @change="renameActivePermissionProfile($event.target.value)" autocomplete="off">
-                          </div>
-                          <div class="col-md-6">
-                            <label class="form-label small text-secondary">Active profile</label>
-                            <select class="form-select" x-model="settings.permissions.active" @change="setActivePermissionProfile(settings.permissions.active)">
-                              <template x-for="profile in permissionSettingsProfiles()" :key="profile.name">
-                                <option :value="profile.name" x-text="profile.name"></option>
-                              </template>
-                            </select>
-                          </div>
-                        </div>
-                        <div class="row g-3 mb-3">
-                          <div class="col-md-4">
-                            <label class="form-label small text-secondary">Network</label>
-                            <select class="form-select" x-model="activePermissionProfile().network">
-                              <option :value="false">disabled</option>
-                              <option :value="true">enabled</option>
-                            </select>
-                          </div>
-                          <div class="col-md-4">
-                            <label class="form-label small text-secondary">Root filesystem</label>
-                            <select class="form-select" x-model="activePermissionProfile().root">
-                              <option value="readonly">readonly</option>
-                              <option value="readwrite">readwrite</option>
-                            </select>
-                          </div>
-                          <div class="col-md-4">
-                            <label class="form-label small text-secondary">Workspace</label>
-                            <select class="form-select" x-model="activePermissionProfile().workspace">
-                              <option value="readonly">readonly</option>
-                              <option value="readwrite">readwrite</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div class="settings-list-header">
-                          <div class="fw-semibold">Extra folders</div>
-                          <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionMount(activePermissionProfile())"><i class="bi bi-plus-lg"></i></button>
-                        </div>
-                        <div class="settings-rule-list">
-                          <template x-if="(activePermissionProfile().mounts || []).length === 0">
-                            <div class="settings-empty">No extra folders mounted</div>
-                          </template>
-                          <template x-for="(mount, idx) in activePermissionProfile().mounts || []" :key="idx">
-                            <div class="settings-rule-row">
-                              <input class="form-control form-control-sm" x-model="mount.path" placeholder="/path/to/folder" autocomplete="off">
-                              <select class="form-select form-select-sm" x-model="mount.mode">
-                                <option value="readonly">readonly</option>
-                                <option value="readwrite">readwrite</option>
-                              </select>
-                              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deletePermissionMount(activePermissionProfile(), idx)"><i class="bi bi-trash"></i></button>
-                            </div>
-                          </template>
-                        </div>
+                    <div class="mt-4">
+                      <div class="fw-semibold mb-2">Default tool availability</div>
+                      <div class="settings-tool-defaults">
+                        <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
+                          <label class="settings-tool-default">
+                            <input class="form-check-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
+                            <span class="text-truncate" x-text="toolDefaultTool(item)"></span>
+                          </label>
+                        </template>
                       </div>
-                    </template>
+                    </div>
                   </div>
-                </div>
-                <div class="mt-4">
-                  <div class="fw-semibold mb-2">Default tool availability</div>
-                  <div class="settings-tool-defaults">
-                    <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
-                      <label class="settings-tool-default">
-                        <input class="form-check-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
-                        <span class="text-truncate" x-text="toolDefaultTool(item)"></span>
-                      </label>
-                    </template>
-                  </div>
-                </div>
+                </template>
               </div>
 
               <div class="alert mt-3 mb-0" x-show="settingsStatus" :class="settingsStatusKind === 'success' ? 'alert-success' : (settingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="settingsStatus"></div>

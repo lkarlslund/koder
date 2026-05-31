@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -103,6 +103,29 @@ func ReadablePath(root string, raw string) (abs string, label string, err error)
 	return WorkspacePath(root, clean)
 }
 
+func WritablePath(runtime Runtime, raw string) (abs string, label string, err error) {
+	root, err := workspaceRoot(runtime.Workdir)
+	if err != nil {
+		return "", "", err
+	}
+	clean, err := cleanPathArg(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if filepath.IsAbs(clean) {
+		abs = filepath.Clean(clean)
+	} else {
+		abs = filepath.Clean(filepath.Join(root, clean))
+	}
+	if err := runtime.CheckPathAccess(accesssettings.AccessWrite, abs); err != nil {
+		return "", "", err
+	}
+	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return abs, filepath.ToSlash(rel), nil
+	}
+	return abs, filepath.ToSlash(abs), nil
+}
+
 func WorkspaceDir(root string, raw string) (abs string, rel string, err error) {
 	if strings.TrimSpace(raw) == "" {
 		abs, err = workspaceRoot(root)
@@ -169,7 +192,7 @@ func SummarizePaths(paths []string, limit int) string {
 	return strings.Join(sorted[:limit], ", ") + fmt.Sprintf(", +%d more", len(sorted)-limit)
 }
 
-func ShellResult(ctx context.Context, dir string, timeout time.Duration, command string, profile permissionprofile.Profile) (string, int, error) {
+func ShellResult(ctx context.Context, dir string, timeout time.Duration, command string, settings accesssettings.Settings) (string, int, error) {
 	if timeout <= 0 {
 		timeout = DefaultBashTimeout
 	}
@@ -182,7 +205,7 @@ func ShellResult(ctx context.Context, dir string, timeout time.Duration, command
 		Executable: "bash",
 		Args:       []string{"-lc", command},
 		Workdir:    dir,
-		Profile:    profile,
+		Settings:   settings,
 	})
 	if err != nil {
 		return "", -1, err

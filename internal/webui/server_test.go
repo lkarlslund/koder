@@ -885,8 +885,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `text === '/settings'`) || !strings.Contains(fullPage, `text === '/model'`) {
 		t.Fatalf("expected settings and model slash commands to be handled locally")
 	}
-	if !strings.Contains(fullPage, `set_permission_profile`) {
-		t.Fatalf("expected permissions UI to call set_permission_profile")
+	if !strings.Contains(fullPage, `set_access_settings`) {
+		t.Fatalf("expected access UI to call set_access_settings")
 	}
 	if !strings.Contains(fullPage, `openModelDialog()`) {
 		t.Fatalf("expected model text to open model dialog")
@@ -906,7 +906,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
-	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Permissions`) {
+	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
 	}
 	if !strings.Contains(fullPage, `topbar-workspace`) || strings.Contains(fullPage, `class="sidebar-label">Workspace`) {
@@ -1093,14 +1093,14 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `'\u0000'`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
-	if !strings.Contains(fullPage, `permissionSettingsProfiles()`) ||
-		!strings.Contains(fullPage, `addPermissionMount(activePermissionProfile())`) ||
-		!strings.Contains(fullPage, `permissionProfileSummary(profile)`) ||
+	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
+		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
+		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||
 		!strings.Contains(fullPage, `toolDefaultRows()`) ||
 		strings.Contains(fullPage, `settingsPermissionsText`) ||
 		strings.Contains(fullPage, `settingsToolDefaultsText`) ||
 		strings.Contains(fullPage, `Permission profiles JSON`) {
-		t.Fatalf("expected permissions settings to use structured controls")
+		t.Fatalf("expected access settings to use structured controls")
 	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
