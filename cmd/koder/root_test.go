@@ -43,7 +43,7 @@ func TestStartupOptionsResolveDefaultsToCurrentDirectory(t *testing.T) {
 	}
 }
 
-func TestStartupOptionsResolveRelativeCWD(t *testing.T) {
+func TestStartupOptionsResolveRelativeProjectRoot(t *testing.T) {
 	base := t.TempDir()
 	workdir := filepath.Join(base, "workspace")
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
@@ -63,7 +63,7 @@ func TestStartupOptionsResolveRelativeCWD(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	got, err := (startupOptions{cwd: "workspace"}).resolve()
+	got, err := (startupOptions{projectRoot: "workspace"}).resolve()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestStartupOptionsResolveRelativeCWD(t *testing.T) {
 	}
 }
 
-func TestStartupOptionsResolveProjectRootAlias(t *testing.T) {
+func TestStartupOptionsResolveProjectRoot(t *testing.T) {
 	workdir := t.TempDir()
 
 	got, err := (startupOptions{projectRoot: workdir}).resolve()
@@ -84,16 +84,6 @@ func TestStartupOptionsResolveProjectRootAlias(t *testing.T) {
 	}
 }
 
-func TestStartupOptionsResolveRejectsConflictingAliases(t *testing.T) {
-	first := t.TempDir()
-	second := t.TempDir()
-
-	_, err := (startupOptions{cwd: first, projectRoot: second}).resolve()
-	if err == nil {
-		t.Fatal("expected conflict error")
-	}
-}
-
 func TestStartupOptionsResolveRejectsFilePath(t *testing.T) {
 	base := t.TempDir()
 	file := filepath.Join(base, "not-a-dir")
@@ -101,24 +91,23 @@ func TestStartupOptionsResolveRejectsFilePath(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	_, err := (startupOptions{cwd: file}).resolve()
+	_, err := (startupOptions{projectRoot: file}).resolve()
 	if err == nil {
 		t.Fatal("expected directory error")
 	}
 }
 
-func TestBindStartupFlagsRegistersAliases(t *testing.T) {
+func TestBindStartupFlagsRegistersBrowserFlags(t *testing.T) {
 	var opts startupOptions
 	cmd := &cobra.Command{}
 	bindStartupFlags(cmd, &opts)
 
-	cwdFlag := cmd.PersistentFlags().Lookup("cwd")
-	if cwdFlag == nil {
-		t.Fatal("expected cwd flag to be registered")
-	}
 	projectRootFlag := cmd.PersistentFlags().Lookup("project-root")
 	if projectRootFlag == nil {
 		t.Fatal("expected project-root flag to be registered")
+	}
+	if cwdFlag := cmd.PersistentFlags().Lookup("cwd"); cwdFlag != nil {
+		t.Fatal("did not expect cwd flag to be registered")
 	}
 	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
 		t.Fatal("expected nobrowser flag to be registered")
@@ -129,8 +118,8 @@ func TestBindStartupFlagsRegistersAliases(t *testing.T) {
 }
 
 func TestStartupConfigFromFlags(t *testing.T) {
-	got := startupOptsFromFlags(startupOptions{noBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true}, true)
-	if !got.ShowAllSessions || !got.NoBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
+	got := startupOptsFromFlags(startupOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true}, true)
+	if !got.ShowAllSessions || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
 		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }

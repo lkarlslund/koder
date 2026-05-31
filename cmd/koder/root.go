@@ -60,18 +60,16 @@ func NewRootCommand() *cobra.Command {
 }
 
 type startupOptions struct {
-	cwd         string
-	projectRoot string
-	noBrowser   bool
-	webBind     string
-	webBindSet  bool
+	projectRoot   string
+	noOpenBrowser bool
+	webBind       string
+	webBindSet    bool
 }
 
 func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
 	flags := cmd.PersistentFlags()
-	flags.StringVar(&opts.cwd, "cwd", "", "Start koder in this working directory")
-	flags.StringVar(&opts.projectRoot, "project-root", "", "Alias for --cwd")
-	flags.BoolVar(&opts.noBrowser, "nobrowser", false, "Do not open a browser for the web UI")
+	flags.StringVar(&opts.projectRoot, "project-root", "", "Start koder with this local project folder")
+	flags.BoolVar(&opts.noOpenBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
 }
 
@@ -85,22 +83,15 @@ func (o *startupOptions) captureFlagState(cmd *cobra.Command) {
 }
 
 func (o startupOptions) resolve() (string, error) {
-	cwd := strings.TrimSpace(o.cwd)
 	projectRoot := strings.TrimSpace(o.projectRoot)
-	if cwd != "" && projectRoot != "" && cwd != projectRoot {
-		return "", fmt.Errorf("--cwd and --project-root must match when both are set")
-	}
-	if cwd == "" {
-		cwd = projectRoot
-	}
-	if cwd == "" {
+	if projectRoot == "" {
 		var err error
-		cwd, err = os.Getwd()
+		projectRoot, err = os.Getwd()
 		if err != nil {
 			return "", err
 		}
 	}
-	abs, err := filepath.Abs(cwd)
+	abs, err := filepath.Abs(projectRoot)
 	if err != nil {
 		return "", err
 	}
@@ -109,14 +100,14 @@ func (o startupOptions) resolve() (string, error) {
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("workdir must be a directory: %s", abs)
+		return "", fmt.Errorf("project root must be a directory: %s", abs)
 	}
 	return abs, nil
 }
 
 type startupConfig struct {
 	ShowAllSessions bool
-	NoBrowser       bool
+	NoOpenBrowser   bool
 	WebBind         string
 	WebBindExplicit bool
 }
@@ -178,7 +169,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err != nil {
 		return err
 	}
-	server, err := startWebUI(ctx, controller, bind, startupOpts.NoBrowser, recorder)
+	server, err := startWebUI(ctx, controller, bind, startupOpts.NoOpenBrowser, recorder)
 	if err != nil {
 		return err
 	}
@@ -219,18 +210,18 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *app.Controller, bind string, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
-		Bind:      bind,
-		NoBrowser: noBrowser,
-		Debug:     recorder,
+		Bind:          bind,
+		NoOpenBrowser: noOpenBrowser,
+		Debug:         recorder,
 	})
 }
 
 func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConfig {
 	return startupConfig{
 		ShowAllSessions: showAllSessions,
-		NoBrowser:       opts.noBrowser,
+		NoOpenBrowser:   opts.noOpenBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
 	}

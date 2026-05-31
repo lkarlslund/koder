@@ -46,7 +46,7 @@ var (
 // Options configures the web UI server.
 type Options struct {
 	Bind                  string
-	NoBrowser             bool
+	NoOpenBrowser         bool
 	OpenDelay             time.Duration
 	OpenBrowser           func(string) error
 	Debug                 *debugsrv.Recorder
@@ -149,7 +149,7 @@ func (s *Server) AppURL() string {
 }
 
 func (s *Server) openBrowserIfNeeded(ctx context.Context) {
-	if s.options.NoBrowser {
+	if s.options.NoOpenBrowser {
 		return
 	}
 	delay := s.options.OpenDelay

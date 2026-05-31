@@ -62,7 +62,7 @@ func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 	sessionID := ctrl.State().Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -147,8 +147,8 @@ func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{
-		Bind:      "127.0.0.1:0",
-		NoBrowser: true,
+		Bind:          "127.0.0.1:0",
+		NoOpenBrowser: true,
 		RequestProcessRestart: func() error {
 			restarted <- struct{}{}
 			return nil
@@ -245,15 +245,15 @@ func TestServerOpensBrowserWhenNoWebSocketConnects(t *testing.T) {
 	}
 }
 
-func TestServerNoBrowserSuppressesBrowserOpen(t *testing.T) {
+func TestServerNoOpenBrowserSuppressesBrowserOpen(t *testing.T) {
 	ctrl := newTestController(t)
 	opened := make(chan string, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, err := Start(ctx, ctrl, Options{
-		Bind:      "127.0.0.1:0",
-		NoBrowser: true,
-		OpenDelay: 10 * time.Millisecond,
+		Bind:          "127.0.0.1:0",
+		NoOpenBrowser: true,
+		OpenDelay:     10 * time.Millisecond,
 		OpenBrowser: func(url string) error {
 			opened <- url
 			return nil
@@ -274,7 +274,7 @@ func TestServerHealthEndpoint(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestServerExposesDebugEndpointsOnWebPort(t *testing.T) {
 	recorder := debugsrv.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true, Debug: recorder})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	recorder := debugsrv.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true, Debug: recorder})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	recorder := debugsrv.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true, Debug: recorder})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestIndexServesHTML(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1066,7 +1066,7 @@ func TestFaviconDoesNot404(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestVendoredAssetsServe(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1151,7 +1151,7 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1199,7 +1199,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1252,7 +1252,7 @@ func TestWebSocketReorderChatsReturnsUpdatedOrder(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1305,7 +1305,7 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1354,7 +1354,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	initialID := ctrl.State().Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1518,7 +1518,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1647,7 +1647,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1698,7 +1698,7 @@ func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testi
 	ctrl := newTestControllerWithWorkdir(t, workdir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -1795,7 +1795,7 @@ func TestClipboardImageUploadEndpointReturnsDraftAttachment(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}

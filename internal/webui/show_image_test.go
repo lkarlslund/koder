@@ -13,7 +13,7 @@ func TestShowImageEndpointServesLocalImage(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestShowImageEndpointRejectsNonImage(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
