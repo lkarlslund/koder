@@ -1620,7 +1620,7 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 		t.Fatalf("expected trailing user message, got %#v", req.Messages)
 	}
 	for _, want := range []string{
-		"You are koder, a terminal coding agent.",
+		"You are koder, a browser-based coding agent with local workspace tools.",
 		"Runtime environment:",
 		"Current working directory: " + repo,
 		"Resolved project AGENTS.md instructions:\nFollow repository instructions.",

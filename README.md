@@ -20,20 +20,20 @@ It is meant for developers who want an agent that stays close to the codebase: i
 Build or install `koder`, then start it in a repository:
 
 ```bash
-koder --cwd /path/to/worktree
+koder --project-root /path/to/worktree
 ```
 
 By default, `koder` binds the web UI on a local ephemeral port and opens your browser. To choose the address or avoid opening a browser:
 
 ```bash
-koder --cwd /path/to/worktree --web-bind 127.0.0.1:8080
-koder --cwd /path/to/worktree --nobrowser
+koder --project-root /path/to/worktree --web-bind 127.0.0.1:8080
+koder --project-root /path/to/worktree --nobrowser
 ```
 
 Resume previous work:
 
 ```bash
-koder resume --cwd /path/to/worktree
+koder resume --project-root /path/to/worktree
 koder resume --all-sessions
 ```
 
@@ -91,10 +91,10 @@ Permission profiles control network access, root filesystem mode, workspace mode
 
 ```bash
 koder
-koder --cwd /path/to/worktree
+koder --project-root /path/to/worktree
 koder --web-bind 127.0.0.1:8080
 koder --nobrowser
-koder resume --cwd /path/to/worktree
+koder resume --project-root /path/to/worktree
 koder resume --all-sessions
 koder doctor
 koder debug info

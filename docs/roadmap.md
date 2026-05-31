@@ -2,18 +2,18 @@
 
 ## Current milestone
 
-Ship a working local-first TUI coding agent with:
+Ship a focused local-first browser coding agent with:
 
-- OpenAI-compatible local inference
-- SQLite-backed sessions
-- transcript rendering with reasoning toggle
-- tool commands plus approval flow
-- docs workflow for progress tracking
+- A single local daemon serving the in-browser application
+- Session-scoped project roots, chats, milestones, todos, approvals, and compaction
+- OpenAI-compatible local or remote model providers configured from the browser UI
+- Structured workspace tools for search, reads, edits, shell execution, web/image access, skills, and MCP
+- Browser-first session, provider, permission, and workspace controls
 
 ## Next milestones
 
-1. Model-driven tool calling instead of slash-command-only tools
-2. Better diff rendering and patch grammar support
-3. PTY-backed shell tool
-4. Parallel child-agent execution
-5. Optional daemon/client split
+1. Simplify app/session/chat ownership so live in-memory state is the only mutation surface.
+2. Tighten browser RPC and state deltas around explicit app APIs.
+3. Improve multi-chat orchestration, archiving, and completion notifications.
+4. Expand provider/model diagnostics and compaction visibility in the browser UI.
+5. Keep command-line surface focused on launching, resuming, debugging, and non-interactive exec flows.

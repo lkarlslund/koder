@@ -8,7 +8,7 @@
 - `internal/provider`: OpenAI-compatible `/models` and `/chat/completions` client
 - `internal/tools`: typed local tool execution surface
 - `internal/agent`: prompt handling, tool approval flow, and event emission
-- `internal/uicore`: renderer-neutral session and chat controller
+- `internal/app`: browser app controller for session, chat, settings, and workspace state
 - `internal/webui`: embedded browser UI and websocket RPC bridge
 
 Current v1 shape is a modular monolith inside one binary. The browser UI talks to in-process services over the embedded websocket server rather than a daemon.
