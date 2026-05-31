@@ -739,6 +739,14 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 	}
 	state := s.controller.State()
 	if state.Session.ID != selection.SessionID {
+		exists, err := s.sessionExists(ctx, selection.SessionID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			s.deleteClientSelection(clientID)
+			return nil
+		}
 		if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
 			return err
 		}
@@ -755,6 +763,14 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 	if selection.SessionID != "" {
 		state := s.controller.State()
 		if state.Session.ID != selection.SessionID {
+			exists, err := s.sessionExists(ctx, selection.SessionID)
+			if err != nil {
+				return app.State{}, err
+			}
+			if !exists {
+				s.deleteClientSelection(clientID)
+				return state, nil
+			}
 			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
 				return app.State{}, err
 			}
@@ -769,6 +785,19 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 		}
 	}
 	return s.controller.State(), nil
+}
+
+func (s *Server) sessionExists(ctx context.Context, sessionID domain.ID) (bool, error) {
+	state, err := s.controller.Sessions(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, session := range state.Sessions {
+		if session.ID == sessionID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func rpcUsesActiveSelection(method string) bool {

@@ -141,6 +141,51 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 }
 
+func TestWebSocketHelloIgnoresStaleURLSessionSelection(t *testing.T) {
+	ctrl := newTestController(t)
+	activeID := ctrl.State().Session.ID
+	staleID := domain.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
+	if staleID == activeID {
+		t.Fatal("test stale id unexpectedly matches active session")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(staleID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			State struct {
+				Session struct {
+					ID domain.ID
+				}
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode hello: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected stale session hello to recover, got %s", resp.Error)
+	}
+	if resp.Result.State.Session.ID != activeID {
+		t.Fatalf("expected hello to fall back to active session %s, got %s", activeID, resp.Result.State.Session.ID)
+	}
+}
+
 func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 	ctrl := newTestController(t)
 	restarted := make(chan struct{}, 1)
