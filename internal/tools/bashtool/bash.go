@@ -3,6 +3,7 @@ package bashtool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -31,8 +32,13 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if command == "" {
 		return nil, errors.New("command is empty")
 	}
+	for _, key := range []string{"cwd", "dir"} {
+		if strings.TrimSpace(args[key]) != "" {
+			return nil, fmt.Errorf("%s is no longer supported; use workdir", key)
+		}
+	}
 	out := map[string]string{"command": command}
-	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir", "cwd", "dir")); workdir != "" {
+	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir")); workdir != "" {
 		out["workdir"] = workdir
 	}
 	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms", "timeout")); timeout != "" {

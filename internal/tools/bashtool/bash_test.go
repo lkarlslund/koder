@@ -15,12 +15,15 @@ func TestNormalizeArgsValidatesCommandAndTimeout(t *testing.T) {
 	if _, err := (tool{}).NormalizeArgs(map[string]string{"command": "echo hi", "timeout_ms": "abc"}); err == nil {
 		t.Fatal("expected timeout validation error")
 	}
-	got, err := (tool{}).NormalizeArgs(map[string]string{"cmd": "echo hi", "cwd": "./sub"})
+	got, err := (tool{}).NormalizeArgs(map[string]string{"cmd": "echo hi", "workdir": "./sub"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got["command"] != "echo hi" || got["workdir"] != "sub" {
 		t.Fatalf("unexpected normalized args: %#v", got)
+	}
+	if _, err := (tool{}).NormalizeArgs(map[string]string{"command": "echo hi", "cwd": "./sub"}); err == nil {
+		t.Fatal("expected cwd compatibility error")
 	}
 }
 

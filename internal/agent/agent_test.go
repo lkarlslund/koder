@@ -871,7 +871,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if evt.Kind != domain.EventKindToolResult {
 		t.Fatalf("expected tool result event, got %#v", evt)
 	}
-	if !strings.Contains(evt.Text, "start_line must be a positive integer") {
+	if !strings.Contains(evt.Text, "offset is no longer supported") {
 		t.Fatalf("expected normalization failure text, got %#v", evt)
 	}
 
@@ -886,7 +886,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != domain.PartKindToolOutput {
 		t.Fatalf("expected one tool output part, got %#v", got)
 	}
-	if !strings.Contains(got[0].Body, "start_line must be a positive integer") {
+	if !strings.Contains(got[0].Body, "offset is no longer supported") {
 		t.Fatalf("expected persisted failure body, got %#v", got[0])
 	}
 }

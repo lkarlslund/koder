@@ -38,19 +38,24 @@ func init() {
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindRead }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
+	for _, key := range []string{"file", "file_path", "filepath", "start", "line", "offset", "end", "limit", "lines", "max_lines"} {
+		if strings.TrimSpace(args[key]) != "" {
+			return nil, fmt.Errorf("%s is no longer supported", key)
+		}
+	}
+	path := tools.NormalizePathInput(tools.FirstArg(args, "path"))
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
 	out := map[string]string{"path": path}
-	startLine, err := parsePositiveArg(tools.FirstArg(args, "start_line", "start", "line", "offset"), "start_line")
+	startLine, err := parsePositiveArg(tools.FirstArg(args, "start_line"), "start_line")
 	if err != nil {
 		return nil, err
 	}
 	if startLine > 0 {
 		out["start_line"] = strconv.Itoa(startLine)
 	}
-	if endLine := tools.FirstArg(args, "end_line", "end"); endLine != "" {
+	if endLine := tools.FirstArg(args, "end_line"); endLine != "" {
 		value, err := tools.ParseFlexibleInt(endLine)
 		if err != nil || value <= 0 {
 			return nil, errors.New("end_line must be a positive integer")
@@ -59,27 +64,14 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 			return nil, errors.New("end_line must be greater than or equal to start_line")
 		}
 		out["end_line"] = strconv.Itoa(value)
-	} else if limit := tools.FirstArg(args, "limit", "lines", "max_lines"); limit != "" {
-		value, err := tools.ParseFlexibleInt(limit)
-		if err != nil || value <= 0 {
-			return nil, errors.New("end_line must be a positive integer")
-		}
-		if startLine <= 0 {
-			startLine = 1
-			out["start_line"] = "1"
-		}
-		out["end_line"] = strconv.Itoa(startLine + value - 1)
 	}
 	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Presentation(req tools.Request) tools.Presentation {
 	path := strings.TrimSpace(req.Args["path"])
-	startLine := strings.TrimSpace(firstPresent(req.Args, "start_line", "offset"))
+	startLine := strings.TrimSpace(req.Args["start_line"])
 	endLine := strings.TrimSpace(req.Args["end_line"])
-	if endLine == "" {
-		endLine = endLineFromLegacyLimit(startLine, req.Args["limit"])
-	}
 	return tools.Presentation{
 		Title:   readPresentationTitle(path, startLine, endLine),
 		Preview: path,
@@ -219,7 +211,7 @@ type readRange struct {
 }
 
 func readRangeFromArgs(args map[string]string) (readRange, error) {
-	startLine, err := parsePositiveArg(firstPresent(args, "start_line", "offset"), "start_line")
+	startLine, err := parsePositiveArg(args["start_line"], "start_line")
 	if err != nil {
 		return readRange{}, err
 	}
@@ -230,17 +222,9 @@ func readRangeFromArgs(args map[string]string) (readRange, error) {
 	if err != nil {
 		return readRange{}, err
 	}
-	legacyLimit := firstPresent(args, "limit", "lines", "max_lines")
-	autoCapped := endLine <= 0 && legacyLimit == ""
+	autoCapped := endLine <= 0
 	if endLine <= 0 {
-		limit, err := parsePositiveArg(legacyLimit, "end_line")
-		if err != nil {
-			return readRange{}, err
-		}
-		if limit <= 0 {
-			limit = tools.DefaultReadLineLimit
-		}
-		endLine = startLine + limit - 1
+		endLine = startLine + tools.DefaultReadLineLimit - 1
 	}
 	if endLine < startLine {
 		return readRange{}, errors.New("end_line must be greater than or equal to start_line")
@@ -270,27 +254,6 @@ func parsePositiveArg(raw, name string) (int, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
 	return parsed, nil
-}
-
-func firstPresent(args map[string]string, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := args[key]; ok && strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func endLineFromLegacyLimit(startLineValue, limitValue string) string {
-	startLine, err := tools.ParseFlexibleInt(startLineValue)
-	if err != nil || startLine <= 0 {
-		startLine = 1
-	}
-	limit, err := tools.ParseFlexibleInt(limitValue)
-	if err != nil || limit <= 0 {
-		return ""
-	}
-	return strconv.Itoa(startLine + limit - 1)
 }
 
 func isTextHeader(header []byte) bool {

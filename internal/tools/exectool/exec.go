@@ -98,8 +98,13 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	if cmd == "" {
 		return nil, errors.New("cmd is empty")
 	}
+	for _, key := range []string{"cwd", "dir"} {
+		if strings.TrimSpace(args[key]) != "" {
+			return nil, fmt.Errorf("%s is no longer supported; use workdir", key)
+		}
+	}
 	out := map[string]string{"cmd": cmd}
-	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir", "cwd", "dir")); workdir != "" {
+	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir")); workdir != "" {
 		out["workdir"] = workdir
 	}
 	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms")); timeout != "" {
