@@ -208,22 +208,6 @@ func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, er
 	return rt, nil
 }
 
-// AdoptChat adds an externally-created live chat runtime to this session.
-func (s *Session) AdoptChat(chatRecord domain.Chat, rt *chatpkg.Chat) {
-	if s == nil || chatRecord.ID == "" {
-		return
-	}
-	s.mu.Lock()
-	upsertSessionChatLocked(&s.chats, chatRecord)
-	if s.runtimes == nil {
-		s.runtimes = map[domain.ID]*chatpkg.Chat{}
-	}
-	if rt != nil {
-		s.runtimes[chatRecord.ID] = rt
-	}
-	s.mu.Unlock()
-}
-
 // NewChat creates a new orchestrator chat under parentChatID.
 func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title string) (*chatpkg.Chat, error) {
 	if s == nil {
@@ -295,7 +279,10 @@ func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (
 	if err != nil {
 		return nil, err
 	}
-	s.AdoptChat(chatRecord, rt)
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	s.runtimes[chatRecord.ID] = rt
+	s.mu.Unlock()
 	return rt, nil
 }
 

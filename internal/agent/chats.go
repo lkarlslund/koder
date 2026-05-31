@@ -10,16 +10,10 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
-
-type chatRunState struct {
-	state      tools.ChatRunState
-	status     string
-	statusText string
-	lastError  string
-}
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
 	if chatRecord.ID == "" {
@@ -41,25 +35,14 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 }
 
 func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
-	if owner, err := e.LoadSession(ctx, sessionID); err == nil {
-		snapshot := owner.Snapshot()
-		statuses := make([]tools.ChatStatus, 0, len(snapshot.Chats))
-		for _, item := range snapshot.Chats {
-			status, err := owner.PollChat(ctx, item.ID)
-			if err != nil {
-				return nil, err
-			}
-			statuses = append(statuses, status)
-		}
-		return statuses, nil
-	}
-	chats, err := e.store.ListChats(ctx, sessionID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	statuses := make([]tools.ChatStatus, 0, len(chats))
-	for _, item := range chats {
-		status, err := e.PollChat(ctx, sessionID, item.ID)
+	snapshot := owner.Snapshot()
+	statuses := make([]tools.ChatStatus, 0, len(snapshot.Chats))
+	for _, item := range snapshot.Chats {
+		status, err := owner.PollChat(ctx, item.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -69,54 +52,11 @@ func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.Ch
 }
 
 func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
-	if owner, err := e.LoadSession(ctx, sessionID); err == nil {
-		return owner.PollChat(ctx, chatID)
-	}
-	chatRecord, err := e.store.GetChat(ctx, chatID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	if sessionID != "" && chatRecord.SessionID != sessionID {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
-	}
-	pending, err := e.store.PendingApprovalsForChat(ctx, chatID)
-	if err != nil {
-		return tools.ChatStatus{}, err
-	}
-
-	e.runMu.RLock()
-	run := e.runs[chatID]
-	e.runMu.RUnlock()
-
-	state := run.state
-	status := strings.TrimSpace(run.status)
-	statusText := run.statusText
-	lastError := run.lastError
-	busy := false
-
-	if state == "" {
-		state = tools.ChatRunStateIdle
-	}
-	if status == "" {
-		status = string(state)
-	}
-	if len(pending) > 0 && state == tools.ChatRunStateIdle {
-		state = tools.ChatRunStateWaitingApproval
-		status = string(chatpkg.StatusWaitingApproval)
-		busy = true
-		if strings.TrimSpace(statusText) == "" {
-			statusText = "Waiting for approval"
-		}
-	}
-	return tools.ChatStatus{
-		Chat:             chatRecord,
-		State:            state,
-		Status:           status,
-		Busy:             busy,
-		PendingApprovals: len(pending),
-		LastError:        lastError,
-		StatusText:       statusText,
-	}, nil
+	return owner.PollChat(ctx, chatID)
 }
 
 func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
@@ -226,7 +166,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 		}
 		scopedTodo = &todo
 	}
-	return e.StartPreparedChat(ctx, session, chatRecord, milestone, scopedTodo, role, objective)
+	return e.startPreparedChat(ctx, owner, chatRecord.ID, milestone, scopedTodo, role, objective)
 }
 
 func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
@@ -341,32 +281,26 @@ func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
 	return domain.Chat{}, false
 }
 
-func (e *Engine) StartPreparedChat(ctx context.Context, session domain.Session, chatRecord domain.Chat, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
-	if session.ID == "" {
-		return tools.ChatStatus{}, fmt.Errorf("session id is required")
+func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID domain.ID, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
+	if owner == nil {
+		return tools.ChatStatus{}, fmt.Errorf("session is required")
 	}
-	if chatRecord.ID == "" {
+	if chatID == "" {
 		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
-	}
-	if chatRecord.SessionID != session.ID {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
 	}
 	objective = strings.TrimSpace(objective)
 	if objective == "" {
 		return tools.ChatStatus{}, fmt.Errorf("objective is required")
 	}
-	activeChat, err := e.Chat(ctx, session, chatRecord)
+	snapshot := owner.Snapshot()
+	activeChat, err := owner.Chat(ctx, chatID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	if owner := e.loadedSession(session.ID); owner != nil {
-		owner.AdoptChat(chatRecord, activeChat)
-	}
-	e.setRunState(chatRecord.ID, chatRunState{state: tools.ChatRunStateRunning, statusText: "Starting background chat"})
 	updates, unsub := activeChat.Subscribe()
-	go e.consumeChatUpdates(chatRecord.ID, updates, unsub)
-	activeChat.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceAutoGenerated, Text: e.bootstrapPrompt(ctx, session.ID, milestone, scopedTodo, role, objective)})
-	return e.PollChat(ctx, session.ID, chatRecord.ID)
+	go e.consumeChatUpdates(chatID, updates, unsub)
+	activeChat.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceAutoGenerated, Text: e.bootstrapPrompt(ctx, snapshot.Session.ID, milestone, scopedTodo, role, objective)})
+	return owner.PollChat(ctx, chatID)
 }
 
 func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Update, unsub func()) {
@@ -375,29 +309,20 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 			unsub()
 		}
 	}()
-	state := tools.ChatRunStateRunning
-	status := string(chatpkg.StatusWaitingLLM)
 	statusText := "Running"
-	lastError := ""
 	notifiedIdle := false
 	sawActive := false
 	for update := range updates {
 		if !update.Active && !sawActive && update.Status != chatpkg.StatusWaitingApproval && update.Status != chatpkg.StatusErrored {
 			continue
 		}
-		if update.Status != "" {
-			status = string(update.Status)
-		}
 		switch update.Status {
 		case chatpkg.StatusWaitingApproval:
-			state = tools.ChatRunStateWaitingApproval
 			if !notifiedIdle {
 				notifiedIdle = true
 				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is waiting for approval: %s", chatID, strings.TrimSpace(update.StatusText)))
 			}
 		case chatpkg.StatusErrored:
-			state = tools.ChatRunStateFailed
-			lastError = strings.TrimSpace(update.StatusText)
 			if !notifiedIdle {
 				notifiedIdle = true
 				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s failed: %s", chatID, strings.TrimSpace(update.StatusText)))
@@ -405,17 +330,12 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 		default:
 			if update.Active {
 				sawActive = true
-				state = tools.ChatRunStateRunning
-			} else if sawActive {
-				state = tools.ChatRunStateIdle
-				status = string(chatpkg.StatusIdle)
 			}
 		}
 		if strings.TrimSpace(update.StatusText) != "" {
 			statusText = strings.TrimSpace(update.StatusText)
 		}
-		e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
-		if !update.Active && sawActive && !notifiedIdle && state == tools.ChatRunStateIdle {
+		if !update.Active && sawActive && !notifiedIdle {
 			notifiedIdle = true
 			if e.parentAlreadyHasDoneNotification(context.Background(), chatID) {
 				continue
@@ -427,13 +347,6 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 			}
 		}
 	}
-	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
-}
-
-func (e *Engine) setRunState(chatID domain.ID, state chatRunState) {
-	e.runMu.Lock()
-	defer e.runMu.Unlock()
-	e.runs[chatID] = state
 }
 
 func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, text string) {
