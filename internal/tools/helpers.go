@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,21 +36,6 @@ func FirstArg(args map[string]string, keys ...string) string {
 	return ""
 }
 
-func NormalizeStringMap(args map[string]string) map[string]string {
-	if len(args) == 0 {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(args))
-	for key, value := range args {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		out[key] = value
-	}
-	return out
-}
-
 func NormalizePathInput(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -60,16 +45,13 @@ func NormalizePathInput(raw string) string {
 }
 
 func WorkspacePath(root string, raw string) (abs string, rel string, err error) {
-	root, err = filepath.Abs(strings.TrimSpace(root))
+	root, err = workspaceRoot(root)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve workspace root: %w", err)
+		return "", "", err
 	}
-	if strings.TrimSpace(raw) == "" {
-		return "", "", errors.New("path is empty")
-	}
-	clean := NormalizePathInput(raw)
-	if clean == "" {
-		return "", "", errors.New("path is empty")
+	clean, err := cleanPathArg(raw)
+	if err != nil {
+		return "", "", err
 	}
 	if clean == "." {
 		return root, ".", nil
@@ -80,58 +62,41 @@ func WorkspacePath(root string, raw string) (abs string, rel string, err error) 
 		abs = filepath.Join(root, clean)
 	}
 	abs = filepath.Clean(abs)
-	rel, err = filepath.Rel(root, abs)
+	rel, err = workspaceRel(root, abs, raw, "path")
 	if err != nil {
-		return "", "", fmt.Errorf("resolve relative path: %w", err)
+		return "", "", err
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("path %q is outside the workspace", raw)
+	resolved, exists, err := resolveExistingPath(abs)
+	if err != nil {
+		return "", "", err
 	}
-	if info, statErr := os.Stat(abs); statErr == nil {
-		resolved, resolveErr := filepath.EvalSymlinks(abs)
-		if resolveErr == nil {
-			rel, err = filepath.Rel(root, resolved)
-			if err != nil {
-				return "", "", fmt.Errorf("resolve relative symlink path: %w", err)
-			}
-			if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return "", "", fmt.Errorf("path %q resolves outside the workspace", raw)
-			}
-			abs = resolved
-		} else if !errors.Is(resolveErr, fs.ErrNotExist) {
-			return "", "", fmt.Errorf("resolve symlink: %w", resolveErr)
+	if exists {
+		rel, err = workspaceRel(root, resolved, raw, "path")
+		if err != nil {
+			return "", "", err
 		}
-		_ = info
-	} else if !errors.Is(statErr, fs.ErrNotExist) {
-		return "", "", fmt.Errorf("stat path: %w", statErr)
+		abs = resolved
 	}
 	return abs, filepath.ToSlash(rel), nil
 }
 
 func ReadablePath(root string, raw string) (abs string, label string, err error) {
-	root, err = filepath.Abs(strings.TrimSpace(root))
+	root, err = workspaceRoot(root)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve workspace root: %w", err)
+		return "", "", err
 	}
-	if strings.TrimSpace(raw) == "" {
-		return "", "", errors.New("path is empty")
-	}
-	clean := NormalizePathInput(raw)
-	if clean == "" {
-		return "", "", errors.New("path is empty")
+	clean, err := cleanPathArg(raw)
+	if err != nil {
+		return "", "", err
 	}
 	if filepath.IsAbs(clean) {
 		abs = filepath.Clean(clean)
-		if info, statErr := os.Stat(abs); statErr == nil {
-			resolved, resolveErr := filepath.EvalSymlinks(abs)
-			if resolveErr == nil {
-				abs = resolved
-			} else if !errors.Is(resolveErr, fs.ErrNotExist) {
-				return "", "", fmt.Errorf("resolve symlink: %w", resolveErr)
-			}
-			_ = info
-		} else if !errors.Is(statErr, fs.ErrNotExist) {
-			return "", "", fmt.Errorf("stat path: %w", statErr)
+		resolved, exists, err := resolveExistingPath(abs)
+		if err != nil {
+			return "", "", err
+		}
+		if exists {
+			abs = resolved
 		}
 		return abs, filepath.ToSlash(abs), nil
 	}
@@ -140,9 +105,9 @@ func ReadablePath(root string, raw string) (abs string, label string, err error)
 
 func WorkspaceDir(root string, raw string) (abs string, rel string, err error) {
 	if strings.TrimSpace(raw) == "" {
-		abs, err = filepath.Abs(strings.TrimSpace(root))
+		abs, err = workspaceRoot(root)
 		if err != nil {
-			return "", "", fmt.Errorf("resolve workspace dir: %w", err)
+			return "", "", err
 		}
 		return abs, ".", nil
 	}
@@ -196,11 +161,12 @@ func SummarizePaths(paths []string, limit int) string {
 	if len(paths) == 0 {
 		return ""
 	}
-	sort.Strings(paths)
-	if limit <= 0 || len(paths) <= limit {
-		return strings.Join(paths, ", ")
+	sorted := append([]string(nil), paths...)
+	sort.Strings(sorted)
+	if limit <= 0 || len(sorted) <= limit {
+		return strings.Join(sorted, ", ")
 	}
-	return strings.Join(paths[:limit], ", ") + fmt.Sprintf(", +%d more", len(paths)-limit)
+	return strings.Join(sorted[:limit], ", ") + fmt.Sprintf(", +%d more", len(sorted)-limit)
 }
 
 func ShellResult(ctx context.Context, dir string, timeout time.Duration, command string, profile permissionprofile.Profile) (string, int, error) {
@@ -259,15 +225,7 @@ func ListDirectory(abs string) ([]string, error) {
 }
 
 func BoolString(value bool) string {
-	if value {
-		return "true"
-	}
-	return "false"
-}
-
-func JSONMeta(values map[string]string) string {
-	data, _ := json.Marshal(values)
-	return string(data)
+	return strconv.FormatBool(value)
 }
 
 func WriteTextFile(abs string, content string, mode fs.FileMode) error {
@@ -282,26 +240,76 @@ func WriteTextFile(abs string, content string, mode fs.FileMode) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	cleanup := func() {
-		_ = os.Remove(tmpPath)
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	closeTemp := func() {
+		_ = tmp.Close()
 	}
 	if _, err := io.WriteString(tmp, content); err != nil {
-		_ = tmp.Close()
-		cleanup()
+		closeTemp()
 		return err
 	}
 	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		cleanup()
+		closeTemp()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		cleanup()
 		return err
 	}
 	if err := os.Rename(tmpPath, abs); err != nil {
-		cleanup()
 		return err
 	}
+	renamed = true
 	return nil
+}
+
+func workspaceRoot(root string) (string, error) {
+	abs, err := filepath.Abs(strings.TrimSpace(root))
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func cleanPathArg(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", errors.New("path is empty")
+	}
+	clean := NormalizePathInput(raw)
+	if clean == "" {
+		return "", errors.New("path is empty")
+	}
+	return clean, nil
+}
+
+func workspaceRel(root string, abs string, raw string, noun string) (string, error) {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve relative %s: %w", noun, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q is outside the workspace", raw)
+	}
+	return rel, nil
+}
+
+func resolveExistingPath(abs string) (resolved string, exists bool, err error) {
+	if _, statErr := os.Stat(abs); statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			return abs, false, nil
+		}
+		return "", false, fmt.Errorf("stat path: %w", statErr)
+	}
+	resolved, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return abs, false, nil
+		}
+		return "", false, fmt.Errorf("resolve symlink: %w", err)
+	}
+	return resolved, true, nil
 }

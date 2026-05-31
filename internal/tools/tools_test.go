@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -67,6 +68,38 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "nested/") {
 		t.Fatalf("expected file listing to include nested directory, got %q", result.Output)
+	}
+}
+
+func TestSummarizePathsDoesNotMutateInput(t *testing.T) {
+	paths := []string{"zeta.go", "alpha.go", "beta.go"}
+
+	got := tools.SummarizePaths(paths, 2)
+
+	if got != "alpha.go, beta.go, +1 more" {
+		t.Fatalf("unexpected summary: %q", got)
+	}
+	if want := []string{"zeta.go", "alpha.go", "beta.go"}; paths[0] != want[0] || paths[1] != want[1] || paths[2] != want[2] {
+		t.Fatalf("SummarizePaths mutated input: got %#v want %#v", paths, want)
+	}
+}
+
+func TestWorkspacePathRejectsSymlinkEscapingWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := tools.WorkspacePath(root, "link.txt")
+	if err == nil || !strings.Contains(err.Error(), "outside the workspace") {
+		t.Fatalf("expected outside workspace error, got %v", err)
 	}
 }
 
