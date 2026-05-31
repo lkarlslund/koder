@@ -212,6 +212,93 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 }
 
+func TestServerExposesSessionHydrationDebug(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultChat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sideChat, err := sessionstore.CreateChat(context.Background(), st, session.ID, "Side", "executor", &defaultChat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, defaultChat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindRead,
+		Args:       map[string]string{"path": "main.go"},
+		Status:     domain.ToolStatusPending,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := chatstore.SetChatQueuedInputs(context.Background(), st, sideChat.ID, []domain.QueuedInput{{Text: "queued"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := NewRecorder()
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: session.ID, SelectedChat: defaultChat.ID})
+	rec.UpdateChats([]ChatDebug{{
+		ID:               defaultChat.ID,
+		SessionID:        session.ID,
+		Title:            defaultChat.Title,
+		Status:           "idle",
+		QueueLen:         0,
+		PendingApprovals: 0,
+	}})
+
+	srv := httptest.NewServer(Handler(st, rec))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/debug/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected sessions status %d: %s", resp.StatusCode, string(data))
+	}
+	var payload struct {
+		Architecture ArchitectureDebug `json:"architecture"`
+		Sessions     []SessionDebug    `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Architecture.Summary == "" || len(payload.Architecture.MoreDataNeeded) == 0 {
+		t.Fatalf("expected architecture guidance, got %#v", payload.Architecture)
+	}
+	if len(payload.Sessions) != 1 {
+		t.Fatalf("expected one session debug entry, got %#v", payload.Sessions)
+	}
+	got := payload.Sessions[0]
+	if !got.Hydrated || got.Hydration != "hydrated" || got.StoredChatCount != 2 || got.HydratedChatCount != 1 || got.SelectedClientCount != 1 {
+		t.Fatalf("unexpected session hydration summary: %#v", got)
+	}
+	byID := map[domain.ID]SessionChatDebug{}
+	for _, chat := range got.Chats {
+		byID[chat.ID] = chat
+	}
+	mainDebug := byID[defaultChat.ID]
+	if !mainDebug.Hydrated || mainDebug.Runtime == nil || mainDebug.PendingExecutableToolCalls != 1 {
+		t.Fatalf("unexpected hydrated main chat debug: %#v", mainDebug)
+	}
+	sideDebug := byID[sideChat.ID]
+	if sideDebug.Hydrated || sideDebug.QueueLen != 1 || len(sideDebug.Diagnostics) == 0 {
+		t.Fatalf("unexpected stored-only side chat debug: %#v", sideDebug)
+	}
+}
+
 func appendDebugTimelineItem(st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, content)
 	if err != nil {

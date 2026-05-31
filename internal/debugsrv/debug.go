@@ -106,6 +106,49 @@ type ChatDebug struct {
 	RunningToolCalls          int       `json:"running_tool_calls"`
 }
 
+type ArchitectureDebug struct {
+	Summary        string   `json:"summary"`
+	Organization   []string `json:"organization"`
+	DataSources    []string `json:"data_sources"`
+	MoreDataNeeded []string `json:"more_data_needed,omitempty"`
+}
+
+type SessionDebug struct {
+	ID                  domain.ID          `json:"id"`
+	Title               string             `json:"title,omitempty"`
+	ProjectRoot         string             `json:"project_root,omitempty"`
+	Hydration           string             `json:"hydration"`
+	Hydrated            bool               `json:"hydrated"`
+	StoredChatCount     int                `json:"stored_chat_count"`
+	HydratedChatCount   int                `json:"hydrated_chat_count"`
+	VisibleChatCount    int                `json:"visible_chat_count"`
+	ArchivedChatCount   int                `json:"archived_chat_count"`
+	SelectedClientCount int                `json:"selected_client_count"`
+	Record              domain.Session     `json:"record"`
+	Chats               []SessionChatDebug `json:"chats"`
+	DataNotes           []string           `json:"data_notes,omitempty"`
+}
+
+type SessionChatDebug struct {
+	ID                         domain.ID  `json:"id"`
+	SessionID                  domain.ID  `json:"session_id"`
+	Title                      string     `json:"title,omitempty"`
+	WorkflowRole               string     `json:"workflow_role,omitempty"`
+	Archived                   bool       `json:"archived"`
+	Hydration                  string     `json:"hydration"`
+	Hydrated                   bool       `json:"hydrated"`
+	QueueLen                   int        `json:"queue_len"`
+	TimelineCount              int        `json:"timeline_count"`
+	PendingApprovals           int        `json:"pending_approvals"`
+	PendingExecutableToolCalls int        `json:"pending_executable_tool_calls"`
+	SelectedClientCount        int        `json:"selected_client_count"`
+	LastKnownContextTokens     int        `json:"last_known_context_tokens,omitempty"`
+	ContextTokensKnown         bool       `json:"context_tokens_known"`
+	LastMessage                string     `json:"last_message,omitempty"`
+	Runtime                    *ChatDebug `json:"runtime,omitempty"`
+	Diagnostics                []string   `json:"diagnostics,omitempty"`
+}
+
 type SessionAnalysis struct {
 	SessionID       domain.ID               `json:"session_id"`
 	ContinueCount   int                     `json:"continue_count"`
@@ -561,6 +604,166 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chat)
 }
 
+func debugArchitecture() ArchitectureDebug {
+	return ArchitectureDebug{
+		Summary: "Engine owns sessions, sessions own persisted chats, and hydrated chat runtimes report live state through the debug recorder.",
+		Organization: []string{
+			"session records and chat records are loaded from the store",
+			"chat hydration is detected from live recorder chat state",
+			"session hydration is inferred when at least one stored chat has live recorder state",
+			"client selection is grouped by selected session and selected chat",
+		},
+		DataSources: []string{
+			"store: sessions, chats, timelines, and approvals",
+			"recorder: connected clients, live chat runtime status, queue length, approvals, and running tool counts",
+		},
+		MoreDataNeeded: []string{
+			"exact engine-owned session hydration is inferred here; expose agent session snapshots if the debug API must distinguish a loaded session with no active chat runtime",
+			"stored-only chats have persisted queue, timeline, approval, and context counts but no live goroutine status until hydrated",
+		},
+	}
+}
+
+func (s *Server) debugSessions(ctx context.Context) ([]SessionDebug, error) {
+	sessions, err := sessionstore.ListSessions(ctx, s.store)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionDebug, 0, len(sessions))
+	for _, session := range sessions {
+		item, _, err := s.debugSession(ctx, session)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (s *Server) debugSession(ctx context.Context, session domain.Session) (SessionDebug, []domain.Chat, error) {
+	chats, err := sessionstore.ListChats(ctx, s.store, session.ID)
+	if err != nil {
+		return SessionDebug{}, nil, err
+	}
+	runtime := s.recorder.Runtime()
+	runtimeByChat := make(map[domain.ID]ChatDebug, len(runtime.Chats))
+	for _, chat := range runtime.Chats {
+		runtimeByChat[chat.ID] = chat
+	}
+	selectedSessions, selectedChats := selectedClientCounts(runtime.Clients)
+
+	out := SessionDebug{
+		ID:                  session.ID,
+		Title:               session.Title,
+		ProjectRoot:         session.ProjectRoot,
+		Hydration:           "stored",
+		StoredChatCount:     len(chats),
+		SelectedClientCount: selectedSessions[session.ID],
+		Record:              session,
+		Chats:               make([]SessionChatDebug, 0, len(chats)),
+	}
+	for _, chatRecord := range chats {
+		chatDebug, err := s.debugChat(ctx, chatRecord, runtimeByChat, selectedChats)
+		if err != nil {
+			return SessionDebug{}, nil, err
+		}
+		out.Chats = append(out.Chats, chatDebug)
+		if chatRecord.Archived {
+			out.ArchivedChatCount++
+		} else {
+			out.VisibleChatCount++
+		}
+		if chatDebug.Hydrated {
+			out.HydratedChatCount++
+		}
+	}
+	if out.HydratedChatCount > 0 {
+		out.Hydrated = true
+		out.Hydration = "hydrated"
+	}
+	if out.HydratedChatCount == 0 && len(chats) > 0 {
+		out.DataNotes = append(out.DataNotes, "no stored chat in this session has live recorder state")
+	}
+	if out.HydratedChatCount > 0 && out.HydratedChatCount < out.StoredChatCount {
+		out.DataNotes = append(out.DataNotes, "some stored chats are not currently hydrated")
+	}
+	return out, chats, nil
+}
+
+func (s *Server) debugChat(ctx context.Context, chatRecord domain.Chat, runtimeByChat map[domain.ID]ChatDebug, selectedChats map[domain.ID]int) (SessionChatDebug, error) {
+	timeline, err := chatstore.TimelineForChat(ctx, s.store, chatRecord.ID)
+	if err != nil {
+		return SessionChatDebug{}, err
+	}
+	approvals, err := chatstore.PendingApprovalsForChat(ctx, s.store, chatRecord.ID)
+	if err != nil {
+		return SessionChatDebug{}, err
+	}
+	out := SessionChatDebug{
+		ID:                         chatRecord.ID,
+		SessionID:                  chatRecord.SessionID,
+		Title:                      chatRecord.Title,
+		WorkflowRole:               string(chatRecord.WorkflowRole),
+		Archived:                   chatRecord.Archived,
+		Hydration:                  "stored",
+		QueueLen:                   len(chatRecord.QueuedInputs),
+		TimelineCount:              len(timeline),
+		PendingApprovals:           len(approvals),
+		PendingExecutableToolCalls: pendingExecutableToolCalls(timeline),
+		SelectedClientCount:        selectedChats[chatRecord.ID],
+		LastKnownContextTokens:     chatRecord.LastKnownContextTokens,
+		ContextTokensKnown:         chatRecord.ContextTokensKnown,
+		LastMessage:                chatRecord.LastMessage,
+	}
+	if runtime, ok := runtimeByChat[chatRecord.ID]; ok {
+		out.Hydrated = true
+		out.Hydration = "hydrated"
+		out.Runtime = &runtime
+		out.QueueLen = runtime.QueueLen
+		out.PendingApprovals = runtime.PendingApprovals
+		if runtime.Busy && runtime.Status == "running_tools" && runtime.RunningToolCalls == 0 {
+			out.Diagnostics = append(out.Diagnostics, "live runtime reports running_tools with no running tool calls")
+		}
+		return out, nil
+	}
+	out.Diagnostics = append(out.Diagnostics, "no live recorder state; runtime goroutine status is unavailable")
+	return out, nil
+}
+
+func selectedClientCounts(clients []ClientDebug) (map[domain.ID]int, map[domain.ID]int) {
+	sessions := map[domain.ID]int{}
+	chats := map[domain.ID]int{}
+	for _, client := range clients {
+		if !client.Connected {
+			continue
+		}
+		if client.SelectedSession != "" {
+			sessions[client.SelectedSession]++
+		}
+		if client.SelectedChat != "" {
+			chats[client.SelectedChat]++
+		}
+	}
+	return sessions, chats
+}
+
+func pendingExecutableToolCalls(timeline []domain.TimelineItem) int {
+	for i := len(timeline) - 1; i >= 0; i-- {
+		message, ok := timeline[i].Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		var count int
+		for _, call := range message.Tools {
+			if call.Status == domain.ToolStatusPending && call.Result == nil && call.Error == nil && call.Approval == nil && call.ApprovalID == "" {
+				count++
+			}
+		}
+		return count
+	}
+	return 0
+}
+
 func (s *Server) handleHTTP(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"debug_api": s.recorder.Runtime().Process.DebugAPI,
@@ -573,14 +776,15 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	sessions, err := sessionstore.ListSessions(r.Context(), s.store)
+	sessions, err := s.debugSessions(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtime":  s.recorder.Runtime(),
-		"sessions": sessions,
+		"architecture": debugArchitecture(),
+		"runtime":      s.recorder.Runtime(),
+		"sessions":     sessions,
 	})
 }
 
@@ -627,6 +831,11 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	sessionDebug, chats, err := s.debugSession(r.Context(), session)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -652,7 +861,10 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		todos = append(todos, items...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"architecture":   debugArchitecture(),
+		"debug":          sessionDebug,
 		"session":        session,
+		"chats":          chats,
 		"timeline":       timeline,
 		"approvals":      approvals,
 		"milestone_plan": plan,
