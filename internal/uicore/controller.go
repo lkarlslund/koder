@@ -2898,19 +2898,19 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		}
 	}
 	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
-	session, chatRecord, chats, err = c.touchLoadedSelection(ctx, session, chatRecord, chats)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, session.ID)
 	if err != nil {
 		return err
 	}
-	var owner *agent.Session
-	if c.agent != nil {
-		owner, err = c.agent.LoadSession(ctx, session.ID)
-		if err != nil {
-			return err
-		}
-		if err := owner.Reload(ctx); err != nil {
-			return err
-		}
+	if err := owner.Reload(ctx); err != nil {
+		return err
+	}
+	session, chatRecord, chats, err = owner.TouchSelection(ctx, chatRecord.ID)
+	if err != nil {
+		return err
 	}
 	chatRecord.PermissionProfile = ""
 	c.mu.RLock()
@@ -3032,24 +3032,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil
-}
-
-func (c *Controller) touchLoadedSelection(ctx context.Context, session domain.Session, chatRecord domain.Chat, chats []domain.Chat) (domain.Session, domain.Chat, []domain.Chat, error) {
-	session, err := c.store.TouchSession(ctx, session.ID)
-	if err != nil {
-		return domain.Session{}, domain.Chat{}, nil, err
-	}
-	chatRecord.UpdatedAt = time.Now().UTC()
-	if err := c.store.UpdateChat(ctx, chatRecord); err != nil {
-		return domain.Session{}, domain.Chat{}, nil, err
-	}
-	for idx, item := range chats {
-		if item.ID == chatRecord.ID {
-			chats[idx] = chatRecord
-			break
-		}
-	}
-	return session, chatRecord, chats, nil
 }
 
 func (c *Controller) ensureChatModels(ctx context.Context, chats []domain.Chat) ([]domain.Chat, error) {

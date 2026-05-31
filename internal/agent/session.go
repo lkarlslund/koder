@@ -506,6 +506,42 @@ func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID
 	return chatRecord, nil
 }
 
+// TouchSelection marks the session and selected chat as recently used.
+func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.Session, domain.Chat, []domain.Chat, error) {
+	if s == nil {
+		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	chatRecord, ok := chatByID(s.chats, chatID)
+	s.mu.RUnlock()
+	if !ok {
+		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("chat %s not found", chatID)
+	}
+	session, err := s.engine.store.TouchSession(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, nil, err
+	}
+	chatRecord.UpdatedAt = time.Now().UTC()
+	if err := s.engine.store.UpdateChat(ctx, chatRecord); err != nil {
+		return domain.Session{}, domain.Chat{}, nil, err
+	}
+	s.mu.Lock()
+	s.session = session
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(session)
+		}
+	}
+	if rt := s.runtimes[chatRecord.ID]; rt != nil {
+		rt.SetChat(chatRecord)
+	}
+	chats := slices.Clone(s.chats)
+	s.mu.Unlock()
+	return session, chatRecord, chats, nil
+}
+
 func (s *Session) PollChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, error) {
 	if s == nil {
 		return tools.ChatStatus{}, fmt.Errorf("session is required")
