@@ -103,12 +103,6 @@ type ExecListStoredResult struct {
 	Items   []ExecListStoredItem `json:"items,omitempty"`
 }
 
-type ApplyPatchStoredResult struct {
-	Summary      string   `json:"summary,omitempty"`
-	ChangedFiles []string `json:"changed_files,omitempty"`
-	FileCount    int      `json:"file_count,omitempty"`
-}
-
 type EditStoredResult struct {
 	Path             string                 `json:"path"`
 	ReplaceAll       bool                   `json:"replace_all,omitempty"`
@@ -313,7 +307,6 @@ func (ReadStoredResult) storedResultPayload()          {}
 func (BashStoredResult) storedResultPayload()          {}
 func (ExecStoredResult) storedResultPayload()          {}
 func (ExecListStoredResult) storedResultPayload()      {}
-func (ApplyPatchStoredResult) storedResultPayload()    {}
 func (EditStoredResult) storedResultPayload()          {}
 func (WriteStoredResult) storedResultPayload()         {}
 func (LintStoredResult) storedResultPayload()          {}
@@ -608,7 +601,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindFileEdit, domain.ToolKindApplyPatch:
+	case domain.ToolKindFileEdit:
 		return false
 	default:
 		return true
@@ -784,10 +777,6 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
 	case domain.ToolKindExecList, domain.ToolKindExecCleanup:
 		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
-	case domain.ToolKindApplyPatch:
-		return decodeAndFormat[ApplyPatchStoredResult](env.Payload, func(result ApplyPatchStoredResult) string {
-			return strings.TrimSpace(result.Summary)
-		})
 	case domain.ToolKindFileEdit:
 		return decodeAndFormat[EditStoredResult](env.Payload, func(result EditStoredResult) string {
 			return strings.TrimSpace(result.Summary)

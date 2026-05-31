@@ -78,7 +78,6 @@ const (
 	ToolKindWebSearch
 	ToolKindMCP
 	// Legacy sentinel values kept for backward compatibility with stored data.
-	ToolKindApplyPatch
 	ToolKindChatStartDecomposition
 	ToolKindChatStartExecution
 )

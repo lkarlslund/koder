@@ -89,12 +89,6 @@ type ExecProcess struct {
 	Lost        bool   `json:"lost,omitempty"`
 }
 
-type ApplyPatchStoredResult struct {
-	Summary      string   `json:"summary,omitempty"`
-	ChangedFiles []string `json:"changed_files,omitempty"`
-	FileCount    int      `json:"file_count,omitempty"`
-}
-
 type EditStoredResult struct {
 	Path         string           `json:"path"`
 	ReplaceAll   bool             `json:"replace_all,omitempty"`
@@ -271,7 +265,6 @@ func (ReadStoredResult) ToolResultPayload()          {}
 func (BashStoredResult) ToolResultPayload()          {}
 func (ExecStoredResult) ToolResultPayload()          {}
 func (ExecListStoredResult) ToolResultPayload()      {}
-func (ApplyPatchStoredResult) ToolResultPayload()    {}
 func (EditStoredResult) ToolResultPayload()          {}
 func (WriteStoredResult) ToolResultPayload()         {}
 func (GlobStoredResult) ToolResultPayload()          {}

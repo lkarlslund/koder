@@ -81,14 +81,6 @@ func TestParseProviderCallStoresNormalizedArguments(t *testing.T) {
 	}
 }
 
-func TestDefinitionsDoNotExposeApplyPatch(t *testing.T) {
-	for _, def := range tools.Definitions(tools.Runtime{}) {
-		if def.Function.Name == "apply_patch" {
-			t.Fatal("apply_patch should not be exposed")
-		}
-	}
-}
-
 func TestWriteDefinitionForceOverwriteOptional(t *testing.T) {
 	def, enabled := tools.DefinitionFor(domain.ToolKindFileWrite, tools.Runtime{})
 	if !enabled {

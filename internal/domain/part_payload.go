@@ -172,8 +172,6 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[ExecStoredResult](raw)
 	case ToolKindExecList, ToolKindExecCleanup:
 		return decodeToolResult[ExecListStoredResult](raw)
-	case ToolKindApplyPatch:
-		return decodeToolResult[ApplyPatchStoredResult](raw)
 	case ToolKindFileEdit:
 		return decodeToolResult[EditStoredResult](raw)
 	case ToolKindFileWrite:
