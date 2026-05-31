@@ -7,7 +7,7 @@
 
 ## Commit Discipline
 
-- After each successful, verified implementation step, create a git commit so the branch stays in sync with completed work.
+- After each successful, verified implementation step, create a git commit and push it so the branch stays in sync with completed work.
 - Prefer small, logically grouped commits over large catch-up commits.
 - Before committing Go changes, run the strongest applicable verification for this repo.
 - Never commit ignored files or directories. Do not use force-add on paths covered by `.gitignore` or equivalent ignore rules.
