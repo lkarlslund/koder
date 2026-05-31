@@ -99,7 +99,7 @@ func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
 	for name, enabled := range raw {
 		kind, err := parseToolDefaultKind(name)
 		if err != nil {
-			return err
+			continue
 		}
 		parsed[kind] = enabled
 	}

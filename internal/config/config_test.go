@@ -136,6 +136,40 @@ milestone_update_item = false
 	}
 }
 
+func TestLoadIgnoresUnknownToolDefaultKeys(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configRoot := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`
+[tool_defaults]
+grep = false
+write = false
+file_read = false
+`)
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolDefaults[domain.ToolKindFileRead] {
+		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.ToolDefaults)
+	}
+	for _, kind := range domain.ToolKindValues() {
+		if !kind.IsAToolKind() {
+			t.Fatalf("loaded invalid tool kind %d", kind)
+		}
+	}
+}
+
 func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
 	cfg := Default()
 
