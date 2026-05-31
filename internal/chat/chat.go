@@ -14,7 +14,6 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/turncontrol"
 )
 
 type QueueKind string
@@ -708,7 +707,7 @@ func (r *Chat) Compact() error {
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining
@@ -1188,7 +1187,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining
@@ -1253,7 +1252,7 @@ func (r *Chat) handleDeny(toolCallID string) {
 func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining
@@ -1289,7 +1288,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining
@@ -1357,7 +1356,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining
@@ -1682,7 +1681,7 @@ func (r *Chat) maybeDispatchNext() {
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.cancelState == CancelStateCancelling || r.draining

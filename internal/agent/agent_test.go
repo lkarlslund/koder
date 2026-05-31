@@ -28,7 +28,6 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
-	"github.com/lkarlslund/koder/internal/turncontrol"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -2241,7 +2240,7 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	}
 
 	out := make(chan domain.Event, 8)
-	ctx := turncontrol.WithShouldStop(context.Background(), func() bool { return true })
+	ctx := chatpkg.WithShouldStop(context.Background(), func() bool { return true })
 	req := tools.Request{
 		Tool:       domain.ToolKindBash,
 		ToolCallID: "call_1",

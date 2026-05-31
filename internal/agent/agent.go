@@ -35,7 +35,6 @@ import (
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
-	"github.com/lkarlslund/koder/internal/turncontrol"
 )
 
 type Engine struct {
@@ -353,7 +352,7 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 	for _, evt := range events {
 		out <- evt
 	}
-	if turncontrol.ShouldStop(ctx) {
+	if chatpkg.ShouldStop(ctx) {
 		return false, context.Canceled
 	}
 	return true, nil
@@ -394,7 +393,7 @@ func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.Tu
 	if err != nil {
 		return false, err
 	}
-	if needsApproval || turncontrol.ShouldStop(ctx) {
+	if needsApproval || chatpkg.ShouldStop(ctx) {
 		return false, nil
 	}
 	return true, nil
@@ -496,7 +495,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				}
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 			}
-			if turncontrol.ShouldStop(ctx) {
+			if chatpkg.ShouldStop(ctx) {
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
 			if pause, ok := l.tracker.trackCalls(calls); ok {
@@ -526,7 +525,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
-		if turncontrol.ShouldStop(ctx) {
+		if chatpkg.ShouldStop(ctx) {
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 
@@ -3190,7 +3189,7 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 	if firstErr != nil {
 		return needsApproval, firstErr
 	}
-	if turncontrol.ShouldStop(ctx) {
+	if chatpkg.ShouldStop(ctx) {
 		return needsApproval, context.Canceled
 	}
 	return needsApproval, nil
