@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 )
 
 const (
@@ -86,32 +87,9 @@ type Task struct {
 	CreatedAt time.Time
 }
 
-type MilestonePlan struct {
-	SessionID  domain.ID
-	Summary    string
-	Milestones []Milestone
-	UpdatedAt  time.Time
-}
-
-type Milestone struct {
-	Ref         string
-	Title       string
-	Status      domain.MilestoneStatus
-	Notes       string
-	Position    int
-	OwnerChatID *domain.ID
-}
-
-type TodoItem struct {
-	ID           domain.ID
-	SessionID    domain.ID
-	MilestoneRef string
-	Content      string
-	Status       domain.TodoStatus
-	Position     int
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
+type MilestonePlan = planning.Plan
+type Milestone = planning.Milestone
+type TodoItem = planning.TodoItem
 
 type RuntimeState struct {
 	ID          string    `json:"id"`

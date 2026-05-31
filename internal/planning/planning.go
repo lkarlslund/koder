@@ -1,0 +1,253 @@
+package planning
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
+)
+
+type Plan struct {
+	SessionID  domain.ID
+	Summary    string
+	Milestones []Milestone
+	UpdatedAt  time.Time
+}
+
+type Milestone struct {
+	Ref         string
+	Title       string
+	Status      domain.MilestoneStatus
+	Notes       string
+	Position    int
+	OwnerChatID *domain.ID
+}
+
+type TodoItem struct {
+	ID           domain.ID
+	SessionID    domain.ID
+	MilestoneRef string
+	Content      string
+	Status       domain.TodoStatus
+	Position     int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type MilestoneInput struct {
+	Ref    string `json:"ref"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Notes  string `json:"notes,omitempty"`
+}
+
+type MilestoneAddInput struct {
+	Ref   string `json:"ref"`
+	Title string `json:"title"`
+	Notes string `json:"notes,omitempty"`
+}
+
+type TodoAddInput struct {
+	Content string `json:"content"`
+}
+
+func ParseMilestones(raw string) ([]Milestone, error) {
+	var items []MilestoneInput
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil, errors.New("milestones must be a JSON array of milestone objects")
+	}
+	out := make([]Milestone, 0, len(items))
+	seenRefs := map[string]struct{}{}
+	for idx, item := range items {
+		ref := strings.TrimSpace(item.Ref)
+		title := strings.TrimSpace(item.Title)
+		status := domain.MilestoneStatus(strings.TrimSpace(item.Status))
+		notes := strings.TrimSpace(item.Notes)
+		if ref == "" || title == "" {
+			return nil, errors.New("each milestone requires ref and title")
+		}
+		if _, exists := seenRefs[ref]; exists {
+			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
+		}
+		seenRefs[ref] = struct{}{}
+		if !ValidMilestoneStatus(status) {
+			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
+		}
+		out = append(out, Milestone{
+			Ref:      ref,
+			Title:    title,
+			Status:   status,
+			Notes:    notes,
+			Position: idx,
+		})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("milestones list is empty")
+	}
+	return out, nil
+}
+
+func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
+	var items []MilestoneAddInput
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil, errors.New("items must be a JSON array of milestone objects")
+	}
+	out := make([]Milestone, 0, len(items))
+	seenRefs := map[string]struct{}{}
+	for _, item := range items {
+		ref := strings.TrimSpace(item.Ref)
+		title := strings.TrimSpace(item.Title)
+		notes := strings.TrimSpace(item.Notes)
+		if ref == "" || title == "" {
+			return nil, errors.New("each milestone requires ref and title")
+		}
+		if _, exists := seenRefs[ref]; exists {
+			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
+		}
+		seenRefs[ref] = struct{}{}
+		out = append(out, Milestone{
+			Ref:    ref,
+			Title:  title,
+			Status: domain.MilestoneStatusPending,
+			Notes:  notes,
+		})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("items list is empty")
+	}
+	return out, nil
+}
+
+func ParseMilestoneRef(raw string) (string, error) {
+	ref := strings.TrimSpace(raw)
+	if ref == "" {
+		return "", errors.New("ref is empty")
+	}
+	return ref, nil
+}
+
+func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
+	status := domain.MilestoneStatus(strings.TrimSpace(raw))
+	if ValidMilestoneStatus(status) {
+		return status, nil
+	}
+	return "", fmt.Errorf("invalid milestone status %q", raw)
+}
+
+func ValidMilestoneStatus(status domain.MilestoneStatus) bool {
+	switch status {
+	case domain.MilestoneStatusPending, domain.MilestoneStatusDecomposing, domain.MilestoneStatusReady, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseTodoAddItems(raw string) ([]string, error) {
+	var items []TodoAddInput
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil, errors.New("items must be a JSON array of todo item objects")
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		content := strings.TrimSpace(item.Content)
+		if content == "" {
+			continue
+		}
+		out = append(out, content)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("items list is empty")
+	}
+	return out, nil
+}
+
+func ParseTodoID(raw string) (domain.ID, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", errors.New("id is required")
+	}
+	return value, nil
+}
+
+func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
+	status := domain.TodoStatus(strings.TrimSpace(raw))
+	switch status {
+	case domain.TodoStatusPending, domain.TodoStatusInProgress, domain.TodoStatusCompleted:
+		return status, nil
+	default:
+		return "", fmt.Errorf("invalid todo status %q", raw)
+	}
+}
+
+func ActiveMilestone(plan Plan) (Milestone, bool) {
+	for _, item := range plan.Milestones {
+		if item.Status == domain.MilestoneStatusExecuting {
+			return item, true
+		}
+	}
+	for _, item := range plan.Milestones {
+		if item.Status == domain.MilestoneStatusDecomposing {
+			return item, true
+		}
+	}
+	return Milestone{}, false
+}
+
+func MilestoneTitle(plan Plan, ref string) string {
+	for _, item := range plan.Milestones {
+		if item.Ref == ref {
+			return item.Title
+		}
+	}
+	return ""
+}
+
+func ValidateTodoProgress(items []TodoItem) error {
+	inProgress := 0
+	for _, item := range items {
+		if item.Status == domain.TodoStatusInProgress {
+			inProgress++
+		}
+	}
+	if inProgress > 1 {
+		return errors.New("todo bucket may contain at most one in_progress item")
+	}
+	return nil
+}
+
+func ValidateMilestoneProgress(items []Milestone) error {
+	seenRefs := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.Ref == "" {
+			return errors.New("milestone ref is empty")
+		}
+		if !ValidMilestoneStatus(item.Status) {
+			return fmt.Errorf("invalid milestone status %q", item.Status)
+		}
+		if _, exists := seenRefs[item.Ref]; exists {
+			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
+		}
+		seenRefs[item.Ref] = struct{}{}
+	}
+	return nil
+}
+
+func PlanForRef(plan Plan, ref string) Plan {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return plan
+	}
+	scoped := plan
+	scoped.Milestones = nil
+	for _, milestone := range plan.Milestones {
+		if milestone.Ref == ref {
+			scoped.Milestones = []Milestone{milestone}
+			return scoped
+		}
+	}
+	return scoped
+}
