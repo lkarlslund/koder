@@ -1616,11 +1616,16 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		c.agent.UpdateConfig(c.cfg)
 	}
 	if c.chat.ID != "" && (strings.TrimSpace(c.chat.ProviderID) == "" || !c.cfg.HasUsableProvider(c.chat.ProviderID) || c.chat.ProviderID == originalID) {
-		if err := c.store.SetChatModel(ctx, c.chat.ID, catalogDraft.ProviderID, catalogDraft.Model); err != nil {
+		if c.agent == nil {
+			c.mu.Unlock()
+			return ProviderState{}, fmt.Errorf("no chat agent")
+		}
+		owner, err := c.agent.LoadSession(ctx, c.session.ID)
+		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		chatRecord, err := c.store.GetChat(ctx, c.chat.ID)
+		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, catalogDraft.ProviderID, catalogDraft.Model)
 		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
@@ -1680,11 +1685,16 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 		c.agent.UpdateConfig(c.cfg)
 	}
 	if c.chat.ID != "" && c.chat.ProviderID == providerID {
-		if err := c.store.SetChatModel(ctx, c.chat.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel); err != nil {
+		if c.agent == nil {
+			c.mu.Unlock()
+			return ProviderState{}, fmt.Errorf("no chat agent")
+		}
+		owner, err := c.agent.LoadSession(ctx, c.session.ID)
+		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		chatRecord, err := c.store.GetChat(ctx, c.chat.ID)
+		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
 		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
