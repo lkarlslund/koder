@@ -12,7 +12,7 @@ import (
 )
 
 type TaskControl interface {
-	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (store.Task, error)
+	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (planning.Task, error)
 }
 
 func RequireSessionStore(runtime Runtime) (*store.Store, error) {
@@ -104,7 +104,7 @@ func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
 }
 
 func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
-	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	plan, err := planning.GetPlan(ctx, st, sessionID)
 	if err != nil {
 		return planning.Plan{}, nil, "", err
 	}
@@ -115,7 +115,7 @@ func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.
 		}
 		ref = active.Ref
 	}
-	todos, err := st.ListTodos(ctx, sessionID, ref)
+	todos, err := planning.ListTodos(ctx, st, sessionID, ref)
 	if err != nil {
 		return planning.Plan{}, nil, "", err
 	}

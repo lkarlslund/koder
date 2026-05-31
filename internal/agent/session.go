@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 )
 
 // LoadSession returns the live owner for a persisted session, hydrating it on demand.
@@ -50,7 +52,7 @@ func (e *Engine) Sessions(ctx context.Context) ([]domain.Session, error) {
 	if e == nil || e.store == nil {
 		return nil, fmt.Errorf("engine store is required")
 	}
-	return e.store.ListSessions(ctx)
+	return sessionstore.ListSessions(ctx, e.store)
 }
 
 // CreateSession creates, configures, and loads a live session owner.
@@ -72,17 +74,15 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 			return nil, fmt.Errorf("project root must be a directory: %s", projectRoot)
 		}
 	}
-	session, err := e.store.CreateSession(ctx, title, e.cfg.DefaultProvider, e.cfg.DefaultModel, nil)
+	session, err := sessionstore.CreateSession(ctx, e.store, title, e.cfg.DefaultProvider, e.cfg.DefaultModel, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := e.store.SetSessionProjectRoot(ctx, session.ID, projectRoot); err != nil {
-		return nil, err
-	}
-	if err := e.store.SetSessionPermissionProfile(ctx, session.ID, e.cfg.Permissions.Profile); err != nil {
-		return nil, err
-	}
-	if err := e.store.SetSessionToolStates(ctx, session.ID, e.cfg.ToolDefaults); err != nil {
+	if err := sessionstore.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
+		session.ProjectRoot = projectRoot
+		session.PermissionProfile = strings.TrimSpace(e.cfg.Permissions.Profile)
+		session.ToolStates = maps.Clone(e.cfg.ToolDefaults)
+	}); err != nil {
 		return nil, err
 	}
 	return e.LoadSession(ctx, session.ID)
@@ -105,5 +105,5 @@ func (e *Engine) DeleteSession(ctx context.Context, sessionID domain.ID) error {
 			return err
 		}
 	}
-	return e.store.DeleteSession(ctx, sessionID)
+	return sessionstore.DeleteSession(ctx, e.store, sessionID)
 }

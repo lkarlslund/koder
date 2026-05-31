@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
@@ -26,7 +28,7 @@ func openMilestoneStore(t *testing.T) *store.Store {
 func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Session) {
 	t.Helper()
 	st := openMilestoneStore(t)
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +37,9 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 
 func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
 	t.Helper()
-	if _, err := st.SetMilestonePlan(context.Background(), sessionID, "Ship it", []planning.Milestone{
+	if err := planning.PutPlan(context.Background(), st, planning.Plan{SessionID: sessionID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -214,10 +216,10 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	runtime.ChatRole = chatrole.Execution
 	runtime.ActiveMilestoneRef = "beta"
-	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []planning.Milestone{
+	if err := planning.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting, Position: 1},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +264,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	if _, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Write tests"}); err != nil {
+	if _, err := planning.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,11 +287,11 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	items, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Write tests"})
+	items, err := planning.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"Write tests"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.UpdateTodoItem(context.Background(), items[0].ID, domain.TodoStatusCompleted, items[0].Content); err != nil {
+	if _, err := planning.UpdateTodoItem(context.Background(), st, items[0].ID, domain.TodoStatusCompleted, items[0].Content); err != nil {
 		t.Fatal(err)
 	}
 
@@ -343,7 +345,7 @@ func TestPlanAndWritePersist(t *testing.T) {
 	}, tools.Result{Output: "planned"}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := st.ListTodos(context.Background(), session.ID, "alpha")
+	todos, err := planning.ListTodos(context.Background(), st, session.ID, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +362,7 @@ func TestPlanAndWritePersist(t *testing.T) {
 	}, tools.Result{Output: "rewritten"}); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := st.GetMilestonePlan(context.Background(), session.ID)
+	plan, err := planning.GetPlan(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,11 +406,11 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
 	}
 
-	chat, err := st.DefaultChat(context.Background(), session.ID)
+	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
 )
 
 type Control interface {
@@ -44,6 +46,191 @@ type TodoItem struct {
 	Position     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type Task struct {
+	ID        domain.ID
+	SessionID domain.ID
+	Body      string
+	Status    domain.TaskStatus
+	CreatedAt time.Time
+}
+
+func PlanCollection(st *store.Store) store.Collection[Plan] {
+	return store.NewCollection(st, store.CollectionSpec[Plan]{
+		Namespace: "milestone-plans",
+		GetID:     func(v Plan) string { return v.SessionID },
+		SetID:     func(v *Plan, id string) { v.SessionID = id },
+	})
+}
+
+func TodoCollection(st *store.Store) store.Collection[TodoItem] {
+	return store.NewCollection(st, store.CollectionSpec[TodoItem]{
+		Namespace: "todos",
+		GetID:     func(v TodoItem) string { return v.ID },
+		SetID:     func(v *TodoItem, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[TodoItem]{
+			{Name: "session", Value: func(v TodoItem) string { return v.SessionID }},
+			{Name: "milestone", Value: func(v TodoItem) string { return v.SessionID + "/" + v.MilestoneRef }},
+		},
+	})
+}
+
+func TaskCollection(st *store.Store) store.Collection[Task] {
+	return store.NewCollection(st, store.CollectionSpec[Task]{
+		Namespace: "tasks",
+		GetID:     func(v Task) string { return v.ID },
+		SetID:     func(v *Task, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[Task]{
+			{Name: "session", Value: func(v Task) string { return v.SessionID }},
+		},
+	})
+}
+
+func PutPlan(ctx context.Context, st *store.Store, plan Plan) error {
+	if plan.SessionID == "" {
+		return fmt.Errorf("put milestone plan: session id is required")
+	}
+	if plan.UpdatedAt.IsZero() {
+		plan.UpdatedAt = time.Now().UTC()
+	}
+	return PlanCollection(st).Put(ctx, plan)
+}
+
+func GetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (Plan, error) {
+	plan, err := PlanCollection(st).Get(ctx, sessionID)
+	if err != nil {
+		return Plan{SessionID: sessionID}, nil
+	}
+	return plan, nil
+}
+
+func PutTodo(ctx context.Context, st *store.Store, item TodoItem) error {
+	if item.ID == "" {
+		return fmt.Errorf("put todo item: id is required")
+	}
+	if item.SessionID == "" {
+		return fmt.Errorf("put todo item: session id is required")
+	}
+	if item.UpdatedAt.IsZero() {
+		item.UpdatedAt = time.Now().UTC()
+	}
+	return TodoCollection(st).Put(ctx, item)
+}
+
+func ListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
+	query := store.ByIndex[TodoItem]("session", string(sessionID))
+	milestoneRef = strings.TrimSpace(milestoneRef)
+	if milestoneRef != "" {
+		query = store.ByIndex[TodoItem]("milestone", string(sessionID)+"/"+milestoneRef)
+	}
+	items, err := TodoCollection(st).List(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	SortTodos(items)
+	return items, nil
+}
+
+func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, milestoneRef string, contents []string) ([]TodoItem, error) {
+	now := time.Now().UTC()
+	milestoneRef = strings.TrimSpace(milestoneRef)
+	existing, err := ListTodos(ctx, st, sessionID, milestoneRef)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]TodoItem, 0, len(contents))
+	for _, content := range contents {
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+		items = append(items, TodoItem{
+			ID:           domain.NewIDAt(now),
+			SessionID:    sessionID,
+			MilestoneRef: milestoneRef,
+			Content:      content,
+			Status:       domain.TodoStatusPending,
+			Position:     len(existing) + len(items),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+	}
+	for _, item := range items {
+		if err := PutTodo(ctx, st, item); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func UpdateTodoItem(ctx context.Context, st *store.Store, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {
+	item, err := TodoCollection(st).Get(ctx, todoID)
+	if err != nil {
+		return TodoItem{}, err
+	}
+	item.Status = status
+	if strings.TrimSpace(content) != "" {
+		item.Content = strings.TrimSpace(content)
+	}
+	item.UpdatedAt = time.Now().UTC()
+	if err := PutTodo(ctx, st, item); err != nil {
+		return TodoItem{}, err
+	}
+	return item, nil
+}
+
+func PutTask(ctx context.Context, st *store.Store, task Task) error {
+	if task.ID == "" {
+		return fmt.Errorf("put task: id is required")
+	}
+	if task.SessionID == "" {
+		return fmt.Errorf("put task: session id is required")
+	}
+	return TaskCollection(st).Put(ctx, task)
+}
+
+func ListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) ([]Task, error) {
+	items, err := TaskCollection(st).List(ctx, store.ByIndex[Task]("session", string(sessionID)))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b Task) int {
+		switch {
+		case a.CreatedAt.Before(b.CreatedAt):
+			return -1
+		case a.CreatedAt.After(b.CreatedAt):
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
+}
+
+func SortTodos(items []TodoItem) {
+	slices.SortFunc(items, func(a, b TodoItem) int {
+		switch {
+		case a.Position < b.Position:
+			return -1
+		case a.Position > b.Position:
+			return 1
+		case a.CreatedAt.Before(b.CreatedAt):
+			return -1
+		case a.CreatedAt.After(b.CreatedAt):
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
 }
 
 type MilestoneInput struct {

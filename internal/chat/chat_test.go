@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -305,22 +307,22 @@ func openTestStore(t *testing.T) *store.Store {
 func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domain.Chat, planning.Plan) {
 	t.Helper()
 	ctx := context.Background()
-	session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := st.DefaultChat(ctx, session.ID)
+	chat, err := sessionstore.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []planning.Milestone{
+	plan := planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
-	})
-	if err != nil {
+	}}
+	if err := planning.PutPlan(ctx, st, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddTodoItems(ctx, session.ID, "alpha", []string{"Inspect state", "Write tests"}); err != nil {
+	if _, err := planning.AddTodoItems(ctx, st, session.ID, "alpha", []string{"Inspect state", "Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 	return session, chat, plan
@@ -623,7 +625,7 @@ func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	if got := runner.promptCallCount(); got != 1 {
 		t.Fatalf("expected drain to leave queued work undispatched, got %d prompt calls", got)
 	}
-	reloaded, err := st.GetChat(context.Background(), chatRecord.ID)
+	reloaded, err := chatstore.GetChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -876,7 +878,7 @@ func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
 
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, nil); err != nil {
+	if err := chatstore.SetChatQueuedInputs(context.Background(), st, chat.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	events <- domain.Event{
@@ -1015,12 +1017,12 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 func TestRuntimeContinueTurnUsesLiveTimelineNotStorageSideChannel(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	seed, err := st.AppendTimeline(context.Background(), chatRecord.ID, domain.UserMessage{Text: "loaded"})
+	seed, err := chatstore.AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "loaded"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), seed); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, seed); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1030,12 +1032,12 @@ func TestRuntimeContinueTurnUsesLiveTimelineNotStorageSideChannel(t *testing.T) 
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	side, err := st.AppendTimeline(context.Background(), chatRecord.ID, domain.UserMessage{Text: "storage-only"})
+	side, err := chatstore.AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "storage-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	side.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), side); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, side); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1086,7 +1088,7 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := st.AppendAssistantToolCalls(context.Background(), chatRecord.ID, []domain.ToolCall{{
+	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_approval",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "echo hi"},
@@ -1129,7 +1131,7 @@ func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := st.AppendAssistantToolCalls(context.Background(), chatRecord.ID, []domain.ToolCall{{
+	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_approval",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "echo hi"},
@@ -1272,7 +1274,7 @@ func TestRuntimeInterruptAndClosePersistsRestartReason(t *testing.T) {
 		t.Fatal("timed out waiting for interrupt close")
 	}
 
-	timeline, err := st.TimelineForChat(context.Background(), chatRecord.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,14 +17,22 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
+
+func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID domain.ID, root string) error {
+	return sessionstore.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
+		session.ProjectRoot = root
+	})
+}
 
 func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 	ctrl, _ := newTestController(t)
@@ -117,7 +125,7 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 	if got := ctrl.State().ActiveChatID; got != active {
 		t.Fatalf("expected active chat to stay %s, got %s", active, got)
 	}
-	archived, err := st.GetChat(context.Background(), side)
+	archived, err := chatstore.GetChat(context.Background(), st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +147,7 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	if got := ctrl.State().ActiveChatID; got != first {
 		t.Fatalf("expected active chat to switch to %s, got %s", first, got)
 	}
-	archived, err := st.GetChat(context.Background(), side)
+	archived, err := chatstore.GetChat(context.Background(), st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +596,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if state.ModelInfo.ProviderID != "test" || state.ModelInfo.ModelID != "next-model" || state.ModelInfo.ContextWindow != 12345 || !state.ModelInfo.SupportsTools {
 		t.Fatalf("unexpected model info: %#v", state.ModelInfo)
 	}
-	chatRecord, err := st.GetChat(context.Background(), state.Snapshot.Chat.ID)
+	chatRecord, err := chatstore.GetChat(context.Background(), st, state.Snapshot.Chat.ID)
 	if err != nil {
 		t.Fatalf("get chat: %v", err)
 	}
@@ -629,7 +637,7 @@ func TestControllerSetPermissionProfileUpdatesActiveSession(t *testing.T) {
 	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
 		t.Fatalf("set permission profile: %v", err)
 	}
-	session, err := st.GetSession(context.Background(), sessionID)
+	session, err := sessionstore.GetSession(context.Background(), st, sessionID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -736,18 +744,18 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	ctx := context.Background()
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
-	sessionA, err := st.CreateSession(ctx, "Workspace A", "test", "model", nil)
+	sessionA, err := sessionstore.CreateSession(ctx, st, "Workspace A", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session a: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, sessionA.ID, workspaceA); err != nil {
+	if err := setSessionProjectRoot(ctx, st, sessionA.ID, workspaceA); err != nil {
 		t.Fatalf("workspace a: %v", err)
 	}
-	sessionB, err := st.CreateSession(ctx, "Workspace B", "test", "model", nil)
+	sessionB, err := sessionstore.CreateSession(ctx, st, "Workspace B", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session b: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, sessionB.ID, workspaceB); err != nil {
+	if err := setSessionProjectRoot(ctx, st, sessionB.ID, workspaceB); err != nil {
 		t.Fatalf("workspace b: %v", err)
 	}
 
@@ -810,7 +818,7 @@ func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
 	if secondRuntime == nil {
 		t.Fatalf("expected second session chat runtime %s to be loaded", secondChatID)
 	}
-	if _, err := st.GetSession(ctx, firstSessionID); err != nil {
+	if _, err := sessionstore.GetSession(ctx, st, firstSessionID); err != nil {
 		t.Fatalf("first session should still exist: %v", err)
 	}
 }
@@ -850,18 +858,18 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := st.CreateSession(ctx, "Interrupted Session", "test", "model", nil)
+	session, err := sessionstore.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := st.DefaultChat(ctx, session.ID)
+	chatRecord, err := sessionstore.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if _, err := st.AppendAssistantToolCalls(ctx, chatRecord.ID, []domain.ToolCall{{
+	if _, err := chatstore.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "pkill -f ./shups"},
@@ -869,7 +877,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}}, "", domain.Usage{}); err != nil {
 		t.Fatalf("append pending tool call: %v", err)
 	}
-	notice, err := st.AppendTimeline(ctx, chatRecord.ID, domain.Notice{
+	notice, err := chatstore.AppendTimeline(ctx, st, chatRecord.ID, domain.Notice{
 		Level:  "warning",
 		Text:   "Interrupted",
 		Kind:   domain.NoticeKindInterrupted,
@@ -879,7 +887,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		t.Fatalf("append notice: %v", err)
 	}
 	notice.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(ctx, notice); err != nil {
+	if err := chatstore.PutTimelineItem(ctx, st, notice); err != nil {
 		t.Fatalf("put notice: %v", err)
 	}
 
@@ -891,7 +899,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if got := ctrl.State().Session.ID; got != session.ID {
 		t.Fatalf("expected restart interrupted session %s, got %s", session.ID, got)
 	}
-	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	timeline, err := chatstore.TimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -924,7 +932,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}
 	deadline = time.After(2 * time.Second)
 	for {
-		timeline, err = st.TimelineForChat(ctx, chatRecord.ID)
+		timeline, err = chatstore.TimelineForChat(ctx, st, chatRecord.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -979,18 +987,18 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := st.CreateSession(ctx, "Interrupted Session", "test", "model", nil)
+	session, err := sessionstore.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := st.DefaultChat(ctx, session.ID)
+	chatRecord, err := sessionstore.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if err := st.SetChatQueuedInputs(ctx, chatRecord.ID, []domain.QueuedInput{{
+	if err := chatstore.SetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
 		ID:        domain.NewID(),
 		Kind:      domain.QueuedInputKindSteer,
 		Text:      "run the user request",
@@ -999,7 +1007,7 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 	}}); err != nil {
 		t.Fatalf("queue user input: %v", err)
 	}
-	notice, err := st.AppendTimeline(ctx, chatRecord.ID, domain.Notice{
+	notice, err := chatstore.AppendTimeline(ctx, st, chatRecord.ID, domain.Notice{
 		Level:  "warning",
 		Text:   "Interrupted",
 		Kind:   domain.NoticeKindInterrupted,
@@ -1009,7 +1017,7 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 		t.Fatalf("append notice: %v", err)
 	}
 	notice.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(ctx, notice); err != nil {
+	if err := chatstore.PutTimelineItem(ctx, st, notice); err != nil {
 		t.Fatalf("put notice: %v", err)
 	}
 
@@ -1035,7 +1043,7 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 	if !strings.Contains(body, "run the user request") {
 		t.Fatalf("expected queued user request in provider request, got %s", body)
 	}
-	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	timeline, err := chatstore.TimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1058,18 +1066,18 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := st.CreateSession(ctx, "Session", "test", "model", nil)
+	session, err := sessionstore.CreateSession(ctx, st, "Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := st.DefaultChat(ctx, session.ID)
+	chatRecord, err := sessionstore.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if _, err := st.AppendAssistantToolCalls(ctx, chatRecord.ID, []domain.ToolCall{{
+	if _, err := chatstore.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_exec",
 		Tool:       domain.ToolKindExecCommand,
 		Args:       map[string]string{"cmd": "sleep 60"},
@@ -1083,7 +1091,7 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	timeline, err := chatstore.TimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1109,32 +1117,32 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	sessionA, err := st.CreateSession(ctx, "Older", "test", "model", nil)
+	sessionA, err := sessionstore.CreateSession(ctx, st, "Older", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create older session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, sessionA.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(ctx, st, sessionA.ID, workdir); err != nil {
 		t.Fatalf("workspace older: %v", err)
 	}
-	sessionB, err := st.CreateSession(ctx, "Last Used", "test", "model", nil)
+	sessionB, err := sessionstore.CreateSession(ctx, st, "Last Used", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create last session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(ctx, sessionB.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(ctx, st, sessionB.ID, workdir); err != nil {
 		t.Fatalf("workspace last: %v", err)
 	}
-	if _, err := st.TouchSession(ctx, sessionB.ID); err != nil {
+	if _, err := sessionstore.TouchSession(ctx, st, sessionB.ID); err != nil {
 		t.Fatalf("touch last session: %v", err)
 	}
-	defaultChat, err := st.DefaultChat(ctx, sessionB.ID)
+	defaultChat, err := sessionstore.DefaultChat(ctx, st, sessionB.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if _, err := st.CreateChat(ctx, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
+	if _, err := sessionstore.CreateChat(ctx, st, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
 		t.Fatalf("create side chat: %v", err)
 	}
 	defaultChat.UpdatedAt = time.Now().UTC().Add(time.Hour)
-	if err := st.UpdateChat(ctx, defaultChat); err != nil {
+	if err := chatstore.UpdateChat(ctx, st, defaultChat); err != nil {
 		t.Fatalf("mark default chat last used: %v", err)
 	}
 

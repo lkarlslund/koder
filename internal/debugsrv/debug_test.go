@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
@@ -62,11 +64,11 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "debug", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := st.DefaultChat(context.Background(), session.ID)
+	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,11 +154,11 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "debug", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := st.DefaultChat(context.Background(), session.ID)
+	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +213,12 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 }
 
 func appendDebugTimelineItem(st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	item, err := st.AppendTimeline(context.Background(), chatID, content)
+	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, content)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	item.Seal(item.UpdatedAt)
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil

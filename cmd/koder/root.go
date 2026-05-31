@@ -20,11 +20,14 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/assets"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/runtimeprefs"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/version"
@@ -229,7 +232,7 @@ func webBindForLaunch(ctx context.Context, st *store.Store, startupOpts startupC
 		return bind, nil
 	}
 	if st != nil {
-		state, err := st.GlobalRuntimeState(ctx)
+		state, err := runtimeprefs.Global(ctx, st)
 		if err != nil {
 			return "", err
 		}
@@ -247,7 +250,7 @@ func saveLastWebBind(ctx context.Context, st *store.Store, bind string) error {
 	if st == nil {
 		return nil
 	}
-	return st.SetLastWebBind(ctx, bind)
+	return runtimeprefs.SetLastWebBind(ctx, st, bind)
 }
 
 func isReusableWebBind(bind string) bool {
@@ -377,7 +380,7 @@ func newSessionDumpCommand() *cobra.Command {
 			}
 			defer st.Close()
 
-			chats, err := st.ListChats(cmd.Context(), sessionID)
+			chats, err := sessionstore.ListChats(cmd.Context(), st, sessionID)
 			if err != nil {
 				return err
 			}
@@ -392,7 +395,7 @@ func newSessionDumpCommand() *cobra.Command {
 				SessionID: sessionID,
 			}
 			for _, chat := range chats {
-				timeline, err := st.TimelineForChat(cmd.Context(), chat.ID)
+				timeline, err := chatstore.TimelineForChat(cmd.Context(), st, chat.ID)
 				if err != nil {
 					return err
 				}

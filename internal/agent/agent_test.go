@@ -20,12 +20,14 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -51,11 +53,29 @@ func testConfig(t *testing.T) config.Config {
 
 func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) domain.Chat {
 	t.Helper()
-	chat, err := st.DefaultChat(context.Background(), sessionID)
+	chat, err := sessionstore.DefaultChat(context.Background(), st, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return chat
+}
+
+func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID domain.ID, root string) error {
+	return sessionstore.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
+		session.ProjectRoot = root
+	})
+}
+
+func setSessionPermissionProfile(ctx context.Context, st *store.Store, sessionID domain.ID, profile string) error {
+	return sessionstore.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
+		session.PermissionProfile = profile
+	})
+}
+
+func setSessionToolStates(ctx context.Context, st *store.Store, sessionID domain.ID, states map[domain.ToolKind]bool) error {
+	return sessionstore.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
+		session.ToolStates = states
+	})
 }
 
 func runLivePrompt(t *testing.T, engine *Engine, session domain.Session, chatRecord domain.Chat, text string) []domain.Event {
@@ -163,12 +183,12 @@ func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, tex
 
 func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID domain.ID, text string, attachments []domain.Attachment) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AppendTimeline(context.Background(), chatID, domain.UserMessage{Text: text, Attachments: attachments})
+	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, domain.UserMessage{Text: text, Attachments: attachments})
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -176,12 +196,12 @@ func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID
 
 func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, msg domain.AssistantMessage) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AppendTimeline(context.Background(), chatID, msg)
+	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -189,12 +209,12 @@ func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID domain.ID
 
 func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, notice domain.Notice) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AppendTimeline(context.Background(), chatID, notice)
+	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, notice)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -202,7 +222,7 @@ func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, n
 
 func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AppendAssistantToolCalls(context.Background(), chatID, []domain.ToolCall{{
+	item, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatID, []domain.ToolCall{{
 		ToolCallID: domain.ToolCallID(req.ToolCallID),
 		Tool:       req.Tool,
 		Args:       req.Args,
@@ -216,7 +236,7 @@ func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID domai
 
 func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AttachToolResult(context.Background(), chatID, req.ToolCallID, domain.ToolResult{
+	item, err := chatstore.AttachToolResult(context.Background(), st, chatID, req.ToolCallID, domain.ToolResult{
 		Text:   text,
 		Data:   data,
 		Status: domain.ToolResultStatusOK,
@@ -245,7 +265,7 @@ func waitForTimelineCondition(t *testing.T, st *store.Store, chatID domain.ID, w
 	var items []domain.TimelineItem
 	for time.Now().Before(deadline) {
 		var err error
-		items, err = st.TimelineForChat(context.Background(), chatID)
+		items, err = chatstore.TimelineForChat(context.Background(), st, chatID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,7 +293,7 @@ func waitForChatInactive(t *testing.T, rt *chatpkg.Chat) {
 
 func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, st *store.Store, chatID domain.ID) []domain.Event {
 	t.Helper()
-	pending, err := st.PendingApprovalsForChat(context.Background(), chatID)
+	pending, err := chatstore.PendingApprovalsForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +316,7 @@ func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallI
 
 func currentToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string) domain.ToolStatus {
 	t.Helper()
-	items, err := st.TimelineForChat(context.Background(), chatID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +336,7 @@ func currentToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCall
 
 func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, summary string, firstKeptItemID string) domain.TimelineItem {
 	t.Helper()
-	item, err := st.AppendTimeline(context.Background(), chatID, domain.Compaction{
+	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, domain.Compaction{
 		Summary:         summary,
 		Status:          "completed",
 		FirstKeptItemID: firstKeptItemID,
@@ -325,7 +345,7 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.I
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
+	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -333,7 +353,7 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.I
 
 func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID domain.ID) ([]domain.Message, map[domain.ID][]domain.Part, error) {
 	t.Helper()
-	chat, err := st.DefaultChat(context.Background(), sessionID)
+	chat, err := sessionstore.DefaultChat(context.Background(), st, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -342,7 +362,7 @@ func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID domai
 
 func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[domain.ID][]domain.Part, error) {
 	t.Helper()
-	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -414,7 +434,7 @@ func testTranscriptItem(sessionID domain.ID, item domain.TimelineItem) (domain.M
 
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID domain.ID) []domain.Notice {
 	t.Helper()
-	items, err := st.TimelineForChat(context.Background(), chatID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,11 +685,11 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
 		domain.ToolKindRead: false,
 	}); err != nil {
 		t.Fatal(err)
@@ -699,13 +719,13 @@ func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Orchestrator, &parentID)
+	child, err := sessionstore.CreateChat(context.Background(), st, session.ID, "child", chatrole.Orchestrator, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +736,7 @@ func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	got, err := st.GetChat(context.Background(), parent.ID)
+	got, err := chatstore.GetChat(context.Background(), st, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,13 +753,13 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Orchestrator, &parentID)
+	child, err := sessionstore.CreateChat(context.Background(), st, session.ID, "child", chatrole.Orchestrator, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,13 +795,13 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Execution, &parentID)
+	child, err := sessionstore.CreateChat(context.Background(), st, session.ID, "child", chatrole.Execution, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -792,7 +812,7 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 		Source:    domain.UserMessageSourceSubchat,
 		CreatedAt: time.Now().UTC(),
 	}}
-	if err := st.UpdateChat(context.Background(), parent); err != nil {
+	if err := chatstore.UpdateChat(context.Background(), st, parent); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
@@ -803,7 +823,7 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	got, err := st.GetChat(context.Background(), parent.ID)
+	got, err := chatstore.GetChat(context.Background(), st, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,13 +840,13 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.WorkflowRole = chatrole.Execution
-	if err := st.UpdateChat(context.Background(), chat); err != nil {
+	if err := chatstore.UpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
@@ -852,7 +872,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,7 +920,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -920,7 +940,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		t.Fatalf("expected persisted timeline item, got %#v", item)
 	}
 
-	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -951,7 +971,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -992,7 +1012,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1032,7 +1052,7 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1075,7 +1095,7 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1119,7 +1139,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1130,7 +1150,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1161,7 +1181,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1189,7 +1209,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	tailItem := appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1236,7 +1256,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1255,7 +1275,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 		Output:    strings.Join(lines, "\n"),
 	})
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1287,7 +1307,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1303,7 +1323,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	latestToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", domain.BashStoredResult{Command: "go test", Output: "ok"})
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1355,11 +1375,11 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, repo); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, repo); err != nil {
 		t.Fatal(err)
 	}
 	session.ProjectRoot = repo
@@ -1389,7 +1409,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1429,7 +1449,7 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1481,7 +1501,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1543,7 +1563,7 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1598,7 +1618,7 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1650,7 +1670,7 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1696,7 +1716,7 @@ func TestPreviewNextRequestIncludesStructuredFileReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1745,7 +1765,7 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1792,11 +1812,11 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil, manager)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
 		domain.ToolKindMCP: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -1839,7 +1859,7 @@ func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1922,11 +1942,11 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "default"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2030,11 +2050,11 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2062,7 +2082,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
-	pendingBefore, err := st.PendingApprovalsForChat(context.Background(), chatRecord.ID)
+	pendingBefore, err := chatstore.PendingApprovalsForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2070,10 +2090,10 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatalf("expected one pending approval, got %#v", pendingBefore)
 	}
 
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := st.GetSession(context.Background(), session.ID)
+	updated, err := sessionstore.GetSession(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2104,14 +2124,14 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatalf("expected permission profile %q, got %q", permissionprofile.ProfileFullAccess, updated.PermissionProfile)
 	}
 
-	chats, err := st.ListChats(context.Background(), session.ID)
+	chats, err := sessionstore.ListChats(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(chats) != 1 {
 		t.Fatalf("expected one chat, got %d", len(chats))
 	}
-	pending, err := st.PendingApprovalsForChat(context.Background(), chats[0].ID)
+	pending, err := chatstore.PendingApprovalsForChat(context.Background(), st, chats[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2169,11 +2189,11 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2219,14 +2239,14 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
-	chat, err := st.CreateChat(context.Background(), session.ID, "chat", "", nil)
+	chat, err := sessionstore.CreateChat(context.Background(), st, session.ID, "chat", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2292,11 +2312,11 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
@@ -2387,11 +2407,11 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
@@ -2410,7 +2430,7 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 		TimelineID: queuedUser.ID,
 		CreatedAt:  time.Now().UTC(),
 	}}
-	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, chat.QueuedInputs); err != nil {
+	if err := chatstore.SetChatQueuedInputs(context.Background(), st, chat.ID, chat.QueuedInputs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2479,11 +2499,11 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2536,11 +2556,11 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "default"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2556,7 +2576,7 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	assertToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusDenied)
-	pending, err := st.PendingApprovalsForChat(context.Background(), chat.ID)
+	pending, err := chatstore.PendingApprovalsForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2576,7 +2596,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2610,7 +2630,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeFinalAssistant(t *te
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2645,11 +2665,11 @@ func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) 
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := st.CreateChat(context.Background(), session.ID, "chat", "", nil)
+	chat, err := sessionstore.CreateChat(context.Background(), st, session.ID, "chat", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2738,7 +2758,7 @@ func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2805,7 +2825,7 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2874,7 +2894,7 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2931,11 +2951,11 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "default"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3018,11 +3038,11 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 	session.ProjectRoot = workdir
@@ -3076,7 +3096,7 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3121,16 +3141,16 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3169,16 +3189,16 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3216,16 +3236,16 @@ func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3310,13 +3330,13 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3423,11 +3443,11 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "default"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3490,12 +3510,12 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, []domain.QueuedInput{{
+	if err := chatstore.SetChatQueuedInputs(context.Background(), st, chat.ID, []domain.QueuedInput{{
 		ID:   domain.NewID(),
 		Kind: domain.QueuedInputKindSteer,
 		Text: "steer the running turn",
@@ -3523,7 +3543,7 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 		t.Fatalf("expected persisted user message item, got %#v", evt.Item)
 	}
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3571,12 +3591,12 @@ func TestRunPromptAutoCompactsWhenFirstModelTurnCrossesThreshold(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defaultChat := defaultChatForSession(t, st, session.ID)
-	sideChat, err := st.CreateChat(context.Background(), session.ID, "side", chatrole.General, nil)
+	sideChat, err := sessionstore.CreateChat(context.Background(), st, session.ID, "side", chatrole.General, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3632,7 +3652,7 @@ func TestRunPromptAutoCompactsWhenFirstModelTurnCrossesThreshold(t *testing.T) {
 		t.Fatalf("expected final model request to continue from compacted summary, got %s", requests[1])
 	}
 
-	sideTimeline, err := st.TimelineForChat(context.Background(), sideChat.ID)
+	sideTimeline, err := chatstore.TimelineForChat(context.Background(), st, sideChat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3655,7 +3675,7 @@ func TestRunPromptAutoCompactsWhenFirstModelTurnCrossesThreshold(t *testing.T) {
 		t.Fatal("expected side chat to be compacted")
 	}
 
-	defaultTimeline, err := st.TimelineForChat(context.Background(), defaultChat.ID)
+	defaultTimeline, err := chatstore.TimelineForChat(context.Background(), st, defaultChat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3706,14 +3726,14 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.LastKnownContextTokens = 850
 	chat.ContextTokensKnown = true
-	if err := st.UpdateChat(context.Background(), chat); err != nil {
+	if err := chatstore.UpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	appendUserTimelineItem(t, st, chat.ID, "previous work")
@@ -3771,7 +3791,7 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3832,7 +3852,7 @@ func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "missing", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "missing", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3931,13 +3951,13 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4046,11 +4066,11 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "auto"); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "auto"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4113,7 +4133,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4155,7 +4175,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 		t.Fatalf("expected compaction lifecycle refresh events, got start=%v done=%v", sawRefreshStart, sawRefreshDone)
 	}
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4225,7 +4245,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4244,7 +4264,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 		t.Fatal("expected compaction request to stream")
 	}
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4298,7 +4318,7 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4376,7 +4396,7 @@ func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "chat", "chat-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "chat", "chat-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4417,7 +4437,7 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "chat", "chat-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "chat", "chat-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4465,7 +4485,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4480,7 +4500,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4521,16 +4541,16 @@ func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4552,14 +4572,14 @@ func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.LastKnownContextTokens = 1000
 	chat.ContextTokensKnown = false
-	if err := st.UpdateChat(context.Background(), chat); err != nil {
+	if err := chatstore.UpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := engine.Chat(context.Background(), session, chat)
@@ -4574,7 +4594,7 @@ func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stored, err := st.GetChat(context.Background(), chat.ID)
+	stored, err := chatstore.GetChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4596,16 +4616,16 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileWriteAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileWriteAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4644,16 +4664,16 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileWriteAsk); err != nil {
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileWriteAsk); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), session.ID, workdir); err != nil {
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4703,7 +4723,7 @@ func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4759,7 +4779,7 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4815,7 +4835,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4892,7 +4912,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4909,7 +4929,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatalf("unexpected task update event: %#v", evt)
 	}
 
-	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4972,7 +4992,7 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 		waited = append(waited, delay)
 		return nil
 	}
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5051,7 +5071,7 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 		}
 		return nil
 	}
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5342,7 +5362,7 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "New Session", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "New Session", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5403,7 +5423,7 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "Existing Session", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "Existing Session", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5423,7 +5443,7 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	if chatTitle != want {
 		t.Fatalf("expected chat title event %q, got %q", want, chatTitle)
 	}
-	updated, err := st.GetChat(context.Background(), chat.ID)
+	updated, err := chatstore.GetChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5464,7 +5484,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5492,7 +5512,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
-	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5554,7 +5574,7 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5612,7 +5632,7 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5695,7 +5715,7 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5777,7 +5797,7 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5848,7 +5868,7 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5904,7 +5924,7 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 		}
 		return nil
 	}
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5978,7 +5998,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6031,7 +6051,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

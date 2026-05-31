@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
@@ -571,7 +573,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	sessions, err := s.store.ListSessions(r.Context())
+	sessions, err := sessionstore.ListSessions(r.Context(), s.store)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -620,7 +622,7 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
-	session, err := s.store.GetSession(r.Context(), sessionID)
+	session, err := sessionstore.GetSession(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -630,19 +632,19 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	approvals, err := s.store.PendingApprovals(r.Context(), sessionID)
+	approvals, err := s.sessionApprovals(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
+	plan, err := planning.GetPlan(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	var todos []planning.TodoItem
 	for _, milestone := range plan.Milestones {
-		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
+		items, err := planning.ListTodos(r.Context(), s.store, sessionID, milestone.Ref)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -688,11 +690,11 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionI
 }
 
 func (s *Server) sessionTimeline(ctx context.Context, sessionID domain.ID) ([]domain.TimelineItem, error) {
-	chat, err := s.store.DefaultChat(ctx, sessionID)
+	chat, err := sessionstore.DefaultChat(ctx, s.store, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.TimelineForChat(ctx, chat.ID)
+	return chatstore.TimelineForChat(ctx, s.store, chat.ID)
 }
 
 func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
@@ -703,7 +705,7 @@ func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
-	approvals, err := s.store.PendingApprovals(r.Context(), sessionID)
+	approvals, err := s.sessionApprovals(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -714,8 +716,24 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
+func (s *Server) sessionApprovals(ctx context.Context, sessionID domain.ID) ([]chatstore.Approval, error) {
+	chats, err := sessionstore.ListChats(ctx, s.store, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var approvals []chatstore.Approval
+	for _, chatRecord := range chats {
+		next, err := chatstore.PendingApprovalsForChat(ctx, s.store, chatRecord.ID)
+		if err != nil {
+			return nil, err
+		}
+		approvals = append(approvals, next...)
+	}
+	return approvals, nil
+}
+
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
-	tasks, err := s.store.ListTasks(r.Context(), sessionID)
+	tasks, err := planning.ListTasks(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -727,7 +745,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID d
 }
 
 func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
-	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
+	plan, err := planning.GetPlan(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -739,14 +757,14 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
-	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
+	plan, err := planning.GetPlan(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	var todos []planning.TodoItem
 	for _, milestone := range plan.Milestones {
-		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
+		items, err := planning.ListTodos(r.Context(), s.store, sessionID, milestone.Ref)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

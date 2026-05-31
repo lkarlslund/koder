@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -787,18 +788,18 @@ func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milesto
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
+func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			task, err := owner.AddTask(ctx, sessionID, body, status)
 			if err != nil {
-				return store.Task{}, err
+				return planning.Task{}, err
 			}
 			c.refreshPlanningFromOwner(owner)
 			return task, nil
 		}
 	}
-	return store.Task{}, fmt.Errorf("no live session owner")
+	return planning.Task{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) refreshPlanningFromOwner(owner *sessionpkg.Session) {
@@ -1022,7 +1023,7 @@ func (c *Controller) SwitchSession(ctx context.Context, sessionID domain.ID) err
 	if sessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
-	session, err := c.store.GetSession(ctx, sessionID)
+	session, err := sessionstore.GetSession(ctx, c.store, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1451,7 +1452,7 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode, proje
 }
 
 func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.ID) error {
-	session, err := c.store.GetSession(ctx, sessionID)
+	session, err := sessionstore.GetSession(ctx, c.store, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1638,7 +1639,7 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string, p
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
-	return c.store.ListSessions(ctx)
+	return sessionstore.ListSessions(ctx, c.store)
 }
 
 func (c *Controller) sessionInWorkspace(session domain.Session) bool {
@@ -1646,7 +1647,7 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 }
 
 func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (planning.Plan, []planning.TodoItem, map[string][]planning.TodoItem) {
-	plan, err := c.store.GetMilestonePlan(ctx, sessionID)
+	plan, err := planning.GetPlan(ctx, c.store, sessionID)
 	if err != nil {
 		return planning.Plan{}, nil, nil
 	}
@@ -1656,7 +1657,7 @@ func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (pl
 		if ref == "" {
 			continue
 		}
-		todos, err := c.store.ListTodos(ctx, sessionID, ref)
+		todos, err := planning.ListTodos(ctx, c.store, sessionID, ref)
 		if err != nil {
 			todosByRef[ref] = nil
 			continue
@@ -1698,7 +1699,7 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID domain.ID) map[
 	if c.store == nil {
 		return out
 	}
-	chats, err := c.store.ListChats(ctx, sessionID)
+	chats, err := sessionstore.ListChats(ctx, c.store, sessionID)
 	if err != nil {
 		return out
 	}
@@ -1711,7 +1712,7 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID domain.ID) map[
 func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID domain.ID) bool {
 	var chats []domain.Chat
 	if c.store != nil && sessionID != "" {
-		if loaded, err := c.store.ListChats(ctx, sessionID); err == nil {
+		if loaded, err := sessionstore.ListChats(ctx, c.store, sessionID); err == nil {
 			chats = loaded
 		}
 	}

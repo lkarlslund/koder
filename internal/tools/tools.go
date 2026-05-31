@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -256,7 +257,7 @@ func normalizeRuntime(runtime Runtime) Runtime {
 func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, sessionID domain.ID) permissionprofile.Profile {
 	profileName := strings.TrimSpace(r.DefaultSandboxProfile)
 	if st != nil && sessionID != "" {
-		if session, err := st.GetSession(ctx, sessionID); err == nil && strings.TrimSpace(session.PermissionProfile) != "" {
+		if session, err := toolSessionCollection(st).Get(ctx, sessionID); err == nil && strings.TrimSpace(session.PermissionProfile) != "" {
 			profileName = strings.TrimSpace(session.PermissionProfile)
 		}
 	}
@@ -267,6 +268,48 @@ func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, 
 		return permissionprofile.Normalize(profile)
 	}
 	return permissionprofile.Normalize(permissionprofile.Profile{})
+}
+
+func toolSessionCollection(st *store.Store) store.Collection[domain.Session] {
+	return store.NewCollection(st, store.CollectionSpec[domain.Session]{
+		Namespace: "sessions",
+		GetID:     func(v domain.Session) string { return v.ID },
+		SetID:     func(v *domain.Session, id string) { v.ID = id },
+	})
+}
+
+func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
+	chats, err := chatstore.ChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	slices.SortFunc(chats, func(a, b domain.Chat) int {
+		switch {
+		case a.Position < b.Position:
+			return -1
+		case a.Position > b.Position:
+			return 1
+		case a.CreatedAt.Before(b.CreatedAt):
+			return -1
+		case a.CreatedAt.After(b.CreatedAt):
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	for _, chat := range chats {
+		if chat.ParentChatID == nil {
+			return chat, nil
+		}
+	}
+	if len(chats) > 0 {
+		return chats[0], nil
+	}
+	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
 }
 
 func PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
@@ -482,7 +525,7 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 	}
 	chatID, ok := ChatIDFromContext(ctx)
 	if !ok || chatID == "" {
-		chat, err := st.DefaultChat(ctx, sessionID)
+		chat, err := defaultChatForToolResult(ctx, st, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -500,13 +543,13 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 	}
 	var item domain.TimelineItem
 	if strings.TrimSpace(req.ToolCallID) == "" {
-		item, err = st.AppendTimeline(ctx, chatID, domain.ToolExecution{
+		item, err = chatstore.AppendTimeline(ctx, st, chatID, domain.ToolExecution{
 			Tool:   req.Tool,
 			Args:   req.Meta(),
 			Result: &toolResult,
 		})
 	} else {
-		item, err = st.AttachToolResult(ctx, chatID, req.ToolCallID, toolResult)
+		item, err = chatstore.AttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
 	}
 	if err != nil {
 		return nil, err

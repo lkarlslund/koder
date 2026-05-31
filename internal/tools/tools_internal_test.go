@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
@@ -27,7 +28,7 @@ func openToolsStore(t *testing.T) *store.Store {
 
 func TestPersistStandardResultReturnsStoredMarshalError(t *testing.T) {
 	st := openToolsStore(t)
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
