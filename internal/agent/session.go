@@ -216,6 +216,54 @@ func (s *Session) Snapshot() SessionSnapshot {
 	}
 }
 
+// Reload refreshes persisted session-owned metadata into the live owner.
+func (s *Session) Reload(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	s.mu.RUnlock()
+	session, err := s.engine.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	chats, err := s.engine.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	plan, err := s.engine.store.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	todosByRef, err := s.engine.loadTodosByRef(ctx, sessionID, plan)
+	if err != nil {
+		return err
+	}
+	tasks, err := s.engine.store.ListTasks(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.session = session
+	s.chats = slices.Clone(chats)
+	s.plan = plan
+	s.todosByRef = todosByRef
+	s.tasks = slices.Clone(tasks)
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(session)
+		}
+	}
+	for _, chatRecord := range chats {
+		if rt := s.runtimes[chatRecord.ID]; rt != nil {
+			rt.SetChat(chatRecord)
+		}
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 // Chat returns the live chat runtime owned by this session.
 func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, error) {
 	if s == nil {

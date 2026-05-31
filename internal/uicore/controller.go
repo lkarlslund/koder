@@ -2888,6 +2888,16 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
+	var owner *agent.Session
+	if c.agent != nil {
+		owner, err = c.agent.LoadSession(ctx, session.ID)
+		if err != nil {
+			return err
+		}
+		if err := owner.Reload(ctx); err != nil {
+			return err
+		}
+	}
 	chatRecord.PermissionProfile = ""
 	c.mu.RLock()
 	existingRuntimes := make(map[domain.ID]*chat.Chat, len(c.runtimes))
@@ -2912,7 +2922,11 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		rt := existingRuntimes[item.ID]
 		if rt == nil {
 			var err error
-			rt, err = c.agent.Chat(ctx, session, item)
+			if owner != nil {
+				rt, err = owner.Chat(ctx, item.ID)
+			} else {
+				rt, err = c.agent.Chat(ctx, session, item)
+			}
 			if err != nil {
 				return err
 			}
@@ -2937,6 +2951,12 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		return fmt.Errorf("chat %s runtime was not loaded", chatRecord.ID)
 	}
 	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
+	if owner != nil {
+		ownerSnapshot := owner.Snapshot()
+		milestone = ownerSnapshot.Plan
+		todos = ownerSnapshot.Todos
+		todosByRef = ownerSnapshot.TodosByRef
+	}
 	workspaceStatus, _ := workspacepkg.Snapshot(ctx, session.ProjectRoot)
 	statuses := c.chatStatuses(ctx, session.ID)
 	snapshots := make(map[domain.ID]chat.Snapshot, len(runtimes))
@@ -3220,28 +3240,14 @@ func hasErroredRestartTool(snapshot chat.Snapshot) bool {
 }
 
 func (c *Controller) createWorkspaceSession(ctx context.Context, title string, projectRoot string) (domain.Session, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "New Session"
+	if c.agent == nil {
+		return domain.Session{}, fmt.Errorf("no chat agent")
 	}
-	projectRoot = strings.TrimSpace(projectRoot)
-	if projectRoot != "" {
-		info, err := os.Stat(projectRoot)
-		if err != nil {
-			return domain.Session{}, err
-		}
-		if !info.IsDir() {
-			return domain.Session{}, fmt.Errorf("project root must be a directory: %s", projectRoot)
-		}
-	}
-	session, err := c.store.CreateSession(ctx, title, c.cfg.DefaultProvider, c.cfg.DefaultModel, nil)
+	owner, err := c.agent.CreateSession(ctx, title, projectRoot)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	_ = c.store.SetSessionProjectRoot(ctx, session.ID, projectRoot)
-	_ = c.store.SetSessionPermissionProfile(ctx, session.ID, c.cfg.Permissions.Profile)
-	_ = c.store.SetSessionToolStates(ctx, session.ID, c.cfg.ToolDefaults)
-	return c.store.GetSession(ctx, session.ID)
+	return owner.Snapshot().Session, nil
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
