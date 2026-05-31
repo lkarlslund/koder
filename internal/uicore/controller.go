@@ -951,7 +951,7 @@ func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) 
 			return owner.GetMilestonePlan(ctx, sessionID)
 		}
 	}
-	return c.store.GetMilestonePlan(ctx, sessionID)
+	return store.MilestonePlan{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
@@ -965,7 +965,7 @@ func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, 
 			return plan, nil
 		}
 	}
-	return c.store.SetMilestonePlan(ctx, sessionID, summary, milestones)
+	return store.MilestonePlan{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
@@ -979,7 +979,7 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, mile
 			return created, nil
 		}
 	}
-	return c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+	return nil, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
@@ -996,7 +996,7 @@ func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, statu
 			return updated, nil
 		}
 	}
-	return c.store.UpdateTodoItem(ctx, todoID, status, content)
+	return store.TodoItem{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]store.TodoItem, error) {
@@ -1005,7 +1005,7 @@ func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milesto
 			return owner.ListTodos(ctx, sessionID, milestoneRef)
 		}
 	}
-	return c.store.ListTodos(ctx, sessionID, milestoneRef)
+	return nil, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
@@ -1019,7 +1019,7 @@ func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body stri
 			return task, nil
 		}
 	}
-	return c.store.AddTask(ctx, sessionID, body, status)
+	return store.Task{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) refreshPlanningFromOwner(owner *agent.Session) {
