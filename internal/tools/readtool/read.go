@@ -77,7 +77,7 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 		Preview: path,
 	}
 }
-func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err
@@ -154,6 +154,9 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if strings.HasPrefix(contentType, "application/octet-stream") && !isTextHeader(header[:n]) {
 		return tools.Result{}, fmt.Errorf("%s appears to be a binary file", rel)
 	}
+	if content, ok := fileContentForLanguageServer(abs); ok {
+		runtime.TouchFile(ctx, rel, content)
+	}
 	page, err := readFilePage(abs, readRange.Start, readRange.Limit, 0)
 	if err != nil {
 		return tools.Result{}, err
@@ -200,6 +203,19 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		},
 		Stored: stored,
 	}, nil
+}
+
+func fileContentForLanguageServer(path string) (string, bool) {
+	const maxLSPWarmBytes = 2 * 1024 * 1024
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Size() > maxLSPWarmBytes {
+		return "", false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 type readRange struct {

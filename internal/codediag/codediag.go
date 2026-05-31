@@ -118,6 +118,49 @@ func Text(report Report) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+func NewProblemsText(report Report) string {
+	report = normalizeReport(report)
+	byPath := map[string][]Diagnostic{}
+	var paths []string
+	for _, diagnostic := range report.Diagnostics {
+		if !strings.EqualFold(strings.TrimSpace(diagnostic.Severity), "error") {
+			continue
+		}
+		path := strings.TrimSpace(diagnostic.Path)
+		if path == "" {
+			path = "(unknown file)"
+		}
+		if _, ok := byPath[path]; !ok {
+			paths = append(paths, path)
+		}
+		byPath[path] = append(byPath[path], diagnostic)
+	}
+	sort.Strings(paths)
+	var lines []string
+	for _, path := range paths {
+		lines = append(lines, path)
+		for _, diagnostic := range byPath[path] {
+			label := string(diagnostic.Source)
+			if diagnostic.Tool != "" {
+				label += "/" + diagnostic.Tool
+			}
+			if label == "" {
+				label = "diagnostic"
+			}
+			line := "?"
+			if diagnostic.Line > 0 {
+				line = fmt.Sprintf("%d", diagnostic.Line)
+			}
+			code := ""
+			if diagnostic.Code != "" {
+				code = " [" + diagnostic.Code + "]"
+			}
+			lines = append(lines, fmt.Sprintf("- [%s error%s] Line %s: %s", label, code, line, diagnostic.Message))
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
 func normalizeOptions(options Options) Options {
 	options.Mode = strings.ToLower(strings.TrimSpace(options.Mode))
 	switch options.Mode {

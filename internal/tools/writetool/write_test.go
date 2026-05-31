@@ -104,7 +104,7 @@ func TestExecuteReportsWrittenFileDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Diagnostics for written file") {
+	if !strings.Contains(result.Output, "Problems detected after writing file") {
 		t.Fatalf("expected diagnostics in output, got %q", result.Output)
 	}
 	stored, ok := result.Stored.(tools.WriteStoredResult)

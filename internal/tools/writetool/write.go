@@ -68,10 +68,10 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
 	summary := fmt.Sprintf("%s %s", cases.Title(language.English).String(action), rel)
 	report := codediag.CheckFile(ctx, runtime.Workdir, rel, req.Args["content"], codediag.Options{Mode: "auto", IncludeExisting: true, Timeout: 2 * time.Second})
-	diagnostics := codediag.Text(report)
+	diagnostics := codediag.NewProblemsText(report)
 	output := summary
 	if diagnostics != "" {
-		output += "\n\nDiagnostics for written file:\n" + diagnostics
+		output += "\n\nProblems detected after writing file:\n" + diagnostics
 	}
 	content, truncated := tools.TruncateText(req.Args["content"], tools.DefaultToolOutputLimit)
 	return tools.Result{

@@ -38,3 +38,13 @@ func TestCheckFileReportsJSONSyntaxDiagnostic(t *testing.T) {
 		t.Fatalf("unexpected path: %#v", report.Diagnostics[0])
 	}
 }
+
+func TestNewProblemsTextReportsOnlyErrorsConcise(t *testing.T) {
+	text := NewProblemsText(Report{Diagnostics: []Diagnostic{
+		{Source: SourceLSP, Tool: "go", Path: "main.go", Line: 12, Severity: "warning", Message: "unused"},
+		{Source: SourceSyntax, Path: "config.json", Line: 2, Severity: "error", Message: "invalid JSON"},
+	}})
+	if text != "config.json\n- [syntax error] Line 2: invalid JSON" {
+		t.Fatalf("unexpected problems text: %q", text)
+	}
+}

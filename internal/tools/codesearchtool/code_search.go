@@ -50,7 +50,14 @@ type lspClient struct {
 	mu          sync.Mutex
 	nextID      int
 	diagnostics map[string][]lspDiagnostic
+	documents   map[string]lspDocument
 	closeOnce   sync.Once
+}
+
+type lspDocument struct {
+	LanguageID string
+	Version    int
+	Text       string
 }
 
 type lspRequest struct {
@@ -407,6 +414,34 @@ func LSPDiagnostics(ctx context.Context, rootAbs, path, before, after string, in
 	return result
 }
 
+// TouchFile opens or updates a file in the pooled language server for its language.
+func TouchFile(ctx context.Context, rootAbs, path, content string) DiagnosticReport {
+	server, ok := languageForPath(path)
+	if !ok {
+		return DiagnosticReport{Skipped: []string{"lsp: no language server configured for " + filepath.Ext(path)}}
+	}
+	if _, err := exec.LookPath(server.Command[0]); err != nil {
+		return DiagnosticReport{Skipped: []string{fmt.Sprintf("lsp: command %q not found for %s", server.Command[0], server.ID)}}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lease, err := defaultLSPManager.acquire(ctx, rootAbs, server)
+	if err != nil {
+		return DiagnosticReport{Skipped: []string{"lsp: " + err.Error()}}
+	}
+	abs, _, err := tools.WorkspacePath(rootAbs, path)
+	if err != nil {
+		lease.release(false)
+		return DiagnosticReport{Skipped: []string{"lsp: " + err.Error()}}
+	}
+	err = lease.client().syncDocument(ctx, fileURI(abs), languageIDForPath(server, path), content)
+	lease.release(err != nil && !isLSPServerError(err))
+	if err != nil {
+		return DiagnosticReport{Skipped: []string{"lsp: " + err.Error()}}
+	}
+	return DiagnosticReport{}
+}
+
 func parametersJSON() string {
 	languages, _ := json.Marshal(languageIDs())
 	return fmt.Sprintf(`{"type":"object","properties":{"action":{"type":"string","enum":["languages","workspace_symbol","document_symbols","definition","references"],"description":"LSP query to run. Defaults to workspace_symbol when query is provided."},"query":{"type":"string","description":"Workspace symbol query for action=workspace_symbol."},"path":{"type":"string","description":"Workspace file path for document_symbols, definition, or references, or optional scope hint for choosing a language server."},"language":{"type":"string","enum":%s,"description":"Optional language server to use. If omitted, all detected languages are queried for workspace_symbol, and path extension chooses for file actions."},"line":{"type":"integer","description":"1-indexed line for definition or references."},"character":{"type":"integer","description":"1-indexed UTF-16 character/column for definition or references."},"limit":{"type":"integer","description":"Maximum result lines to return. Defaults to 100."}},"additionalProperties":false}`, languages)
@@ -653,7 +688,7 @@ func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs str
 	}
 	uri := fileURI(abs)
 	languageID := languageIDForPath(server, path)
-	if err := client.didOpen(ctx, uri, languageID, before); err != nil {
+	if err := client.syncDocument(ctx, uri, languageID, before); err != nil {
 		return DiagnosticReport{}, err
 	}
 	if err := client.flushDiagnostics(ctx, uri); err != nil {
@@ -661,7 +696,7 @@ func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs str
 	}
 	beforeDiagnostics := append([]lspDiagnostic(nil), client.diagnostics[uri]...)
 	if after != before {
-		if err := client.didChange(ctx, uri, 2, after); err != nil {
+		if err := client.syncDocument(ctx, uri, languageID, after); err != nil {
 			return DiagnosticReport{}, err
 		}
 		if err := client.flushDiagnostics(ctx, uri); err != nil {
@@ -754,7 +789,14 @@ func startLSP(rootAbs string, server languageServer) (*lspClient, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &lspClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), nextID: 1, diagnostics: map[string][]lspDiagnostic{}}, nil
+	return &lspClient{
+		cmd:         cmd,
+		stdin:       stdin,
+		stdout:      bufio.NewReader(stdout),
+		nextID:      1,
+		diagnostics: map[string][]lspDiagnostic{},
+		documents:   map[string]lspDocument{},
+	}, nil
 }
 
 func (c *lspClient) initialize(ctx context.Context, rootAbs string) error {
@@ -804,7 +846,7 @@ func (c *lspClient) documentSymbols(ctx context.Context, server languageServer, 
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
+	if err := c.syncDocument(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
 	raw, err := c.request(ctx, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
@@ -820,7 +862,7 @@ func (c *lspClient) definition(ctx context.Context, server languageServer, rootA
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
+	if err := c.syncDocument(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
 	raw, err := c.request(ctx, "textDocument/definition", map[string]any{
@@ -842,7 +884,7 @@ func (c *lspClient) references(ctx context.Context, server languageServer, rootA
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
+	if err := c.syncDocument(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
 	raw, err := c.request(ctx, "textDocument/references", map[string]any{
@@ -860,25 +902,51 @@ func (c *lspClient) references(ctx context.Context, server languageServer, rootA
 	return lspResult{Language: server.ID, Server: commandString(server), Lines: lines}, err
 }
 
-func (c *lspClient) didOpen(ctx context.Context, uri, languageID, text string) error {
-	return c.notify(ctx, "textDocument/didOpen", map[string]any{
-		"textDocument": map[string]any{
-			"uri":        uri,
-			"languageId": languageID,
-			"version":    1,
-			"text":       text,
-		},
-	})
-}
-
-func (c *lspClient) didChange(ctx context.Context, uri string, version int, text string) error {
-	return c.notify(ctx, "textDocument/didChange", map[string]any{
+func (c *lspClient) syncDocument(ctx context.Context, uri, languageID, text string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.documents == nil {
+		c.documents = map[string]lspDocument{}
+	}
+	doc, open := c.documents[uri]
+	if !open || doc.LanguageID != languageID {
+		params := map[string]any{
+			"textDocument": map[string]any{
+				"uri":        uri,
+				"languageId": languageID,
+				"version":    1,
+				"text":       text,
+			},
+		}
+		if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: params}); err != nil {
+			return err
+		}
+		c.documents[uri] = lspDocument{LanguageID: languageID, Version: 1, Text: text}
+		return nil
+	}
+	if doc.Text == text {
+		return nil
+	}
+	doc.Version++
+	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri":     uri,
-			"version": version,
+			"version": doc.Version,
 		},
 		"contentChanges": []map[string]string{{"text": text}},
-	})
+	}
+	if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: "textDocument/didChange", Params: params}); err != nil {
+		return err
+	}
+	doc.Text = text
+	c.documents[uri] = doc
+	return nil
 }
 
 func (c *lspClient) flushDiagnostics(ctx context.Context, uri string) error {

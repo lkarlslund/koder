@@ -298,7 +298,7 @@ func TestExecuteEditReportsIntroducedGoDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Diagnostics introduced by this edit") {
+	if !strings.Contains(result.Output, "New problems detected after editing file") {
 		t.Fatalf("expected diagnostics in output, got %q", result.Output)
 	}
 	stored, ok := result.Stored.(tools.EditStoredResult)
@@ -354,7 +354,7 @@ func TestExecuteEditReportsStructuredFileDiagnostics(t *testing.T) {
 			if !ok {
 				t.Fatalf("unexpected stored result type %T", result.Stored)
 			}
-			if !strings.Contains(result.Output, "Diagnostics introduced by this edit") || !strings.Contains(stored.Diagnostics, tt.file) {
+			if !strings.Contains(result.Output, "New problems detected after editing file") || !strings.Contains(stored.Diagnostics, tt.file) {
 				t.Fatalf("expected diagnostics for %s, output=%q stored=%#v", tt.file, result.Output, stored)
 			}
 		})

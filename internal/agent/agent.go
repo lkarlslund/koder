@@ -40,6 +40,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 )
 
 type Engine struct {
@@ -2037,6 +2038,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ChatControl:           e,
 		Exec:                  e.exec,
 		MCP:                   e.mcp,
+		FileTracker:           codeIntelFileTracker{root: sessionProjectRoot(session)},
 		AccessSettings:        sessionAccessSettings(session, e.cfg),
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
@@ -2044,6 +2046,17 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		runtime.TaskControl = owner
 	}
 	return runtime
+}
+
+type codeIntelFileTracker struct {
+	root string
+}
+
+func (t codeIntelFileTracker) TouchFile(ctx context.Context, path, content string) {
+	if strings.TrimSpace(t.root) == "" || strings.TrimSpace(path) == "" {
+		return
+	}
+	_ = codesearchtool.TouchFile(ctx, t.root, path, content)
 }
 
 func sessionAccessSettings(session domain.Session, cfg config.Config) accesssettings.Settings {

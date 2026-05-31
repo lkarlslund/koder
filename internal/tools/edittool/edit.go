@@ -118,7 +118,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes). The edit did not persist as intended; re-read the file and try again", rel, len(after), len(verifyBytes))
 	}
 	report := codediag.CheckEdit(ctx, runtime.Workdir, rel, before, after, codediag.Options{Mode: "auto", Timeout: 2 * time.Second})
-	diagnostics := codediag.Text(report)
+	diagnostics := codediag.NewProblemsText(report)
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(before, after, false)
 	mode := "replaced 1 occurrence"
@@ -128,7 +128,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
 	output := summary
 	if diagnostics != "" {
-		output += "\n\nDiagnostics introduced by this edit:\n" + diagnostics
+		output += "\n\nNew problems detected after editing file:\n" + diagnostics
 	}
 	hunks, truncated := buildStoredHunksFromRanges(before, match.ranges, match.newString)
 	return tools.Result{

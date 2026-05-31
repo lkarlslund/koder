@@ -146,11 +146,23 @@ type Runtime struct {
 	TaskControl           TaskControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
+	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
 }
 
 type MCPExecutor interface {
 	ExecuteTool(context.Context, string, string, map[string]any) (Result, error)
+}
+
+type FileTracker interface {
+	TouchFile(context.Context, string, string)
+}
+
+func (r Runtime) TouchFile(ctx context.Context, path, content string) {
+	if r.FileTracker == nil || strings.TrimSpace(path) == "" {
+		return
+	}
+	r.FileTracker.TouchFile(ctx, path, content)
 }
 
 type Tool interface {

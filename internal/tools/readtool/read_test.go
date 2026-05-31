@@ -13,6 +13,16 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
+type recordingFileTracker struct {
+	path    string
+	content string
+}
+
+func (r *recordingFileTracker) TouchFile(_ context.Context, path, content string) {
+	r.path = path
+	r.content = content
+}
+
 func TestExecuteAllowsAbsolutePathOutsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	outsideDir := t.TempDir()
@@ -32,6 +42,37 @@ func TestExecuteAllowsAbsolutePathOutsideWorkspace(t *testing.T) {
 	}
 	if got := result.Meta["path"]; got != filepath.ToSlash(target) {
 		t.Fatalf("expected absolute path label %q, got %q", filepath.ToSlash(target), got)
+	}
+}
+
+func TestExecuteTouchesReadFileForCodeIntel(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracker := &recordingFileTracker{}
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace, FileTracker: tracker}, tools.Request{
+		Args: map[string]string{"path": "main.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tracker.path != "main.go" || tracker.content != "package main\n" {
+		t.Fatalf("unexpected file touch path=%q content=%q", tracker.path, tracker.content)
+	}
+}
+
+func TestExecuteDoesNotTouchDirectoriesForCodeIntel(t *testing.T) {
+	workspace := t.TempDir()
+	tracker := &recordingFileTracker{}
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace, FileTracker: tracker}, tools.Request{
+		Args: map[string]string{"path": "."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tracker.path != "" || tracker.content != "" {
+		t.Fatalf("unexpected directory touch path=%q content=%q", tracker.path, tracker.content)
 	}
 }
 
