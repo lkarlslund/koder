@@ -1772,6 +1772,22 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 		return
 	}
 	for step := 0; step < loop.MaxSteps(); step++ {
+		if step > 0 {
+			item, applied, err := turn.ApplyNextSteer(ctx)
+			if err != nil {
+				r.handleTurnError(ctx, turn, out, err)
+				return
+			}
+			if applied {
+				transient = nil
+				out <- domain.Event{
+					Kind: domain.EventKindStatus,
+					Text: "Applying queued steer...",
+					Item: item,
+					Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
+				}
+			}
+		}
 		result, err := loop.Step(ctx, turn, step, transient, out)
 		if err != nil {
 			r.handleTurnError(ctx, turn, out, err)

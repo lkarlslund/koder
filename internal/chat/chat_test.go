@@ -56,6 +56,19 @@ type controlledTurnPromptRunner struct {
 	events  []<-chan domain.Event
 }
 
+type queuedSteerBoundaryRunner struct {
+	step0Started chan struct{}
+	continueStep chan struct{}
+	step1Done    chan struct{}
+
+	mu            sync.Mutex
+	step1Timeline []domain.TimelineItem
+}
+
+type queuedSteerBoundaryLoop struct {
+	runner *queuedSteerBoundaryRunner
+}
+
 type fakeTurnLoop struct {
 	next func() <-chan domain.Event
 }
@@ -97,6 +110,42 @@ func (f fakeTurnLoop) Step(_ context.Context, _ *TurnState, _ int, _ []provider.
 		out <- evt
 	}
 	return TurnStepResult{Done: !waitingApproval, WaitingApproval: waitingApproval}, nil
+}
+
+func (f *queuedSteerBoundaryRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	if err != nil {
+		return nil, err
+	}
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: item}
+	return nil, nil
+}
+
+func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	return nil, nil
+}
+
+func (f *queuedSteerBoundaryRunner) NewTurnLoop(*TurnState) TurnLoop {
+	return queuedSteerBoundaryLoop{runner: f}
+}
+
+func (queuedSteerBoundaryLoop) MaxSteps() int { return 2 }
+
+func (queuedSteerBoundaryLoop) PauseLimit(context.Context, *TurnState, chan<- domain.Event) {}
+
+func (l queuedSteerBoundaryLoop) Step(_ context.Context, turn *TurnState, step int, _ []provider.InstructionBlock, _ chan<- domain.Event) (TurnStepResult, error) {
+	switch step {
+	case 0:
+		close(l.runner.step0Started)
+		<-l.runner.continueStep
+		return TurnStepResult{Continue: true}, nil
+	default:
+		l.runner.mu.Lock()
+		l.runner.step1Timeline = turn.Timeline()
+		l.runner.mu.Unlock()
+		close(l.runner.step1Done)
+		return TurnStepResult{Done: true}, nil
+	}
 }
 
 func (f *cancelAwareRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
@@ -494,6 +543,76 @@ dispatched:
 	}
 	if seenQueued != 1 {
 		t.Fatalf("expected one queued user timeline item, got %d in %#v", seenQueued, rt.Snapshot().Timeline)
+	}
+}
+
+func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &queuedSteerBoundaryRunner{
+		step0Started: make(chan struct{}),
+		continueStep: make(chan struct{}),
+		step1Done:    make(chan struct{}),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first prompt"})
+	select {
+	case <-runner.step0Started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first step")
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: "subchat is done"})
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) != 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued steer: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(runner.continueStep)
+
+	var sawQueueRefresh bool
+	deadline = time.After(2 * time.Second)
+	for !sawQueueRefresh {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindStatus && update.Event.Text == "Applying queued steer..." {
+				sawQueueRefresh = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for queued steer application")
+		}
+	}
+	select {
+	case <-runner.step1Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second step")
+	}
+	if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+		t.Fatalf("queued inputs = %#v", got)
+	}
+
+	runner.mu.Lock()
+	timeline := runner.step1Timeline
+	runner.mu.Unlock()
+	if len(timeline) < 2 {
+		t.Fatalf("step 1 timeline too short: %#v", timeline)
+	}
+	user, ok := timeline[len(timeline)-1].Content.(domain.UserMessage)
+	if !ok {
+		t.Fatalf("last timeline item = %#v", timeline[len(timeline)-1])
+	}
+	if user.Text != "subchat is done" {
+		t.Fatalf("queued steer text = %q", user.Text)
+	}
+	if user.Source != domain.UserMessageSourceSubchat {
+		t.Fatalf("queued steer source = %q, want %q", user.Source, domain.UserMessageSourceSubchat)
 	}
 }
 
