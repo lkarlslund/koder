@@ -2909,15 +2909,33 @@ func compactTextForCompaction(text string, label string) string {
 
 func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
+	streamedBytes := 0
 	onEvent := func(evt domain.Event) {
-		if out == nil || evt.Kind != domain.EventKindStatus || evt.Meta[domain.EventMetaPromptProgress] != "true" {
+		if out == nil {
 			return
 		}
-		if evt.Meta == nil {
-			evt.Meta = map[string]string{}
+		switch evt.Kind {
+		case domain.EventKindMessageDelta, domain.EventKindReasoning:
+			streamedBytes += len(evt.Text)
+			if streamedBytes <= 0 {
+				return
+			}
+			out <- domain.Event{
+				Kind: domain.EventKindStatus,
+				Text: fmt.Sprintf("Streaming compacted results (%s)", formatCompactionBytes(streamedBytes)),
+				Meta: map[string]string{"compaction": "streaming"},
+			}
+		case domain.EventKindStatus:
+			if evt.Meta[domain.EventMetaPromptProgress] != "true" {
+				return
+			}
+			if evt.Meta == nil {
+				evt.Meta = map[string]string{}
+			}
+			evt.Meta["compaction"] = "progress"
+			evt.Text = compactionPromptProgressText(evt.Meta)
+			out <- evt
 		}
-		evt.Meta["compaction"] = "progress"
-		out <- evt
 	}
 	if req.Stream {
 		resp, err := client.StreamChatResponse(ctx, req, onEvent)
@@ -2945,6 +2963,33 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 		return client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
 	}
 	return resp, err
+}
+
+func compactionPromptProgressText(meta map[string]string) string {
+	total, totalErr := strconv.Atoi(strings.TrimSpace(meta["total"]))
+	processed, processedErr := strconv.Atoi(strings.TrimSpace(meta["processed"]))
+	if totalErr == nil && processedErr == nil && total > 0 {
+		percent := processed * 100 / total
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		return fmt.Sprintf("Compaction pre-processing %d%%", percent)
+	}
+	return "Compaction pre-processing"
+}
+
+func formatCompactionBytes(size int) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	value := float64(size) / 1024
+	if value < 10 {
+		return fmt.Sprintf("%.1f KB", value)
+	}
+	return fmt.Sprintf("%.0f KB", value)
 }
 
 func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) int {

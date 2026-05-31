@@ -1536,6 +1536,9 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		if text, ok := promptProgressStatusText(evt.Meta); ok {
 			r.status = StatusWaitingLLM
 			r.statusText = text
+		} else if text, ok := compactionStatusText(evt); ok {
+			r.status = StatusWaitingLLM
+			r.statusText = text
 		}
 		if afterTokens, ok := completedCompactionContext(evt.Item, evt.Meta); ok {
 			r.chat.LastKnownContextTokens = afterTokens
@@ -1572,6 +1575,10 @@ func promptProgressStatusText(meta map[string]string) (string, bool) {
 	if meta[domain.EventMetaPromptProgress] != "true" {
 		return "", false
 	}
+	prefix := "LLM preprocessing"
+	if meta["compaction"] == "progress" {
+		prefix = "Compaction pre-processing"
+	}
 	total, totalErr := strconv.Atoi(strings.TrimSpace(meta["total"]))
 	processed, processedErr := strconv.Atoi(strings.TrimSpace(meta["processed"]))
 	if totalErr == nil && processedErr == nil && total > 0 {
@@ -1582,9 +1589,20 @@ func promptProgressStatusText(meta map[string]string) (string, bool) {
 		if percent > 100 {
 			percent = 100
 		}
-		return fmt.Sprintf("LLM preprocessing %d%%", percent), true
+		return fmt.Sprintf("%s %d%%", prefix, percent), true
 	}
-	return "LLM preprocessing", true
+	return prefix, true
+}
+
+func compactionStatusText(evt domain.Event) (string, bool) {
+	if evt.Meta["compaction"] != "streaming" {
+		return "", false
+	}
+	text := strings.TrimSpace(evt.Text)
+	if text == "" {
+		return "Streaming compacted results", true
+	}
+	return text, true
 }
 
 func completedCompactionContext(item domain.TimelineItem, meta map[string]string) (int, bool) {

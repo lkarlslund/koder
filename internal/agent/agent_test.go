@@ -4392,19 +4392,29 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 	close(events)
 
 	var sawProgress bool
+	var sawStreaming bool
 	for evt := range events {
 		if evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaPromptProgress] == "true" {
 			sawProgress = true
 			if evt.Meta["compaction"] != "progress" {
 				t.Fatalf("expected compaction progress marker, got %#v", evt.Meta)
 			}
-			if evt.Text != "Processing prompt 4%" {
+			if evt.Text != "Compaction pre-processing 4%" {
 				t.Fatalf("progress text = %q", evt.Text)
+			}
+		}
+		if evt.Kind == domain.EventKindStatus && evt.Meta["compaction"] == "streaming" {
+			sawStreaming = true
+			if evt.Text != "Streaming compacted results (24 B)" {
+				t.Fatalf("streaming text = %q", evt.Text)
 			}
 		}
 	}
 	if !sawProgress {
 		t.Fatal("expected compaction prompt progress event")
+	}
+	if !sawStreaming {
+		t.Fatal("expected compaction streaming status event")
 	}
 }
 
