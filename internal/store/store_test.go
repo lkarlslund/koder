@@ -14,6 +14,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store/driver"
 )
 
 func TestSessionMessageRoundTrip(t *testing.T) {
@@ -1185,7 +1186,7 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v6", "sessions", session.ID+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v7", "collections", "sessions", session.ID+".json")); err != nil {
 		t.Fatalf("expected inspectable session JSON file: %v", err)
 	}
 }
@@ -1204,9 +1205,9 @@ func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
 			if err := st.Close(); err != nil {
 				t.Fatal(err)
 			}
-			writeStoreMetaForTest(t, root, backend, metaRecord{
-				SchemaVersion: schemaVersion - 1,
-				Encoding:      encodingJSON,
+			writeStoreMetaForTest(t, root, backend, driver.Meta{
+				SchemaVersion: driver.SchemaVersion - 1,
+				Encoding:      driver.EncodingJSON,
 				Backend:       backend,
 			})
 
@@ -1233,31 +1234,29 @@ func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
 	}
 }
 
-func writeStoreMetaForTest(t *testing.T, root, backend string, meta metaRecord) {
+func writeStoreMetaForTest(t *testing.T, root, backend string, meta driver.Meta) {
 	t.Helper()
 	switch backend {
 	case BackendJSONFS:
-		if err := writeJSONFile(filepath.Join(root, "store-jsonfs-v6", "meta.json"), meta); err != nil {
+		if err := driver.WriteJSONFile(filepath.Join(root, "store-jsonfs-v7", "meta.json"), meta); err != nil {
 			t.Fatal(err)
 		}
 	case BackendPebble:
-		impl, err := openPebbleBackend(root)
+		dir := filepath.Join(root, "store-pebble-v7")
+		db, err := pebble.Open(dir, &pebble.Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		batch := impl.db.NewBatch()
-		if err := impl.putMeta(batch, meta); err != nil {
-			_ = batch.Close()
-			_ = impl.Close()
+		data, err := driver.EncodeJSON(meta)
+		if err != nil {
+			_ = db.Close()
 			t.Fatal(err)
 		}
-		if err := batch.Commit(pebble.Sync); err != nil {
-			_ = batch.Close()
-			_ = impl.Close()
+		if err := db.Set([]byte("meta/store"), data, pebble.Sync); err != nil {
+			_ = db.Close()
 			t.Fatal(err)
 		}
-		_ = batch.Close()
-		if err := impl.Close(); err != nil {
+		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
 	default:

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store/driver"
 )
 
 // CollectionSpec describes how one typed collection is stored and indexed.
@@ -45,19 +46,6 @@ func ByIndex[T any](name, value string) Query[T] {
 type Collection[T any] struct {
 	store *Store
 	spec  CollectionSpec[T]
-}
-
-type collectionBackend interface {
-	getCollectionRecord(context.Context, string, string) ([]byte, error)
-	putCollectionRecord(context.Context, string, string, []byte, map[string]string) error
-	deleteCollectionRecord(context.Context, string, string) error
-	listCollectionRecords(context.Context, string, *indexLookup) ([][]byte, error)
-	transaction(context.Context, func() error) error
-}
-
-type indexLookup struct {
-	name  string
-	value string
 }
 
 // NewCollection returns a typed collection for spec.
@@ -112,6 +100,40 @@ func (s *Store) Approvals() Collection[Approval] {
 	})
 }
 
+// Tasks returns the generic session task collection.
+func (s *Store) Tasks() Collection[Task] {
+	return NewCollection(s, CollectionSpec[Task]{
+		Namespace: "tasks",
+		GetID:     func(v Task) string { return v.ID },
+		SetID:     func(v *Task, id string) { v.ID = id },
+		Indexes: []IndexSpec[Task]{
+			{Name: "session", Value: func(v Task) string { return fmt.Sprint(v.SessionID) }},
+		},
+	})
+}
+
+// MilestonePlans returns the generic milestone plan collection.
+func (s *Store) MilestonePlans() Collection[MilestonePlan] {
+	return NewCollection(s, CollectionSpec[MilestonePlan]{
+		Namespace: "milestone-plans",
+		GetID:     func(v MilestonePlan) string { return v.SessionID },
+		SetID:     func(v *MilestonePlan, id string) { v.SessionID = id },
+	})
+}
+
+// Todos returns the generic todo collection.
+func (s *Store) Todos() Collection[TodoItem] {
+	return NewCollection(s, CollectionSpec[TodoItem]{
+		Namespace: "todos",
+		GetID:     func(v TodoItem) string { return v.ID },
+		SetID:     func(v *TodoItem, id string) { v.ID = id },
+		Indexes: []IndexSpec[TodoItem]{
+			{Name: "session", Value: func(v TodoItem) string { return fmt.Sprint(v.SessionID) }},
+			{Name: "milestone", Value: func(v TodoItem) string { return fmt.Sprint(v.SessionID) + "/" + v.MilestoneRef }},
+		},
+	})
+}
+
 // RuntimeStates returns the generic runtime state collection.
 func (s *Store) RuntimeStates() Collection[RuntimeState] {
 	return NewCollection(s, CollectionSpec[RuntimeState]{
@@ -128,7 +150,7 @@ func (c Collection[T]) Get(ctx context.Context, id any) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	raw, err := c.backend().getCollectionRecord(ctx, c.spec.Namespace, key)
+	raw, err := c.store.backend.Get(ctx, c.spec.Namespace, key)
 	if err != nil {
 		return zero, err
 	}
@@ -166,12 +188,16 @@ func (c Collection[T]) Delete(ctx context.Context, id any) error {
 	if err != nil {
 		return err
 	}
-	return c.backend().deleteCollectionRecord(ctx, c.spec.Namespace, key)
+	return c.store.backend.Delete(ctx, c.spec.Namespace, key)
 }
 
 // List returns records matching query, sorted by ID when the spec has an ID function.
 func (c Collection[T]) List(ctx context.Context, query Query[T]) ([]T, error) {
-	rawItems, err := c.backend().listCollectionRecords(ctx, c.spec.Namespace, nil)
+	var lookup *driver.IndexLookup
+	if query.Index != "" {
+		lookup = &driver.IndexLookup{Name: query.Index, Value: query.Value}
+	}
+	rawItems, err := c.store.backend.List(ctx, c.spec.Namespace, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -206,11 +232,7 @@ func (c Collection[T]) List(ctx context.Context, query Query[T]) ([]T, error) {
 
 // Transaction groups multiple collection writes behind one store-facing operation.
 func (s *Store) Transaction(ctx context.Context, fn func(*Tx) error) error {
-	rb, ok := s.backend.(collectionBackend)
-	if !ok {
-		return fmt.Errorf("store backend does not support generic transactions")
-	}
-	return rb.transaction(ctx, func() error {
+	return s.backend.Transaction(ctx, func() error {
 		return fn(&Tx{})
 	})
 }
@@ -237,7 +259,7 @@ func (c Collection[T]) put(ctx context.Context, value T) error {
 	for _, spec := range c.spec.Indexes {
 		indexes[spec.Name] = spec.Value(value)
 	}
-	return c.backend().putCollectionRecord(ctx, c.spec.Namespace, c.spec.GetID(value), data, indexes)
+	return c.store.backend.Put(ctx, c.spec.Namespace, c.spec.GetID(value), data, indexes)
 }
 
 func collectionIDKey(id any) (string, error) {
@@ -250,14 +272,6 @@ func collectionIDKey(id any) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported collection id %T", id)
 	}
-}
-
-func (c Collection[T]) backend() collectionBackend {
-	rb, ok := c.store.backend.(collectionBackend)
-	if !ok {
-		panic("store backend does not support generic collections")
-	}
-	return rb
 }
 
 func (c Collection[T]) matchesIndex(value T, name, want string) bool {

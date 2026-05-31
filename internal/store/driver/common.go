@@ -1,4 +1,4 @@
-package store
+package driver
 
 import (
 	"context"
@@ -10,25 +10,25 @@ import (
 )
 
 const (
-	schemaVersion = 6
-	encodingJSON  = "json"
+	SchemaVersion = 7
+	EncodingJSON  = "json"
 )
 
-type metaRecord struct {
+type Meta struct {
 	SchemaVersion int    `json:"schema_version"`
 	Encoding      string `json:"encoding"`
 	Backend       string `json:"backend"`
 }
 
-func defaultMeta(backend string) metaRecord {
-	return metaRecord{
-		SchemaVersion: schemaVersion,
-		Encoding:      encodingJSON,
+func DefaultMeta(backend string) Meta {
+	return Meta{
+		SchemaVersion: SchemaVersion,
+		Encoding:      EncodingJSON,
 		Backend:       backend,
 	}
 }
 
-func ensureContext(ctx context.Context) error {
+func EnsureContext(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -37,7 +37,7 @@ func ensureContext(ctx context.Context) error {
 	}
 }
 
-func cloneBytes(data []byte) []byte {
+func CloneBytes(data []byte) []byte {
 	if len(data) == 0 {
 		return nil
 	}
@@ -46,7 +46,7 @@ func cloneBytes(data []byte) []byte {
 	return out
 }
 
-func encodeJSON(v any) ([]byte, error) {
+func EncodeJSON(v any) ([]byte, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -54,23 +54,27 @@ func encodeJSON(v any) ([]byte, error) {
 	return data, nil
 }
 
-func formatUnixNanos(t time.Time) string {
+func FormatUnixNanos(t time.Time) string {
 	return fmt.Sprintf("%020d", t.UTC().UnixNano())
 }
 
-func collectionRecordPrefix(namespace string) string {
+func RecordPrefix(namespace string) string {
 	return "collection/" + namespace + "/"
 }
 
-func collectionRecordKey(namespace string, id string) string {
-	return collectionRecordPrefix(namespace) + id
+func RecordKey(namespace string, id string) string {
+	return RecordPrefix(namespace) + id
 }
 
-func collectionIndexKey(namespace, name, value, id string) string {
-	return "collection-index/" + namespace + "/" + name + "/" + value + "/" + id
+func IndexPrefix(namespace, name, value string) string {
+	return "collection-index/" + namespace + "/" + name + "/" + value + "/"
 }
 
-func writeJSONFile(path string, value any) error {
+func IndexKey(namespace, name, value, id string) string {
+	return IndexPrefix(namespace, name, value) + id
+}
+
+func WriteJSONFile(path string, value any) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
@@ -79,7 +83,7 @@ func writeJSONFile(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func readJSONFile(path string, dst any) error {
+func ReadJSONFile(path string, dst any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -87,16 +91,16 @@ func readJSONFile(path string, dst any) error {
 	return json.Unmarshal(data, dst)
 }
 
-func ensureDir(path string) error {
+func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-func fileExists(path string) bool {
+func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func sortedJSONPaths(root string) ([]string, error) {
+func SortedJSONPaths(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
