@@ -26,14 +26,28 @@ type ChatLoader func(context.Context, domain.Session, domain.Chat) (*chatpkg.Cha
 type EventKind string
 
 const (
-	EventChatAdded EventKind = "chat_added"
+	EventChatAdded       EventKind = "chat_added"
+	EventChatChanged     EventKind = "chat_changed"
+	EventChatArchived    EventKind = "chat_archived"
+	EventSessionChanged  EventKind = "session_changed"
+	EventPlanningChanged EventKind = "planning_changed"
+	EventTasksChanged    EventKind = "tasks_changed"
 )
 
 // Event reports a mutation made by the session owner.
 type Event struct {
-	Kind      EventKind
-	SessionID domain.ID
-	Chat      domain.Chat
+	Kind       EventKind
+	SessionID  domain.ID
+	Chat       domain.Chat
+	Snapshot   chatpkg.Snapshot
+	Update     chatpkg.Update
+	NextChatID domain.ID
+	Session    domain.Session
+	Plan       planning.Plan
+	Todos      []planning.TodoItem
+	TodosByRef map[string][]planning.TodoItem
+	Tasks      []planning.Task
+	Err        error
 }
 
 // Session owns the live state for one persisted session.
@@ -45,6 +59,7 @@ type Session struct {
 	session    domain.Session
 	chats      []domain.Chat
 	runtimes   map[domain.ID]*chatpkg.Chat
+	unsubs     map[domain.ID]func()
 	plan       planning.Plan
 	todosByRef map[string][]planning.TodoItem
 	tasks      []planning.Task
@@ -91,6 +106,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 		session:    session,
 		chats:      slices.Clone(chats),
 		runtimes:   map[domain.ID]*chatpkg.Chat{},
+		unsubs:     map[domain.ID]func(){},
 		plan:       plan,
 		todosByRef: todosByRef,
 		tasks:      slices.Clone(tasks),
@@ -156,7 +172,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 
 // Subscribe registers for session-owned state mutations.
 func (s *Session) Subscribe() (<-chan Event, func()) {
-	ch := make(chan Event, 16)
+	ch := make(chan Event, 128)
 	if s == nil {
 		close(ch)
 		return ch, func() {}
@@ -191,54 +207,6 @@ func (s *Session) emit(event Event) {
 	}
 }
 
-// Reload refreshes persisted session-owned metadata into the live owner.
-func (s *Session) Reload(ctx context.Context) error {
-	if s == nil {
-		return fmt.Errorf("session is required")
-	}
-	s.mu.RLock()
-	sessionID := s.session.ID
-	s.mu.RUnlock()
-	session, err := sessionstore.GetSession(ctx, s.store, sessionID)
-	if err != nil {
-		return err
-	}
-	chats, err := sessionstore.ListChats(ctx, s.store, sessionID)
-	if err != nil {
-		return err
-	}
-	plan, err := planning.GetPlan(ctx, s.store, sessionID)
-	if err != nil {
-		return err
-	}
-	todosByRef, err := loadTodosByRef(ctx, s.store, sessionID, plan)
-	if err != nil {
-		return err
-	}
-	tasks, err := planning.ListTasks(ctx, s.store, sessionID)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.session = session
-	s.chats = slices.Clone(chats)
-	s.plan = plan
-	s.todosByRef = todosByRef
-	s.tasks = slices.Clone(tasks)
-	for _, rt := range s.runtimes {
-		if rt != nil {
-			rt.SetSession(session)
-		}
-	}
-	for _, chatRecord := range chats {
-		if rt := s.runtimes[chatRecord.ID]; rt != nil {
-			rt.SetChat(chatRecord)
-		}
-	}
-	s.mu.Unlock()
-	return nil
-}
-
 // Chat returns the live chat runtime owned by this session.
 func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, error) {
 	if s == nil {
@@ -263,7 +231,7 @@ func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, er
 		return nil, err
 	}
 	s.mu.Lock()
-	s.runtimes[chatID] = rt
+	s.trackRuntimeLocked(chatID, rt)
 	s.mu.Unlock()
 	return rt, nil
 }
@@ -342,10 +310,60 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	}
 	s.mu.Lock()
 	upsertSessionChatLocked(&s.chats, chatRecord)
-	s.runtimes[chatRecord.ID] = rt
+	s.trackRuntimeLocked(chatRecord.ID, rt)
+	snapshot := rt.Snapshot()
 	s.mu.Unlock()
-	s.emit(Event{Kind: EventChatAdded, SessionID: session.ID, Chat: chatRecord})
+	s.emit(Event{Kind: EventChatAdded, SessionID: session.ID, Chat: chatRecord, Snapshot: snapshot})
 	return rt, nil
+}
+
+func (s *Session) trackRuntimeLocked(chatID domain.ID, rt *chatpkg.Chat) {
+	if s.runtimes == nil {
+		s.runtimes = map[domain.ID]*chatpkg.Chat{}
+	}
+	if s.unsubs == nil {
+		s.unsubs = map[domain.ID]func(){}
+	}
+	if existing := s.runtimes[chatID]; existing == rt && s.unsubs[chatID] != nil {
+		return
+	}
+	if unsub := s.unsubs[chatID]; unsub != nil {
+		unsub()
+	}
+	updates, unsub := rt.Subscribe()
+	s.runtimes[chatID] = rt
+	s.unsubs[chatID] = unsub
+	go s.forwardRuntime(chatID, updates)
+}
+
+func (s *Session) forwardRuntime(chatID domain.ID, updates <-chan chatpkg.Update) {
+	for update := range updates {
+		if update.Snapshot.Chat.ID == "" {
+			update.Snapshot.Chat.ID = chatID
+		}
+		s.mu.Lock()
+		sessionID := s.session.ID
+		chatRecord := update.Snapshot.Chat
+		if chatRecord.ID == "" {
+			chatRecord, _ = chatByID(s.chats, chatID)
+			update.Snapshot.Chat = chatRecord
+		}
+		if chatRecord.ID != "" {
+			if existing, ok := chatByID(s.chats, chatRecord.ID); ok && strings.TrimSpace(chatRecord.Title) == "" {
+				chatRecord = existing
+				update.Snapshot.Chat = existing
+			}
+			upsertSessionChatLocked(&s.chats, chatRecord)
+		}
+		s.mu.Unlock()
+		s.emit(Event{
+			Kind:      EventChatChanged,
+			SessionID: sessionID,
+			Chat:      chatRecord,
+			Snapshot:  update.Snapshot,
+			Update:    update,
+		})
+	}
 }
 
 // EnsureDefaultChat returns the newest chat, creating the session default when empty.
@@ -400,9 +418,16 @@ func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.Chat
 		rt.SetChat(target)
 	}
 	status := s.chatStatusLocked(target.ID)
+	snapshot := chatpkg.Snapshot{Session: s.session, Chat: target, Status: chatpkg.StatusIdle, StatusText: "Archived"}
+	if rt := s.runtimes[target.ID]; rt != nil {
+		snapshot = rt.Snapshot()
+		snapshot.Chat = target
+		snapshot.StatusText = "Archived"
+	}
 	s.mu.Unlock()
 	status.Chat = target
 	status.StatusText = "Archived"
+	s.emit(Event{Kind: EventChatArchived, SessionID: target.SessionID, Chat: target, Snapshot: snapshot, NextChatID: nextChatID})
 	return status, nextChatID, nil
 }
 
@@ -426,6 +451,9 @@ func (s *Session) ReorderChats(ctx context.Context, ids []domain.ID) ([]domain.C
 		}
 	}
 	s.mu.Unlock()
+	for _, item := range ordered {
+		s.emit(Event{Kind: EventChatChanged, SessionID: sessionID, Chat: item, Snapshot: s.snapshotForChat(item.ID)})
+	}
 	return slices.Clone(ordered), nil
 }
 
@@ -460,6 +488,7 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 		}
 	}
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
 
@@ -490,6 +519,7 @@ func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings
 		}
 	}
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
 
@@ -523,7 +553,9 @@ func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID
 	if rt := s.runtimes[chatID]; rt != nil {
 		rt.SetChat(chatRecord)
 	}
+	snapshot := s.snapshotForChatLocked(chatID)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventChatChanged, SessionID: chatRecord.SessionID, Chat: chatRecord, Snapshot: snapshot})
 	return chatRecord, nil
 }
 
@@ -602,6 +634,8 @@ func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.
 	}
 	chats := slices.Clone(s.chats)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventSessionChanged, SessionID: session.ID, Session: session})
+	s.emit(Event{Kind: EventChatChanged, SessionID: session.ID, Chat: chatRecord, Snapshot: s.snapshotForChat(chatRecord.ID)})
 	return session, chatRecord, chats, nil
 }
 
@@ -653,6 +687,18 @@ func (s *Session) Close(ctx context.Context) error {
 	for _, ch := range subs {
 		close(ch)
 	}
+	s.mu.Lock()
+	unsubs := make([]func(), 0, len(s.unsubs))
+	for id, unsub := range s.unsubs {
+		delete(s.unsubs, id)
+		if unsub != nil {
+			unsubs = append(unsubs, unsub)
+		}
+	}
+	s.mu.Unlock()
+	for _, unsub := range unsubs {
+		unsub()
+	}
 	for _, rt := range runtimes {
 		if err := rt.DrainAndClose(ctx); err != nil {
 			return err
@@ -685,7 +731,10 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, sum
 	}
 	s.mu.Lock()
 	s.plan = plan
+	todos := flattenTodos(s.todosByRef)
+	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Todos: todos, TodosByRef: todosByRef})
 	return cloneMilestonePlan(plan), nil
 }
 
@@ -725,7 +774,11 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 		s.todosByRef = map[string][]planning.TodoItem{}
 	}
 	s.todosByRef[milestoneRef] = append(s.todosByRef[milestoneRef], items...)
+	plan := cloneMilestonePlan(s.plan)
+	todos := flattenTodos(s.todosByRef)
+	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: todos, TodosByRef: todosByRef})
 	return slices.Clone(items), nil
 }
 
@@ -772,7 +825,12 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 		}
 	}
 	s.todosByRef[ref] = todos
+	sessionID := s.session.ID
+	plan := cloneMilestonePlan(s.plan)
+	allTodos := flattenTodos(s.todosByRef)
+	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: allTodos, TodosByRef: todosByRef})
 	return item, nil
 }
 
@@ -805,7 +863,9 @@ func (s *Session) AddTask(ctx context.Context, sessionID domain.ID, body string,
 	}
 	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
+	tasks := slices.Clone(s.tasks)
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventTasksChanged, SessionID: sessionID, Tasks: tasks})
 	return task, nil
 }
 
@@ -990,6 +1050,24 @@ func (s *Session) chatStatusLocked(chatID domain.ID) tools.ChatStatus {
 		PendingApprovals: pending,
 		StatusText:       statusText,
 	}
+}
+
+func (s *Session) snapshotForChat(chatID domain.ID) chatpkg.Snapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snapshotForChatLocked(chatID)
+}
+
+func (s *Session) snapshotForChatLocked(chatID domain.ID) chatpkg.Snapshot {
+	chatRecord, _ := chatByID(s.chats, chatID)
+	if rt := s.runtimes[chatID]; rt != nil {
+		snapshot := rt.Snapshot()
+		if snapshot.Chat.ID == "" {
+			snapshot.Chat = chatRecord
+		}
+		return snapshot
+	}
+	return chatpkg.Snapshot{Session: s.session, Chat: chatRecord, Status: chatpkg.StatusIdle, StatusText: string(chatpkg.StatusIdle)}
 }
 
 func chatByID(chats []domain.Chat, id domain.ID) (domain.Chat, bool) {

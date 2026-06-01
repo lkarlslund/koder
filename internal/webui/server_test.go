@@ -487,7 +487,7 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 		TranscriptChanged: true,
 		StatusChanged:     true,
 	}
-	event, ok := webEventFromControllerEvent(app.Event{Seq: 9, Type: "chat_update", Payload: update})
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 9, Type: "chat_delta", Payload: update})
 	if !ok {
 		t.Fatal("expected compact web event")
 	}
@@ -1231,7 +1231,7 @@ func TestAssetHashIncludesVendoredAssets(t *testing.T) {
 	}
 }
 
-func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
+func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1251,11 +1251,7 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Snapshot struct {
-				Chat struct {
-					ModelID string
-				}
-			}
+			Updated bool `json:"updated"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1265,8 +1261,12 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected set_model ok, got %s", resp.Error)
 	}
-	if resp.Result.Snapshot.Chat.ModelID != "next-model" {
-		t.Fatalf("expected response chat next-model, got %q", resp.Result.Snapshot.Chat.ModelID)
+	if !resp.Result.Updated {
+		t.Fatal("expected set_model acknowledgement")
+	}
+	state := ctrl.State()
+	if state.Snapshot.Chat.ModelID != "next-model" {
+		t.Fatalf("expected controller chat next-model, got %q", state.Snapshot.Chat.ModelID)
 	}
 }
 
@@ -1322,7 +1322,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	}
 }
 
-func TestWebSocketReorderChatsReturnsUpdatedOrder(t *testing.T) {
+func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := ctrl.State().ActiveChatID
 	if err := ctrl.NewChat(context.Background(), "second"); err != nil {
@@ -1353,10 +1353,7 @@ func TestWebSocketReorderChatsReturnsUpdatedOrder(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Chats []struct {
-				ID       domain.ID
-				Position int
-			}
+			Reordered bool `json:"reordered"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1366,21 +1363,25 @@ func TestWebSocketReorderChatsReturnsUpdatedOrder(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected reorder_chats ok, got %s", resp.Error)
 	}
-	got := make([]domain.ID, 0, len(resp.Result.Chats))
-	for _, chat := range resp.Result.Chats {
+	if !resp.Result.Reordered {
+		t.Fatal("expected reorder_chats acknowledgement")
+	}
+	state := ctrl.State()
+	got := make([]domain.ID, 0, len(state.Chats))
+	for _, chat := range state.Chats {
 		got = append(got, chat.ID)
 	}
 	if !slices.Equal(got, []domain.ID{thirdID, firstID, secondID}) {
 		t.Fatalf("unexpected chat order: %#v", got)
 	}
-	for idx, chat := range resp.Result.Chats {
+	for idx, chat := range state.Chats {
 		if chat.Position != idx {
 			t.Fatalf("expected position %d for %s, got %d", idx, chat.ID, chat.Position)
 		}
 	}
 }
 
-func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
+func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	ctrl := newTestController(t)
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
 		t.Fatalf("new chat: %v", err)
@@ -1405,11 +1406,7 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveChatID domain.ID `json:"active_chat_id"`
-			Chats        []struct {
-				ID       domain.ID
-				Archived bool
-			}
+			Archived bool `json:"archived"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1419,17 +1416,21 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
 	}
-	if resp.Result.ActiveChatID == deletedID {
+	if !resp.Result.Archived {
+		t.Fatal("expected delete_chat acknowledgement")
+	}
+	state := ctrl.State()
+	if state.ActiveChatID == deletedID {
 		t.Fatalf("expected active chat to switch away from %s", deletedID)
 	}
 	foundArchived := false
-	for _, chat := range resp.Result.Chats {
+	for _, chat := range state.Chats {
 		if chat.ID == deletedID {
 			foundArchived = chat.Archived
 		}
 	}
 	if !foundArchived {
-		t.Fatalf("expected archived chat to remain listed as archived: %#v", resp.Result.Chats)
+		t.Fatalf("expected archived chat to remain listed as archived: %#v", state.Chats)
 	}
 }
 

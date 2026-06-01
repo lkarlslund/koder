@@ -449,7 +449,6 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
-	c.broadcast("snapshot", c.State())
 	return nil
 }
 
@@ -493,7 +492,6 @@ func (c *Controller) SetAccessSettings(ctx context.Context, settings accesssetti
 	for _, rt := range runtimes {
 		rt.SetSession(session)
 	}
-	c.broadcast("snapshot", c.State())
 	return nil
 }
 

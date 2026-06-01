@@ -605,7 +605,11 @@
           if (msg.type === 'snapshot') this.applyState(msg.payload);
           if (msg.type === 'state_delta') this.applyStateDelta(msg.payload);
           if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);
-          if (msg.type === 'chat_update') this.applyChatUpdate(msg.payload);
+          if (msg.type === 'planning_delta') this.applyPlanningDelta(msg.payload);
+          if (msg.type === 'tasks_delta') this.applyTasksDelta(msg.payload);
+          if (msg.type === 'session_delta') this.applySessionDelta(msg.payload);
+          if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
+          if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
         applyStateDelta(delta) {
@@ -635,6 +639,51 @@
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
+          this.reportClientStateSoon();
+        },
+        applyPlanningDelta(delta) {
+          if (!delta) return;
+          if (delta.milestones !== undefined) { this.state.milestones = delta.milestones; this.state.Milestones = delta.milestones; }
+          if (delta.todos !== undefined) { this.state.todos = delta.todos; this.state.Todos = delta.todos; }
+          if (delta.todos_by_milestone !== undefined) { this.state.todos_by_milestone = delta.todos_by_milestone; this.state.TodosByRef = delta.todos_by_milestone; }
+          this.reportClientStateSoon();
+        },
+        applyTasksDelta(delta) {
+          if (!delta) return;
+          if (delta.tasks !== undefined) { this.state.tasks = delta.tasks; this.state.Tasks = delta.tasks; }
+          this.reportClientStateSoon();
+        },
+        applySessionDelta(delta) {
+          if (!delta || !delta.session) return;
+          this.state.session = delta.session;
+          this.state.Session = delta.session;
+          const id = String(delta.session.id || delta.session.ID || '').trim();
+          const sessions = (this.state.sessions || this.state.Sessions || []).slice();
+          const idx = sessions.findIndex(item => String(item.id || item.ID || '') === id);
+          if (idx >= 0) sessions[idx] = delta.session; else if (id) sessions.push(delta.session);
+          this.state.sessions = sessions;
+          this.state.Sessions = sessions;
+          this.syncSessionURL();
+          this.reportClientStateSoon();
+        },
+        applySelectionDelta(delta) {
+          if (!delta) return;
+          const id = String(delta.active_chat_id || delta.ActiveChatID || '').trim();
+          if (!id) return;
+          this.state.active_chat_id = id;
+          this.state.ActiveChatID = id;
+          const snapshots = this.state.snapshots || this.state.Snapshots || {};
+          const snapshot = snapshots[id] || snapshots[String(id)];
+          if (snapshot) { this.state.snapshot = snapshot; this.state.Snapshot = snapshot; }
+          this.writeSelectedChat();
+          this.reportClientStateSoon();
+        },
+        applyWorkspaceDelta(delta) {
+          if (!delta) return;
+          const status = delta.workspace_status || delta.Workspace || delta.workspace;
+          if (status === undefined) return;
+          this.state.workspace_status = status;
+          this.state.Workspace = status;
           this.reportClientStateSoon();
         },
         applyChatDelta(delta) {
@@ -709,22 +758,6 @@
           if (idx >= 0) statuses[idx] = {...statuses[idx], ...status}; else statuses.push(status);
           this.state.chat_statuses = statuses;
           this.state.ChatStatuses = statuses;
-        },
-        applyChatUpdate(update) {
-          const snapshot = update?.Snapshot || update?.snapshot;
-          const chat = snapshot?.Chat || snapshot?.chat || {};
-          const id = chat.ID || chat.id || update?.chat_id || update?.ChatID;
-          if (!id) return;
-          const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
-          snapshots[id] = snapshot;
-          this.state.snapshots = snapshots;
-          this.state.Snapshots = snapshots;
-          if (id === this.activeChatID()) {
-            this.state.snapshot = snapshot;
-            this.state.Snapshot = snapshot;
-          }
-          this.syncInterruptArmed();
-          this.reportClientStateSoon();
         },
         rpc(method, params) {
           return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
@@ -1202,7 +1235,7 @@
           if (code.includes('M') || code.includes('R') || code.includes('C')) return 'text-bg-warning';
           return 'text-bg-secondary';
         },
-        refreshWorkspace() { this.rpc('refresh_workspace', {}).then(s => this.applyState(s)); },
+        refreshWorkspace() { this.rpc('refresh_workspace', {}); },
         toolIcon(kind) {
           if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
@@ -1498,7 +1531,7 @@
           return false;
         },
         switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).catch(err => this.showToast(err.message)); },
         startChatDrag(ev, id) {
           if (!id) return;
           this.dragChatID = id;
@@ -1529,19 +1562,20 @@
             const id = this.chatID(chat);
             if (!visibleIDs.has(id)) orderedIDs.push(id);
           });
+          const previousChats = allChats.slice();
           this.state.chats = [...chats, ...allChats.filter(chat => !visibleIDs.has(this.chatID(chat)))];
           this.state.Chats = this.state.chats;
           this.rpc('reorder_chats', {chat_ids: orderedIDs})
-            .then(s => this.applyState(s))
             .catch(err => {
               this.showToast(err.message);
-              this.rpc('get_state', {}).then(s => this.applyState(s)).catch(() => {});
+              this.state.chats = previousChats;
+              this.state.Chats = previousChats;
             });
         },
         endChatDrag() { this.dragChatID = ''; },
         deleteChat(id) {
           if (!id || !confirm('Archive this chat?')) return;
-          this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));
+          this.rpc('delete_chat', {chat_id: id}).catch(err => this.showToast(err.message));
         },
         showToast(message) {
           this.toast = message || '';
@@ -1582,7 +1616,7 @@
           settings.mounts.splice(index, 1);
         },
         saveAccessSettings() {
-          this.rpc('set_access_settings', this.accessDraft).then(s => { this.applyState(s); this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
+          this.rpc('set_access_settings', this.accessDraft).then(() => { this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
         },
         openModelDialog() {
           this.showModels = true; this.modelQuery = '';
@@ -1605,8 +1639,8 @@
           return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
         },
         selectModel(model) {
-          this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(s => {
-            this.applyState(s); this.closeModelDialog();
+          this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(() => {
+            this.closeModelDialog();
           });
         },
         openSessionDialog() {

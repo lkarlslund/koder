@@ -2,13 +2,13 @@ package app
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
-	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type execRuntimeSubscription struct {
@@ -96,88 +96,13 @@ func (c *Controller) forwardExecRuntime(chatID domain.ID, events <-chan execrunt
 		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
 		c.snapshots[chatID] = snapshot
 		c.mu.Unlock()
-		c.broadcast("chat_update", chat.Update{
+		c.broadcast("chat_delta", chat.Update{
 			Snapshot:   snapshot,
 			Status:     snapshot.Status,
 			StatusText: snapshot.StatusText,
 			Context:    snapshot.Context,
 			Active:     snapshot.Active,
 		})
-	}
-}
-
-func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update) {
-	for update := range updates {
-		c.mu.RLock()
-		sessionID := c.session.ID
-		activeChatID := c.chat.ID
-		_, subscribed := c.runtimes[chatID]
-		_, hasSnapshot := c.snapshots[chatID]
-		c.mu.RUnlock()
-		if !subscribed && chatID != activeChatID && !hasSnapshot {
-			return
-		}
-		if update.Event != nil && update.Event.Err != nil {
-			c.mu.Lock()
-			c.lastErr = update.Event.Err.Error()
-			c.mu.Unlock()
-		}
-		if update.Snapshot.Chat.ID == "" {
-			update.Snapshot.Chat.ID = chatID
-		}
-		if update.Snapshot.Chat.ID == chatID {
-			c.mu.Lock()
-			stalePassive := false
-			if existing, ok := c.snapshots[chatID]; ok && runtimeUpdateIsPassive(update) && !update.Snapshot.Chat.UpdatedAt.After(existing.Chat.UpdatedAt) {
-				stalePassive = true
-			}
-			if stalePassive {
-				c.mu.Unlock()
-			} else {
-				if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
-					if existing, ok := chatByID(c.chats, chatID); ok {
-						update.Snapshot.Chat = existing
-					} else if activeChatID == chatID {
-						update.Snapshot.Chat = c.chat
-					}
-				}
-				if activeChatID == chatID {
-					c.chat = update.Snapshot.Chat
-				}
-				if c.statuses == nil {
-					c.statuses = map[domain.ID]ChatSidebarStatus{}
-				}
-				if c.snapshots == nil {
-					c.snapshots = map[domain.ID]chat.Snapshot{}
-				}
-				c.snapshots[chatID] = update.Snapshot
-				c.statuses[chatID] = sidebarStatusFromUpdate(update)
-				found := false
-				for idx := range c.chats {
-					if c.chats[idx].ID == update.Snapshot.Chat.ID {
-						c.chats[idx] = update.Snapshot.Chat
-						found = true
-						break
-					}
-				}
-				if !found {
-					c.chats = append(c.chats, update.Snapshot.Chat)
-				}
-				c.mu.Unlock()
-			}
-		} else {
-			c.mu.Lock()
-			if c.statuses == nil {
-				c.statuses = map[domain.ID]ChatSidebarStatus{}
-			}
-			c.statuses[chatID] = sidebarStatusFromUpdate(update)
-			c.mu.Unlock()
-		}
-		c.refreshPlanningState(context.Background(), sessionID)
-		c.broadcast("chat_update", update)
-		if runtimeUpdateNeedsStateSnapshot(update) {
-			c.broadcast("snapshot", c.State())
-		}
 	}
 }
 
@@ -193,41 +118,111 @@ func (c *Controller) forwardSessionEvents(sessionID domain.ID, events <-chan ses
 			return
 		}
 		switch event.Kind {
-		case sessionpkg.EventChatAdded:
-			status, err := c.agent.PollChat(context.Background(), event.SessionID, event.Chat.ID)
-			if err != nil {
-				status = tools.ChatStatus{
-					Chat:       event.Chat,
-					State:      tools.ChatRunStateIdle,
-					Status:     string(tools.ChatRunStateIdle),
-					StatusText: string(chat.StatusIdle),
-				}
-			}
-			if err := c.addStartedChat(context.Background(), status); err != nil {
-				c.mu.Lock()
-				c.lastErr = err.Error()
-				c.mu.Unlock()
-				c.broadcast("snapshot", c.State())
-			}
+		case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived:
+			c.applySessionChatEvent(event)
+		case sessionpkg.EventPlanningChanged:
+			c.applySessionPlanningEvent(event)
+		case sessionpkg.EventTasksChanged:
+			c.applySessionTasksEvent(event)
+		case sessionpkg.EventSessionChanged:
+			c.applySessionChangedEvent(event)
 		}
 	}
 }
 
-func runtimeUpdateIsPassive(update chat.Update) bool {
-	return update.Event == nil && !update.Active && !update.QueueChanged && !update.ApprovalsChanged
+func (c *Controller) applySessionChatEvent(event sessionpkg.Event) {
+	update := event.Update
+	if update.Snapshot.Chat.ID == "" {
+		update.Snapshot = event.Snapshot
+	}
+	if update.Snapshot.Chat.ID == "" {
+		update.Snapshot.Chat = event.Chat
+	}
+	if update.Snapshot.Chat.ID == "" {
+		return
+	}
+	if update.Status == "" {
+		update.Status = update.Snapshot.Status
+	}
+	if update.StatusText == "" {
+		update.StatusText = update.Snapshot.StatusText
+	}
+	update.Active = update.Active || update.Snapshot.Active
+	chatID := update.Snapshot.Chat.ID
+	if update.Event != nil && update.Event.Err != nil {
+		c.mu.Lock()
+		c.lastErr = update.Event.Err.Error()
+		c.mu.Unlock()
+	}
+	c.mu.Lock()
+	if c.session.ID != event.SessionID {
+		c.mu.Unlock()
+		return
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[domain.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[domain.ID]ChatSidebarStatus{}
+	}
+	if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
+		if existing, ok := chatByID(c.chats, chatID); ok {
+			update.Snapshot.Chat = existing
+		}
+	}
+	c.snapshots[chatID] = update.Snapshot
+	upsertChat(&c.chats, update.Snapshot.Chat)
+	c.statuses[chatID] = sidebarStatusFromUpdate(update)
+	if c.chat.ID == chatID {
+		c.chat = update.Snapshot.Chat
+	}
+	if event.Kind == sessionpkg.EventChatArchived && c.chat.ID == chatID && event.NextChatID != "" {
+		if next, ok := chatByID(c.chats, event.NextChatID); ok {
+			c.chat = next
+			if rt := c.runtimes[next.ID]; rt != nil {
+				c.runtime = rt
+			}
+		}
+	}
+	c.mu.Unlock()
+	c.broadcast("chat_delta", update)
+	if event.Kind == sessionpkg.EventChatArchived {
+		c.mu.RLock()
+		activeChatID := c.chat.ID
+		c.mu.RUnlock()
+		c.broadcast("selection_delta", map[string]domain.ID{"active_chat_id": activeChatID})
+	}
 }
 
-func runtimeUpdateNeedsStateSnapshot(update chat.Update) bool {
-	if update.QueueChanged || update.ApprovalsChanged {
-		return true
+func (c *Controller) applySessionPlanningEvent(event sessionpkg.Event) {
+	c.mu.Lock()
+	if c.session.ID == event.SessionID {
+		c.milestone = event.Plan
+		c.todos = slices.Clone(event.Todos)
+		c.todosByRef = cloneTodosByRef(event.TodosByRef)
 	}
-	if update.Event == nil {
-		return false
+	c.mu.Unlock()
+	c.broadcast("planning_delta", map[string]any{
+		"milestones":         event.Plan,
+		"todos":              slices.Clone(event.Todos),
+		"todos_by_milestone": cloneTodosByRef(event.TodosByRef),
+	})
+}
+
+func (c *Controller) applySessionTasksEvent(event sessionpkg.Event) {
+	c.broadcast("tasks_delta", map[string]any{"tasks": slices.Clone(event.Tasks)})
+}
+
+func (c *Controller) applySessionChangedEvent(event sessionpkg.Event) {
+	c.mu.Lock()
+	if c.session.ID == event.SessionID {
+		c.session = event.Session
+		for idx := range c.sessions {
+			if c.sessions[idx].ID == event.SessionID {
+				c.sessions[idx] = event.Session
+			}
+		}
 	}
-	switch update.Event.Kind {
-	case domain.EventKindToolResult, domain.EventKindApprovalAsk, domain.EventKindApprovalReply, domain.EventKindChatTitle, domain.EventKindSessionTitle, domain.EventKindError, domain.EventKindMessageDone:
-		return true
-	default:
-		return false
-	}
+	c.mu.Unlock()
+	c.broadcast("session_delta", map[string]any{"session": event.Session})
 }

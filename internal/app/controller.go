@@ -17,7 +17,6 @@ import (
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
-	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
@@ -288,7 +287,6 @@ type Controller struct {
 	unsub                      func()
 	sessionUnsub               func()
 	runtimes                   map[domain.ID]*chat.Chat
-	unsubs                     map[domain.ID]func()
 	execUnsubs                 map[domain.ID]func()
 	snapshots                  map[domain.ID]chat.Snapshot
 	milestone                  planning.Plan
@@ -315,7 +313,6 @@ func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 		theme:      normalizeTheme(cfg.UI.Theme),
 		statuses:   map[domain.ID]ChatSidebarStatus{},
 		runtimes:   map[domain.ID]*chat.Chat{},
-		unsubs:     map[domain.ID]func(){},
 		execUnsubs: map[domain.ID]func(){},
 		snapshots:  map[domain.ID]chat.Snapshot{},
 		subs:       map[int]chan Event{},
@@ -568,12 +565,7 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 			runtimes = append(runtimes, rt)
 		}
 	}
-	unsubs := make([]func(), 0, len(c.unsubs)+len(c.execUnsubs)+2)
-	for _, unsub := range c.unsubs {
-		if unsub != nil {
-			unsubs = append(unsubs, unsub)
-		}
-	}
+	unsubs := make([]func(), 0, len(c.execUnsubs)+2)
 	for _, unsub := range c.execUnsubs {
 		if unsub != nil {
 			unsubs = append(unsubs, unsub)
@@ -668,7 +660,36 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	if err != nil {
 		return err
 	}
-	return c.loadSession(ctx, session.ID, rt.Snapshot().Chat.ID)
+	snapshot := rt.Snapshot()
+	if snapshot.Chat.ID == "" {
+		return fmt.Errorf("created chat has no id")
+	}
+	c.mu.Lock()
+	upsertChat(&c.chats, snapshot.Chat)
+	if c.runtimes == nil {
+		c.runtimes = map[domain.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[domain.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[domain.ID]ChatSidebarStatus{}
+	}
+	c.chat = snapshot.Chat
+	c.runtime = rt
+	c.runtimes[snapshot.Chat.ID] = rt
+	c.snapshots[snapshot.Chat.ID] = snapshot
+	c.statuses[snapshot.Chat.ID] = sidebarStatusFromSnapshot(snapshot)
+	c.mu.Unlock()
+	c.broadcast("chat_delta", chat.Update{
+		Snapshot:   snapshot,
+		Status:     snapshot.Status,
+		StatusText: snapshot.StatusText,
+		Context:    snapshot.Context,
+		Active:     snapshot.Active,
+	})
+	c.broadcast("selection_delta", map[string]domain.ID{"active_chat_id": snapshot.Chat.ID})
+	return nil
 }
 
 // ListChats returns the controller's live chat list for the active session.
@@ -682,14 +703,15 @@ func (c *Controller) ListChats(ctx context.Context, sessionID domain.ID) ([]tool
 		return nil, fmt.Errorf("session %s is not active", sessionID)
 	}
 	chats := slices.Clone(c.chats)
+	statuses := make(map[domain.ID]ChatSidebarStatus, len(c.statuses))
+	for id, status := range c.statuses {
+		statuses[id] = status
+	}
 	c.mu.RUnlock()
 	out := make([]tools.ChatStatus, 0, len(chats))
 	for _, item := range chats {
-		status, err := c.PollChat(ctx, sessionID, item.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, status)
+		status := statuses[item.ID]
+		out = append(out, toolStatusFromSidebar(item, status))
 	}
 	return out, nil
 }
@@ -726,7 +748,6 @@ func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, 
 			if err != nil {
 				return planning.Plan{}, err
 			}
-			c.refreshPlanningFromOwner(owner)
 			return plan, nil
 		}
 	}
@@ -740,7 +761,6 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, mile
 			if err != nil {
 				return nil, err
 			}
-			c.refreshPlanningFromOwner(owner)
 			return created, nil
 		}
 	}
@@ -757,7 +777,6 @@ func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, statu
 			if err != nil {
 				return planning.TodoItem{}, err
 			}
-			c.refreshPlanningFromOwner(owner)
 			return updated, nil
 		}
 	}
@@ -780,99 +799,10 @@ func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body stri
 			if err != nil {
 				return planning.Task{}, err
 			}
-			c.refreshPlanningFromOwner(owner)
 			return task, nil
 		}
 	}
 	return planning.Task{}, fmt.Errorf("no live session owner")
-}
-
-func (c *Controller) refreshPlanningFromOwner(owner *sessionpkg.Session) {
-	if owner == nil {
-		return
-	}
-	snapshot := owner.Snapshot()
-	c.mu.Lock()
-	if c.session.ID == snapshot.Session.ID {
-		c.milestone = snapshot.Plan
-		c.todos = snapshot.Todos
-		c.todosByRef = snapshot.TodosByRef
-	}
-	c.mu.Unlock()
-}
-
-func (c *Controller) addStartedChat(ctx context.Context, status tools.ChatStatus) error {
-	chatRecord := status.Chat
-	if chatRecord.ID == "" {
-		return fmt.Errorf("started chat has no id")
-	}
-	c.mu.RLock()
-	session := c.session
-	_, exists := c.runtimes[chatRecord.ID]
-	c.mu.RUnlock()
-	if session.ID == "" || chatRecord.SessionID != session.ID {
-		return nil
-	}
-	rt, err := c.agent.Chat(ctx, session, chatRecord)
-	if err != nil {
-		return err
-	}
-	var updates <-chan chat.Update
-	var unsub func()
-	if !exists {
-		updates, unsub = rt.Subscribe()
-	} else {
-		rt.SetSession(session)
-		rt.SetChat(chatRecord)
-	}
-	snapshot := rt.Snapshot()
-	if snapshot.Chat.ID == "" {
-		snapshot.Chat = chatRecord
-	}
-	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
-	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
-
-	c.mu.Lock()
-	if c.session.ID != session.ID {
-		c.mu.Unlock()
-		if unsub != nil {
-			unsub()
-		}
-		return nil
-	}
-	upsertChat(&c.chats, chatRecord)
-	if c.runtimes == nil {
-		c.runtimes = map[domain.ID]*chat.Chat{}
-	}
-	if c.unsubs == nil {
-		c.unsubs = map[domain.ID]func(){}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[domain.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[domain.ID]ChatSidebarStatus{}
-	}
-	c.runtimes[chatRecord.ID] = rt
-	if unsub != nil {
-		c.unsubs[chatRecord.ID] = unsub
-	}
-	c.snapshots[chatRecord.ID] = snapshot
-	c.statuses[chatRecord.ID] = sidebarStatusFromToolStatus(status)
-	c.milestone = milestone
-	c.todos = todos
-	c.todosByRef = todosByRef
-	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{chatRecord})
-	c.mu.Unlock()
-
-	if updates != nil {
-		go c.forwardRuntime(chatRecord.ID, updates)
-	}
-	for _, sub := range execSubscriptions {
-		go c.forwardExecRuntime(sub.chatID, sub.events)
-	}
-	c.broadcast("snapshot", c.State())
-	return nil
 }
 
 func (c *Controller) snapshotWithExecProcessesForSession(session domain.Session, snapshot chat.Snapshot) chat.Snapshot {
@@ -942,15 +872,15 @@ func (c *Controller) ArchiveChat(ctx context.Context, sessionID domain.ID, chatI
 		snapshot.Chat = target
 		c.snapshots[target.ID] = snapshot
 	}
-	c.mu.Unlock()
 	if archivingActive {
-		if err := c.loadSession(ctx, sessionID, nextChatID); err != nil {
-			return tools.ChatStatus{}, err
+		if next, ok := chatByID(c.chats, nextChatID); ok {
+			c.chat = next
+			if rt := c.runtimes[next.ID]; rt != nil {
+				c.runtime = rt
+			}
 		}
-	} else {
-		c.refreshChatStatuses(ctx, sessionID)
-		c.broadcast("snapshot", c.State())
 	}
+	c.mu.Unlock()
 	return status, nil
 }
 
@@ -986,7 +916,6 @@ func (c *Controller) ReorderChats(ctx context.Context, chatIDs []domain.ID) erro
 		}
 	}
 	c.mu.Unlock()
-	c.broadcast("snapshot", c.State())
 	return nil
 }
 
@@ -1101,16 +1030,7 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 	}
 	c.mu.RLock()
 	deletingSelected := c.session.ID == sessionID
-	unsubs := make([]func(), 0, len(chats))
-	for _, chatRecord := range chats {
-		if unsub := c.unsubs[chatRecord.ID]; unsub != nil {
-			unsubs = append(unsubs, unsub)
-		}
-	}
 	c.mu.RUnlock()
-	for _, unsub := range unsubs {
-		unsub()
-	}
 	if err := c.agent.DeleteSession(ctx, sessionID); err != nil {
 		return err
 	}
@@ -1136,7 +1056,6 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 	c.sessions = sessions
 	for _, chatRecord := range chats {
 		delete(c.runtimes, chatRecord.ID)
-		delete(c.unsubs, chatRecord.ID)
 		delete(c.snapshots, chatRecord.ID)
 		delete(c.statuses, chatRecord.ID)
 	}
@@ -1149,15 +1068,6 @@ func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID domain.ID,
 	for _, chatRecord := range chats {
 		if len(chatRecord.QueuedInputs) > 0 {
 			return fmt.Errorf("session has active chats and cannot be deleted")
-		}
-		if c.agent != nil {
-			status, err := c.agent.PollChat(ctx, sessionID, chatRecord.ID)
-			if err != nil {
-				return err
-			}
-			if status.Busy || status.PendingApprovals > 0 {
-				return fmt.Errorf("session has active chats and cannot be deleted")
-			}
 		}
 		c.mu.RLock()
 		rt := c.runtimes[chatRecord.ID]
@@ -1172,7 +1082,7 @@ func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID domain.ID,
 	return nil
 }
 
-// RefreshWorkspace refreshes workspace metadata and publishes a snapshot on change.
+// RefreshWorkspace scans workspace metadata and publishes an event on change.
 func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	c.mu.RLock()
 	projectRoot := c.session.ProjectRoot
@@ -1186,7 +1096,7 @@ func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	c.workspace = status
 	c.mu.Unlock()
 	if changed {
-		c.broadcast("snapshot", c.State())
+		c.broadcast("workspace_delta", map[string]any{"workspace_status": status})
 	}
 	return nil
 }
@@ -1455,9 +1365,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
-	if err := owner.Reload(ctx); err != nil {
-		return err
-	}
 	chats, err := owner.EnsureChatModels(ctx, c.cfg.DefaultProvider, c.cfg.DefaultModel)
 	if err != nil {
 		return err
@@ -1502,19 +1409,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	for id, rt := range c.runtimes {
 		existingRuntimes[id] = rt
 	}
-	existingUnsubs := make(map[domain.ID]func(), len(c.unsubs))
-	for id, unsub := range c.unsubs {
-		existingUnsubs[id] = unsub
-	}
 	c.mu.RUnlock()
 
-	type runtimeSubscription struct {
-		chatID  domain.ID
-		updates <-chan chat.Update
-	}
 	runtimes := make(map[domain.ID]*chat.Chat, len(chats))
-	unsubs := make(map[domain.ID]func(), len(chats))
-	var subscriptions []runtimeSubscription
 	for _, item := range chats {
 		item.PermissionProfile = ""
 		rt := existingRuntimes[item.ID]
@@ -1524,19 +1421,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 			if err != nil {
 				return err
 			}
-			updates, unsub := rt.Subscribe()
-			unsubs[item.ID] = unsub
-			subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
 		} else {
 			rt.SetSession(session)
 			rt.SetChat(item)
-			if unsub := existingUnsubs[item.ID]; unsub != nil {
-				unsubs[item.ID] = unsub
-			} else {
-				updates, unsub := rt.Subscribe()
-				unsubs[item.ID] = unsub
-				subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
-			}
 		}
 		runtimes[item.ID] = rt
 	}
@@ -1563,9 +1450,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if c.runtimes == nil {
 		c.runtimes = map[domain.ID]*chat.Chat{}
 	}
-	if c.unsubs == nil {
-		c.unsubs = map[domain.ID]func(){}
-	}
 	if c.execUnsubs == nil {
 		c.execUnsubs = map[domain.ID]func(){}
 	}
@@ -1588,9 +1472,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	for id, loaded := range runtimes {
 		c.runtimes[id] = loaded
 	}
-	for id, unsub := range unsubs {
-		c.unsubs[id] = unsub
-	}
 	execSubscriptions := c.ensureExecSubscriptionsLocked(chats)
 	for id, snapshot := range snapshots {
 		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
@@ -1606,9 +1487,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.lastErr = ""
 	c.mu.Unlock()
 
-	for _, sub := range subscriptions {
-		go c.forwardRuntime(sub.chatID, sub.updates)
-	}
 	for _, sub := range execSubscriptions {
 		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
@@ -1678,15 +1556,6 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID domain.ID) map[
 	if sessionID == "" {
 		return out
 	}
-	if c.agent != nil {
-		statuses, err := c.agent.ListChats(ctx, sessionID)
-		if err == nil {
-			for _, status := range statuses {
-				out[status.Chat.ID] = sidebarStatusFromToolStatus(status)
-			}
-			return out
-		}
-	}
 	if c.store == nil {
 		return out
 	}
@@ -1698,39 +1567,6 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID domain.ID) map[
 		out[item.ID] = idleChatSidebarStatus(item.ID)
 	}
 	return out
-}
-
-func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID domain.ID) bool {
-	var chats []domain.Chat
-	if c.store != nil && sessionID != "" {
-		if loaded, err := sessionstore.ListChats(ctx, c.store, sessionID); err == nil {
-			chats = loaded
-		}
-	}
-	statuses := c.chatStatuses(ctx, sessionID)
-	if status, ok := c.activeChatSidebarStatus(sessionID); ok {
-		statuses[status.ChatID] = status
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if sessionID == "" || c.session.ID != sessionID {
-		return false
-	}
-	for idx := range chats {
-		if snapshot, ok := c.snapshots[chats[idx].ID]; ok && snapshot.Chat.ID == chats[idx].ID {
-			chats[idx] = snapshot.Chat
-		}
-	}
-	changed := !chatSidebarStatusMapsEqual(c.statuses, statuses)
-	if len(chats) > 0 && !chatListsSameForSidebar(c.chats, chats) {
-		c.chats = chats
-		changed = true
-	}
-	if !changed {
-		return false
-	}
-	c.statuses = statuses
-	return true
 }
 
 func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
@@ -1745,40 +1581,33 @@ func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
 	return out
 }
 
-func (c *Controller) activeChatSidebarStatus(sessionID domain.ID) (ChatSidebarStatus, bool) {
-	c.mu.RLock()
-	rt := c.runtime
-	activeSessionID := c.session.ID
-	c.mu.RUnlock()
-	if rt == nil || activeSessionID != sessionID {
-		return ChatSidebarStatus{}, false
-	}
-	status := sidebarStatusFromSnapshot(rt.Snapshot())
-	return status, status.ChatID != ""
-}
-
 func idleChatSidebarStatus(chatID domain.ID) ChatSidebarStatus {
 	return ChatSidebarStatus{ChatID: chatID, Status: string(chat.StatusIdle), StatusText: "Idle"}
 }
 
-func sidebarStatusFromToolStatus(status tools.ChatStatus) ChatSidebarStatus {
-	value := strings.TrimSpace(status.Status)
-	if value == "" {
-		value = string(status.State)
+func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) tools.ChatStatus {
+	state := tools.ChatRunStateIdle
+	switch tools.ChatRunState(status.Status) {
+	case tools.ChatRunStateRunning, tools.ChatRunStateWaitingApproval, tools.ChatRunStateCompleted, tools.ChatRunStateFailed, tools.ChatRunStateCancelled:
+		state = tools.ChatRunState(status.Status)
+	default:
+		if status.Busy {
+			state = tools.ChatRunStateRunning
+		}
 	}
-	if value == "" {
-		value = string(chat.StatusIdle)
+	if status.PendingApprovals > 0 {
+		state = tools.ChatRunStateWaitingApproval
 	}
-	text := strings.TrimSpace(status.StatusText)
-	if text == "" {
-		text = chatSidebarStatusText(value)
+	if status.Status == "" {
+		state = tools.ChatRunStateIdle
 	}
-	return ChatSidebarStatus{
-		ChatID:           status.Chat.ID,
-		Status:           value,
+	return tools.ChatStatus{
+		Chat:             chatRecord,
+		State:            state,
+		Status:           string(state),
 		Busy:             status.Busy,
 		PendingApprovals: status.PendingApprovals,
-		StatusText:       text,
+		StatusText:       status.StatusText,
 		LastError:        status.LastError,
 	}
 }
@@ -1844,38 +1673,6 @@ func hasChatSidebarStatus(statuses []ChatSidebarStatus, chatID domain.ID) bool {
 	return false
 }
 
-func chatSidebarStatusMapsEqual(left, right map[domain.ID]ChatSidebarStatus) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for id, leftStatus := range left {
-		if right[id] != leftStatus {
-			return false
-		}
-	}
-	return true
-}
-
-func chatListsSameForSidebar(left, right []domain.Chat) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx].ID != right[idx].ID ||
-			left[idx].ParentChatID != right[idx].ParentChatID ||
-			left[idx].Title != right[idx].Title ||
-			left[idx].WorkflowRole != right[idx].WorkflowRole ||
-			left[idx].ActiveMilestoneRef != right[idx].ActiveMilestoneRef ||
-			left[idx].AssignedTodoBucketRef != right[idx].AssignedTodoBucketRef ||
-			left[idx].AssignedTodoRef != right[idx].AssignedTodoRef ||
-			left[idx].LastMessage != right[idx].LastMessage ||
-			!left[idx].UpdatedAt.Equal(right[idx].UpdatedAt) {
-			return false
-		}
-	}
-	return true
-}
-
 func chatSidebarStatusText(status string) string {
 	switch status {
 	case string(chat.StatusWaitingLLM):
@@ -1901,21 +1698,6 @@ func chatSidebarStatusText(status string) string {
 	default:
 		return "Idle"
 	}
-}
-
-func (c *Controller) refreshPlanningState(ctx context.Context, sessionID domain.ID) {
-	if sessionID == "" {
-		return
-	}
-	milestone, todos, todosByRef := c.planningState(ctx, sessionID)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.session.ID != sessionID {
-		return
-	}
-	c.milestone = milestone
-	c.todos = todos
-	c.todosByRef = todosByRef
 }
 
 func (c *Controller) currentRuntime() *chat.Chat {

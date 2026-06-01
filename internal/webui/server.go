@@ -493,7 +493,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.RefreshWorkspace(ctx); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"started": true}, nil
 	case "switch_chat":
 		var in struct {
 			ChatID domain.ID `json:"chat_id"`
@@ -513,7 +513,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.NewChat(ctx, in.Title); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"created": true}, nil
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
 	case "switch_session":
@@ -576,7 +576,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.DeleteChat(ctx, in.ChatID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"archived": true}, nil
 	case "reorder_chats":
 		var in struct {
 			ChatIDs []domain.ID `json:"chat_ids"`
@@ -587,7 +587,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.ReorderChats(ctx, in.ChatIDs); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"reordered": true}, nil
 	case "approve":
 		var in struct {
 			ToolCallID string `json:"tool_call_id"`
@@ -654,7 +654,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SetModel(ctx, in.ProviderID, in.ModelID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"updated": true}, nil
 	case "provider_state":
 		return s.controller.Providers(), nil
 	case "new_provider_draft":
@@ -705,7 +705,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SetAccessSettings(ctx, in); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return map[string]bool{"updated": true}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
@@ -885,7 +885,7 @@ type chatDelta struct {
 
 func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
 	switch event.Type {
-	case "chat_update":
+	case "chat_delta":
 		update, ok := event.Payload.(chat.Update)
 		if !ok {
 			return app.Event{}, false

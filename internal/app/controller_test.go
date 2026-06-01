@@ -24,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -168,12 +169,6 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 		ctrl.unsub()
 		ctrl.unsub = nil
 	}
-	for _, unsub := range ctrl.unsubs {
-		if unsub != nil {
-			unsub()
-		}
-	}
-	ctrl.unsubs = nil
 	ctrl.runtime = nil
 	ctrl.mu.Unlock()
 	updated := state.Snapshot
@@ -185,7 +180,7 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	updates <- chat.Update{Snapshot: updated, Status: chat.StatusRunningTools, StatusText: "Running tools", Active: true}
 	close(updates)
 
-	ctrl.forwardRuntime(state.ActiveChatID, updates)
+	ctrl.applySessionChatEvent(sessionpkg.Event{Kind: sessionpkg.EventChatChanged, SessionID: state.Session.ID, Chat: updated.Chat, Snapshot: updated, Update: <-updates})
 
 	got := ctrl.State()
 	var listed string
@@ -236,7 +231,7 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	updates <- chat.Update{Snapshot: updated, Status: chat.StatusWaitingApproval, StatusText: "Waiting for approval", Active: true}
 	close(updates)
 
-	ctrl.forwardRuntime(side, updates)
+	ctrl.applySessionChatEvent(sessionpkg.Event{Kind: sessionpkg.EventChatChanged, SessionID: ctrl.State().Session.ID, Chat: updated.Chat, Snapshot: updated, Update: <-updates})
 
 	got := ctrl.State()
 	if got.ActiveChatID != first {
@@ -741,7 +736,7 @@ func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 	for {
 		select {
 		case event := <-events:
-			if event.Type != "snapshot" && event.Type != "chat_update" {
+			if event.Type != "snapshot" && event.Type != "chat_delta" && event.Type != "session_delta" {
 				continue
 			}
 			if got := ctrl.State().Access.Settings.Network; got {
@@ -1301,7 +1296,6 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
-	<-events
 	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1312,11 +1306,11 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	for {
 		select {
 		case event := <-events:
-			if event.Type == "snapshot" {
+			if event.Type == "workspace_delta" {
 				return
 			}
 		case <-deadline:
-			t.Fatal("expected workspace refresh snapshot")
+			t.Fatal("expected workspace delta")
 		}
 	}
 }
