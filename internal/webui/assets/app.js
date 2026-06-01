@@ -585,14 +585,14 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
           this.$watch('draft', () => this.writeComposerDraft());
           this.$watch('composerAttachments', () => this.writeComposerDraft());
           this.connect();
-          window.addEventListener('resize', () => { this.resizeComposer(); this.reportClientStateSoon(); });
+          window.addEventListener('resize', () => { this.resizeComposer(); if (!this.isMobileLayout()) this.mobileSidebarOpen = false; this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
@@ -604,6 +604,11 @@
         handleGlobalKeydown(event) {
           if (!event || event.defaultPrevented || event.isComposing) return;
           if (event.key === 'Escape') {
+            if (this.mobileSidebarOpen) {
+              event.preventDefault();
+              this.closeMobileSidebar();
+              return;
+            }
             if (this.modalOpenName()) return;
             if (!this.chatInterruptible()) return;
             event.preventDefault();
@@ -617,6 +622,7 @@
         shouldFocusComposerForKey(event) {
           if (!event || event.ctrlKey || event.metaKey || event.altKey) return false;
           if (event.key.length !== 1) return false;
+          if (this.mobileSidebarOpen) return false;
           if (this.modalOpenName()) return false;
           if (this.textEntryActive()) return false;
           return !!this.$refs?.composerInput;
@@ -706,6 +712,9 @@
           }
         },
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
+        isMobileLayout() { return (window.innerWidth || 0) <= 900; },
+        openMobileSidebar() { this.mobileSidebarOpen = true; this.reportClientStateSoon(); },
+        closeMobileSidebar() { this.mobileSidebarOpen = false; this.reportClientStateSoon(); },
         sidebarWidth() {
           const width = window.innerWidth || 1440;
           return Math.round(Math.max(280, Math.min(640, width * this.sidebarRatio)));
@@ -1702,7 +1711,7 @@
           if (code.includes('M') || code.includes('R') || code.includes('C')) return 'text-bg-warning';
           return 'text-bg-secondary';
         },
-        refreshWorkspace() { this.rpc('refresh_workspace', {}); },
+        refreshWorkspace() { this.rpc('refresh_workspace', {}); this.closeMobileSidebar(); },
         toolIcon(kind) {
           if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
@@ -1999,8 +2008,8 @@
           if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
           return false;
         },
-        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).catch(err => this.showToast(err.message)); },
+        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.closeMobileSidebar(); }); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(() => this.closeMobileSidebar()).catch(err => this.showToast(err.message)); },
         startChatDrag(ev, id) {
           if (!id) return;
           this.dragChatID = id;
@@ -2071,7 +2080,7 @@
         openAccessDialog() {
           this.accessDraft = this.cloneAccessSettings(this.activeAccessSettings());
           this.showAccess = true;
-          this.showModels = false; this.showSettings = false; this.reportClientStateSoon();
+          this.showModels = false; this.showSettings = false; this.closeMobileSidebar(); this.reportClientStateSoon();
         },
         closeAccessDialog() { this.showAccess = false; this.reportClientStateSoon(); },
         applyAccessPreset(settings) { this.accessDraft = this.cloneAccessSettings(settings); },
@@ -2089,6 +2098,7 @@
         },
         openModelDialog() {
           this.showModels = true; this.modelQuery = ''; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.closeMobileSidebar();
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.refreshModelOptions();

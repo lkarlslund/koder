@@ -1003,6 +1003,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
 	}
+	if !strings.Contains(fullPage, `mobile-sidebar-toggle`) ||
+		!strings.Contains(fullPage, `mobileSidebarOpen`) ||
+		!strings.Contains(fullPage, `mobile-sidebar-backdrop`) ||
+		!strings.Contains(fullPage, `.sidebar.mobile-open`) {
+		t.Fatalf("expected mobile sidebar to open as an overlay")
+	}
 	if !strings.Contains(fullPage, `topbar-workspace`) || strings.Contains(fullPage, `class="sidebar-label">Workspace`) {
 		t.Fatalf("expected workspace to render in the top status bar instead of the sidebar")
 	}

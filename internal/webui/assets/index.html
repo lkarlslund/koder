@@ -28,6 +28,7 @@
       <div class="d-flex align-items-center gap-2">
         <button class="btn btn-sm btn-outline-warning restart-needed" x-show="restartNeeded()" :disabled="restartRequested" title="New koder build is ready; restart koder" @click="requestRestart()" style="display: none;"><i class="bi bi-arrow-clockwise"></i></button>
         <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
+        <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
@@ -114,7 +115,13 @@
 
     <div class="sidebar-resizer" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
-    <aside class="sidebar p-3 bg-body-tertiary">
+    <div class="mobile-sidebar-backdrop" x-show="mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
+
+    <aside class="sidebar p-3 bg-body-tertiary" :class="{'mobile-open': mobileSidebarOpen}">
+      <div class="mobile-sidebar-header">
+        <span class="fw-semibold">Sidebar</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close sidebar" @click="closeMobileSidebar()"><i class="bi bi-x-lg"></i></button>
+      </div>
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-label">Chat</span>
