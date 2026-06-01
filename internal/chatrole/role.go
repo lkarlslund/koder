@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 const (
@@ -22,12 +23,12 @@ type Spec struct {
 	Name         domain.WorkflowRole
 	DisplayName  string
 	SystemPrompt string
-	AllowTools   map[domain.ToolKind]bool
-	DenyTools    map[domain.ToolKind]bool
+	AllowTools   map[toolkind.Kind]bool
+	DenyTools    map[toolkind.Kind]bool
 }
 
 // AllowsTool reports whether this role may expose or execute a tool.
-func (s Spec) AllowsTool(kind domain.ToolKind) bool {
+func (s Spec) AllowsTool(kind toolkind.Kind) bool {
 	if !s.Registered {
 		return false
 	}
@@ -62,11 +63,11 @@ Focus only on the assigned milestone and todo bucket.
 - Keep todo item status updated as you progress.
 			- Do not rewrite unrelated milestones or todo buckets.`),
 			DenyTools: toolSet(
-				domain.ToolKindChatStart,
-				domain.ToolKindChatPoll,
-				domain.ToolKindMilestoneAdd,
-				domain.ToolKindMilestonePlan,
-				domain.ToolKindMilestoneWrite,
+				toolkind.ToolKindChatStart,
+				toolkind.ToolKindChatPoll,
+				toolkind.ToolKindMilestoneAdd,
+				toolkind.ToolKindMilestonePlan,
+				toolkind.ToolKindMilestoneWrite,
 			),
 		},
 	}}
@@ -97,12 +98,12 @@ func SpecFor(role domain.WorkflowRole) Spec {
 }
 
 // AllowsTool reports whether role may expose or execute kind.
-func AllowsTool(role domain.WorkflowRole, kind domain.ToolKind) bool {
+func AllowsTool(role domain.WorkflowRole, kind toolkind.Kind) bool {
 	return SpecFor(role).AllowsTool(kind)
 }
 
 // CheckToolAllowed returns an error when role cannot execute kind.
-func CheckToolAllowed(role domain.WorkflowRole, kind domain.ToolKind) error {
+func CheckToolAllowed(role domain.WorkflowRole, kind toolkind.Kind) error {
 	if AllowsTool(role, kind) {
 		return nil
 	}
@@ -140,8 +141,8 @@ You may discuss, ask clarifying questions, manage milestones, decompose work inl
 	}
 }
 
-func toolSet(kinds ...domain.ToolKind) map[domain.ToolKind]bool {
-	out := make(map[domain.ToolKind]bool, len(kinds))
+func toolSet(kinds ...toolkind.Kind) map[toolkind.Kind]bool {
+	out := make(map[toolkind.Kind]bool, len(kinds))
 	for _, kind := range kinds {
 		out[kind] = true
 	}

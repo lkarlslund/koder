@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 const (
@@ -39,7 +39,7 @@ type Profile struct {
 
 // Rule grants, asks, or denies a tool matching a pattern.
 type Rule struct {
-	Tool    domain.ToolKind               `toml:"tool"`
+	Tool    toolkind.Kind                 `toml:"tool"`
 	Pattern string                        `toml:"pattern"`
 	Action  accesssettings.PermissionMode `toml:"action"`
 }
@@ -71,7 +71,7 @@ type ProfileOption struct {
 
 // Request describes the permission-sensitive operation being evaluated.
 type Request struct {
-	Tool           domain.ToolKind
+	Tool           toolkind.Kind
 	Access         AccessKind
 	Pattern        string
 	ProjectRoot    string
@@ -352,7 +352,7 @@ func (req Request) targetsProjectOnly() bool {
 	return true
 }
 
-func toolMatches(ruleTool, reqTool domain.ToolKind) bool {
+func toolMatches(ruleTool, reqTool toolkind.Kind) bool {
 	if strings.TrimSpace(ruleTool.String()) == "" {
 		return false
 	}

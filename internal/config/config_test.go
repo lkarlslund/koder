@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
@@ -85,11 +84,11 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 func TestApplyDefaultsPrunesRemovedToolDefaults(t *testing.T) {
 	cfg := Default()
 	// Use a tool kind value that doesn't exist in the enum (value 255)
-	cfg.ToolDefaults[domain.ToolKind(255)] = true
+	cfg.ToolDefaults[toolkind.Kind(255)] = true
 
 	cfg.applyDefaults()
 
-	if _, ok := cfg.ToolDefaults[domain.ToolKind(255)]; ok {
+	if _, ok := cfg.ToolDefaults[toolkind.Kind(255)]; ok {
 		t.Fatalf("expected removed tool default to be pruned: %#v", cfg.ToolDefaults)
 	}
 }
@@ -121,19 +120,19 @@ milestone_update_item = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []domain.ToolKind{
-		domain.ToolKindBash,
-		domain.ToolKindExecWriteStdin,
-		domain.ToolKindExecCleanup,
-		domain.ToolKindMilestoneAdd,
-		domain.ToolKindMilestonePlan,
-		domain.ToolKindMilestoneUpdate,
+	for _, kind := range []toolkind.Kind{
+		toolkind.ToolKindBash,
+		toolkind.ToolKindExecWriteStdin,
+		toolkind.ToolKindExecCleanup,
+		toolkind.ToolKindMilestoneAdd,
+		toolkind.ToolKindMilestonePlan,
+		toolkind.ToolKindMilestoneUpdate,
 	} {
 		if cfg.ToolDefaults[kind] {
 			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.ToolDefaults)
 		}
 	}
-	if !cfg.ToolDefaults[domain.ToolKindFileRead] {
+	if !cfg.ToolDefaults[toolkind.ToolKindFileRead] {
 		t.Fatal("expected missing tool default to be backfilled enabled")
 	}
 }
@@ -162,7 +161,7 @@ file_read = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ToolDefaults[domain.ToolKindFileRead] {
+	if cfg.ToolDefaults[toolkind.ToolKindFileRead] {
 		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.ToolDefaults)
 	}
 	for _, kind := range toolkind.KindValues() {
@@ -321,8 +320,8 @@ func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
 			Profiles: map[string]PermissionProfile{
 				"default": {
 					Rules: []PermissionRule{
-						{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
-						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+						{Tool: toolkind.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+						{Tool: toolkind.ToolKindWebSearch, Pattern: "*", Action: accesssettings.PermissionModeAsk},
 					},
 				},
 			},
@@ -365,10 +364,10 @@ bash = "allow"
 	}
 	profile := cfg.Permissions.Profiles["default"]
 	for _, rule := range profile.Rules {
-		if rule.Tool == domain.ToolKindFileRead && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAllow {
+		if rule.Tool == toolkind.ToolKindFileRead && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAllow {
 			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
 		}
-		if rule.Tool == domain.ToolKindBash && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAsk {
+		if rule.Tool == toolkind.ToolKindBash && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAsk {
 			t.Fatalf("expected legacy bash field to be ignored, got %#v", rule)
 		}
 	}

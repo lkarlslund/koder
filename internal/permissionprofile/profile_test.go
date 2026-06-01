@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 func testRules() Rules {
@@ -14,14 +14,14 @@ func testRules() Rules {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
-					{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
-					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: toolkind.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: toolkind.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: toolkind.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeAsk},
 				},
 			},
 			"readonly": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: toolkind.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
 				},
 			},
 		},
@@ -31,16 +31,16 @@ func testRules() Rules {
 func TestEvaluateDefaultProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "README.md"}); got.Mode != accesssettings.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: toolkind.ToolKindFileRead, Pattern: "README.md"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected read mode: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != accesssettings.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: toolkind.ToolKindBash, Pattern: "ls"}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "internal/domain/types.go"}); got.Mode != accesssettings.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: toolkind.ToolKindFileRead, Pattern: "internal/domain/types.go"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected read mode for nested path: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != accesssettings.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: toolkind.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode for path-containing command: %s", got)
 	}
 }
@@ -48,14 +48,14 @@ func TestEvaluateDefaultProfile(t *testing.T) {
 func TestEvaluateReadonlyProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindFileWrite, Pattern: "main.go"}); got.Mode != accesssettings.PermissionModeDeny {
+	if got := Evaluate(cfg, "readonly", nil, Request{Tool: toolkind.ToolKindFileWrite, Pattern: "main.go"}); got.Mode != accesssettings.PermissionModeDeny {
 		t.Fatalf("unexpected write mode: %s", got)
 	}
 }
 
 func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
 	cfg := testRules()
-	got := Evaluate(cfg, ProfileFullAccess, nil, Request{Tool: domain.ToolKindBash, Pattern: "pwd"})
+	got := Evaluate(cfg, ProfileFullAccess, nil, Request{Tool: toolkind.ToolKindBash, Pattern: "pwd"})
 	if got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected mode: %s", got.Mode)
 	}
@@ -64,10 +64,10 @@ func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
 func TestEvaluateSessionOverridesTakePrecedence(t *testing.T) {
 	cfg := testRules()
 	got := Evaluate(cfg, ProfileAsk, []accesssettings.PermissionOverride{{
-		Tool:    domain.ToolKindBash,
+		Tool:    toolkind.ToolKindBash,
 		Pattern: "git *",
 		Action:  accesssettings.PermissionModeAllow,
-	}}, Request{Tool: domain.ToolKindBash, Pattern: "git status"})
+	}}, Request{Tool: toolkind.ToolKindBash, Pattern: "git status"})
 	if got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("expected override allow, got %s", got.Mode)
 	}
@@ -79,16 +79,16 @@ func TestEvaluateProfileMatchesToolWildcards(t *testing.T) {
 		Profiles: map[string]Profile{
 			"custom": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: accesssettings.PermissionModeAsk},
-					{Tool: domain.ToolKindMCP, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: toolkind.ToolKindExecCommand, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: toolkind.ToolKindMCP, Pattern: "*", Action: accesssettings.PermissionModeAllow},
 				},
 			},
 		},
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindExecCommand, Pattern: "tty"}); got.Mode != accesssettings.PermissionModeAsk {
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: toolkind.ToolKindExecCommand, Pattern: "tty"}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("expected tool ask, got %s", got.Mode)
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindMCP, Pattern: "anything"}); got.Mode != accesssettings.PermissionModeAllow {
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: toolkind.ToolKindMCP, Pattern: "anything"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("expected custom tool allow, got %s", got.Mode)
 	}
 }
@@ -114,9 +114,9 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
-					{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
-					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeDeny},
+					{Tool: toolkind.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: toolkind.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: toolkind.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeDeny},
 				},
 			},
 		},

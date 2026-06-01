@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/toolkind"
 	toml "github.com/pelletier/go-toml/v2"
@@ -67,7 +66,7 @@ type PermissionRules = permissionprofile.Rules
 type PermissionProfile = permissionprofile.Profile
 type PermissionRule = permissionprofile.Rule
 
-type ToolDefaults map[domain.ToolKind]bool
+type ToolDefaults map[toolkind.Kind]bool
 
 type Config struct {
 	DefaultProvider           string                  `toml:"default_provider"`
@@ -518,7 +517,7 @@ func cloneToolDefaults(src ToolDefaults) ToolDefaults {
 }
 
 func pruneToolDefaults(defaults ToolDefaults) {
-	known := make(map[domain.ToolKind]struct{}, len(toolkind.KindValues()))
+	known := make(map[toolkind.Kind]struct{}, len(toolkind.KindValues()))
 	for _, kind := range toolkind.KindValues() {
 		known[kind] = struct{}{}
 	}
@@ -529,14 +528,14 @@ func pruneToolDefaults(defaults ToolDefaults) {
 	}
 }
 
-var toolDefaultKindAliases = map[string]domain.ToolKind{
-	"execcleanupbackground":     domain.ToolKindExecCleanup,
-	"milestoneadditems":         domain.ToolKindMilestoneAdd,
-	"milestoneplananddecompose": domain.ToolKindMilestonePlan,
-	"milestoneupdateitem":       domain.ToolKindMilestoneUpdate,
+var toolDefaultKindAliases = map[string]toolkind.Kind{
+	"execcleanupbackground":     toolkind.ToolKindExecCleanup,
+	"milestoneadditems":         toolkind.ToolKindMilestoneAdd,
+	"milestoneplananddecompose": toolkind.ToolKindMilestonePlan,
+	"milestoneupdateitem":       toolkind.ToolKindMilestoneUpdate,
 }
 
-func parseToolDefaultKind(name string) (domain.ToolKind, error) {
+func parseToolDefaultKind(name string) (toolkind.Kind, error) {
 	if kind, err := toolkind.KindString(name); err == nil {
 		return kind, nil
 	}
