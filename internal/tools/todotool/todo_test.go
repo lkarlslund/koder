@@ -105,7 +105,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
-		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "InProgress"},
+		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "in_progress"},
 	}); err != nil {
 		t.Fatal(err)
 	}

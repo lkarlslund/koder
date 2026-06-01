@@ -196,7 +196,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			if todos[idx].ID != id {
 				continue
 			}
-			todoStatus, err := domain.TodoStatusString(req.Args["status"])
+			todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
 			if err != nil {
 				return tools.Result{}, fmt.Errorf("invalid todo status %q", req.Args["status"])
 			}
@@ -315,7 +315,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 		if err != nil {
 			return nil, err
 		}
-		todoStatus, err := domain.TodoStatusString(req.Args["status"])
+		todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
 		if err != nil {
 			return nil, fmt.Errorf("invalid todo status %q", req.Args["status"])
 		}

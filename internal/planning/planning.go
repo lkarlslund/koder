@@ -370,7 +370,9 @@ func ParseTodoID(raw string) (domain.ID, error) {
 }
 
 func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
-	status, err := domain.TodoStatusString(strings.TrimSpace(raw))
+	value := strings.TrimSpace(raw)
+	value = strings.ReplaceAll(value, "_", "")
+	status, err := domain.TodoStatusString(value)
 	if err != nil {
 		return 0, fmt.Errorf("invalid todo status %q", raw)
 	}
