@@ -1,9 +1,12 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +18,7 @@ type FileStatus struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
+	Files     int    `json:"files,omitempty"`
 }
 
 type Status struct {
@@ -59,7 +63,8 @@ func Snapshot(ctx context.Context, dir string) (Status, error) {
 		numstatOutput = nil
 	}
 
-	parsed := parseStatus(string(statusOutput), string(numstatOutput))
+	untrackedStats := untrackedFileStats(ctx, projectRoot)
+	parsed := parseStatus(string(statusOutput), string(numstatOutput), untrackedStats)
 	parsed.ProjectRoot = status.ProjectRoot
 	parsed.AgentsChecksum = status.AgentsChecksum
 	parsed.AgentsFiles = status.AgentsFiles
@@ -67,7 +72,7 @@ func Snapshot(ctx context.Context, dir string) (Status, error) {
 	return parsed, nil
 }
 
-func parseStatus(raw string, numstatRaw string) Status {
+func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileStatus) Status {
 	status := Status{Available: true}
 	numstats := parseNumstat(numstatRaw)
 	for _, line := range strings.Split(raw, "\n") {
@@ -84,6 +89,12 @@ func parseStatus(raw string, numstatRaw string) Status {
 			file.Additions = stat.Additions
 			file.Deletions = stat.Deletions
 		}
+		if file.Code == "??" {
+			if stat, ok := untrackedStatForPath(file.Path, untrackedStats); ok {
+				file.Additions = stat.Additions
+				file.Files = stat.Files
+			}
+		}
 		status.Files = append(status.Files, file)
 		switch {
 		case file.Code == "??":
@@ -97,6 +108,61 @@ func parseStatus(raw string, numstatRaw string) Status {
 		}
 	}
 	return status
+}
+
+func untrackedFileStats(ctx context.Context, root string) map[string]FileStatus {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "-z")
+	cmd.Dir = root
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	stats := make(map[string]FileStatus)
+	for _, raw := range bytes.Split(output, []byte{0}) {
+		path := strings.TrimSpace(string(raw))
+		if path == "" {
+			continue
+		}
+		additions := countFileLines(filepath.Join(root, filepath.FromSlash(path)))
+		stats[path] = FileStatus{Path: path, Additions: additions, Files: 1}
+	}
+	return stats
+}
+
+func untrackedStatForPath(path string, stats map[string]FileStatus) (FileStatus, bool) {
+	if len(stats) == 0 {
+		return FileStatus{}, false
+	}
+	path = strings.TrimSpace(path)
+	if stat, ok := stats[path]; ok {
+		return stat, true
+	}
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	var out FileStatus
+	for _, stat := range stats {
+		if strings.HasPrefix(stat.Path, prefix) {
+			out.Path = path
+			out.Additions += stat.Additions
+			out.Files += stat.Files
+		}
+	}
+	return out, out.Files > 0
+}
+
+func countFileLines(path string) int {
+	info, err := os.Lstat(path)
+	if err != nil || info.IsDir() {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return 0
+	}
+	lines := bytes.Count(data, []byte{'\n'})
+	if data[len(data)-1] != '\n' {
+		lines++
+	}
+	return lines
 }
 
 func parseNumstat(raw string) map[string]FileStatus {

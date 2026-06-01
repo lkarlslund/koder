@@ -258,9 +258,10 @@
                 <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">
                   <div class="d-flex align-items-start justify-content-between gap-2">
                     <span class="text-break"><span class="badge me-1" :class="gitCodeBadge(file)" x-text="gitFileCode(file)"></span><span x-text="file.path || file.Path"></span></span>
-                    <span class="small text-nowrap" x-show="gitAdditions(file) || gitDeletions(file)">
-                      <span class="diff-add" x-text="'+' + gitAdditions(file)"></span>
-                      <span class="diff-del ms-1" x-text="'-' + gitDeletions(file)"></span>
+                    <span class="small text-nowrap" x-show="gitFileStatsText(file)">
+                      <span class="diff-add" x-show="gitAdditions(file)" x-text="'+' + gitAdditions(file)"></span>
+                      <span class="diff-del ms-1" x-show="gitDeletions(file)" x-text="'-' + gitDeletions(file)"></span>
+                      <span class="text-secondary ms-1" x-show="gitFileCount(file) > 1" x-text="gitFileCount(file) + ' files'"></span>
                     </span>
                   </div>
                 </div>

@@ -11,7 +11,9 @@ import (
 func TestParseStatus(t *testing.T) {
 	raw := "## main...origin/main [ahead 1]\n M internal/webui/server.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
 	numstat := "12\t4\tinternal/webui/server.go\n7\t0\tinternal/workspace/status.go\n0\t9\told.txt\n"
-	got := parseStatus(raw, numstat)
+	got := parseStatus(raw, numstat, map[string]FileStatus{
+		"new.txt": {Path: "new.txt", Additions: 3, Files: 1},
+	})
 
 	if got.Branch != "main" {
 		t.Fatalf("unexpected branch: %q", got.Branch)
@@ -34,8 +36,22 @@ func TestParseStatus(t *testing.T) {
 	if got.Files[0].Additions != 12 || got.Files[0].Deletions != 4 {
 		t.Fatalf("unexpected diff stats: %#v", got.Files[0])
 	}
-	if got.Files[3].Additions != 0 || got.Files[3].Deletions != 0 {
+	if got.Files[3].Additions != 3 || got.Files[3].Deletions != 0 || got.Files[3].Files != 1 {
 		t.Fatalf("unexpected untracked diff stats: %#v", got.Files[3])
+	}
+}
+
+func TestParseStatusAggregatesUntrackedDirectoryStats(t *testing.T) {
+	raw := "## main\n?? pkg/e2e/\n"
+	got := parseStatus(raw, "", map[string]FileStatus{
+		"pkg/e2e/a.go": {Path: "pkg/e2e/a.go", Additions: 10, Files: 1},
+		"pkg/e2e/b.go": {Path: "pkg/e2e/b.go", Additions: 20, Files: 1},
+	})
+	if len(got.Files) != 1 {
+		t.Fatalf("unexpected files: %#v", got.Files)
+	}
+	if got.Files[0].Additions != 30 || got.Files[0].Files != 2 {
+		t.Fatalf("expected aggregated untracked directory stats, got %#v", got.Files[0])
 	}
 }
 

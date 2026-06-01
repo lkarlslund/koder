@@ -1265,6 +1265,17 @@
         gitFileCode(file) { return file.code || file.Code || ''; },
         gitAdditions(file) { return file.additions ?? file.Additions ?? 0; },
         gitDeletions(file) { return file.deletions ?? file.Deletions ?? 0; },
+        gitFileCount(file) { return file.files ?? file.Files ?? 0; },
+        gitFileStatsText(file) {
+          const parts = [];
+          const additions = this.gitAdditions(file);
+          const deletions = this.gitDeletions(file);
+          const files = this.gitFileCount(file);
+          if (additions) parts.push('+' + additions);
+          if (deletions) parts.push('-' + deletions);
+          if (files > 1) parts.push(files + ' files');
+          return parts.join(' ');
+        },
         gitFileClass(file) {
           const code = this.gitFileCode(file);
           if (code === '??') return 'git-untracked';
