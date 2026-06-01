@@ -856,6 +856,31 @@ func (r *Chat) SetChat(chat domain.Chat) {
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
 }
 
+// Archive hides this chat from normal session lists while preserving its history.
+func (r *Chat) Archive(ctx context.Context) (domain.Chat, error) {
+	if r == nil {
+		return domain.Chat{}, fmt.Errorf("chat runtime is required")
+	}
+	r.mu.Lock()
+	r.chat.Archived = true
+	r.chat.UpdatedAt = time.Now().UTC()
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.Archived = true
+			chat.UpdatedAt = r.chat.UpdatedAt
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if err := chatstore.UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return domain.Chat{}, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+	return chatRecord, nil
+}
+
 func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolCallID string, args map[string]string, result domain.ToolResult) (domain.TimelineItem, error) {
 	if r == nil {
 		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")

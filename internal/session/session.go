@@ -397,6 +397,7 @@ func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.Chat
 		return tools.ChatStatus{}, "", fmt.Errorf("chat id is required")
 	}
 	s.mu.RLock()
+	session := s.session
 	target, ok := chatByID(s.chats, chatID)
 	nextChatID := fallbackVisibleChatID(s.chats, target)
 	if !ok {
@@ -407,19 +408,29 @@ func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.Chat
 	if nextChatID == "" {
 		return tools.ChatStatus{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
 	}
-	target.Archived = true
-	target.UpdatedAt = time.Now().UTC()
-	if err := chatstore.UpdateChat(ctx, s.store, target); err != nil {
+	s.mu.Lock()
+	rt := s.runtimes[target.ID]
+	s.mu.Unlock()
+	if rt == nil {
+		loaded, err := s.chatLoader(ctx, session, target)
+		if err != nil {
+			return tools.ChatStatus{}, "", err
+		}
+		s.mu.Lock()
+		s.trackRuntimeLocked(target.ID, loaded)
+		rt = loaded
+		s.mu.Unlock()
+	}
+	archived, err := rt.Archive(ctx)
+	if err != nil {
 		return tools.ChatStatus{}, "", err
 	}
+	target = archived
 	s.mu.Lock()
 	upsertSessionChatLocked(&s.chats, target)
-	if rt := s.runtimes[target.ID]; rt != nil {
-		rt.SetChat(target)
-	}
 	status := s.chatStatusLocked(target.ID)
-	snapshot := chatpkg.Snapshot{Session: s.session, Chat: target, Status: chatpkg.StatusIdle, StatusText: "Archived"}
-	if rt := s.runtimes[target.ID]; rt != nil {
+	snapshot := chatpkg.Snapshot{Session: session, Chat: target, Status: chatpkg.StatusIdle, StatusText: "Archived"}
+	if rt != nil {
 		snapshot = rt.Snapshot()
 		snapshot.Chat = target
 		snapshot.StatusText = "Archived"

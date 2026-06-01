@@ -832,6 +832,41 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	}
 }
 
+func TestArchiveChatPersistsThroughEngineControl(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := sessionstore.CreateChat(context.Background(), st, session.ID, "child", chatrole.Execution, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, nil)
+	status, err := engine.ArchiveChat(context.Background(), session.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Chat.Archived {
+		t.Fatalf("expected archived status, got %#v", status.Chat)
+	}
+	reloaded, err := chatstore.GetChat(context.Background(), st, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.Archived {
+		t.Fatalf("expected persisted archive flag, got %#v", reloaded)
+	}
+}
+
 func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
