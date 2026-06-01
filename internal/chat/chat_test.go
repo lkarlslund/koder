@@ -1504,7 +1504,7 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 	close(runner.events)
 }
 
-func TestRuntimeInterruptAndClosePersistsRestartReason(t *testing.T) {
+func TestRuntimeInterruptAndCloseDoesNotPersistNoticeForStreamingInterrupt(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	runner := &cancelAwareRunner{
@@ -1547,12 +1547,69 @@ func TestRuntimeInterruptAndClosePersistsRestartReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(timeline) == 0 {
-		t.Fatal("expected persisted interruption notice")
+	for _, item := range timeline {
+		notice, ok := item.Content.(domain.Notice)
+		if ok && notice.Kind == domain.NoticeKindInterrupted {
+			t.Fatalf("did not expect interruption notice for streaming interrupt, got %#v", notice)
+		}
 	}
-	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
-	if !ok || notice.Kind != domain.NoticeKindInterrupted || notice.Reason != domain.NoticeReasonProcessRestart {
-		t.Fatalf("expected restart interruption notice, got %#v", timeline[len(timeline)-1].Content)
+}
+
+func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.DrainAndCloseWithInterruptReason(context.Background(), domain.NoticeReasonProcessRestart)
+	}()
+
+	select {
+	case <-runCtx.Done():
+		t.Fatal("expected restart drain to keep streaming context alive")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(runner.events)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("drain and close: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for drain close")
+	}
+
+	chatRecord, err := GetChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chatRecord.QueuedInputs) != 1 || chatRecord.QueuedInputs[0].Kind != domain.QueuedInputKindContinue || chatRecord.QueuedInputs[0].Source != domain.UserMessageSourceAutoResume {
+		t.Fatalf("expected persisted auto-resume continuation, got %#v", chatRecord.QueuedInputs)
+	}
+	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		notice, ok := item.Content.(domain.Notice)
+		if ok && notice.Kind == domain.NoticeKindInterrupted {
+			t.Fatalf("did not expect interruption notice for graceful restart drain, got %#v", notice)
+		}
 	}
 }
 

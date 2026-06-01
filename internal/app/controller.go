@@ -602,7 +602,7 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 		if reason == "" {
 			err = rt.DrainAndClose(ctx)
 		} else {
-			err = rt.InterruptAndClose(ctx, reason)
+			err = rt.DrainAndCloseWithInterruptReason(ctx, reason)
 		}
 		if err != nil && firstErr == nil {
 			firstErr = err

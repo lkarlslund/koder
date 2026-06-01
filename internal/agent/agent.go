@@ -517,6 +517,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			if needsApproval {
 				return chatpkg.TurnStepResult{WaitingApproval: true}, nil
 			}
+			if chatpkg.ShouldStop(ctx) {
+				return chatpkg.TurnStepResult{Done: true}, nil
+			}
 			return chatpkg.TurnStepResult{Continue: true}, nil
 		}
 	}
@@ -556,6 +559,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		out <- evt
 		if evt.Kind == domain.EventKindApprovalAsk {
 			return chatpkg.TurnStepResult{WaitingApproval: true}, nil
+		}
+		if chatpkg.ShouldStop(ctx) {
+			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 		return chatpkg.TurnStepResult{Continue: true}, nil
 	}
@@ -3336,7 +3342,7 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 		return needsApproval, firstErr
 	}
 	if chatpkg.ShouldStop(ctx) {
-		return needsApproval, context.Canceled
+		return needsApproval, nil
 	}
 	if err := e.appendLintMessageForTouchedFiles(ctx, session, chat, turn, orderedTouchedFiles(touched), out); err != nil {
 		return needsApproval, err

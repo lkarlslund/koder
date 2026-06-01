@@ -745,24 +745,31 @@ func (r *Chat) DrainAndClose(ctx context.Context) error {
 	return r.closeAfterDrain(ctx, "")
 }
 
-// InterruptAndClose cancels active work, records why it was interrupted, and closes the chat.
-func (r *Chat) InterruptAndClose(ctx context.Context, reason string) error {
+// DrainAndCloseWithInterruptReason waits for a persisted boundary, queues continuation if needed, and closes the chat.
+func (r *Chat) DrainAndCloseWithInterruptReason(ctx context.Context, reason string) error {
 	return r.closeAfterDrain(ctx, strings.TrimSpace(reason))
 }
 
-func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string) error {
+// InterruptAndClose cancels active work, records why it was interrupted, and closes the chat.
+func (r *Chat) InterruptAndClose(ctx context.Context, reason string) error {
+	return r.closeAfterDrain(ctx, strings.TrimSpace(reason), true)
+}
+
+func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, cancelActive ...bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	shouldCancelActive := len(cancelActive) > 0 && cancelActive[0]
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
 		return nil
 	}
 	wasActive := r.active
+	wasRunningTool := r.status == StatusRunningTools && len(r.running) > 0
 	r.draining = true
 	if r.active {
-		if interruptReason == "" {
+		if interruptReason == "" || !shouldCancelActive {
 			r.statusText = "Stopping after current turn"
 		} else {
 			r.statusText = "Interrupting..."
@@ -772,7 +779,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string) erro
 	cancel := r.cancel
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
-	if interruptReason != "" && cancel != nil {
+	if shouldCancelActive && interruptReason != "" && cancel != nil {
 		cancel()
 	}
 
@@ -791,7 +798,10 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string) erro
 		case <-ticker.C:
 		}
 	}
-	if wasActive && interruptReason != "" {
+	if wasActive && interruptReason != "" && !shouldCancelActive {
+		r.queueShutdownContinuation()
+	}
+	if wasActive && interruptReason != "" && shouldCancelActive && wasRunningTool {
 		if err := r.appendPersistedInterruptNotice(context.Background(), interruptReason); err != nil {
 			return err
 		}
@@ -801,6 +811,29 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string) erro
 	}
 	r.Close()
 	return nil
+}
+
+func (r *Chat) queueShutdownContinuation() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, item := range r.queue {
+		if item.Kind == domain.QueuedInputKindContinue || strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+			return
+		}
+	}
+	item := domain.QueuedInput{
+		ID:        id.New(),
+		Kind:      domain.QueuedInputKindContinue,
+		Source:    domain.UserMessageSourceAutoResume,
+		CreatedAt: time.Now().UTC(),
+	}
+	r.queue = append(r.queue, item)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
 }
 
 func (r *Chat) Status() (Status, string, bool) {

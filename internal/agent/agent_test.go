@@ -2348,7 +2348,7 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	}
 }
 
-func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T) {
+func TestHandleModelToolCallsStopsAfterToolBatchWhenStopRequested(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig(t)
@@ -2382,8 +2382,8 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	}
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{req}, out)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context canceled, got %v", err)
+	if err != nil {
+		t.Fatalf("expected graceful stop after tool batch, got %v", err)
 	}
 	if needsApproval {
 		t.Fatal("did not expect approval request")
