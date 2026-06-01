@@ -1,9 +1,9 @@
-package domain
+package toolkind
 
 import "strings"
 
-func (i ToolKind) DisplayName() string {
-	if !i.IsAToolKind() {
+func (i Kind) DisplayName() string {
+	if !i.IsAKind() {
 		return ""
 	}
 	name := strings.TrimSpace(i.String())

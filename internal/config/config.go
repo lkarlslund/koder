@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/toolkind"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -163,8 +164,8 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
-	toolDefaults := make(ToolDefaults, len(domain.ToolKindValues()))
-	for _, kind := range domain.ToolKindValues() {
+	toolDefaults := make(ToolDefaults, len(toolkind.KindValues()))
+	for _, kind := range toolkind.KindValues() {
 		toolDefaults[kind] = true
 	}
 	return Config{
@@ -229,7 +230,7 @@ func (c *Config) applyDefaults() {
 		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
 	}
 	pruneToolDefaults(c.ToolDefaults)
-	for _, kind := range domain.ToolKindValues() {
+	for _, kind := range toolkind.KindValues() {
 		if _, ok := c.ToolDefaults[kind]; !ok {
 			c.ToolDefaults[kind] = true
 		}
@@ -517,8 +518,8 @@ func cloneToolDefaults(src ToolDefaults) ToolDefaults {
 }
 
 func pruneToolDefaults(defaults ToolDefaults) {
-	known := make(map[domain.ToolKind]struct{}, len(domain.ToolKindValues()))
-	for _, kind := range domain.ToolKindValues() {
+	known := make(map[domain.ToolKind]struct{}, len(toolkind.KindValues()))
+	for _, kind := range toolkind.KindValues() {
 		known[kind] = struct{}{}
 	}
 	for kind := range defaults {
@@ -536,14 +537,14 @@ var toolDefaultKindAliases = map[string]domain.ToolKind{
 }
 
 func parseToolDefaultKind(name string) (domain.ToolKind, error) {
-	if kind, err := domain.ToolKindString(name); err == nil {
+	if kind, err := toolkind.KindString(name); err == nil {
 		return kind, nil
 	}
 	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
 	if kind, ok := toolDefaultKindAliases[normalized]; ok {
 		return kind, nil
 	}
-	for _, kind := range domain.ToolKindValues() {
+	for _, kind := range toolkind.KindValues() {
 		canonical := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(kind.String()))
 		if canonical == normalized {
 			return kind, nil

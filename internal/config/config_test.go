@@ -10,6 +10,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 func TestLoadWritesDefaultConfig(t *testing.T) {
@@ -164,8 +165,8 @@ file_read = false
 	if cfg.ToolDefaults[domain.ToolKindFileRead] {
 		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.ToolDefaults)
 	}
-	for _, kind := range domain.ToolKindValues() {
-		if !kind.IsAToolKind() {
+	for _, kind := range toolkind.KindValues() {
+		if !kind.IsAKind() {
 			t.Fatalf("loaded invalid tool kind %d", kind)
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 // TimelineContent is the typed payload stored by a timeline item.
@@ -265,7 +267,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(in.Tool)
+	tool, err := toolkind.ParsePersisted(in.Tool)
 	if err != nil {
 		tool = 0
 	}
@@ -355,7 +357,7 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(in.Tool)
+	tool, err := toolkind.ParsePersisted(in.Tool)
 	if err != nil {
 		tool = 0
 	}
@@ -430,7 +432,7 @@ func (n *Notice) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(encoded.Tool)
+	tool, err := toolkind.ParsePersisted(encoded.Tool)
 	if err != nil {
 		tool = 0
 	}

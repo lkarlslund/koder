@@ -37,6 +37,7 @@ import (
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
+	"github.com/lkarlslund/koder/internal/toolkind"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
@@ -1437,7 +1438,7 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 	}
 	var noticeTool domain.ToolKind
 	if meta.Tool != "" {
-		if tk, err := domain.ToolKindString(meta.Tool); err == nil {
+		if tk, err := toolkind.KindString(meta.Tool); err == nil {
 			noticeTool = tk
 		}
 	}

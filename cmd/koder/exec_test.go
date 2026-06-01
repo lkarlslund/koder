@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/toolkind"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -160,7 +160,7 @@ func TestRunExecPlainTextFailsWhenStructuredOutputRequired(t *testing.T) {
 }
 
 func TestStructuredOutputToolNotRegisteredGlobally(t *testing.T) {
-	if kind, err := domain.ToolKindString(structuredOutputToolName); err == nil {
+	if kind, err := toolkind.KindString(structuredOutputToolName); err == nil {
 		if _, ok := tools.DefinitionFor(kind, tools.Runtime{}); ok {
 			t.Fatalf("%s should not be registered as a normal tool", structuredOutputToolName)
 		}

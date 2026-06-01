@@ -1,4 +1,4 @@
-package domain
+package toolkind
 
 import (
 	"encoding/json"
@@ -6,7 +6,9 @@ import (
 	"strings"
 )
 
-var toolStateKeyAliases = map[string]ToolKind{
+type States map[Kind]bool
+
+var stateKeyAliases = map[string]Kind{
 	"execcleanupbackground":     ToolKindExecCleanup,
 	"edit":                      ToolKindFileEdit,
 	"glob":                      ToolKindFileGlob,
@@ -18,14 +20,14 @@ var toolStateKeyAliases = map[string]ToolKind{
 	"write":                     ToolKindFileWrite,
 }
 
-func (s *ToolStates) UnmarshalJSON(data []byte) error {
+func (s *States) UnmarshalJSON(data []byte) error {
 	var raw map[string]bool
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	states := make(ToolStates, len(raw))
+	states := make(States, len(raw))
 	for name, enabled := range raw {
-		kind, err := parsePersistedToolKind(name)
+		kind, err := ParsePersisted(name)
 		if err != nil {
 			continue
 		}
@@ -35,15 +37,15 @@ func (s *ToolStates) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func parsePersistedToolKind(name string) (ToolKind, error) {
-	if kind, err := ToolKindString(name); err == nil {
+func ParsePersisted(name string) (Kind, error) {
+	if kind, err := KindString(name); err == nil {
 		return kind, nil
 	}
 	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
-	if kind, ok := toolStateKeyAliases[normalized]; ok {
+	if kind, ok := stateKeyAliases[normalized]; ok {
 		return kind, nil
 	}
-	for _, kind := range ToolKindValues() {
+	for _, kind := range KindValues() {
 		canonical := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(kind.String()))
 		if canonical == normalized {
 			return kind, nil

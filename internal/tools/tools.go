@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 type chatIDContextKey struct{}
@@ -528,7 +529,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if name == "" {
 		return Request{}, fmt.Errorf("provider tool call missing function name")
 	}
-	kind, err := domain.ToolKindString(name)
+	kind, err := toolkind.KindString(name)
 	if err != nil {
 		return Request{}, fmt.Errorf("unknown tool %q", name)
 	}
@@ -586,7 +587,7 @@ func RequestFromMetaMap(raw map[string]string) (Request, error) {
 	if toolName == "" {
 		return Request{}, fmt.Errorf("tool name is empty")
 	}
-	kind, err := domain.ToolKindString(toolName)
+	kind, err := toolkind.KindString(toolName)
 	if err != nil {
 		return Request{}, fmt.Errorf("unknown tool %q", toolName)
 	}

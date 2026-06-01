@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 // PartPayload is the typed content stored by a message part.
@@ -74,7 +76,7 @@ func (p *ToolCallPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(encoded.Tool)
+	tool, err := toolkind.ParsePersisted(encoded.Tool)
 	if err != nil {
 		tool = 0
 	}
@@ -154,7 +156,7 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(encoded.Tool)
+	tool, err := toolkind.ParsePersisted(encoded.Tool)
 	if err != nil {
 		tool = 0
 	}
@@ -274,7 +276,7 @@ func (p *ApprovalRequestPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(encoded.Tool)
+	tool, err := toolkind.ParsePersisted(encoded.Tool)
 	if err != nil {
 		tool = 0
 	}
@@ -387,7 +389,7 @@ func (p *EventNoticePayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := parsePersistedToolKind(encoded.Tool)
+	tool, err := toolkind.ParsePersisted(encoded.Tool)
 	if err != nil {
 		tool = 0
 	}

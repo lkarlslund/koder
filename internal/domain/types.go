@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 //go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -transform=snake -json -text -values -output=messagerole_enumer.go
@@ -36,50 +37,48 @@ const (
 	PartKindEventNotice
 )
 
-//go:generate go tool enumer -type=ToolKind -trimprefix=ToolKind -transform=snake -json -text -values -output=toolkind_enumer.go
-type ToolKind uint8
+type ToolKind = toolkind.Kind
 
 const (
-	ToolKindFileRead ToolKind = iota + 1
-	ToolKindViewImage
-	ToolKindShowImage
-	ToolKindFileGlob
-	ToolKindFileGrep
-	ToolKindCodeSearch
-	ToolKindLint
-	ToolKindBash
-	ToolKindExecCommand
-	ToolKindExecStatus
-	ToolKindExecList
-	ToolKindExecWriteStdin
-	ToolKindExecResize
-	ToolKindExecTerminate
-	ToolKindExecCleanup
-	ToolKindFileEdit
-	ToolKindFileWrite
-	ToolKindTask
-	ToolKindQuestion
-	ToolKindUpdatePlan
-	ToolKindMilestoneList
-	ToolKindMilestoneAdd
-	ToolKindMilestoneUpdate
-	ToolKindMilestonePlan
-	ToolKindMilestoneWrite
-	ToolKindTodoList
-	ToolKindTodoAddItems
-	ToolKindTodoUpdateItem
-	ToolKindTodoFetchNext
-	ToolKindChatList
-	ToolKindChatStart
-	ToolKindChatPoll
-	ToolKindChatArchive
-	ToolKindSkill
-	ToolKindWebFetch
-	ToolKindWebSearch
-	ToolKindMCP
-	// Legacy sentinel values kept for backward compatibility with stored data.
-	ToolKindChatStartDecomposition
-	ToolKindChatStartExecution
+	ToolKindFileRead               = toolkind.ToolKindFileRead
+	ToolKindViewImage              = toolkind.ToolKindViewImage
+	ToolKindShowImage              = toolkind.ToolKindShowImage
+	ToolKindFileGlob               = toolkind.ToolKindFileGlob
+	ToolKindFileGrep               = toolkind.ToolKindFileGrep
+	ToolKindCodeSearch             = toolkind.ToolKindCodeSearch
+	ToolKindLint                   = toolkind.ToolKindLint
+	ToolKindBash                   = toolkind.ToolKindBash
+	ToolKindExecCommand            = toolkind.ToolKindExecCommand
+	ToolKindExecStatus             = toolkind.ToolKindExecStatus
+	ToolKindExecList               = toolkind.ToolKindExecList
+	ToolKindExecWriteStdin         = toolkind.ToolKindExecWriteStdin
+	ToolKindExecResize             = toolkind.ToolKindExecResize
+	ToolKindExecTerminate          = toolkind.ToolKindExecTerminate
+	ToolKindExecCleanup            = toolkind.ToolKindExecCleanup
+	ToolKindFileEdit               = toolkind.ToolKindFileEdit
+	ToolKindFileWrite              = toolkind.ToolKindFileWrite
+	ToolKindTask                   = toolkind.ToolKindTask
+	ToolKindQuestion               = toolkind.ToolKindQuestion
+	ToolKindUpdatePlan             = toolkind.ToolKindUpdatePlan
+	ToolKindMilestoneList          = toolkind.ToolKindMilestoneList
+	ToolKindMilestoneAdd           = toolkind.ToolKindMilestoneAdd
+	ToolKindMilestoneUpdate        = toolkind.ToolKindMilestoneUpdate
+	ToolKindMilestonePlan          = toolkind.ToolKindMilestonePlan
+	ToolKindMilestoneWrite         = toolkind.ToolKindMilestoneWrite
+	ToolKindTodoList               = toolkind.ToolKindTodoList
+	ToolKindTodoAddItems           = toolkind.ToolKindTodoAddItems
+	ToolKindTodoUpdateItem         = toolkind.ToolKindTodoUpdateItem
+	ToolKindTodoFetchNext          = toolkind.ToolKindTodoFetchNext
+	ToolKindChatList               = toolkind.ToolKindChatList
+	ToolKindChatStart              = toolkind.ToolKindChatStart
+	ToolKindChatPoll               = toolkind.ToolKindChatPoll
+	ToolKindChatArchive            = toolkind.ToolKindChatArchive
+	ToolKindSkill                  = toolkind.ToolKindSkill
+	ToolKindWebFetch               = toolkind.ToolKindWebFetch
+	ToolKindWebSearch              = toolkind.ToolKindWebSearch
+	ToolKindMCP                    = toolkind.ToolKindMCP
+	ToolKindChatStartDecomposition = toolkind.ToolKindChatStartDecomposition
+	ToolKindChatStartExecution     = toolkind.ToolKindChatStartExecution
 )
 
 type PermissionOverride struct {
@@ -88,7 +87,7 @@ type PermissionOverride struct {
 	Action  accesssettings.PermissionMode
 }
 
-type ToolStates map[ToolKind]bool
+type ToolStates = toolkind.States
 
 type ApprovalStatus uint8
 

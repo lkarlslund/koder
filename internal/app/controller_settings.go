@@ -15,6 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 func (c *Controller) Providers() ProviderState {
@@ -870,7 +871,7 @@ func accessPreferencesFromConfig(src accesssettings.Settings) AccessPreferences 
 }
 
 func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
-	kinds := domain.ToolKindValues()
+	kinds := toolkind.KindValues()
 	out := make([]ToolDefaultPreference, 0, len(kinds))
 	for _, kind := range kinds {
 		enabled := true
@@ -1056,7 +1057,7 @@ func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreferen
 	for _, item := range prefs {
 		next[item.Tool] = item.Enabled
 	}
-	for _, kind := range domain.ToolKindValues() {
+	for _, kind := range toolkind.KindValues() {
 		if _, ok := next[kind]; !ok {
 			next[kind] = true
 		}
