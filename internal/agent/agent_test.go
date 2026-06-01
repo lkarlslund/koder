@@ -2916,6 +2916,90 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 	}
 }
 
+func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) {
+	t.Parallel()
+
+	var requests [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, body)
+		switch len(requests) {
+		case 1:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the todo.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"todo_update_item\",\"arguments\":\"{\\\"id\\\":\\\"019aa000-0000-7000-8000-000000000001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"I saw the tool error."}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionstore.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+
+	events := runLivePrompt(t, engine, session, chatRecord, "update todo")
+	var sawToolDelta bool
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindToolCallDelta {
+			sawToolDelta = true
+		}
+	}
+	if !sawToolDelta {
+		t.Fatal("expected tool call delta for persisted invalid tool call")
+	}
+	if len(requests) < 2 {
+		t.Fatalf("expected invalid tool call to continue with tool error feedback, got %d requests", len(requests))
+	}
+	if !strings.Contains(string(requests[1]), "Invalid tool call: invalid todo status") {
+		t.Fatalf("expected second request to include tool error feedback, got %s", requests[1])
+	}
+
+	timeline, err := chatstore.TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawErroredTool bool
+	for _, item := range timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, tool := range assistant.Tools {
+			if tool.Tool == domain.ToolKindTodoUpdateItem && tool.Status == domain.ToolStatusErrored && tool.Error != nil && strings.Contains(tool.Error.Message, "invalid todo status") {
+				sawErroredTool = true
+			}
+		}
+	}
+	if !sawErroredTool {
+		t.Fatalf("expected transcript to contain errored todo_update_item call, got %#v", timeline)
+	}
+}
+
 func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	t.Parallel()
 

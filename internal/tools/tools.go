@@ -72,7 +72,7 @@ func (r Request) MarshalJSON() ([]byte, error) {
 }
 
 func (r *Request) UnmarshalJSON(data []byte) error {
-	raw, err := decodeStringMap(data)
+	raw, err := DecodeStringMap(data)
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if err != nil {
 		return Request{}, fmt.Errorf("unknown tool %q", name)
 	}
-	args, err := decodeStringMap([]byte(call.Function.Arguments))
+	args, err := DecodeStringMap([]byte(call.Function.Arguments))
 	if err != nil {
 		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
 	}
@@ -438,7 +438,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 }
 
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
-	args, err := decodeStringMap([]byte(raw))
+	args, err := DecodeStringMap([]byte(raw))
 	if err != nil {
 		return Request{}, fmt.Errorf("decode stored tool arguments for %s: %w", kind, err)
 	}
@@ -706,7 +706,8 @@ func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
 	}
 }
 
-func decodeStringMap(data []byte) (map[string]string, error) {
+// DecodeStringMap decodes provider/tool JSON arguments into the string map used by tool requests.
+func DecodeStringMap(data []byte) (map[string]string, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" || trimmed == "null" {
 		return map[string]string{}, nil

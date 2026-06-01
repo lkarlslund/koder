@@ -470,16 +470,17 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 
 	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 	if len(resp.ToolCalls) > 0 {
-		calls, err := e.parseProviderToolCalls(resp.ToolCalls, session.ID)
-		if err != nil {
+		parsed := e.parseProviderToolCallsForTranscript(resp.ToolCalls, session.ID)
+		calls := parsed.Requests
+		if len(parsed.ToolCalls) == 0 && parsed.Err != nil {
 			if strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "" {
-				return chatpkg.TurnStepResult{}, err
+				return chatpkg.TurnStepResult{}, parsed.Err
 			}
-			e.recordLifecycle(session.ID, "provider_tool_call_parse_ignored", err.Error(), map[string]string{
+			e.recordLifecycle(session.ID, "provider_tool_call_parse_ignored", parsed.Err.Error(), map[string]string{
 				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 			})
-		} else if len(calls) > 0 {
-			assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, calls, strings.TrimSpace(resp.Text), resp.Usage)
+		} else if len(parsed.ToolCalls) > 0 {
+			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), resp.Usage)
 			if err != nil {
 				return chatpkg.TurnStepResult{}, err
 			}
@@ -492,6 +493,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			if chatpkg.ShouldStop(ctx) {
 				return chatpkg.TurnStepResult{Done: true}, nil
+			}
+			if len(calls) == 0 {
+				return chatpkg.TurnStepResult{Continue: true}, nil
 			}
 			if pause, ok := l.tracker.trackCalls(calls); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
@@ -3058,8 +3062,22 @@ type completedToolCall struct {
 	err    error
 }
 
+type providerToolCallParseResult struct {
+	Requests  []tools.Request
+	ToolCalls []domain.ToolCall
+	Err       error
+}
+
 func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID domain.ID) ([]tools.Request, error) {
-	calls := make([]tools.Request, 0, len(raw))
+	parsed := e.parseProviderToolCallsForTranscript(raw, sessionID)
+	if len(parsed.Requests) == 0 {
+		return nil, parsed.Err
+	}
+	return parsed.Requests, nil
+}
+
+func (e *Engine) parseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID domain.ID) providerToolCallParseResult {
+	var out providerToolCallParseResult
 	var parseErr error
 	for _, item := range raw {
 		call, err := e.parseProviderToolCall(item)
@@ -3071,15 +3089,17 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID domai
 				"tool_call_id": strings.TrimSpace(item.ID),
 				"tool_type":    strings.TrimSpace(item.Type),
 			})
+			if failed, ok := e.failedProviderToolCall(item, err); ok {
+				out.ToolCalls = append(out.ToolCalls, failed)
+			}
 			continue
 		}
 		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		calls = append(calls, call)
+		out.Requests = append(out.Requests, call)
+		out.ToolCalls = append(out.ToolCalls, toolCallRecord(call))
 	}
-	if len(calls) == 0 {
-		return nil, parseErr
-	}
-	return calls, nil
+	out.Err = parseErr
+	return out
 }
 
 func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, error) {
@@ -3116,16 +3136,71 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	return tools.Normalize(req)
 }
 
+func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) (domain.ToolCall, bool) {
+	kind, args, ok := e.providerToolCallDisplayState(item)
+	if !ok {
+		return domain.ToolCall{}, false
+	}
+	callID := strings.TrimSpace(item.ID)
+	if callID == "" {
+		callID = "invalid_" + string(domain.NewIDAt(time.Now().UTC()))
+	}
+	now := time.Now().UTC()
+	return domain.ToolCall{
+		ToolCallID:  domain.ToolCallID(callID),
+		Tool:        kind,
+		Args:        args,
+		Status:      domain.ToolStatusErrored,
+		Error:       &domain.ToolError{Message: "Invalid tool call: " + parseErr.Error()},
+		CompletedAt: now,
+	}, true
+}
+
+func (e *Engine) providerToolCallDisplayState(item provider.ToolCall) (domain.ToolKind, map[string]string, bool) {
+	name := strings.TrimSpace(item.Function.Name)
+	if name == "" {
+		return 0, nil, false
+	}
+	if e.mcp != nil {
+		localDefs := tools.Definitions(e.toolRuntime(domain.Session{}, domain.Chat{}))
+		serverID, toolName, ok := e.mcp.ResolveToolName(name, localDefs)
+		if ok {
+			return domain.ToolKindMCP, map[string]string{
+				"server":        serverID,
+				"tool":          toolName,
+				"arguments_raw": strings.TrimSpace(item.Function.Arguments),
+			}, true
+		}
+	}
+	kind, err := domain.ToolKindString(name)
+	if err != nil {
+		return 0, nil, false
+	}
+	args, err := tools.DecodeStringMap([]byte(item.Function.Arguments))
+	if err != nil {
+		args = map[string]string{"arguments_raw": strings.TrimSpace(item.Function.Arguments)}
+	}
+	return kind, args, true
+}
+
+func toolCallRecord(call tools.Request) domain.ToolCall {
+	return domain.ToolCall{
+		ToolCallID: domain.ToolCallID(call.ToolCallID),
+		Tool:       call.Tool,
+		Args:       call.Args,
+		Status:     domain.ToolStatusPending,
+	}
+}
+
 func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID domain.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		toolCalls = append(toolCalls, domain.ToolCall{
-			ToolCallID: domain.ToolCallID(call.ToolCallID),
-			Tool:       call.Tool,
-			Args:       call.Args,
-			Status:     domain.ToolStatusPending,
-		})
+		toolCalls = append(toolCalls, toolCallRecord(call))
 	}
+	return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
+}
+
+func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID domain.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	item, err := chatstore.AppendAssistantToolCallsWithItem(ctx, e.store, chatID, item, toolCalls, text, usage)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -3134,17 +3209,16 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 }
 
 func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	if turn == nil {
-		return e.persistAssistantToolCalls(ctx, chatID, sessionID, item, calls, text, usage)
-	}
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		toolCalls = append(toolCalls, domain.ToolCall{
-			ToolCallID: domain.ToolCallID(call.ToolCallID),
-			Tool:       call.Tool,
-			Args:       call.Args,
-			Status:     domain.ToolStatusPending,
-		})
+		toolCalls = append(toolCalls, toolCallRecord(call))
+	}
+	return e.persistAssistantToolCallRecordsForTurn(ctx, turn, chatID, sessionID, item, toolCalls, text, usage)
+}
+
+func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	if turn == nil {
+		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
 	}
 	assistant := domain.AssistantMessage{Text: text, Tools: toolCalls}
 	usage = usage.Normalized()
