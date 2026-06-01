@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-//go:generate go tool enumer -type=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -transform=snake -json -text -values -output=messagerole_enumer.go
+//go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -transform=snake -json -text -values -output=messagerole_enumer.go
 type MessageRole uint8
 
 const (
@@ -82,18 +82,10 @@ const (
 	ToolKindChatStartExecution
 )
 
-type PermissionMode uint8
-
-const (
-	PermissionModeAllow PermissionMode = iota
-	PermissionModeAsk
-	PermissionModeDeny
-)
-
 type PermissionOverride struct {
 	Tool    ToolKind
 	Pattern string
-	Action  PermissionMode
+	Action  accesssettings.PermissionMode
 }
 
 type ToolStates map[ToolKind]bool

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -38,9 +39,9 @@ type Profile struct {
 
 // Rule grants, asks, or denies a tool matching a pattern.
 type Rule struct {
-	Tool    domain.ToolKind       `toml:"tool"`
-	Pattern string                `toml:"pattern"`
-	Action  domain.PermissionMode `toml:"action"`
+	Tool    domain.ToolKind               `toml:"tool"`
+	Pattern string                        `toml:"pattern"`
+	Action  accesssettings.PermissionMode `toml:"action"`
 }
 
 // MountMode controls whether a bwrap bind mount is read-only or read-write.
@@ -81,7 +82,7 @@ type Request struct {
 
 // Decision is the outcome of evaluating a permission request.
 type Decision struct {
-	Mode   domain.PermissionMode
+	Mode   accesssettings.PermissionMode
 	Reason string
 }
 
@@ -107,7 +108,7 @@ func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverri
 		profile = cfg.Profiles[cfg.Profile]
 	}
 	if len(profile.Rules) == 0 {
-		return Decision{Mode: domain.PermissionModeAllow}
+		return Decision{Mode: accesssettings.PermissionModeAllow}
 	}
 
 	for _, rule := range slices.Backward(profile.Rules) {
@@ -118,7 +119,7 @@ func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverri
 			return Decision{Mode: rule.Action}
 		}
 	}
-	return Decision{Mode: domain.PermissionModeDeny}
+	return Decision{Mode: accesssettings.PermissionModeDeny}
 }
 
 // Normalize fills missing sandbox fields with conservative defaults.
@@ -237,9 +238,9 @@ func ProfileNames(cfg Rules) []string {
 }
 
 // Validate reports whether mode is a supported permission mode.
-func Validate(mode domain.PermissionMode) error {
+func Validate(mode accesssettings.PermissionMode) error {
 	switch mode {
-	case domain.PermissionModeAllow, domain.PermissionModeAsk, domain.PermissionModeDeny:
+	case accesssettings.PermissionModeAllow, accesssettings.PermissionModeAsk, accesssettings.PermissionModeDeny:
 		return nil
 	default:
 		return fmt.Errorf("invalid permission mode %q", mode)
@@ -285,27 +286,27 @@ func wildcardMatch(pattern, value string) bool {
 func evaluateBuiltin(profileName string, req Request) Decision {
 	switch profileName {
 	case ProfileAsk:
-		return Decision{Mode: domain.PermissionModeAsk, Reason: "this mode requires approval for all tool actions"}
+		return Decision{Mode: accesssettings.PermissionModeAsk, Reason: "this mode requires approval for all tool actions"}
 	case ProfileReadAsk:
 		if req.Access == AccessShell {
-			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
+			return Decision{Mode: accesssettings.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
 		if req.Access == AccessRead && req.targetsProjectOnly() {
-			return Decision{Mode: domain.PermissionModeAllow}
+			return Decision{Mode: accesssettings.PermissionModeAllow}
 		}
-		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads in the current project")}
+		return Decision{Mode: accesssettings.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads in the current project")}
 	case ProfileWriteAsk:
 		if req.Access == AccessShell {
-			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
+			return Decision{Mode: accesssettings.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
 		if (req.Access == AccessRead || req.Access == AccessWrite) && req.targetsProjectOnly() {
-			return Decision{Mode: domain.PermissionModeAllow}
+			return Decision{Mode: accesssettings.PermissionModeAllow}
 		}
-		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads and writes in the current project")}
+		return Decision{Mode: accesssettings.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads and writes in the current project")}
 	case ProfileFullAccess:
-		return Decision{Mode: domain.PermissionModeAllow}
+		return Decision{Mode: accesssettings.PermissionModeAllow}
 	default:
-		return Decision{Mode: domain.PermissionModeDeny}
+		return Decision{Mode: accesssettings.PermissionModeDeny}
 	}
 }
 
@@ -313,12 +314,12 @@ func summarizeRules(rules []Rule) string {
 	if len(rules) == 0 {
 		return ""
 	}
-	counts := map[domain.PermissionMode]int{}
+	counts := map[accesssettings.PermissionMode]int{}
 	for _, rule := range rules {
 		counts[rule.Action]++
 	}
 	parts := make([]string, 0, 3)
-	for _, mode := range []domain.PermissionMode{domain.PermissionModeAllow, domain.PermissionModeAsk, domain.PermissionModeDeny} {
+	for _, mode := range []accesssettings.PermissionMode{accesssettings.PermissionModeAllow, accesssettings.PermissionModeAsk, accesssettings.PermissionModeDeny} {
 		if counts[mode] == 0 {
 			continue
 		}

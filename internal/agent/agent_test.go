@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -2011,10 +2012,10 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	cfg.DefaultModel = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Rules: []config.PermissionRule{
-			{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
-			{Tool: domain.ToolKindFileGlob, Pattern: "*", Action: domain.PermissionModeAllow},
-			{Tool: domain.ToolKindFileGrep, Pattern: "*", Action: domain.PermissionModeAllow},
-			{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
+			{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+			{Tool: domain.ToolKindFileGlob, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+			{Tool: domain.ToolKindFileGrep, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+			{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
 		},
 	}
 
@@ -2123,7 +2124,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindBash,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 
@@ -2631,7 +2632,7 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
-		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeDeny}},
+		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeDeny}},
 	}
 
 	st, err := store.Open(t.TempDir())
@@ -3111,7 +3112,7 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
-		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk}},
+		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk}},
 	}
 
 	st, err := store.Open(t.TempDir())
@@ -3302,7 +3303,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 	st, err := store.Open(t.TempDir())
@@ -3487,7 +3488,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 
@@ -3605,7 +3606,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindBash,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 
@@ -4110,7 +4111,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 
@@ -4840,7 +4841,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 		Rules: []config.PermissionRule{{
 			Tool:    domain.ToolKindBash,
 			Pattern: "*",
-			Action:  domain.PermissionModeAsk,
+			Action:  accesssettings.PermissionModeAsk,
 		}},
 	}
 	st, err := store.Open(t.TempDir())

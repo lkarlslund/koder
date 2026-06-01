@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 )
@@ -319,8 +320,8 @@ func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
 			Profiles: map[string]PermissionProfile{
 				"default": {
 					Rules: []PermissionRule{
-						{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: accesssettings.PermissionModeAsk},
 					},
 				},
 			},
@@ -363,10 +364,10 @@ bash = "allow"
 	}
 	profile := cfg.Permissions.Profiles["default"]
 	for _, rule := range profile.Rules {
-		if rule.Tool == domain.ToolKindFileRead && rule.Pattern == "*" && rule.Action != domain.PermissionModeAllow {
+		if rule.Tool == domain.ToolKindFileRead && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAllow {
 			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
 		}
-		if rule.Tool == domain.ToolKindBash && rule.Pattern == "*" && rule.Action != domain.PermissionModeAsk {
+		if rule.Tool == domain.ToolKindBash && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAsk {
 			t.Fatalf("expected legacy bash field to be ignored, got %#v", rule)
 		}
 	}

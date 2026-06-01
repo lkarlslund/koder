@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -13,14 +14,14 @@ func testRules() Rules {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
-					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeAsk},
 				},
 			},
 			"readonly": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
 				},
 			},
 		},
@@ -30,16 +31,16 @@ func testRules() Rules {
 func TestEvaluateDefaultProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "README.md"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected read mode: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != domain.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "internal/domain/types.go"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected read mode for nested path: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != domain.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode for path-containing command: %s", got)
 	}
 }
@@ -47,7 +48,7 @@ func TestEvaluateDefaultProfile(t *testing.T) {
 func TestEvaluateReadonlyProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindFileWrite, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
+	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindFileWrite, Pattern: "main.go"}); got.Mode != accesssettings.PermissionModeDeny {
 		t.Fatalf("unexpected write mode: %s", got)
 	}
 }
@@ -55,7 +56,7 @@ func TestEvaluateReadonlyProfile(t *testing.T) {
 func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
 	cfg := testRules()
 	got := Evaluate(cfg, ProfileFullAccess, nil, Request{Tool: domain.ToolKindBash, Pattern: "pwd"})
-	if got.Mode != domain.PermissionModeAllow {
+	if got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("unexpected mode: %s", got.Mode)
 	}
 }
@@ -65,9 +66,9 @@ func TestEvaluateSessionOverridesTakePrecedence(t *testing.T) {
 	got := Evaluate(cfg, ProfileAsk, []domain.PermissionOverride{{
 		Tool:    domain.ToolKindBash,
 		Pattern: "git *",
-		Action:  domain.PermissionModeAllow,
+		Action:  accesssettings.PermissionModeAllow,
 	}}, Request{Tool: domain.ToolKindBash, Pattern: "git status"})
-	if got.Mode != domain.PermissionModeAllow {
+	if got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("expected override allow, got %s", got.Mode)
 	}
 }
@@ -78,16 +79,16 @@ func TestEvaluateProfileMatchesToolWildcards(t *testing.T) {
 		Profiles: map[string]Profile{
 			"custom": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: domain.ToolKindMCP, Pattern: "*", Action: accesssettings.PermissionModeAllow},
 				},
 			},
 		},
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindExecCommand, Pattern: "tty"}); got.Mode != domain.PermissionModeAsk {
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindExecCommand, Pattern: "tty"}); got.Mode != accesssettings.PermissionModeAsk {
 		t.Fatalf("expected tool ask, got %s", got.Mode)
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindMCP, Pattern: "anything"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindMCP, Pattern: "anything"}); got.Mode != accesssettings.PermissionModeAllow {
 		t.Fatalf("expected custom tool allow, got %s", got.Mode)
 	}
 }
@@ -113,9 +114,9 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
-					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: domain.PermissionModeDeny},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
+					{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk},
+					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: accesssettings.PermissionModeDeny},
 				},
 			},
 		},
