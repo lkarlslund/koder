@@ -62,6 +62,13 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := ctrl.State().Session.ID
+	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	secondID := ctrl.State().Session.ID
+	if err := ctrl.SwitchSession(context.Background(), sessionID); err != nil {
+		t.Fatalf("switch back to first session: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -84,13 +91,22 @@ func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 		t.Fatalf("expected redirect to %s, got %s", want, got)
 	}
 
-	resp, err = http.Get(srv.AppURL())
+	resp, err = http.Get(srv.URL() + "/s/" + string(secondID))
 	if err != nil {
-		t.Fatalf("get app url: %v", err)
+		t.Fatalf("get inactive session url: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected session app ok, got %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(srv.URL() + "/s/019e72fa-1cb8-73ef-a5ca-247275f3f62f")
+	if err != nil {
+		t.Fatalf("get missing session url: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected missing session status 404, got %d", resp.StatusCode)
 	}
 }
 
@@ -142,7 +158,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 }
 
-func TestWebSocketHelloIgnoresStaleURLSessionSelection(t *testing.T) {
+func TestWebSocketHelloErrorsForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := ctrl.State().Session.ID
 	staleID := id.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
@@ -166,24 +182,17 @@ func TestWebSocketHelloIgnoresStaleURLSessionSelection(t *testing.T) {
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
 	var resp struct {
-		OK     bool `json:"ok"`
-		Result struct {
-			State struct {
-				Session struct {
-					ID id.ID
-				}
-			}
-		} `json:"result"`
+		OK    bool   `json:"ok"`
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(msg, &resp); err != nil {
 		t.Fatalf("decode hello: %v", err)
 	}
-	if !resp.OK {
-		t.Fatalf("expected stale session hello to recover, got %s", resp.Error)
+	if resp.OK || !strings.Contains(resp.Error, string(staleID)) {
+		t.Fatalf("expected stale session hello to fail for %s, got %#v", staleID, resp)
 	}
-	if resp.Result.State.Session.ID != activeID {
-		t.Fatalf("expected hello to fall back to active session %s, got %s", activeID, resp.Result.State.Session.ID)
+	if got := ctrl.State().Session.ID; got != activeID {
+		t.Fatalf("expected stale session hello not to switch active session from %s, got %s", activeID, got)
 	}
 }
 

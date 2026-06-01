@@ -196,8 +196,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/s/"+string(state.Session.ID), http.StatusTemporaryRedirect)
 		return
 	}
-	if sessionIDFromPath(r.URL.Path) == "" {
+	sessionID := sessionIDFromPath(r.URL.Path)
+	if sessionID == "" {
 		http.NotFound(w, r)
+		return
+	}
+	exists, err := s.sessionExists(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -759,8 +769,7 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 			return err
 		}
 		if !exists {
-			s.deleteClientSelection(clientID)
-			return nil
+			return fmt.Errorf("session not found: %s", selection.SessionID)
 		}
 		if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
 			return err
@@ -783,8 +792,7 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 				return app.State{}, err
 			}
 			if !exists {
-				s.deleteClientSelection(clientID)
-				return state, nil
+				return app.State{}, fmt.Errorf("session not found: %s", selection.SessionID)
 			}
 			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
 				return app.State{}, err

@@ -590,7 +590,9 @@
           this.connecting = false;
           this.connected = true;
           this.reconnectDelay = 150;
-          this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
+          this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(err => {
+            this.error = (err && err.message) || 'failed to load session';
+          });
         },
         connectNow() {
           if (this.reconnectTimer) {
