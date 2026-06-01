@@ -1029,12 +1029,13 @@
           return 'bi-circle text-secondary';
         },
         milestoneBadge(status) {
-          if (status === 'completed') return 'text-bg-success';
-          if (status === 'cancelled') return 'text-bg-secondary';
-          if (status === 'blocked') return 'text-bg-danger';
-          if (status === 'decomposing' || status === 'executing') return 'text-bg-primary';
-          if (status === 'ready') return 'text-bg-info';
-          return 'text-bg-secondary';
+          if (status === 'completed') return 'planning-badge-completed';
+          if (status === 'cancelled') return 'planning-badge-cancelled';
+          if (status === 'blocked') return 'planning-badge-blocked';
+          if (status === 'decomposing') return 'planning-badge-decomposing';
+          if (status === 'executing') return 'planning-badge-executing';
+          if (status === 'ready') return 'planning-badge-ready';
+          return 'planning-badge-pending';
         },
         todoItems() { return this.state.todos || this.state.Todos || []; },
         todosByMilestone() { return this.state.todos_by_milestone || this.state.TodosByRef || {}; },

@@ -120,7 +120,14 @@
     .planning-row:hover { color: var(--bs-emphasis-color); background: var(--bs-secondary-bg); }
     .planning-expander, .planning-status { font-size: .85rem; line-height: 1; }
     .planning-ref, .planning-counts, .planning-todo-status { color: var(--bs-secondary-color); font-size: .78rem; white-space: nowrap; }
-    .planning-badge { font-size: .68rem; max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; }
+    .planning-badge { font-size: .68rem; max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; border: 1px solid transparent; }
+    .planning-badge-pending { color: var(--bs-secondary-text-emphasis); background: var(--bs-secondary-bg-subtle); border-color: var(--bs-secondary-border-subtle); }
+    .planning-badge-decomposing { color: var(--bs-primary-text-emphasis); background: var(--bs-primary-bg-subtle); border-color: var(--bs-primary-border-subtle); }
+    .planning-badge-ready { color: var(--bs-info-text-emphasis); background: var(--bs-info-bg-subtle); border-color: var(--bs-info-border-subtle); }
+    .planning-badge-executing { color: var(--bs-warning-text-emphasis); background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); }
+    .planning-badge-completed { color: var(--bs-success-text-emphasis); background: var(--bs-success-bg-subtle); border-color: var(--bs-success-border-subtle); }
+    .planning-badge-blocked { color: var(--bs-danger-text-emphasis); background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); }
+    .planning-badge-cancelled { color: var(--bs-light-text-emphasis); background: var(--bs-dark-bg-subtle); border-color: var(--bs-dark-border-subtle); }
     .planning-children { margin-left: 1.35rem; padding: .05rem 0 .18rem .55rem; border-left: 1px solid var(--bs-border-color); }
     .planning-todo { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: .28rem; min-height: 1.25rem; font-size: .84rem; }
     .planning-empty { color: var(--bs-secondary-color); font-size: .82rem; padding: .1rem 0; }

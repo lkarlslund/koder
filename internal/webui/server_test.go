@@ -937,6 +937,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
+	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
+		t.Fatalf("expected colorful milestone status badge classes")
+	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")
 	}
