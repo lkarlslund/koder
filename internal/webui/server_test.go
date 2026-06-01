@@ -1036,6 +1036,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) || strings.Contains(fullPage, `.chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; animation`) {
 		t.Fatalf("expected idle chat status icon to be static")
 	}
+	if !strings.Contains(fullPage, `.chat-list-item.active .chat-status-icon.status-running`) || !strings.Contains(fullPage, `drop-shadow(0 0 2px rgba(0, 0, 0, .55))`) {
+		t.Fatalf("expected selected busy chat status icons to stay visible on active row background")
+	}
 	if !strings.Contains(fullPage, `@keyframes chat-status-spin`) || !strings.Contains(fullPage, `chatStatusIcon(chat)`) {
 		t.Fatalf("expected chat status icons to animate per state")
 	}
