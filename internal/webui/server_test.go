@@ -940,6 +940,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
 		t.Fatalf("expected colorful milestone status badge classes")
 	}
+	if !strings.Contains(fullPage, `todoBadge(todoStatus(todo))`) || !strings.Contains(fullPage, `todoBadge(status)`) {
+		t.Fatalf("expected colorful todo status badge classes")
+	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")
 	}

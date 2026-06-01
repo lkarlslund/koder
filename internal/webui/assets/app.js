@@ -1071,6 +1071,11 @@
           if (status === 'in_progress') return 'bi-arrow-repeat text-primary';
           return 'bi-circle text-secondary';
         },
+        todoBadge(status) {
+          if (status === 'completed') return 'planning-badge-completed';
+          if (status === 'in_progress') return 'planning-badge-executing';
+          return 'planning-badge-pending';
+        },
         chatID(chat) { return String(chat?.ID || chat?.id || '').trim(); },
         chatArchived(chat) { return !!(chat?.Archived || chat?.archived); },
         visibleChats() {
