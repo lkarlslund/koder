@@ -846,12 +846,13 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 
 // DeleteChat archives a chat and switches away first when it is active.
 func (c *Controller) DeleteChat(ctx context.Context, chatID id.ID) error {
-	_, err := c.ArchiveChat(ctx, "", chatID)
+	archived := true
+	_, err := c.UpdateChat(ctx, "", chatID, tools.ChatUpdateRequest{Archived: &archived})
 	return err
 }
 
-// ArchiveChat hides a chat from the default sidebar without deleting its history.
-func (c *Controller) ArchiveChat(ctx context.Context, sessionID id.ID, chatID id.ID) (tools.ChatStatus, error) {
+// UpdateChat updates chat metadata through the owning session.
+func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	if chatID == "" {
 		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
 	}
@@ -871,8 +872,8 @@ func (c *Controller) ArchiveChat(ctx context.Context, sessionID id.ID, chatID id
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	archivingActive := chatID == activeChatID
-	status, nextChatID, err := owner.ArchiveChat(ctx, chatID)
+	archivingActive := update.Archived != nil && *update.Archived && chatID == activeChatID
+	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}

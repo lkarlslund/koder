@@ -35,6 +35,11 @@ type QueueItem struct {
 	Note        string
 }
 
+type MetadataUpdate struct {
+	Archived *bool
+	Title    string
+}
+
 type Status string
 
 const (
@@ -890,17 +895,28 @@ func (r *Chat) SetChat(chat domain.Chat) {
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
 }
 
-// Archive hides this chat from normal session lists while preserving its history.
-func (r *Chat) Archive(ctx context.Context) (domain.Chat, error) {
+// UpdateMetadata updates chat metadata owned by this chat runtime.
+func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domain.Chat, error) {
 	if r == nil {
 		return domain.Chat{}, fmt.Errorf("chat runtime is required")
 	}
+	title := strings.TrimSpace(update.Title)
 	r.mu.Lock()
-	r.chat.Archived = true
+	if update.Archived != nil {
+		r.chat.Archived = *update.Archived
+	}
+	if title != "" {
+		r.chat.Title = title
+	}
 	r.chat.UpdatedAt = time.Now().UTC()
 	if r.state != nil {
 		r.state.UpdateChat(func(chat *domain.Chat) {
-			chat.Archived = true
+			if update.Archived != nil {
+				chat.Archived = *update.Archived
+			}
+			if title != "" {
+				chat.Title = title
+			}
 			chat.UpdatedAt = r.chat.UpdatedAt
 		})
 	}

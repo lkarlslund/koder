@@ -36,7 +36,7 @@ const (
 	ToolKindChatList
 	ToolKindChatStart
 	ToolKindChatPoll
-	ToolKindChatArchive
+	ToolKindChatUpdate
 	ToolKindSkill
 	ToolKindWebFetch
 	ToolKindWebSearch

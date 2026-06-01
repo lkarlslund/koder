@@ -164,12 +164,12 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 	return e.startPreparedChat(ctx, owner, chatRecord.ID, milestone, scopedTodo, role, objective)
 }
 
-func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
+func (e *Engine) UpdateChat(ctx context.Context, sessionID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	status, _, err := owner.ArchiveChat(ctx, chatID)
+	status, _, err := owner.UpdateChat(ctx, chatID, update)
 	return status, err
 }
 

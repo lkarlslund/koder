@@ -35,11 +35,16 @@ func (f *fakeChatControl) PollChat(_ context.Context, _ id.ID, chatID id.ID) (to
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) ArchiveChat(_ context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
+func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	f.lastSessionID = sessionID
 	f.lastChatID = chatID
 	status := f.statuses[0]
-	status.Chat.Archived = true
+	if update.Archived != nil {
+		status.Chat.Archived = *update.Archived
+	}
+	if update.Title != "" {
+		status.Chat.Title = update.Title
+	}
 	return status, nil
 }
 
@@ -53,6 +58,13 @@ func testRuntime(control tools.ChatControl) tools.Runtime {
 }
 
 func TestNormalizeStartAndPollArgs(t *testing.T) {
+	listArgs, err := (listTool{}).NormalizeArgs(map[string]string{"archived": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listArgs["archived"] != "true" {
+		t.Fatalf("unexpected list args: %#v", listArgs)
+	}
 	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "ref": " alpha ", "title": "Worker", "todo_id": "todo-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +88,19 @@ func TestNormalizeStartAndPollArgs(t *testing.T) {
 	if _, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": "   "}); err == nil {
 		t.Fatal("expected empty chat id error")
 	}
+	updateArgs, err := (updateTool{}).NormalizeArgs(map[string]string{"chat_id": " #019e2831-cbf8-79f6-9e6d-3ec97db3d9f9 ", "archived": "false", "title": " Restored "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updateArgs["chat_id"] != "019e2831-cbf8-79f6-9e6d-3ec97db3d9f9" || updateArgs["archived"] != "false" || updateArgs["title"] != "Restored" {
+		t.Fatalf("unexpected update args: %#v", updateArgs)
+	}
+	if _, err := (updateTool{}).NormalizeArgs(map[string]string{}); err == nil {
+		t.Fatal("expected update field error")
+	}
+	if _, err := (updateTool{}).NormalizeArgs(map[string]string{"archived": "maybe"}); err == nil {
+		t.Fatal("expected archived bool error")
+	}
 }
 
 func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
@@ -88,6 +113,10 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 		Chat:       domain.Chat{ID: "chat-7", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
+	}, {
+		Chat:       domain.Chat{ID: "chat-8", Title: "Archived", WorkflowRole: chatrole.Execution, Archived: true},
+		State:      tools.ChatRunStateIdle,
+		StatusText: "Idle",
 	}}}
 	result, err := (listTool{}).Execute(context.Background(), testRuntime(control), tools.Request{Tool: domain.ToolKindChatList})
 	if err != nil {
@@ -95,6 +124,16 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Worker") {
 		t.Fatalf("expected stored chat output, got %q", result.Output)
+	}
+	if strings.Contains(result.Output, "Archived") {
+		t.Fatalf("expected archived chat hidden by default, got %q", result.Output)
+	}
+	result, err = (listTool{}).Execute(context.Background(), testRuntime(control), tools.Request{Tool: domain.ToolKindChatList, Args: map[string]string{"archived": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Archived") {
+		t.Fatalf("expected archived chat with archived=true, got %q", result.Output)
 	}
 }
 
@@ -175,23 +214,23 @@ func TestPollExecuteHintsAgainstRepeatedBusyPolls(t *testing.T) {
 	}
 }
 
-func TestArchiveExecuteArchivesCurrentChatByDefault(t *testing.T) {
+func TestUpdateExecuteUpdatesCurrentChatByDefault(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
 		Chat:       domain.Chat{ID: "chat-20", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateIdle,
 		StatusText: "Idle",
 	}}}
-	result, err := (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatArchive,
-		Args: map[string]string{},
+	result, err := (updateTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatUpdate,
+		Args: map[string]string{"archived": "false", "title": "Restored"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if control.lastSessionID != "session-10" || control.lastChatID != "chat-20" {
-		t.Fatalf("unexpected archive target: %#v", control)
+		t.Fatalf("unexpected update target: %#v", control)
 	}
-	if !strings.Contains(result.Output, "Worker") {
-		t.Fatalf("expected archive output to include chat, got %q", result.Output)
+	if !strings.Contains(result.Output, "Restored") {
+		t.Fatalf("expected update output to include chat, got %q", result.Output)
 	}
 }

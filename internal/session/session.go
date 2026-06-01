@@ -387,24 +387,31 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	return chatRecord, nil
 }
 
-// ArchiveChat marks a chat archived, preserving its history.
-func (s *Session) ArchiveChat(ctx context.Context, chatID id.ID) (tools.ChatStatus, id.ID, error) {
+// UpdateChat updates chat metadata, preserving its history.
+func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, id.ID, error) {
 	if s == nil {
 		return tools.ChatStatus{}, "", fmt.Errorf("session is required")
 	}
 	if chatID == "" {
 		return tools.ChatStatus{}, "", fmt.Errorf("chat id is required")
 	}
+	if update.Archived == nil && strings.TrimSpace(update.Title) == "" {
+		return tools.ChatStatus{}, "", fmt.Errorf("archived or title is required")
+	}
 	s.mu.RLock()
 	session := s.session
 	target, ok := chatByID(s.chats, chatID)
-	nextChatID := fallbackVisibleChatID(s.chats, target)
 	if !ok {
 		s.mu.RUnlock()
 		return tools.ChatStatus{}, "", fmt.Errorf("chat %s not found", chatID)
 	}
+	nextChatID := id.ID("")
+	archivingVisibleChat := update.Archived != nil && *update.Archived && !target.Archived
+	if archivingVisibleChat {
+		nextChatID = fallbackVisibleChatID(s.chats, target)
+	}
 	s.mu.RUnlock()
-	if nextChatID == "" {
+	if archivingVisibleChat && nextChatID == "" {
 		return tools.ChatStatus{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
 	}
 	s.mu.Lock()
@@ -420,24 +427,39 @@ func (s *Session) ArchiveChat(ctx context.Context, chatID id.ID) (tools.ChatStat
 		rt = loaded
 		s.mu.Unlock()
 	}
-	archived, err := rt.Archive(ctx)
+	updated, err := rt.UpdateMetadata(ctx, chatpkg.MetadataUpdate{
+		Archived: update.Archived,
+		Title:    update.Title,
+	})
 	if err != nil {
 		return tools.ChatStatus{}, "", err
 	}
-	target = archived
+	target = updated
 	s.mu.Lock()
 	upsertSessionChatLocked(&s.chats, target)
 	status := s.chatStatusLocked(target.ID)
-	snapshot := chatpkg.Snapshot{Session: session, Chat: target, Status: chatpkg.StatusIdle, StatusText: "Archived"}
+	statusText := "Updated"
+	if update.Archived != nil {
+		if *update.Archived {
+			statusText = "Archived"
+		} else {
+			statusText = "Restored"
+		}
+	}
+	snapshot := chatpkg.Snapshot{Session: session, Chat: target, Status: chatpkg.StatusIdle, StatusText: statusText}
 	if rt != nil {
 		snapshot = rt.Snapshot()
 		snapshot.Chat = target
-		snapshot.StatusText = "Archived"
+		snapshot.StatusText = statusText
 	}
 	s.mu.Unlock()
 	status.Chat = target
-	status.StatusText = "Archived"
-	s.emit(Event{Kind: EventChatArchived, SessionID: target.SessionID, Chat: target, Snapshot: snapshot, NextChatID: nextChatID})
+	status.StatusText = statusText
+	kind := EventChatChanged
+	if archivingVisibleChat {
+		kind = EventChatArchived
+	}
+	s.emit(Event{Kind: kind, SessionID: target.SessionID, Chat: target, Snapshot: snapshot, NextChatID: nextChatID})
 	return status, nextChatID, nil
 }
 

@@ -870,7 +870,7 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	}
 }
 
-func TestArchiveChatPersistsThroughEngineControl(t *testing.T) {
+func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -889,19 +889,35 @@ func TestArchiveChatPersistsThroughEngineControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	status, err := engine.ArchiveChat(context.Background(), session.ID, child.ID)
+	archived := true
+	status, err := engine.UpdateChat(context.Background(), session.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived, Title: "Renamed child"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.Chat.Archived {
+	if !status.Chat.Archived || status.Chat.Title != "Renamed child" {
 		t.Fatalf("expected archived status, got %#v", status.Chat)
 	}
 	reloaded, err := chatpkg.GetChat(context.Background(), st, child.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reloaded.Archived {
+	if !reloaded.Archived || reloaded.Title != "Renamed child" {
 		t.Fatalf("expected persisted archive flag, got %#v", reloaded)
+	}
+	archived = false
+	status, err = engine.UpdateChat(context.Background(), session.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Chat.Archived {
+		t.Fatalf("expected restored status, got %#v", status.Chat)
+	}
+	reloaded, err = chatpkg.GetChat(context.Background(), st, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Archived {
+		t.Fatalf("expected persisted restored archive flag, got %#v", reloaded)
 	}
 }
 

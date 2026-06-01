@@ -73,7 +73,7 @@ const (
 	ToolKindChatList               = toolkind.ToolKindChatList
 	ToolKindChatStart              = toolkind.ToolKindChatStart
 	ToolKindChatPoll               = toolkind.ToolKindChatPoll
-	ToolKindChatArchive            = toolkind.ToolKindChatArchive
+	ToolKindChatUpdate             = toolkind.ToolKindChatUpdate
 	ToolKindSkill                  = toolkind.ToolKindSkill
 	ToolKindWebFetch               = toolkind.ToolKindWebFetch
 	ToolKindWebSearch              = toolkind.ToolKindWebSearch

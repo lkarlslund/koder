@@ -898,7 +898,7 @@ func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 		return "web", "Web"
 	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecList, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate, domain.ToolKindExecCleanup:
 		return "exec", "Exec"
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatPoll, domain.ToolKindChatArchive, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatPoll, domain.ToolKindChatUpdate, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
 		return "chat", "Chat"
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
 		return "milestone", "Milestone"

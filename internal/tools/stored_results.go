@@ -818,7 +818,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution, domain.ToolKindChatPoll, domain.ToolKindChatArchive:
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution, domain.ToolKindChatPoll, domain.ToolKindChatUpdate:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
