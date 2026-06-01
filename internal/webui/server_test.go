@@ -649,6 +649,13 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	}
 }
 
+func TestWebSocketSelectionDeltaIsNotBroadcast(t *testing.T) {
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 3, Type: "selection_delta", Payload: map[string]id.ID{"active_chat_id": "chat-2"}})
+	if ok {
+		t.Fatalf("expected selection delta to be private to the initiating RPC, got %#v", event)
+	}
+}
+
 func TestIndexServesHTML(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1088,8 +1095,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
 	}
-	if !strings.Contains(fullPage, `selectedChatPreferenceName()`) {
-		t.Fatalf("expected selected chat to use browser preference storage")
+	if !strings.Contains(fullPage, `selectedChatPreferenceName()`) ||
+		!strings.Contains(fullPage, `writeTabPreference(this.selectedChatPreferenceName()`) ||
+		!strings.Contains(fullPage, `readTabPreference(this.selectedChatPreferenceName()`) {
+		t.Fatalf("expected selected chat to use tab-local browser preference storage")
 	}
 	if !strings.Contains(fullPage, `restoreSelectedChat()`) {
 		t.Fatalf("expected selected chat to be restored after reload")
@@ -1531,7 +1540,7 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Archived bool `json:"archived"`
+			ActiveChatID id.ID `json:"active_chat_id"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1541,8 +1550,8 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
 	}
-	if !resp.Result.Archived {
-		t.Fatal("expected delete_chat acknowledgement")
+	if resp.Result.ActiveChatID == "" || resp.Result.ActiveChatID == deletedID {
+		t.Fatalf("expected delete_chat response to select a different chat, got %s", resp.Result.ActiveChatID)
 	}
 	state := ctrl.State()
 	if state.ActiveChatID == deletedID {

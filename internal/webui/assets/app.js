@@ -947,15 +947,16 @@
         },
         applySessionDelta(delta) {
           if (!delta || !delta.session) return;
-          this.state.session = delta.session;
-          this.state.Session = delta.session;
           const id = String(delta.session.id || delta.session.ID || '').trim();
           const sessions = (this.state.sessions || this.state.Sessions || []).slice();
           const idx = sessions.findIndex(item => String(item.id || item.ID || '') === id);
           if (idx >= 0) sessions[idx] = delta.session; else if (id) sessions.push(delta.session);
           this.state.sessions = sessions;
           this.state.Sessions = sessions;
-          this.syncSessionURL();
+          if (id && id === this.currentSessionID()) {
+            this.state.session = delta.session;
+            this.state.Session = delta.session;
+          }
           this.reportClientStateSoon();
         },
         applySelectionDelta(delta) {
@@ -1196,7 +1197,7 @@
           writeJSONPreference(this.milestoneExpansionPreferenceName(), this.expandedMilestones || {});
         },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
-        writeSelectedChat() { const id = this.activeChatID(); if (id) writePreference(this.selectedChatPreferenceName(), id); },
+        writeSelectedChat() { const id = this.activeChatID(); if (id) writeTabPreference(this.selectedChatPreferenceName(), id); },
         composerDraftPreferenceName() {
           const session = encodeURIComponent(this.currentSessionID());
           const chat = encodeURIComponent(this.activeChatID() || '');
@@ -1246,7 +1247,7 @@
         },
         restoreSelectedChat() {
           if (this.restoreChatAttempted) return false;
-          const raw = readPreference(this.selectedChatPreferenceName(), '');
+          const raw = readTabPreference(this.selectedChatPreferenceName(), '');
           const id = String(raw || '').trim();
           if (!id) { this.restoreChatAttempted = true; return false; }
           const exists = (this.state.chats || this.state.Chats || []).some(chat => this.chatID(chat) === id);
@@ -2009,7 +2010,7 @@
           return false;
         },
         switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.closeMobileSidebar(); }); },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(() => this.closeMobileSidebar()).catch(err => this.showToast(err.message)); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
         startChatDrag(ev, id) {
           if (!id) return;
           this.dragChatID = id;
@@ -2053,7 +2054,7 @@
         endChatDrag() { this.dragChatID = ''; },
         deleteChat(id) {
           if (!id || !confirm('Archive this chat?')) return;
-          this.rpc('delete_chat', {chat_id: id}).catch(err => this.showToast(err.message));
+          this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s, {scrollToBottom: true})).catch(err => this.showToast(err.message));
         },
         showToast(message) {
           this.toast = message || '';
@@ -2698,6 +2699,12 @@
     }
     function removePreference(name) {
       try { localStorage.removeItem(preferenceKey(name)); } catch (_) {}
+    }
+    function readTabPreference(name, fallback) {
+      try { return sessionStorage.getItem(preferenceKey(name)) || fallback; } catch (_) { return fallback; }
+    }
+    function writeTabPreference(name, value) {
+      try { sessionStorage.setItem(preferenceKey(name), String(value)); } catch (_) {}
     }
     function readJSONPreference(name, fallback) {
       try {

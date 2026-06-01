@@ -545,7 +545,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.NewChat(ctx, in.Title); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"created": true}, nil
+		return s.controller.State(), nil
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
 	case "switch_session":
@@ -608,7 +608,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.DeleteChat(ctx, in.ChatID); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"archived": true}, nil
+		return s.controller.State(), nil
 	case "reorder_chats":
 		var in struct {
 			ChatIDs []id.ID `json:"chat_ids"`
@@ -943,6 +943,8 @@ func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
 			return app.Event{}, false
 		}
 		return app.Event{Seq: event.Seq, Type: "state_delta", Payload: stateDeltaFromState(state)}, true
+	case "selection_delta":
+		return app.Event{}, false
 	default:
 		return event, true
 	}
