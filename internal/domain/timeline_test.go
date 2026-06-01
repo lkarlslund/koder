@@ -53,6 +53,28 @@ func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	}
 }
 
+func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+	var part Part
+	err := json.Unmarshal([]byte(`{
+		"kind": "ToolCall",
+		"payload": {
+			"tool": "read",
+			"tool_call_id": "call_1",
+			"args": {"path": "README.md"}
+		}
+	}`), &part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := part.Payload.(ToolCallPayload)
+	if !ok {
+		t.Fatalf("expected tool call payload, got %#v", part.Payload)
+	}
+	if payload.Tool != ToolKindFileRead {
+		t.Fatalf("expected renamed read tool kind, got %s", payload.Tool)
+	}
+}
+
 func TestToolPayloadUnmarshalIgnoresRemovedToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{

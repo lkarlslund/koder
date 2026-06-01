@@ -412,6 +412,43 @@ type Notice struct {
 	Limit      int      `json:"limit,omitempty"`
 }
 
+// UnmarshalJSON accepts historical persisted tool names.
+func (n *Notice) UnmarshalJSON(data []byte) error {
+	type encodedNotice struct {
+		Level      string `json:"level,omitempty"`
+		Text       string `json:"text"`
+		Kind       string `json:"kind,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+		Title      string `json:"title,omitempty"`
+		Subtitle   string `json:"subtitle,omitempty"`
+		Tool       string `json:"tool,omitempty"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
+		Count      int    `json:"count,omitempty"`
+		Limit      int    `json:"limit,omitempty"`
+	}
+	var encoded encodedNotice
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		return err
+	}
+	tool, err := parsePersistedToolKind(encoded.Tool)
+	if err != nil {
+		tool = 0
+	}
+	*n = Notice{
+		Level:      encoded.Level,
+		Text:       encoded.Text,
+		Kind:       encoded.Kind,
+		Reason:     encoded.Reason,
+		Title:      encoded.Title,
+		Subtitle:   encoded.Subtitle,
+		Tool:       tool,
+		ToolCallID: encoded.ToolCallID,
+		Count:      encoded.Count,
+		Limit:      encoded.Limit,
+	}
+	return nil
+}
+
 const (
 	NoticeKindInterrupted          = "interrupted"
 	NoticeReasonUserInterrupted    = "user_interrupted"

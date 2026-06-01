@@ -63,6 +63,25 @@ type ToolCallPayload struct {
 // PartKind returns the payload part kind.
 func (ToolCallPayload) PartKind() PartKind { return PartKindToolCall }
 
+// UnmarshalJSON accepts historical persisted tool names.
+func (p *ToolCallPayload) UnmarshalJSON(data []byte) error {
+	type encodedToolCallPayload struct {
+		Tool       string            `json:"tool"`
+		ToolCallID string            `json:"tool_call_id,omitempty"`
+		Args       map[string]string `json:"args,omitempty"`
+	}
+	var encoded encodedToolCallPayload
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		return err
+	}
+	tool, err := parsePersistedToolKind(encoded.Tool)
+	if err != nil {
+		tool = 0
+	}
+	*p = ToolCallPayload{Tool: tool, ToolCallID: encoded.ToolCallID, Args: encoded.Args}
+	return nil
+}
+
 // ToolResultStatus describes the persisted result state for a tool output.
 type ToolResultStatus string
 
@@ -241,6 +260,35 @@ type ApprovalRequestPayload struct {
 // PartKind returns the payload part kind.
 func (ApprovalRequestPayload) PartKind() PartKind { return PartKindApprovalRequest }
 
+// UnmarshalJSON accepts historical persisted tool names.
+func (p *ApprovalRequestPayload) UnmarshalJSON(data []byte) error {
+	type encodedApprovalRequestPayload struct {
+		ApprovalID ID             `json:"approval_id,omitempty"`
+		Tool       string         `json:"tool,omitempty"`
+		ToolCallID string         `json:"tool_call_id,omitempty"`
+		Command    string         `json:"command,omitempty"`
+		Status     ApprovalStatus `json:"status,omitempty"`
+		Body       string         `json:"body,omitempty"`
+	}
+	var encoded encodedApprovalRequestPayload
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		return err
+	}
+	tool, err := parsePersistedToolKind(encoded.Tool)
+	if err != nil {
+		tool = 0
+	}
+	*p = ApprovalRequestPayload{
+		ApprovalID: encoded.ApprovalID,
+		Tool:       tool,
+		ToolCallID: encoded.ToolCallID,
+		Command:    encoded.Command,
+		Status:     encoded.Status,
+		Body:       encoded.Body,
+	}
+	return nil
+}
+
 // CompactionPayload stores a compacted conversation summary.
 type CompactionPayload struct {
 	Summary             string `json:"summary"`
@@ -320,6 +368,43 @@ type EventNoticePayload struct {
 
 // PartKind returns the payload part kind.
 func (EventNoticePayload) PartKind() PartKind { return PartKindEventNotice }
+
+// UnmarshalJSON accepts historical persisted tool names.
+func (p *EventNoticePayload) UnmarshalJSON(data []byte) error {
+	type encodedEventNoticePayload struct {
+		Text       string `json:"text"`
+		Kind       string `json:"kind,omitempty"`
+		Severity   string `json:"severity,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+		Title      string `json:"title,omitempty"`
+		Subtitle   string `json:"subtitle,omitempty"`
+		Tool       string `json:"tool,omitempty"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
+		Count      int    `json:"count,omitempty"`
+		Limit      int    `json:"limit,omitempty"`
+	}
+	var encoded encodedEventNoticePayload
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		return err
+	}
+	tool, err := parsePersistedToolKind(encoded.Tool)
+	if err != nil {
+		tool = 0
+	}
+	*p = EventNoticePayload{
+		Text:       encoded.Text,
+		Kind:       encoded.Kind,
+		Severity:   encoded.Severity,
+		Reason:     encoded.Reason,
+		Title:      encoded.Title,
+		Subtitle:   encoded.Subtitle,
+		Tool:       tool,
+		ToolCallID: encoded.ToolCallID,
+		Count:      encoded.Count,
+		Limit:      encoded.Limit,
+	}
+	return nil
+}
 
 // Text returns the human-readable text represented by the part payload.
 func (p Part) Text() string {
