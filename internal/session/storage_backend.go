@@ -555,12 +555,12 @@ func sortChatsForSidebar(chats []domain.Chat) {
 	})
 }
 
-func AppendPermissionRule(rules []domain.PermissionOverride, rule domain.PermissionOverride) []domain.PermissionOverride {
+func AppendPermissionRule(rules []accesssettings.PermissionOverride, rule accesssettings.PermissionOverride) []accesssettings.PermissionOverride {
 	rule.Pattern = strings.TrimSpace(rule.Pattern)
 	if rule.Pattern == "" {
 		rule.Pattern = "*"
 	}
-	next := make([]domain.PermissionOverride, 0, len(rules)+1)
+	next := make([]accesssettings.PermissionOverride, 0, len(rules)+1)
 	for _, existing := range rules {
 		if existing.Tool == rule.Tool && strings.TrimSpace(existing.Pattern) == rule.Pattern {
 			continue

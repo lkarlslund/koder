@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -255,7 +256,7 @@ func (f *runtimeFakeRunner) nextEvents() <-chan domain.Event {
 	return evt
 }
 
-func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *TurnState, _ string, _ *domain.PermissionOverride, out chan<- domain.Event) (bool, error) {
+func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *TurnState, _ string, _ *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
 	f.mu.Lock()
 	f.approveCalls++
 	f.mu.Unlock()

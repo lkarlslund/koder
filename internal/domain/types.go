@@ -81,11 +81,7 @@ const (
 	ToolKindChatStartExecution     = toolkind.ToolKindChatStartExecution
 )
 
-type PermissionOverride struct {
-	Tool    ToolKind
-	Pattern string
-	Action  accesssettings.PermissionMode
-}
+type PermissionOverride = accesssettings.PermissionOverride
 
 type ToolStates = toolkind.States
 

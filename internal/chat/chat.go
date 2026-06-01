@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -147,7 +148,7 @@ type interruptCmd struct{}
 type resumePendingToolsCmd struct{}
 type approveCmd struct {
 	toolCallID string
-	rule       *domain.PermissionOverride
+	rule       *accesssettings.PermissionOverride
 }
 type denyCmd struct {
 	toolCallID string
@@ -176,7 +177,7 @@ type TurnLoopService interface {
 }
 
 type ToolTurnService interface {
-	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
+	ApproveToolForTurn(context.Context, *TurnState, string, *accesssettings.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
 }
 
@@ -1262,7 +1263,7 @@ func (r *Chat) handleInterrupt() {
 	}
 }
 
-func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
+func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionOverride) {
 	if service := r.deps.Tools; service != nil {
 		r.handleApproveWithTurnLoop(service, toolCallID, rule)
 		return
@@ -1282,7 +1283,7 @@ func (r *Chat) handleDeny(toolCallID string) {
 	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 }
 
-func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
+func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *accesssettings.PermissionOverride) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {

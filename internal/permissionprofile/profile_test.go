@@ -63,7 +63,7 @@ func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
 
 func TestEvaluateSessionOverridesTakePrecedence(t *testing.T) {
 	cfg := testRules()
-	got := Evaluate(cfg, ProfileAsk, []domain.PermissionOverride{{
+	got := Evaluate(cfg, ProfileAsk, []accesssettings.PermissionOverride{{
 		Tool:    domain.ToolKindBash,
 		Pattern: "git *",
 		Action:  accesssettings.PermissionModeAllow,

@@ -87,7 +87,7 @@ type Decision struct {
 }
 
 // Evaluate returns the permission decision for req under profileName.
-func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverride, req Request) Decision {
+func Evaluate(cfg Rules, profileName string, overrides []accesssettings.PermissionOverride, req Request) Decision {
 	pattern := req.Pattern
 	if pattern == "" {
 		pattern = "*"

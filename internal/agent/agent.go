@@ -302,7 +302,7 @@ func (e *Engine) HandleTurnError(ctx context.Context, turn *chatpkg.TurnState, o
 	e.emitAssistantError(ctx, out, chatID, sessionID, err)
 }
 
-func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, rule *domain.PermissionOverride, out chan<- domain.Event) (bool, error) {
+func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
 	if turn == nil {
 		return false, fmt.Errorf("turn state is required")
 	}
