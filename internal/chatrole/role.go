@@ -4,23 +4,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
+type Role string
+
 const (
-	General      domain.WorkflowRole = "general"
-	Orchestrator domain.WorkflowRole = "orchestrator"
-	Planning     domain.WorkflowRole = "planning"
-	Execution    domain.WorkflowRole = "execution"
+	General      Role = "general"
+	Orchestrator Role = "orchestrator"
+	Planning     Role = "planning"
+	Execution    Role = "execution"
 )
 
-const legacyDecomposition domain.WorkflowRole = "decomposition"
+const legacyDecomposition Role = "decomposition"
 
 // Spec describes a chat role's behavior contract.
 type Spec struct {
 	Registered   bool // Registered is false for unknown roles.
-	Name         domain.WorkflowRole
+	Name         Role
 	DisplayName  string
 	SystemPrompt string
 	AllowTools   map[toolkind.Kind]bool
@@ -43,12 +44,12 @@ func (s Spec) AllowsTool(kind toolkind.Kind) bool {
 
 // Registry stores the available chat roles by name.
 type Registry struct {
-	roles map[domain.WorkflowRole]Spec
+	roles map[Role]Spec
 }
 
 // DefaultRegistry returns the built-in chat role registry.
 func DefaultRegistry() Registry {
-	return Registry{roles: map[domain.WorkflowRole]Spec{
+	return Registry{roles: map[Role]Spec{
 		General:      orchestrationSpec(General, "Chat"),
 		Orchestrator: orchestrationSpec(Orchestrator, "Orchestrate"),
 		Planning:     orchestrationSpec(Planning, "Plan"),
@@ -74,7 +75,7 @@ Focus only on the assigned milestone and todo bucket.
 }
 
 // Lookup returns the role spec for name.
-func (r Registry) Lookup(name domain.WorkflowRole) (Spec, bool) {
+func (r Registry) Lookup(name Role) (Spec, bool) {
 	if strings.TrimSpace(string(name)) == "" {
 		name = General
 	}
@@ -83,7 +84,7 @@ func (r Registry) Lookup(name domain.WorkflowRole) (Spec, bool) {
 }
 
 // SpecFor returns the registered role spec.
-func SpecFor(role domain.WorkflowRole) Spec {
+func SpecFor(role Role) Spec {
 	if role == legacyDecomposition {
 		return orchestrationSpec(Orchestrator, "Orchestrate")
 	}
@@ -98,12 +99,12 @@ func SpecFor(role domain.WorkflowRole) Spec {
 }
 
 // AllowsTool reports whether role may expose or execute kind.
-func AllowsTool(role domain.WorkflowRole, kind toolkind.Kind) bool {
+func AllowsTool(role Role, kind toolkind.Kind) bool {
 	return SpecFor(role).AllowsTool(kind)
 }
 
 // CheckToolAllowed returns an error when role cannot execute kind.
-func CheckToolAllowed(role domain.WorkflowRole, kind toolkind.Kind) error {
+func CheckToolAllowed(role Role, kind toolkind.Kind) error {
 	if AllowsTool(role, kind) {
 		return nil
 	}
@@ -111,12 +112,12 @@ func CheckToolAllowed(role domain.WorkflowRole, kind toolkind.Kind) error {
 }
 
 // SystemPrompt returns the role-specific instruction text.
-func SystemPrompt(role domain.WorkflowRole) string {
+func SystemPrompt(role Role) string {
 	return SpecFor(role).SystemPrompt
 }
 
 // DisplayName returns a short UI label for role.
-func DisplayName(role domain.WorkflowRole) string {
+func DisplayName(role Role) string {
 	spec := SpecFor(role)
 	if strings.TrimSpace(spec.DisplayName) != "" {
 		return spec.DisplayName
@@ -127,7 +128,7 @@ func DisplayName(role domain.WorkflowRole) string {
 	return string(role)
 }
 
-func orchestrationSpec(name domain.WorkflowRole, display string) Spec {
+func orchestrationSpec(name Role, display string) Spec {
 	return Spec{
 		Registered:  true,
 		Name:        name,

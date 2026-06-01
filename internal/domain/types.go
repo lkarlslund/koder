@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
@@ -162,7 +163,7 @@ type Session struct {
 	LastMessage       string
 }
 
-type WorkflowRole string
+type WorkflowRole = chatrole.Role
 
 type Chat struct {
 	ID                     ID

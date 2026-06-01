@@ -4,14 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 func TestDefaultRegistryRoleSpecs(t *testing.T) {
 	tests := []struct {
 		name        string
-		role        domain.WorkflowRole
+		role        Role
 		displayName string
 		prompt      string
 	}{
@@ -37,17 +36,17 @@ func TestDefaultRegistryRoleSpecs(t *testing.T) {
 func TestRoleAllowsTool(t *testing.T) {
 	tests := []struct {
 		name string
-		role domain.WorkflowRole
+		role Role
 		tool toolkind.Kind
 		want bool
 	}{
-		{"legacy decomposition allows orchestrator tools", domain.WorkflowRole("decomposition"), toolkind.ToolKindChatPoll, true},
+		{"legacy decomposition allows orchestrator tools", Role("decomposition"), toolkind.ToolKindChatPoll, true},
 		{"execution allows edit", Execution, toolkind.ToolKindFileEdit, true},
 		{"execution rejects chat start", Execution, toolkind.ToolKindChatStart, false},
 		{"execution rejects milestone add", Execution, toolkind.ToolKindMilestoneAdd, false},
 		{"execution allows milestone update", Execution, toolkind.ToolKindMilestoneUpdate, true},
 		{"orchestrator allows chat poll", Orchestrator, toolkind.ToolKindChatPoll, true},
-		{"unknown rejects read", domain.WorkflowRole("unknown"), toolkind.ToolKindFileRead, false},
+		{"unknown rejects read", Role("unknown"), toolkind.ToolKindFileRead, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
