@@ -23,8 +23,8 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Write file",
 		Description: "Create a workspace file, or intentionally overwrite one when force_overwrite is true.",
-		Usage:       "Create a new file in the workspace. For existing files, prefer file_edit for targeted changes. Write refuses to overwrite existing files unless force_overwrite is explicitly true; only force overwrite when a full-file rewrite is absolutely necessary.",
-		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to create or intentionally overwrite"},"content":{"type":"string","description":"Complete contents of the file. Use only for new files or intentional full rewrites."},"force_overwrite":{"type":"boolean","description":"Set to true only when intentionally replacing the complete contents of an existing file. Omit or false for new-file creation."}},"required":["path","content"],"additionalProperties":false}`,
+		Usage:       "Create a new file in the workspace. Prefer file_write for new or small files, ideally under 200 lines. For larger files, write a minimal skeleton first, then add sections incrementally with file_edit. For existing files, prefer file_edit for targeted changes. Write refuses to overwrite existing files unless force_overwrite is explicitly true; only force overwrite when a full-file rewrite is absolutely necessary.",
+		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to create or intentionally overwrite"},"content":{"type":"string","description":"Complete contents of the file. Prefer under 200 lines; for larger files, write a skeleton first and fill sections with file_edit. Do not use placeholders."},"force_overwrite":{"type":"boolean","description":"Set to true only when intentionally replacing the complete contents of an existing file. Omit or false for new-file creation."}},"required":["path","content"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
