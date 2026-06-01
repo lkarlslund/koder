@@ -93,8 +93,11 @@
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
     .markdown-body svg { max-width: 100%; height: auto; }
-    .mermaid-diagram { margin: .75rem 0; max-width: 100%; overflow: auto; border: 1px solid var(--bs-border-color); border-radius: .45rem; padding: .75rem; background: var(--bs-body-bg); }
+    .markdown-media-preview { position: relative; display: inline-block; max-width: 100%; vertical-align: top; }
+    .markdown-media-preview > img, .markdown-media-preview > svg { display: block; max-width: 100%; height: auto; }
+    .mermaid-diagram { position: relative; margin: .75rem 0; max-width: 100%; overflow: auto; border: 1px solid var(--bs-border-color); border-radius: .45rem; padding: .75rem; background: var(--bs-body-bg); }
     .mermaid-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+    .mermaid-diagram-content { min-width: 0; }
     .mermaid-diagram[data-mermaid-state="error"] { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
     .mermaid-error { color: var(--bs-danger-text-emphasis); font-size: .86rem; font-weight: 600; margin-bottom: .45rem; }
     .diagram-stream-placeholder { display: inline-flex; align-items: center; min-height: 2rem; margin: .35rem 0 .75rem; padding: .25rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; color: var(--bs-secondary-color); background: var(--bs-secondary-bg); font-size: .86rem; }
@@ -118,10 +121,16 @@
     .tool-image-large-img { max-width: 100%; max-height: 28rem; object-fit: contain; display: block; }
     .tool-image-zoom { position: absolute; right: .25rem; bottom: .25rem; display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 999px; background: rgba(0, 0, 0, .6); color: white; font-size: .8rem; opacity: .85; }
     .tool-image-preview:hover .tool-image-zoom, .tool-image-preview:focus-visible .tool-image-zoom { opacity: 1; }
+    .media-expand-button { position: absolute; right: .35rem; bottom: .35rem; z-index: 2; display: inline-grid; place-items: center; width: 1.8rem; height: 1.8rem; border: 1px solid rgba(255, 255, 255, .28); border-radius: 999px; background: rgba(0, 0, 0, .68); color: #fff; opacity: .82; }
+    .media-expand-button:hover, .media-expand-button:focus-visible { opacity: 1; background: rgba(0, 0, 0, .82); }
     .image-lightbox { z-index: 1080; background: rgba(0, 0, 0, .82); }
     .image-lightbox-dialog { width: min(96vw, 1280px); max-height: 94vh; display: flex; flex-direction: column; background: var(--bs-body-bg); }
-    .image-lightbox-body { min-height: 0; display: grid; place-items: center; padding: .75rem; overflow: auto; background: #050505; }
-    .image-lightbox-img { max-width: 100%; max-height: calc(94vh - 7rem); object-fit: contain; }
+    .image-lightbox-body { min-height: 0; height: min(78vh, 860px); display: grid; place-items: center; padding: .75rem; overflow: hidden; background: #050505; touch-action: none; cursor: grab; }
+    .image-lightbox-content { transform-origin: center center; will-change: transform; user-select: none; }
+    .image-lightbox-content.is-dragging { cursor: grabbing; }
+    .image-lightbox-img { max-width: min(100%, 1180px); max-height: calc(94vh - 7rem); object-fit: contain; pointer-events: none; }
+    .image-lightbox-svg { max-width: min(100%, 1180px); max-height: calc(94vh - 7rem); overflow: visible; pointer-events: none; }
+    .image-lightbox-svg svg { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(94vh - 7rem); background: var(--bs-body-bg); }
     .reasoning { color: var(--bs-secondary-color); }
     .notice { display: inline-flex; align-items: center; gap: .45rem; color: var(--bs-secondary-color); font-size: .9rem; }
     .notice-warning { color: var(--bs-warning-text-emphasis); }

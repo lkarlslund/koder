@@ -1142,13 +1142,23 @@
     <section class="image-lightbox-dialog border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-2 border-bottom">
         <div class="min-w-0">
-          <div class="fw-semibold text-truncate" x-text="imageLightbox.title || 'Image preview'"></div>
+          <div class="fw-semibold text-truncate" x-text="imageLightbox.title || 'Preview'"></div>
           <div class="small text-secondary text-truncate" x-show="imageLightbox.meta" x-text="imageLightbox.meta"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeImageLightbox()" title="Close image preview"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-secondary" title="Zoom out" @click="zoomLightbox(-0.25)"><i class="bi bi-zoom-out"></i></button>
+            <button type="button" class="btn btn-outline-secondary" title="Reset zoom" @click="resetLightboxView()" x-text="Math.round((imageLightbox.zoom || 1) * 100) + '%'"></button>
+            <button type="button" class="btn btn-outline-secondary" title="Zoom in" @click="zoomLightbox(0.25)"><i class="bi bi-zoom-in"></i></button>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeImageLightbox()" title="Close preview"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
-      <div class="image-lightbox-body">
-        <img class="image-lightbox-img" :src="imageLightbox.src" :alt="imageLightbox.title || 'Image preview'">
+      <div class="image-lightbox-body" @wheel="onLightboxWheel($event)" @pointerdown="startLightboxPan($event)" @pointermove.window="moveLightboxPan($event)" @pointerup.window="stopLightboxPan()" @pointercancel.window="stopLightboxPan()">
+        <div class="image-lightbox-content" :class="{'is-dragging': imageLightbox.dragging}" :style="{transform: lightboxTransform()}">
+          <img x-show="imageLightbox.kind === 'image'" class="image-lightbox-img" :src="imageLightbox.src" :alt="imageLightbox.title || 'Image preview'" draggable="false">
+          <div x-show="imageLightbox.kind === 'svg'" class="image-lightbox-svg" x-html="imageLightbox.html"></div>
+        </div>
       </div>
     </section>
   </div>

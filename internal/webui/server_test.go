@@ -835,7 +835,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `function renderImagePreviewBlock`) ||
 		!strings.Contains(fullPage, `if (kind === 'view_image')`) ||
 		!strings.Contains(fullPage, `data-lightbox-src`) ||
-		!strings.Contains(fullPage, `handleImagePreviewClick`) ||
+		!strings.Contains(fullPage, `handleMediaPreviewClick`) ||
 		!strings.Contains(fullPage, `image-lightbox`) ||
 		!strings.Contains(fullPage, `.tool-image-thumb`) {
 		t.Fatalf("expected view_image results to render clickable image thumbnails with a lightbox")
@@ -1008,6 +1008,17 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
+	}
+	if !strings.Contains(fullPage, `theme: 'base'`) ||
+		!strings.Contains(fullPage, `themeVariables: dark ?`) ||
+		!strings.Contains(fullPage, `markMermaidThemeDirty`) {
+		t.Fatalf("expected mermaid rendering to use theme-specific variables and rerender on theme changes")
+	}
+	if !strings.Contains(fullPage, `media-expand-button`) ||
+		!strings.Contains(fullPage, `openSVGLightbox`) ||
+		!strings.Contains(fullPage, `onLightboxWheel($event)`) ||
+		!strings.Contains(fullPage, `lightboxTransform()`) {
+		t.Fatalf("expected images and diagrams to support expandable pan/zoom lightbox")
 	}
 	if !strings.Contains(fullPage, `visibleMilestones()`) ||
 		!strings.Contains(fullPage, `hideClosedMilestones`) ||

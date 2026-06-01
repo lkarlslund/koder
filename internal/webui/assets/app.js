@@ -77,28 +77,86 @@
     }
     function configureMermaid() {
       if (!window.mermaid) return;
-      const theme = document.documentElement.getAttribute('data-bs-theme') === 'light' ? 'default' : 'dark';
+      const dark = document.documentElement.getAttribute('data-bs-theme') !== 'light';
+      const theme = dark ? 'koder-dark' : 'koder-light';
       if (window.koderMermaidTheme === theme) return;
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
-        theme,
+        theme: 'base',
+        themeVariables: dark ? {
+          background: '#212529',
+          mainBkg: '#2b3035',
+          secondBkg: '#343a40',
+          primaryColor: '#2b3035',
+          primaryTextColor: '#f8f9fa',
+          primaryBorderColor: '#6ea8fe',
+          secondaryColor: '#343a40',
+          secondaryTextColor: '#f8f9fa',
+          secondaryBorderColor: '#495057',
+          tertiaryColor: '#1a1d20',
+          tertiaryTextColor: '#f8f9fa',
+          tertiaryBorderColor: '#495057',
+          lineColor: '#adb5bd',
+          textColor: '#f8f9fa',
+          noteBkgColor: '#332701',
+          noteTextColor: '#fff3cd',
+          noteBorderColor: '#ffda6a',
+          clusterBkg: '#1a1d20',
+          clusterBorder: '#495057',
+          edgeLabelBackground: '#212529',
+          actorBkg: '#2b3035',
+          actorBorder: '#6ea8fe',
+          actorTextColor: '#f8f9fa',
+          signalColor: '#f8f9fa',
+          signalTextColor: '#f8f9fa'
+        } : {
+          background: '#ffffff',
+          mainBkg: '#ffffff',
+          secondBkg: '#f8f9fa',
+          primaryColor: '#ffffff',
+          primaryTextColor: '#212529',
+          primaryBorderColor: '#0d6efd',
+          secondaryColor: '#f8f9fa',
+          secondaryTextColor: '#212529',
+          secondaryBorderColor: '#ced4da',
+          tertiaryColor: '#e9ecef',
+          tertiaryTextColor: '#212529',
+          tertiaryBorderColor: '#ced4da',
+          lineColor: '#495057',
+          textColor: '#212529',
+          noteBkgColor: '#fff3cd',
+          noteTextColor: '#212529',
+          noteBorderColor: '#ffda6a',
+          clusterBkg: '#f8f9fa',
+          clusterBorder: '#ced4da',
+          edgeLabelBackground: '#ffffff',
+          actorBkg: '#ffffff',
+          actorBorder: '#0d6efd',
+          actorTextColor: '#212529',
+          signalColor: '#212529',
+          signalTextColor: '#212529'
+        },
         flowchart: {htmlLabels: false}
       });
       window.koderMermaidTheme = theme;
+    }
+    function diagramExpandButton(title) {
+      return '<button type="button" class="media-expand-button" title="Expand ' + escapeHTML(title) + '"><i class="bi bi-arrows-angle-expand"></i></button>';
     }
     async function renderMermaidIn(root) {
       if (!root || !window.mermaid) return;
       configureMermaid();
       const diagrams = root.querySelectorAll('.mermaid-diagram[data-mermaid-state="pending"]');
       for (const diagram of diagrams) {
-        const source = (diagram.textContent || '').trim();
+        const source = (diagram.dataset.mermaidSource || diagram.textContent || '').trim();
         if (!source) continue;
+        diagram.dataset.mermaidSource = source;
         diagram.dataset.mermaidState = 'rendering';
         const id = 'mermaid-' + Math.random().toString(36).slice(2);
         try {
           const result = await mermaid.render(id, source);
-          diagram.innerHTML = sanitizeDiagramSVG(result.svg || '');
+          diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeDiagramSVG(result.svg || '') + '</div>' + diagramExpandButton('Mermaid diagram');
           diagram.dataset.mermaidState = 'done';
           if (result.bindFunctions) result.bindFunctions(diagram);
         } catch (err) {
@@ -106,6 +164,15 @@
           diagram.innerHTML = '<div class="mermaid-error">Mermaid render failed</div><pre>' + escapeHTML(source) + '</pre>';
         }
       }
+    }
+    function markMermaidThemeDirty(root) {
+      if (!root) return;
+      root.querySelectorAll('.mermaid-diagram[data-mermaid-state="done"]').forEach(diagram => {
+        const source = diagram.dataset.mermaidSource || '';
+        if (!source) return;
+        diagram.dataset.mermaidState = 'pending';
+        diagram.innerHTML = '<pre>' + escapeHTML(source) + '</pre>';
+      });
     }
     const markdownCache = new Map();
     function markdownCacheKey(source, options) {
@@ -516,7 +583,7 @@
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
-        imageLightbox: {open: false, src: '', title: '', meta: ''},
+        imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
         init() {
@@ -530,7 +597,7 @@
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
-          document.addEventListener('click', event => this.handleImagePreviewClick(event));
+          document.addEventListener('click', event => this.handleMediaPreviewClick(event));
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); });
         },
@@ -570,23 +637,73 @@
           el.focus();
           this.insertComposerText(text);
         },
-        handleImagePreviewClick(event) {
-          const trigger = event.target?.closest?.('[data-lightbox-src]');
+        handleMediaPreviewClick(event) {
+          const trigger = event.target?.closest?.('[data-lightbox-src], [data-lightbox-svg], .mermaid-diagram .media-expand-button');
           if (!trigger) return;
           event.preventDefault();
+          if (trigger.matches('.mermaid-diagram .media-expand-button')) {
+            const diagram = trigger.closest('.mermaid-diagram');
+            const svg = diagram?.querySelector('.mermaid-diagram-content svg');
+            this.openSVGLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+            return;
+          }
+          if (trigger.dataset.lightboxSvg) {
+            this.openSVGLightbox(trigger.dataset.lightboxSvg || '', trigger.dataset.lightboxTitle || 'SVG preview', trigger.dataset.lightboxMeta || 'Drag to pan, wheel or buttons to zoom');
+            return;
+          }
           this.openImageLightbox(trigger.dataset.lightboxSrc || '', trigger.dataset.lightboxTitle || '', trigger.dataset.lightboxMeta || '');
         },
         openImageLightbox(src, title, meta) {
           if (!src) return;
-          this.imageLightbox = {open: true, src, title: title || 'Image preview', meta: meta || ''};
+          this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image preview', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        },
+        openSVGLightbox(html, title, meta) {
+          html = sanitizeDiagramSVG(html || '');
+          if (!html) return;
+          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'SVG preview', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
         },
         closeImageLightbox() {
-          this.imageLightbox = {open: false, src: '', title: '', meta: ''};
+          this.imageLightbox = {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        },
+        lightboxTransform() {
+          const box = this.imageLightbox || {};
+          return 'translate(' + (box.panX || 0) + 'px, ' + (box.panY || 0) + 'px) scale(' + (box.zoom || 1) + ')';
+        },
+        zoomLightbox(delta) {
+          const current = Number(this.imageLightbox.zoom || 1);
+          this.imageLightbox.zoom = Math.max(0.25, Math.min(8, current + delta));
+        },
+        resetLightboxView() {
+          this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0;
+        },
+        onLightboxWheel(event) {
+          event.preventDefault();
+          const direction = event.deltaY < 0 ? 0.2 : -0.2;
+          this.zoomLightbox(direction);
+        },
+        startLightboxPan(event) {
+          if (!this.imageLightbox.open) return;
+          this.imageLightbox.dragging = true;
+          this.imageLightbox.dragX = event.clientX - (this.imageLightbox.panX || 0);
+          this.imageLightbox.dragY = event.clientY - (this.imageLightbox.panY || 0);
+        },
+        moveLightboxPan(event) {
+          if (!this.imageLightbox.dragging) return;
+          this.imageLightbox.panX = event.clientX - (this.imageLightbox.dragX || 0);
+          this.imageLightbox.panY = event.clientY - (this.imageLightbox.dragY || 0);
+        },
+        stopLightboxPan() {
+          this.imageLightbox.dragging = false;
         },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
+          const previous = document.documentElement.getAttribute('data-bs-theme') || '';
           document.documentElement.setAttribute('data-bs-theme', resolved);
           configureMermaid();
+          if (previous && previous !== resolved) {
+            markMermaidThemeDirty(this.transcriptElement());
+            this.renderDiagrams();
+          }
         },
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
         sidebarWidth() {
@@ -981,7 +1098,45 @@
           });
         },
         renderDiagrams() {
-          renderMermaidIn(this.transcriptElement());
+          const root = this.transcriptElement();
+          renderMermaidIn(root).then(() => this.enhanceDisplayedMedia(root));
+          this.enhanceDisplayedMedia(root);
+        },
+        enhanceDisplayedMedia(root) {
+          if (!root) return;
+          root.querySelectorAll('.markdown-body img:not([data-lightbox-enhanced])').forEach(img => {
+            img.dataset.lightboxEnhanced = 'true';
+            const wrapper = document.createElement('span');
+            wrapper.className = 'markdown-media-preview';
+            img.parentNode.insertBefore(wrapper, img);
+            wrapper.appendChild(img);
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'media-expand-button';
+            button.title = 'Expand image';
+            button.dataset.lightboxSrc = img.currentSrc || img.src || '';
+            button.dataset.lightboxTitle = img.alt || 'Image preview';
+            button.dataset.lightboxMeta = 'Drag to pan, wheel or buttons to zoom';
+            button.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
+            wrapper.appendChild(button);
+          });
+          root.querySelectorAll('.markdown-body svg:not([data-lightbox-enhanced])').forEach(svg => {
+            if (svg.closest('.mermaid-diagram')) return;
+            svg.dataset.lightboxEnhanced = 'true';
+            const wrapper = document.createElement('span');
+            wrapper.className = 'markdown-media-preview markdown-svg-preview';
+            svg.parentNode.insertBefore(wrapper, svg);
+            wrapper.appendChild(svg);
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'media-expand-button';
+            button.title = 'Expand SVG';
+            button.dataset.lightboxSvg = svg.outerHTML;
+            button.dataset.lightboxTitle = 'SVG preview';
+            button.dataset.lightboxMeta = 'Drag to pan, wheel or buttons to zoom';
+            button.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
+            wrapper.appendChild(button);
+          });
         },
         restoreTranscriptScroll(scroll, options = {}) {
           const el = this.transcriptElement();
