@@ -927,6 +927,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
 	}
+	if !strings.Contains(fullPage, `visibleMilestones()`) ||
+		!strings.Contains(fullPage, `hideClosedMilestones`) ||
+		!strings.Contains(fullPage, `toggleClosedMilestones()`) {
+		t.Fatalf("expected sidebar to hide completed/cancelled milestones")
+	}
 	if !strings.Contains(fullPage, `todoItemsForMilestone(milestone)`) {
 		t.Fatalf("expected sidebar to render todos as milestone children")
 	}

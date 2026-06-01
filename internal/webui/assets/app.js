@@ -370,7 +370,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, src: '', title: '', meta: ''},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1055,6 +1055,24 @@
         },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },
         milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
+        visibleMilestones() {
+          const items = this.milestoneItems();
+          if (!this.hideClosedMilestones) return items;
+          return items.filter(milestone => {
+            const status = this.milestoneStatus(milestone);
+            return status !== 'completed' && status !== 'cancelled';
+          });
+        },
+        closedMilestoneCount() {
+          return this.milestoneItems().filter(milestone => {
+            const status = this.milestoneStatus(milestone);
+            return status === 'completed' || status === 'cancelled';
+          }).length;
+        },
+        toggleClosedMilestones() {
+          this.hideClosedMilestones = !this.hideClosedMilestones;
+          writePreference('hideClosedMilestones', this.hideClosedMilestones ? 'true' : 'false');
+        },
         milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },
         milestoneRef(m) { return m.Ref || m.ref || ''; },
         milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
