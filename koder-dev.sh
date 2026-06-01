@@ -164,13 +164,68 @@ stop_koder() {
   done
 }
 
-signal_restart_needed() {
+web_bind_arg() {
+  local expect_value=0
+  local arg
+  for arg in "$@"; do
+    if (( expect_value )); then
+      printf '%s\n' "$arg"
+      return 0
+    fi
+    case "$arg" in
+      --)
+        break
+        ;;
+      --web-bind=*)
+        printf '%s\n' "${arg#--web-bind=}"
+        return 0
+        ;;
+      --web-bind)
+        expect_value=1
+        ;;
+    esac
+  done
+  printf '%s\n' "$KODER_DEV_WEB_BIND"
+}
+
+restart_needed_url() {
+  local bind
+  local addr
+  local host
+  local port
+  bind="$(web_bind_arg "$@")"
+  addr="${bind#http://}"
+  addr="${addr#https://}"
+  host="${addr%:*}"
+  port="${addr##*:}"
+  if [[ "$host" == "$addr" ]]; then
+    host="127.0.0.1"
+    port="$addr"
+  fi
+  case "$host" in
+    ""|"0.0.0.0"|"::"|"[::]")
+      host="127.0.0.1"
+      ;;
+  esac
+  printf 'http://%s:%s/api/restart-needed\n' "$host" "$port"
+}
+
+notify_restart_needed() {
   local pid="$1"
+  shift || true
+  local url
+  local output
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 0
   fi
-  log "new koder build is ready; signaling pid=$pid to show restart-needed indicator"
-  kill -USR2 "$pid" 2>/dev/null || true
+  url="$(restart_needed_url "$@")"
+  log "new koder build is ready; notifying $url"
+  if output="$(curl --fail --silent --show-error --max-time 2 -X POST "$url" 2>&1)"; then
+    log "restart-needed notification acknowledged"
+    return 0
+  fi
+  log "restart-needed notification failed: $output"
+  return 1
 }
 
 report_stopped_status() {
@@ -308,7 +363,7 @@ while true; do
   log "building koder..."
   if build_koder; then
     if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
-      signal_restart_needed "$child_pid"
+      notify_restart_needed "$child_pid" "$@" || true
       last_signature="$(source_signature)"
       continue
     fi

@@ -674,6 +674,7 @@
           if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);
           if (msg.type === 'planning_delta') this.applyPlanningDelta(msg.payload);
           if (msg.type === 'tasks_delta') this.applyTasksDelta(msg.payload);
+          if (msg.type === 'restart_delta') this.applyRestartDelta(msg.payload);
           if (msg.type === 'session_delta') this.applySessionDelta(msg.payload);
           if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
@@ -706,6 +707,13 @@
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
+          this.reportClientStateSoon();
+        },
+        applyRestartDelta(delta) {
+          if (!delta) return;
+          const needed = !!(delta.restart_needed || delta.RestartNeeded);
+          this.state.restart_needed = needed;
+          this.state.RestartNeeded = needed;
           this.reportClientStateSoon();
         },
         applyPlanningDelta(delta) {

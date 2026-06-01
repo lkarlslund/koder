@@ -232,6 +232,52 @@ func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 	}
 }
 
+func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	_ = readRPCResponse(t, ctx, conn, 1)
+
+	resp, err := http.Post(srv.URL()+"/api/restart-needed", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post restart-needed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected restart-needed status 200, got %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if !ctrl.State().RestartNeeded {
+		t.Fatal("expected controller state to mark restart needed")
+	}
+
+	msg := readMessage(t, ctx, conn)
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			RestartNeeded bool `json:"restart_needed"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &event); err != nil {
+		t.Fatalf("decode restart event: %v", err)
+	}
+	if event.Type != "restart_delta" || !event.Payload.RestartNeeded {
+		t.Fatalf("expected restart_delta with restart_needed=true, got %s", string(msg))
+	}
+}
+
 func TestServerDoesNotOpenBrowserWhenExistingTabRefreshes(t *testing.T) {
 	ctrl := newTestController(t)
 	opened := make(chan string, 1)
@@ -551,9 +597,10 @@ func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
 
 func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	state := app.State{
-		Session:      domain.Session{ID: "session-1", Title: "Session"},
-		Chats:        []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
-		ActiveChatID: "chat-7",
+		Session:       domain.Session{ID: "session-1", Title: "Session"},
+		Chats:         []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
+		ActiveChatID:  "chat-7",
+		RestartNeeded: true,
 		Milestones: planning.Plan{
 			Summary:    "Live plan",
 			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}},
@@ -587,6 +634,9 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	}
 	if !strings.Contains(payload, `"milestones"`) || !strings.Contains(payload, `"todos_by_milestone"`) || !strings.Contains(payload, `"Alpha"`) {
 		t.Fatalf("expected state delta to include planning state, got %s", payload)
+	}
+	if !strings.Contains(payload, `"restart_needed":true`) {
+		t.Fatalf("expected state delta to include restart-needed state, got %s", payload)
 	}
 }
 

@@ -411,9 +411,8 @@ func (c *Controller) MarkRestartNeeded() {
 	}
 	c.mu.Lock()
 	c.restartNeeded = true
-	state := c.stateLocked()
 	c.mu.Unlock()
-	c.broadcast("snapshot", state)
+	c.broadcast("restart_delta", map[string]bool{"restart_needed": true})
 }
 
 func (c *Controller) stateLocked() State {

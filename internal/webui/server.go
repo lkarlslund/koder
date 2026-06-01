@@ -101,6 +101,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/favicon.ico", handleFavicon)
 	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/api/health", handleHealth)
+	mux.HandleFunc("/api/restart-needed", s.handleRestartNeeded)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -238,6 +239,20 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":         true,
 		"asset_hash": currentAssetHash,
+	})
+}
+
+func (s *Server) handleRestartNeeded(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.controller.MarkRestartNeeded()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":             true,
+		"restart_needed": true,
 	})
 }
 
@@ -862,6 +877,7 @@ type stateDelta struct {
 	ModelInfo     any    `json:"model_info,omitempty"`
 	Theme         string `json:"theme,omitempty"`
 	ProjectRoot   string `json:"project_root,omitempty"`
+	RestartNeeded bool   `json:"restart_needed,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 
@@ -978,6 +994,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		ModelInfo:     state.ModelInfo,
 		Theme:         state.Theme,
 		ProjectRoot:   state.ProjectRoot,
+		RestartNeeded: state.RestartNeeded,
 		Error:         state.Error,
 	}
 }
