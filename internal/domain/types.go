@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-//go:generate go tool enumer -type=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -json -text -values -output=messagerole_enumer.go
+//go:generate go tool enumer -type=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -transform=snake -json -text -values -output=messagerole_enumer.go
 type MessageRole uint8
 
 const (

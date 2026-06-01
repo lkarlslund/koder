@@ -121,7 +121,7 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 		},
 	}
 
-	if got := Description("default", cfg); got != "1 Allow, 1 Ask, 1 Deny" {
+	if got := Description("default", cfg); got != "1 allow, 1 ask, 1 deny" {
 		t.Fatalf("unexpected configured profile description: %q", got)
 	}
 	if got := Description(ProfileFullAccess, cfg); got != "Network on, root readwrite, workspace readwrite" {

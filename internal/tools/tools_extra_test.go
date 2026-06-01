@@ -87,7 +87,7 @@ func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 		ID: "call_1",
 		Function: provider.FunctionCall{
 			Name:      domain.ToolKindTodoUpdateItem.String(),
-			Arguments: `{"id":"019aa000-0000-7000-8000-000000000001","status":"in_progress"}`,
+			Arguments: `{"id":"019aa000-0000-7000-8000-000000000001","status":"InProgress"}`,
 		},
 	})
 	var callErr tools.ProviderCallError
@@ -97,7 +97,7 @@ func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 	if callErr.Request.Tool != domain.ToolKindTodoUpdateItem || callErr.Request.ToolCallID != "call_1" {
 		t.Fatalf("expected partial todo request identity, got %#v", callErr.Request)
 	}
-	if callErr.Request.Args["status"] != "in_progress" {
+	if callErr.Request.Args["status"] != "InProgress" {
 		t.Fatalf("expected raw status in partial request, got %#v", callErr.Request.Args)
 	}
 }

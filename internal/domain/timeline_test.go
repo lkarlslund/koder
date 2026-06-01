@@ -29,7 +29,7 @@ func TestNewTimelineIDReturnsUUIDv7(t *testing.T) {
 func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{
-		"kind": "ToolOutput",
+		"kind": "tool_output",
 		"payload": {
 			"tool": "glob",
 			"tool_call_id": "call_1",
@@ -56,7 +56,7 @@ func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{
-		"kind": "ToolCall",
+		"kind": "tool_call",
 		"payload": {
 			"tool": "read",
 			"tool_call_id": "call_1",
@@ -78,7 +78,7 @@ func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 func TestToolPayloadUnmarshalIgnoresRemovedToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{
-		"kind": "ToolOutput",
+		"kind": "tool_output",
 		"payload": {
 			"tool": "apply_patch",
 			"tool_call_id": "call_1",

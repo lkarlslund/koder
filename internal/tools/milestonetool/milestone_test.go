@@ -314,7 +314,7 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Completed") {
+	if !strings.Contains(result.Output, "completed") {
 		t.Fatalf("expected completed milestone output, got %q", result.Output)
 	}
 }

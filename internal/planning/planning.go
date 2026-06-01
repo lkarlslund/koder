@@ -408,7 +408,7 @@ func ValidateTodoProgress(items []TodoItem) error {
 		}
 	}
 	if inProgress > 1 {
-		return errors.New("todo bucket may contain at most one InProgress item")
+		return errors.New("todo bucket may contain at most one in_progress item")
 	}
 	return nil
 }
