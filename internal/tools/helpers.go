@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/processgroup"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -211,6 +212,7 @@ func ShellResult(ctx context.Context, dir string, timeout time.Duration, command
 		return "", -1, err
 	}
 	cmd := exec.CommandContext(ctx, executable, args...)
+	processgroup.ConfigureContextCancel(cmd, 500*time.Millisecond)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

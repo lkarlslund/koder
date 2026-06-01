@@ -14,13 +14,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/creack/pty"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/processgroup"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -241,6 +241,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		return Snapshot{}, err
 	}
 	cmd := exec.CommandContext(context.Background(), executable, wrappedArgs...)
+	processgroup.Configure(cmd)
 	cmd.Dir = strings.TrimSpace(req.Workdir)
 	cmd.Env = nil
 	p := &process{
@@ -596,19 +597,19 @@ func terminateProcess(p *process) error {
 	p.endedAt = time.Now().UTC()
 	p.exitCode = intPtr(-1)
 	if runtime.GOOS != "windows" {
-		if err := p.proc.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		if err := processgroup.Terminate(p.proc); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
 		go func() {
 			select {
 			case <-time.After(3 * time.Second):
-				_ = p.proc.Process.Kill()
+				_ = processgroup.Kill(p.proc)
 			case <-p.done:
 			}
 		}()
 		return nil
 	}
-	return p.proc.Process.Kill()
+	return processgroup.Kill(p.proc)
 }
 
 func matchesScope(p *process, sessionID, chatID id.ID, scope Scope) bool {

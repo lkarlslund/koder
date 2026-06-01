@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -40,5 +41,22 @@ func TestExecuteRunsCommandAndCapturesMetadata(t *testing.T) {
 	}
 	if result.Meta["timeout_ms"] != "500" || result.Meta["workdir"] != "." {
 		t.Fatalf("unexpected metadata: %#v", result.Meta)
+	}
+}
+
+func TestExecuteTimeoutKillsBackgroundChildHoldingOutputPipe(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now()
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+		Args: map[string]string{
+			"command":    "sleep 5 &",
+			"timeout_ms": "100",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("timeout took %s; background child likely kept output pipe open", elapsed)
 	}
 }
