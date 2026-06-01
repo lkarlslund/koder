@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/planning"
@@ -317,7 +317,7 @@ func normalizeRuntime(runtime Runtime) Runtime {
 }
 
 func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
-	chats, err := chatstore.ChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
+	chats, err := toolChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -348,6 +348,102 @@ func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID do
 		return chats[0], nil
 	}
 	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
+}
+
+func toolChatCollection(st *store.Store) store.Collection[domain.Chat] {
+	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
+		Namespace: "chats",
+		GetID:     func(v domain.Chat) string { return v.ID },
+		SetID:     func(v *domain.Chat, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.Chat]{
+			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
+		},
+	})
+}
+
+func toolTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
+	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
+		Namespace: "timeline",
+		GetID:     func(v domain.TimelineItem) string { return v.ID },
+		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.TimelineItem]{
+			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
+		},
+	})
+}
+
+func toolTimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+	items, err := toolTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
+}
+
+func toolAppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+	items, err := toolTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	return toolTimelineCollection(st).Insert(ctx, domain.TimelineItem{
+		ChatID:    chatID,
+		Seq:       int64(len(items) + 1),
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
+
+func toolAttachToolResult(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+	items, err := toolTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		item := items[idx]
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(strings.TrimSpace(toolCallID)))
+		if call == nil {
+			continue
+		}
+		call.Result = &result
+		call.Error = nil
+		call.Approval = nil
+		call.ApprovalID = ""
+		if result.Status == domain.ToolResultStatusDenied {
+			call.Status = domain.ToolStatusDenied
+		} else {
+			call.Status = domain.ToolStatusDone
+		}
+		if call.CompletedAt.IsZero() {
+			call.CompletedAt = time.Now().UTC()
+		}
+		item.Content = assistant
+		item.UpdatedAt = time.Now().UTC()
+		if err := toolTimelineCollection(st).Put(ctx, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
+		return item, nil
+	}
+	return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
 }
 
 func (r Runtime) CheckNetworkAccess() error {
@@ -620,13 +716,13 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 	}
 	var item domain.TimelineItem
 	if strings.TrimSpace(req.ToolCallID) == "" {
-		item, err = chatstore.AppendTimeline(ctx, st, chatID, domain.ToolExecution{
+		item, err = toolAppendTimeline(ctx, st, chatID, domain.ToolExecution{
 			Tool:   req.Tool,
 			Args:   req.Meta(),
 			Result: &toolResult,
 		})
 	} else {
-		item, err = chatstore.AttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
+		item, err = toolAttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
 	}
 	if err != nil {
 		return nil, err

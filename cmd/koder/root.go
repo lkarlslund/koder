@@ -20,14 +20,14 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/assets"
-	"github.com/lkarlslund/koder/internal/chatstore"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/runtimeprefs"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/version"
@@ -380,7 +380,7 @@ func newSessionDumpCommand() *cobra.Command {
 			}
 			defer st.Close()
 
-			chats, err := sessionstore.ListChats(cmd.Context(), st, sessionID)
+			chats, err := sessionpkg.ListChats(cmd.Context(), st, sessionID)
 			if err != nil {
 				return err
 			}
@@ -395,7 +395,7 @@ func newSessionDumpCommand() *cobra.Command {
 				SessionID: sessionID,
 			}
 			for _, chat := range chats {
-				timeline, err := chatstore.TimelineForChat(cmd.Context(), st, chat.ID)
+				timeline, err := chatpkg.TimelineForChat(cmd.Context(), st, chat.ID)
 				if err != nil {
 					return err
 				}

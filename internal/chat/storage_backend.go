@@ -1,4 +1,4 @@
-package chatstore
+package chat
 
 import (
 	"context"
@@ -90,12 +90,12 @@ func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID domain.ID,
 	if err != nil {
 		return err
 	}
-	chatRecord.QueuedInputs = cloneQueuedInputs(items)
+	chatRecord.QueuedInputs = storageCloneQueuedInputs(items)
 	chatRecord.UpdatedAt = time.Now().UTC()
 	return PutChat(ctx, st, chatRecord)
 }
 
-func cloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
+func storageCloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
 	if len(src) == 0 {
 		return nil
 	}

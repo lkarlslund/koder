@@ -9,7 +9,6 @@ import (
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -350,7 +349,7 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 }
 
 func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, text string) {
-	source, err := chatstore.GetChat(ctx, e.store, sourceChatID)
+	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
 	if err != nil || source.ParentChatID == nil || strings.TrimSpace(text) == "" {
 		return
 	}
@@ -358,12 +357,12 @@ func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, t
 }
 
 func (e *Engine) completedChildChatNotification(ctx context.Context, chatID domain.ID) string {
-	chatRecord, err := chatstore.GetChat(ctx, e.store, chatID)
+	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
 	if err != nil || chatRecord.ParentChatID == nil {
 		return ""
 	}
 	if chatRecord.AssignedTodoRef != "" {
-		todos, err := planning.ListTodos(ctx, e.store, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
+		todos, err := sessionpkg.ListTodos(ctx, e.store, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
 		if err == nil {
 			for _, todo := range todos {
 				if todo.ID == chatRecord.AssignedTodoRef && todo.Status == domain.TodoStatusCompleted {
@@ -373,7 +372,7 @@ func (e *Engine) completedChildChatNotification(ctx context.Context, chatID doma
 		}
 	}
 	if ref := strings.TrimSpace(chatRecord.ActiveMilestoneRef); ref != "" {
-		plan, err := planning.GetPlan(ctx, e.store, chatRecord.SessionID)
+		plan, err := sessionpkg.GetPlan(ctx, e.store, chatRecord.SessionID)
 		if err == nil {
 			for _, milestone := range plan.Milestones {
 				if milestone.Ref != ref {
@@ -390,7 +389,7 @@ func (e *Engine) completedChildChatNotification(ctx context.Context, chatID doma
 }
 
 func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceChatID domain.ID) bool {
-	source, err := chatstore.GetChat(ctx, e.store, sourceChatID)
+	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
 	if err != nil || source.ParentChatID == nil {
 		return false
 	}
@@ -405,7 +404,7 @@ func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceCha
 			}
 		}
 	}
-	parentRecord, err := chatstore.GetChat(ctx, e.store, *source.ParentChatID)
+	parentRecord, err := chatpkg.GetChat(ctx, e.store, *source.ParentChatID)
 	if err != nil {
 		return false
 	}
@@ -422,7 +421,7 @@ func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string
 	if chatID == "" || text == "" {
 		return
 	}
-	chatRecord, err := chatstore.GetChat(ctx, e.store, chatID)
+	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
 	if err != nil {
 		return
 	}
@@ -444,7 +443,7 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, miles
 		strings.TrimSpace(objective),
 	}
 	if milestone.Ref != "" {
-		todos, _ := planning.ListTodos(ctx, e.store, sessionID, milestone.Ref)
+		todos, _ := sessionpkg.ListTodos(ctx, e.store, sessionID, milestone.Ref)
 		if scopedTodo != nil {
 			todos = []planning.TodoItem{*scopedTodo}
 		}

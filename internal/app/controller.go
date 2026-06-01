@@ -17,7 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -937,7 +937,7 @@ func (c *Controller) SwitchSession(ctx context.Context, sessionID domain.ID) err
 	if sessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
-	session, err := sessionstore.GetSession(ctx, c.store, sessionID)
+	session, err := sessionpkg.GetSession(ctx, c.store, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1347,7 +1347,7 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode, proje
 }
 
 func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.ID) error {
-	session, err := sessionstore.GetSession(ctx, c.store, sessionID)
+	session, err := sessionpkg.GetSession(ctx, c.store, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1508,7 +1508,7 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string, p
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
-	return sessionstore.ListSessions(ctx, c.store)
+	return sessionpkg.ListSessions(ctx, c.store)
 }
 
 func (c *Controller) sessionInWorkspace(session domain.Session) bool {
@@ -1516,7 +1516,7 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 }
 
 func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (planning.Plan, []planning.TodoItem, map[string][]planning.TodoItem) {
-	plan, err := planning.GetPlan(ctx, c.store, sessionID)
+	plan, err := sessionpkg.GetPlan(ctx, c.store, sessionID)
 	if err != nil {
 		return planning.Plan{}, nil, nil
 	}
@@ -1526,7 +1526,7 @@ func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (pl
 		if ref == "" {
 			continue
 		}
-		todos, err := planning.ListTodos(ctx, c.store, sessionID, ref)
+		todos, err := sessionpkg.ListTodos(ctx, c.store, sessionID, ref)
 		if err != nil {
 			todosByRef[ref] = nil
 			continue
@@ -1559,7 +1559,7 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID domain.ID) map[
 	if c.store == nil {
 		return out
 	}
-	chats, err := sessionstore.ListChats(ctx, c.store, sessionID)
+	chats, err := sessionpkg.ListChats(ctx, c.store, sessionID)
 	if err != nil {
 		return out
 	}

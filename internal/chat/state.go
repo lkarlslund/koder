@@ -2,13 +2,11 @@ package chat
 
 import (
 	"fmt"
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/lkarlslund/koder/internal/chatstore"
-	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
@@ -16,7 +14,7 @@ type ChatState struct {
 	chat      domain.Chat
 	timeline  []*TimelineRecord
 	byItem    map[string]*TimelineRecord
-	approvals []chatstore.Approval
+	approvals []Approval
 	pending   PendingAssistantTurn
 }
 
@@ -32,14 +30,14 @@ type PendingAssistantTurn struct {
 }
 
 // NewTimelineState builds a chat state from persisted timeline snapshots.
-func NewTimelineState(chat domain.Chat, timeline []domain.TimelineItem, approvals []chatstore.Approval) *ChatState {
+func NewTimelineState(chat domain.Chat, timeline []domain.TimelineItem, approvals []Approval) *ChatState {
 	state := &ChatState{}
 	state.MergeTimelineLoaded(chat, timeline, approvals)
 	return state
 }
 
 // MergeTimelineLoaded refreshes timeline records while preserving record identity by ID.
-func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.TimelineItem, approvals []chatstore.Approval) {
+func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.TimelineItem, approvals []Approval) {
 	s.chat = chat
 	if s.byItem == nil {
 		s.byItem = map[string]*TimelineRecord{}
@@ -505,15 +503,15 @@ func (r *TimelineRecord) TimelineValue() domain.TimelineItem {
 }
 
 // Approvals returns the current approval snapshot.
-func (s *ChatState) Approvals() []chatstore.Approval {
+func (s *ChatState) Approvals() []Approval {
 	if s == nil {
 		return nil
 	}
 	return slices.Clone(s.approvals)
 }
 
-func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []chatstore.Approval {
-	var approvals []chatstore.Approval
+func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []Approval {
+	var approvals []Approval
 	for _, item := range timeline {
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
@@ -523,8 +521,8 @@ func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []chatsto
 			if call.Status != domain.ToolStatusAwaitingApproval {
 				continue
 			}
-			approvals = append(approvals, chatstore.Approval{
-				ID:         chatstore.SyntheticApprovalID(string(call.ToolCallID)),
+			approvals = append(approvals, Approval{
+				ID:         SyntheticApprovalID(string(call.ToolCallID)),
 				SessionID:  chat.SessionID,
 				ChatID:     chat.ID,
 				Tool:       call.Tool,
@@ -549,7 +547,7 @@ func approvalCommand(call domain.ToolCall) string {
 }
 
 // UpsertApproval adds or replaces one approval snapshot.
-func (s *ChatState) UpsertApproval(approval chatstore.Approval) {
+func (s *ChatState) UpsertApproval(approval Approval) {
 	if s == nil || approval.ID == "" {
 		return
 	}

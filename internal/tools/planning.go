@@ -8,18 +8,10 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/store"
 )
 
 type TaskControl interface {
 	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (planning.Task, error)
-}
-
-func RequireSessionStore(runtime Runtime) (*store.Store, error) {
-	if runtime.Store == nil || runtime.SessionID == "" {
-		return nil, errors.New("planning tools require a persisted session")
-	}
-	return runtime.Store, nil
 }
 
 func RequireSessionControl(runtime Runtime) (planning.Control, error) {
@@ -103,25 +95,6 @@ func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
 	return planning.PlanForRef(plan, ref)
 }
 
-func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
-	plan, err := planning.GetPlan(ctx, st, sessionID)
-	if err != nil {
-		return planning.Plan{}, nil, "", err
-	}
-	if ref == "" {
-		active, ok := planning.ActiveMilestone(plan)
-		if !ok {
-			return planning.Plan{}, nil, "", errors.New("no active milestone; read milestones first or provide milestone_ref")
-		}
-		ref = active.Ref
-	}
-	todos, err := planning.ListTodos(ctx, st, sessionID, ref)
-	if err != nil {
-		return planning.Plan{}, nil, "", err
-	}
-	return plan, todos, ref, nil
-}
-
 func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
 	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
 	for _, item := range plan.Milestones {
@@ -130,10 +103,10 @@ func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
 			ownerChatID = *item.OwnerChatID
 		}
 		items = append(items, MilestoneStoredItem{
-			Ref:  item.Ref,
-			Title:  item.Title,
-			Status:  item.Status.String(),
-			Notes:  item.Notes,
+			Ref:         item.Ref,
+			Title:       item.Title,
+			Status:      item.Status.String(),
+			Notes:       item.Notes,
 			OwnerChatID: ownerChatID,
 		})
 	}
@@ -166,8 +139,8 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 		items = append(items, ChatStoredItem{
 			ID:                 status.Chat.ID,
 			Title:              status.Chat.Title,
-			Role:  string(status.Chat.WorkflowRole),
-			State:  string(status.State),
+			Role:               string(status.Chat.WorkflowRole),
+			State:              string(status.State),
 			Archived:           status.Chat.Archived,
 			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
 			AssignedTodoRef:    status.Chat.AssignedTodoRef,

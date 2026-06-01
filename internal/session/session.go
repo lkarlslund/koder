@@ -11,10 +11,8 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -80,15 +78,15 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	session, err := sessionstore.GetSession(ctx, st, sessionID)
+	session, err := GetSession(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	chats, err := sessionstore.ListChats(ctx, st, sessionID)
+	chats, err := ListChats(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planning.GetPlan(ctx, st, sessionID)
+	plan, err := GetPlan(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +94,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := planning.ListTasks(ctx, st, sessionID)
+	tasks, err := ListTasks(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +124,7 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID domain.ID, p
 			continue
 		}
 		seen[ref] = struct{}{}
-		items, err := planning.ListTodos(ctx, st, sessionID, ref)
+		items, err := ListTodos(ctx, st, sessionID, ref)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +299,7 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
 	}
-	if err := chatstore.PutChat(ctx, s.store, chatRecord); err != nil {
+	if err := putChat(ctx, s.store, chatRecord); err != nil {
 		return nil, err
 	}
 	rt, err := s.chatLoader(ctx, session, chatRecord)
@@ -378,7 +376,7 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	if best := newestSessionChat(chats); best.ID != "" {
 		return best, nil
 	}
-	chatRecord, err := sessionstore.DefaultChat(ctx, s.store, session.ID)
+	chatRecord, err := DefaultChat(ctx, s.store, session.ID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -450,7 +448,7 @@ func (s *Session) ReorderChats(ctx context.Context, ids []domain.ID) ([]domain.C
 	s.mu.RLock()
 	sessionID := s.session.ID
 	s.mu.RUnlock()
-	ordered, err := sessionstore.ReorderChats(ctx, s.store, sessionID, ids)
+	ordered, err := ReorderChats(ctx, s.store, sessionID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -480,14 +478,14 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	s.mu.RLock()
 	sessionID := s.session.ID
 	s.mu.RUnlock()
-	if err := sessionstore.UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) {
+	if err := UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) {
 		session.Title = strings.TrimSpace(title)
 		session.TitleGeneratedAt = time.Time{}
 		session.TitleRefreshCount = 0
 	}); err != nil {
 		return domain.Session{}, err
 	}
-	updated, err := sessionstore.GetSession(ctx, s.store, sessionID)
+	updated, err := GetSession(ctx, s.store, sessionID)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -515,10 +513,10 @@ func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings
 	s.mu.RLock()
 	sessionID := s.session.ID
 	s.mu.RUnlock()
-	if err := sessionstore.UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) { session.AccessSettings = settings }); err != nil {
+	if err := UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) { session.AccessSettings = settings }); err != nil {
 		return domain.Session{}, err
 	}
-	updated, err := sessionstore.GetSession(ctx, s.store, sessionID)
+	updated, err := GetSession(ctx, s.store, sessionID)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -556,7 +554,7 @@ func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID
 	chatRecord.ProviderID = providerID
 	chatRecord.ModelID = modelID
 	chatRecord.UpdatedAt = time.Now().UTC()
-	if err := chatstore.UpdateChat(ctx, s.store, chatRecord); err != nil {
+	if err := updateChat(ctx, s.store, chatRecord); err != nil {
 		return domain.Chat{}, err
 	}
 	s.mu.Lock()
@@ -624,12 +622,12 @@ func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.
 	if !ok {
 		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("chat %s not found", chatID)
 	}
-	session, err := sessionstore.TouchSession(ctx, s.store, sessionID)
+	session, err := TouchSession(ctx, s.store, sessionID)
 	if err != nil {
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
 	chatRecord.UpdatedAt = time.Now().UTC()
-	if err := chatstore.UpdateChat(ctx, s.store, chatRecord); err != nil {
+	if err := updateChat(ctx, s.store, chatRecord); err != nil {
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
 	s.mu.Lock()
@@ -737,7 +735,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, sum
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
-	if err := planning.PutPlan(ctx, s.store, plan); err != nil {
+	if err := PutPlan(ctx, s.store, plan); err != nil {
 		return planning.Plan{}, err
 	}
 	s.mu.Lock()
@@ -776,7 +774,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 		})
 	}
 	for _, item := range items {
-		if err := planning.PutTodo(ctx, s.store, item); err != nil {
+		if err := PutTodo(ctx, s.store, item); err != nil {
 			return nil, err
 		}
 	}
@@ -824,7 +822,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 		item.Content = content
 	}
 	item.UpdatedAt = now
-	if err := planning.PutTodo(ctx, s.store, item); err != nil {
+	if err := PutTodo(ctx, s.store, item); err != nil {
 		return planning.TodoItem{}, err
 	}
 	s.mu.Lock()
@@ -869,7 +867,7 @@ func (s *Session) AddTask(ctx context.Context, sessionID domain.ID, body string,
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := planning.PutTask(ctx, s.store, task); err != nil {
+	if err := PutTask(ctx, s.store, task); err != nil {
 		return planning.Task{}, err
 	}
 	s.mu.Lock()

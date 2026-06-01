@@ -9,9 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
@@ -64,11 +63,11 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +153,11 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,15 +220,15 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionstore.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultChat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	defaultChat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sideChat, err := sessionstore.CreateChat(context.Background(), st, session.ID, "Side", "executor", &defaultChat.ID)
+	sideChat, err := modeltest.CreateChat(context.Background(), st, session.ID, "Side", "executor", &defaultChat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +240,7 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := chatstore.SetChatQueuedInputs(context.Background(), st, sideChat.ID, []domain.QueuedInput{{Text: "queued"}}); err != nil {
+	if err := modeltest.SetChatQueuedInputs(context.Background(), st, sideChat.ID, []domain.QueuedInput{{Text: "queued"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,12 +299,12 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 }
 
 func appendDebugTimelineItem(st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	item, err := chatstore.AppendTimeline(context.Background(), st, chatID, content)
+	item, err := modeltest.AppendTimeline(context.Background(), st, chatID, content)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	item.Seal(item.UpdatedAt)
-	if err := chatstore.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := modeltest.PutTimelineItem(context.Background(), st, item); err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil

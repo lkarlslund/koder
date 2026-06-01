@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatstore"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
@@ -22,7 +22,7 @@ func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Sess
 	}
 	var matches []domain.Session
 	for _, session := range sessions {
-		chats, err := sessionstore.ListChats(ctx, c.store, session.ID)
+		chats, err := sessionpkg.ListChats(ctx, c.store, session.ID)
 		if err != nil {
 			return domain.Session{}, false, err
 		}
@@ -40,7 +40,7 @@ func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Sess
 }
 
 func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
-	timeline, err := chatstore.TimelineForChat(ctx, c.store, chatID)
+	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
 	if err != nil {
 		return false, err
 	}
@@ -77,7 +77,7 @@ func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats 
 	c.clearedStartupRunningTools = true
 	c.mu.Unlock()
 	for _, chatRecord := range chats {
-		if _, err := chatstore.FailRunningToolCalls(ctx, c.store, chatRecord.ID, processStartupRunningToolFailure); err != nil {
+		if _, err := chatpkg.FailRunningToolCalls(ctx, c.store, chatRecord.ID, processStartupRunningToolFailure); err != nil {
 			return err
 		}
 	}
@@ -89,7 +89,7 @@ func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats 
 		if ok, err := c.chatEndsWithProcessInterrupt(ctx, chatRecord.ID); err != nil {
 			return err
 		} else if ok {
-			if _, err := chatstore.FailInterruptedToolCalls(ctx, c.store, chatRecord.ID, processRestartToolFailure); err != nil {
+			if _, err := chatpkg.FailInterruptedToolCalls(ctx, c.store, chatRecord.ID, processRestartToolFailure); err != nil {
 				return err
 			}
 		}
@@ -98,7 +98,7 @@ func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats 
 }
 
 func (c *Controller) chatEndsWithProcessInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
-	timeline, err := chatstore.TimelineForChat(ctx, c.store, chatID)
+	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
 	if err != nil {
 		return false, err
 	}

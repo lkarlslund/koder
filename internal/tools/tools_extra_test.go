@@ -7,10 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -147,15 +146,15 @@ func TestRequireChatControlRequiresActiveChat(t *testing.T) {
 
 func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 	st := openToolsTestStore(t)
-	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = chatstore.AppendAssistantToolCalls(context.Background(), st, chat.ID, []domain.ToolCall{{
+	_, err = modeltest.AppendAssistantToolCalls(context.Background(), st, chat.ID, []domain.ToolCall{{
 		ToolCallID: "call_write",
 		Tool:       domain.ToolKindFileWrite,
 		Args:       map[string]string{"path": "notes.txt"},
@@ -187,7 +186,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
 
-	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

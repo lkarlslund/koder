@@ -8,7 +8,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
-	"github.com/lkarlslund/koder/internal/sessionstore"
 )
 
 // LoadSession returns the live owner for a persisted session, hydrating it on demand.
@@ -51,7 +50,7 @@ func (e *Engine) Sessions(ctx context.Context) ([]domain.Session, error) {
 	if e == nil || e.store == nil {
 		return nil, fmt.Errorf("engine store is required")
 	}
-	return sessionstore.ListSessions(ctx, e.store)
+	return sessionpkg.ListSessions(ctx, e.store)
 }
 
 // CreateSession creates, configures, and loads a live session owner.
@@ -73,11 +72,11 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 			return nil, fmt.Errorf("project root must be a directory: %s", projectRoot)
 		}
 	}
-	session, err := sessionstore.CreateSession(ctx, e.store, title, e.cfg.DefaultProvider, e.cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(ctx, e.store, title, e.cfg.DefaultProvider, e.cfg.DefaultModel, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := sessionstore.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
+	if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
 		session.ProjectRoot = projectRoot
 		session.AccessSettings = e.cfg.Access
 		session.ToolStates = make(domain.ToolStates, len(e.cfg.ToolDefaults))
@@ -107,5 +106,5 @@ func (e *Engine) DeleteSession(ctx context.Context, sessionID domain.ID) error {
 			return err
 		}
 	}
-	return sessionstore.DeleteSession(ctx, e.store, sessionID)
+	return sessionpkg.DeleteSession(ctx, e.store, sessionID)
 }

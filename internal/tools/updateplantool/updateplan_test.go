@@ -5,9 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
@@ -49,7 +48,7 @@ func TestExecuteFormatsPlan(t *testing.T) {
 
 func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	st := openPlanStore(t)
-	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,11 +70,11 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if evt.Kind != domain.EventKindStatus || evt.Text != "Plan updated" {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +92,7 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 
 func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
 	st := openPlanStore(t)
-	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,11 +108,11 @@ func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
 		t.Fatal("expected invalid plan error")
 	}
 
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

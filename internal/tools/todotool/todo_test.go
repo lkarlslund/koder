@@ -7,8 +7,8 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -62,7 +62,7 @@ func TestTodoStatusUsesSnakeCase(t *testing.T) {
 func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
-	session, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatalf("expected first pending todo, got %q", next.Output)
 	}
 
-	todos, err := planning.ListTodos(ctx, st, session.ID, "implement")
+	todos, err := modeltest.ListTodos(ctx, st, session.ID, "implement")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
-	session, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,16 +192,16 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
-	session, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := planning.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusExecuting},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := planning.AddTodoItems(ctx, st, session.ID, "implement", []string{"First", "Second"})
+	todos, err := modeltest.AddTodoItems(ctx, st, session.ID, "implement", []string{"First", "Second"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
@@ -41,7 +40,7 @@ func TestNormalizeAndExecute(t *testing.T) {
 
 func TestPersistResultCreatesPendingTask(t *testing.T) {
 	st := openTaskStore(t)
-	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +57,7 @@ func TestPersistResultCreatesPendingTask(t *testing.T) {
 	if evt.Kind != domain.EventKindTaskUpdate {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	tasks, err := planning.ListTasks(context.Background(), st, session.ID)
+	tasks, err := modeltest.ListTasks(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

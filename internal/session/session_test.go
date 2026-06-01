@@ -8,7 +8,6 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/sessionstore"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -19,21 +18,21 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := planning.PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
+	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTodos, err := planning.AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha todo"})
+	alphaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha todo"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := planning.AddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta todo"})
+	betaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta todo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,14 +70,14 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := sessionstore.CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := planning.PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady}}}); err != nil {
+	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := planning.AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}

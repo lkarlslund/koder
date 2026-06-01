@@ -4,9 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/chatstore"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/sessionstore"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -40,7 +39,7 @@ func TestNormalizeAndExecute(t *testing.T) {
 
 func TestPersistResult(t *testing.T) {
 	st := openQuestionStore(t)
-	session, err := sessionstore.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +57,11 @@ func TestPersistResult(t *testing.T) {
 	if evt.Kind != domain.EventKindToolResult {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	chat, err := sessionstore.DefaultChat(context.Background(), st, session.ID)
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := chatstore.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
