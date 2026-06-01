@@ -53,6 +53,28 @@
       });
       return template.innerHTML;
     }
+    function byteCount(value) {
+      const source = String(value || '');
+      if (window.TextEncoder) return new TextEncoder().encode(source).length;
+      return unescape(encodeURIComponent(source)).length;
+    }
+    function formatByteCount(bytes) {
+      const value = Number(bytes) || 0;
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return (value / 1024).toFixed(value < 10 * 1024 ? 1 : 0) + ' KB';
+      return (value / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+    function diagramPlaceholder(kind, source) {
+      return '\n<div class="diagram-stream-placeholder">' + escapeHTML(kind) + ' received: ' + escapeHTML(formatByteCount(byteCount(source))) + '</div>\n';
+    }
+    function deferStreamingDiagrams(source) {
+      let text = String(source || '');
+      text = text.replace(/```mermaid[^\n]*\n[\s\S]*?```/gi, match => diagramPlaceholder('Mermaid diagram', match));
+      text = text.replace(/```mermaid[\s\S]*$/i, match => diagramPlaceholder('Mermaid diagram', match));
+      text = text.replace(/<svg\b[\s\S]*?<\/svg>/gi, match => diagramPlaceholder('SVG', match));
+      text = text.replace(/<svg\b[\s\S]*$/i, match => diagramPlaceholder('SVG', match));
+      return text;
+    }
     function configureMermaid() {
       if (!window.mermaid) return;
       const theme = document.documentElement.getAttribute('data-bs-theme') === 'light' ? 'default' : 'dark';
@@ -85,14 +107,14 @@
         }
       }
     }
-    function renderMarkdown(text) {
-      const source = String(text || '');
+    function renderMarkdown(text, options = {}) {
+      const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
       if (!window.marked) return '<pre>' + escapeHTML(source) + '</pre>';
       marked.setOptions({gfm: true, breaks: false});
       let html = marked.parse(source);
       html = sanitizeHTML(html);
-      html = renderMermaidPlaceholders(html);
+      if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
       html = highlightMarkdownCode(html);
       return sanitizeHTML(html);
     }
@@ -1022,7 +1044,7 @@
           if (!source) return 0;
           return Math.max(1, Math.ceil(source.length / 4));
         },
-        markdownHTML(text) { return renderMarkdown(text); },
+        markdownHTML(text, options = {}) { return renderMarkdown(text, options); },
         userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
         userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },

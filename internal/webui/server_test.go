@@ -748,8 +748,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `x-html="markdownHTML(item.content?.text || '')"`) {
 		t.Fatalf("expected assistant text to render as markdown HTML")
 	}
-	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText())"`) {
-		t.Fatalf("expected streaming assistant text to render as markdown HTML")
+	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText(), {deferDiagrams: true})"`) {
+		t.Fatalf("expected streaming assistant text to render markdown with deferred diagrams")
 	}
 	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
 		t.Fatalf("expected user turns to use the full transcript width")
@@ -779,6 +779,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeDiagramSVG`) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams and sanitize SVG output")
+	}
+	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) {
+		t.Fatalf("expected streaming markdown renderer to defer Mermaid and SVG rendering")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
 		t.Fatalf("expected inline SVG output to be constrained and sanitized")

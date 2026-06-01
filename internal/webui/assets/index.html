@@ -107,7 +107,7 @@
       <template x-if="pendingText()">
         <section class="turn assistant-turn mb-4">
           <div class="small text-secondary mb-2"><i class="bi bi-broadcast"></i> streaming</div>
-          <div class="markdown-body" x-html="markdownHTML(pendingText())"></div>
+          <div class="markdown-body" x-html="markdownHTML(pendingText(), {deferDiagrams: true})"></div>
         </section>
       </template>
     </main>
