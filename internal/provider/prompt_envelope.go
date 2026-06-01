@@ -2,8 +2,6 @@ package provider
 
 import (
 	"strings"
-
-	"github.com/lkarlslund/koder/internal/domain"
 )
 
 type InstructionKind string
@@ -32,12 +30,12 @@ func SerializePromptEnvelope(env PromptEnvelope) []Message {
 	out := make([]Message, 0, len(env.Items)+1)
 	if joined := joinInstructionBlocks(env.Instructions); joined != "" {
 		out = append(out, Message{
-			Role:    domain.MessageRoleSystem,
+			Role:    RoleSystem,
 			Content: joined,
 		})
 	}
 	for _, item := range env.Items {
-		if item.Role == domain.MessageRoleSystem || (item.Role == 0 && strings.TrimSpace(item.Content) == "" && len(item.ContentParts) == 0 && len(item.ToolCalls) == 0) {
+		if item.Role == RoleSystem || (item.Role == "" && strings.TrimSpace(item.Content) == "" && len(item.ContentParts) == 0 && len(item.ToolCalls) == 0) {
 			continue
 		}
 		out = append(out, item)

@@ -64,11 +64,11 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 }
 
 type Message struct {
-	Role         domain.MessageRole `json:"role"`
-	Content      string             `json:"content,omitempty"`
-	ContentParts []ContentPart      `json:"-"`
-	ToolCallID   string             `json:"tool_call_id,omitempty"`
-	ToolCalls    []ToolCall         `json:"tool_calls,omitempty"`
+	Role         Role          `json:"role"`
+	Content      string        `json:"content,omitempty"`
+	ContentParts []ContentPart `json:"-"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 type ContentPart struct {
@@ -140,15 +140,15 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func providerRole(role domain.MessageRole) string {
+func providerRole(role Role) string {
 	switch role {
-	case domain.MessageRoleSystem:
+	case RoleSystem:
 		return "system"
-	case domain.MessageRoleUser:
+	case RoleUser:
 		return "user"
-	case domain.MessageRoleAssistant:
+	case RoleAssistant:
 		return "assistant"
-	case domain.MessageRoleTool:
+	case RoleTool:
 		return "tool"
 	default:
 		return strings.ToLower(role.String())
@@ -603,7 +603,7 @@ func (c *Client) ProbeImageSupport(ctx context.Context, modelID string) (bool, e
 	_, err := c.CompleteChat(ctx, ChatRequest{
 		Model: modelID,
 		Messages: []Message{{
-			Role: domain.MessageRoleUser,
+			Role: RoleUser,
 			ContentParts: []ContentPart{
 				ImagePart("image/png", probePNG),
 				TextPart("Reply with OK."),

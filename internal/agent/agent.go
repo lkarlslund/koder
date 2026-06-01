@@ -1063,12 +1063,12 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID id.ID) ([]d
 	}
 	return timeline, []provider.Message{
 		{
-			Role: domain.MessageRoleSystem,
+			Role: provider.RoleSystem,
 			Content: "Write a concise session title of exactly 5 or 6 words. " +
 				"Return only the title text with no quotes, punctuation suffix, or explanation.",
 		},
 		{
-			Role:    domain.MessageRoleUser,
+			Role:    provider.RoleUser,
 			Content: strings.Join(transcript, "\n\n"),
 		},
 	}, nil
@@ -1077,12 +1077,12 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID id.ID) ([]d
 func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 	switch content := item.Content.(type) {
 	case domain.UserMessage:
-		return domain.MessageRoleUser.String(), content.Text
+		return provider.RoleUser.String(), content.Text
 	case domain.AssistantMessage:
 		if strings.TrimSpace(content.Text) != "" {
-			return domain.MessageRoleAssistant.String(), content.Text
+			return provider.RoleAssistant.String(), content.Text
 		}
-		return domain.MessageRoleAssistant.String(), strings.TrimSpace(content.Reasoning.Text)
+		return provider.RoleAssistant.String(), strings.TrimSpace(content.Reasoning.Text)
 	case domain.ToolExecution:
 		text := ""
 		if content.Result != nil {
@@ -1091,7 +1091,7 @@ func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 		if content.Error != nil {
 			text = content.Error.Message
 		}
-		return domain.MessageRoleTool.String(), text
+		return provider.RoleTool.String(), text
 	case domain.Notice:
 		return "notice", content.Text
 	case domain.Compaction:
@@ -1893,7 +1893,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		if strings.TrimSpace(content.Text) == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: domain.MessageRoleUser, Content: content.Text}}, nil
+		return []provider.Message{{Role: provider.RoleUser, Content: content.Text}}, nil
 	case domain.AssistantMessage:
 		var toolCalls []provider.ToolCall
 		for _, tool := range content.Tools {
@@ -1915,7 +1915,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 			textChunks = append(textChunks, content.Text)
 		}
 		out := []provider.Message{{
-			Role:      domain.MessageRoleAssistant,
+			Role:      provider.RoleAssistant,
 			Content:   assistantConversationContent(textChunks, reasoningChunks, preserveThinking),
 			ToolCalls: toolCalls,
 		}}
@@ -1942,7 +1942,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		if body == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: domain.MessageRoleUser, Content: fmt.Sprintf("%s output:\n%s", content.Tool, body)}}, nil
+		return []provider.Message{{Role: provider.RoleUser, Content: fmt.Sprintf("%s output:\n%s", content.Tool, body)}}, nil
 	case domain.Notice:
 		return nil, nil
 	default:
@@ -1995,7 +1995,7 @@ func (e *Engine) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCal
 			body = "Diff:\n" + diff
 		}
 	}
-	return provider.Message{Role: domain.MessageRoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
+	return provider.Message{Role: provider.RoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
 }
 
 func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
@@ -2081,7 +2081,7 @@ func (e *Engine) loadedSession(sessionID id.ID) *sessionpkg.Session {
 
 func compactedHistoryMessage(summary string) provider.Message {
 	return provider.Message{
-		Role: domain.MessageRoleUser,
+		Role: provider.RoleUser,
 		Content: strings.TrimSpace(
 			"Compacted session summary for continuation:\n" +
 				summary +
@@ -2118,7 +2118,7 @@ func (e *Engine) previewUserMessage(session domain.Session, prompt string, draft
 		return provider.Message{}, false, nil
 	}
 	return provider.Message{
-		Role:    domain.MessageRoleUser,
+		Role:    provider.RoleUser,
 		Content: strings.TrimSpace(prompt),
 	}, true, nil
 }
@@ -2205,7 +2205,7 @@ func (e *Engine) userMessageWithContext(session domain.Session, parts []domain.P
 	if !hasStructured {
 		return provider.Message{}, false, nil
 	}
-	message := provider.Message{Role: domain.MessageRoleUser, ContentParts: contentParts}
+	message := provider.Message{Role: provider.RoleUser, ContentParts: contentParts}
 	if len(contentParts) == 0 && strings.TrimSpace(prompt) != "" {
 		message.Content = prompt
 	}
@@ -2247,7 +2247,7 @@ func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID
 	}
 	contentParts = append(contentParts, provider.ImagePart(mimeType, data))
 	return provider.Message{
-		Role:         domain.MessageRoleTool,
+		Role:         provider.RoleTool,
 		ContentParts: contentParts,
 		ToolCallID:   toolCallID,
 	}, true
@@ -2480,7 +2480,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		}
 	}
 	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
-		Role:    domain.MessageRoleUser,
+		Role:    provider.RoleUser,
 		Content: e.compactPrompt(),
 	}), e.providerStreamingEnabled(compactionChat))
 	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
@@ -2591,7 +2591,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 		}
 	}
 	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
-		Role:    domain.MessageRoleUser,
+		Role:    provider.RoleUser,
 		Content: e.compactPrompt(),
 	}), e.providerStreamingEnabled(compactionChat))
 	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
@@ -2715,13 +2715,13 @@ func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item 
 		if body == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: domain.MessageRoleUser, Content: body}}, nil
+		return []provider.Message{{Role: provider.RoleUser, Content: body}}, nil
 	case domain.AssistantMessage:
 		body := compactAssistantMessageText(content, preserveThinking)
 		if body == "" {
 			return nil, nil
 		}
-		out := []provider.Message{{Role: domain.MessageRoleAssistant, Content: body}}
+		out := []provider.Message{{Role: provider.RoleAssistant, Content: body}}
 		for _, tool := range content.Tools {
 			msg, ok := e.compactionToolResultMessage(tool)
 			if ok {
@@ -2745,7 +2745,7 @@ func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item 
 		if body == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: domain.MessageRoleUser, Content: compactTextForCompaction(content.Tool.String()+" output:\n"+body, "tool execution")}}, nil
+		return []provider.Message{{Role: provider.RoleUser, Content: compactTextForCompaction(content.Tool.String()+" output:\n"+body, "tool execution")}}, nil
 	case domain.Notice:
 		return nil, nil
 	default:
@@ -2885,7 +2885,7 @@ func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Mes
 	if body == "" {
 		return provider.Message{}, false
 	}
-	return provider.Message{Role: domain.MessageRoleUser, Content: "Tool result for " + tool.Tool.String() + ":\n" + body}, true
+	return provider.Message{Role: provider.RoleUser, Content: "Tool result for " + tool.Tool.String() + ":\n" + body}, true
 }
 
 func compactTextForCompaction(text string, label string) string {

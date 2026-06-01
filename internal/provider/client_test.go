@@ -52,7 +52,7 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 			{Kind: InstructionKindSessionNote, Text: "Session update:\nPermission mode changed", Ephemeral: true},
 		},
 		Items: []Message{
-			{Role: domain.MessageRoleUser, Content: "hello"},
+			{Role: RoleUser, Content: "hello"},
 		},
 	}
 
@@ -60,7 +60,7 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 	if len(got) != 2 {
 		t.Fatalf("expected one system message plus user item, got %#v", got)
 	}
-	if got[0].Role != domain.MessageRoleSystem {
+	if got[0].Role != RoleSystem {
 		t.Fatalf("expected leading system message, got %#v", got)
 	}
 	if strings.Contains(got[0].Content, "\n\n\n") {
@@ -71,14 +71,14 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 			t.Fatalf("expected %q in joined system prompt, got %q", want, got[0].Content)
 		}
 	}
-	if got[1].Role != domain.MessageRoleUser || got[1].Content != "hello" {
+	if got[1].Role != RoleUser || got[1].Content != "hello" {
 		t.Fatalf("unexpected trailing item: %#v", got[1])
 	}
 }
 
 func TestMessageMarshalJSONOmitsEmptyAssistantToolCallContent(t *testing.T) {
 	data, err := json.Marshal(Message{
-		Role: domain.MessageRoleAssistant,
+		Role: RoleAssistant,
 		ToolCalls: []ToolCall{
 			{
 				ID:   "call_1",
@@ -120,10 +120,10 @@ func TestChatRequestMarshalJSONUsesProviderRoleNames(t *testing.T) {
 	data, err := json.Marshal(ChatRequest{
 		Model: "test-model",
 		Messages: []Message{
-			{Role: domain.MessageRoleSystem, Content: "system"},
-			{Role: domain.MessageRoleUser, Content: "user"},
-			{Role: domain.MessageRoleAssistant, Content: "assistant"},
-			{Role: domain.MessageRoleTool, ToolCallID: "call_1", Content: "tool"},
+			{Role: RoleSystem, Content: "system"},
+			{Role: RoleUser, Content: "user"},
+			{Role: RoleAssistant, Content: "assistant"},
+			{Role: RoleTool, ToolCallID: "call_1", Content: "tool"},
 		},
 	})
 	if err != nil {
@@ -963,7 +963,7 @@ func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
 
 func TestMessageMarshalJSONWithContentParts(t *testing.T) {
 	buf, err := json.Marshal(Message{
-		Role: domain.MessageRoleUser,
+		Role: RoleUser,
 		ContentParts: []ContentPart{
 			TextPart("hello"),
 			ImagePart("image/png", []byte("pngbytes")),

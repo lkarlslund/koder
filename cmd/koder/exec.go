@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/config"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -230,8 +229,8 @@ func schemaRootAcceptsObject(schema map[string]any) bool {
 
 func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdir string, schema *structuredOutputSchema, maxTurns int) (string, error) {
 	messages := []provider.Message{
-		{Role: domain.MessageRoleSystem, Content: directSystemPrompt(workdir, schema != nil)},
-		{Role: domain.MessageRoleUser, Content: prompt},
+		{Role: provider.RoleSystem, Content: directSystemPrompt(workdir, schema != nil)},
+		{Role: provider.RoleUser, Content: prompt},
 	}
 	runtime := tools.Runtime{
 		Workdir:        workdir,
@@ -261,13 +260,13 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			}
 			if len(structuredCalls) > 0 {
 				messages = append(messages, provider.Message{
-					Role:      domain.MessageRoleAssistant,
+					Role:      provider.RoleAssistant,
 					Content:   resp.Text,
 					ToolCalls: structuredCalls,
 				})
 				for _, call := range structuredCalls {
 					messages = append(messages, provider.Message{
-						Role:       domain.MessageRoleTool,
+						Role:       provider.RoleTool,
 						ToolCallID: strings.TrimSpace(call.ID),
 						Content:    "Error: " + validationErr.Error(),
 					})
@@ -283,7 +282,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			return text, nil
 		}
 		messages = append(messages, provider.Message{
-			Role:      domain.MessageRoleAssistant,
+			Role:      provider.RoleAssistant,
 			Content:   resp.Text,
 			ToolCalls: resp.ToolCalls,
 		})
@@ -373,7 +372,7 @@ func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime
 		}
 		req, err := tools.ParseProviderCall(call)
 		if err != nil {
-			*messages = append(*messages, provider.Message{Role: domain.MessageRoleTool, ToolCallID: strings.TrimSpace(call.ID), Content: "Error: " + err.Error()})
+			*messages = append(*messages, provider.Message{Role: provider.RoleTool, ToolCallID: strings.TrimSpace(call.ID), Content: "Error: " + err.Error()})
 			continue
 		}
 		result, err := tools.Execute(ctx, runtime, req)
@@ -384,7 +383,7 @@ func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime
 		if content == "" {
 			content = "Tool completed with no output."
 		}
-		*messages = append(*messages, provider.Message{Role: domain.MessageRoleTool, ToolCallID: req.ToolCallID, Content: content})
+		*messages = append(*messages, provider.Message{Role: provider.RoleTool, ToolCallID: req.ToolCallID, Content: content})
 	}
 	return nil
 }

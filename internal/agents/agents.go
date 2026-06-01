@@ -16,7 +16,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
@@ -279,8 +278,8 @@ func (m *Manager) Resolve(ctx context.Context, client *provider.Client, modelID 
 	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
 		Model: modelID,
 		Messages: []provider.Message{
-			{Role: domain.MessageRoleSystem, Content: "Resolve project instruction files into a single AGENTS.md and conflict summary."},
-			{Role: domain.MessageRoleUser, Content: prompt.String()},
+			{Role: provider.RoleSystem, Content: "Resolve project instruction files into a single AGENTS.md and conflict summary."},
+			{Role: provider.RoleUser, Content: prompt.String()},
 		},
 	})
 	if err != nil {

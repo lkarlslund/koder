@@ -198,7 +198,7 @@ func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string
 	}
 	req := ChatRequest{
 		Model:    strings.TrimSpace(modelID),
-		Messages: []Message{{Role: domain.MessageRoleUser, Content: "ping"}},
+		Messages: []Message{{Role: RoleUser, Content: "ping"}},
 		Stream:   true,
 		ExtraBody: map[string]any{
 			"max_tokens":      1,

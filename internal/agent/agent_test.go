@@ -1074,7 +1074,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 		t.Fatal("expected conversation entries")
 	}
 	got := conversation[len(conversation)-1]
-	if got.Role != domain.MessageRoleAssistant {
+	if got.Role != provider.RoleAssistant {
 		t.Fatalf("expected assistant conversation entry, got %#v", got)
 	}
 	if !strings.Contains(got.Content, "inspect that file") {
@@ -1110,7 +1110,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if len(conversation) < 3 {
 		t.Fatalf("expected compact summary and later message, got %#v", conversation)
 	}
-	if conversation[len(conversation)-2].Role != domain.MessageRoleUser {
+	if conversation[len(conversation)-2].Role != provider.RoleUser {
 		t.Fatalf("expected compact summary to be replayed as a user replacement-history anchor, got %#v", conversation[len(conversation)-2])
 	}
 	if !strings.Contains(conversation[len(conversation)-2].Content, "summary block") {
@@ -1159,7 +1159,7 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	if len(conversation[len(conversation)-2].ToolCalls) != 1 || conversation[len(conversation)-2].ToolCalls[0].ID != "call_1" {
 		t.Fatalf("expected preserved structured tool call, got %#v", conversation[len(conversation)-2])
 	}
-	if conversation[len(conversation)-1].Role != domain.MessageRoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" {
+	if conversation[len(conversation)-1].Role != provider.RoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" {
 		t.Fatalf("expected preserved tool result, got %#v", conversation[len(conversation)-1])
 	}
 	if strings.Contains(conversation[len(conversation)-3].Content, "old question") {
@@ -1314,7 +1314,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 		if len(msg.ContentParts) != 0 {
 			t.Fatalf("expected no content parts in compaction message, got %#v", msg)
 		}
-		if msg.Role == domain.MessageRoleTool || msg.ToolCallID != "" || len(msg.ToolCalls) != 0 {
+		if msg.Role == provider.RoleTool || msg.ToolCallID != "" || len(msg.ToolCalls) != 0 {
 			t.Fatalf("expected compaction messages to avoid structured tool protocol, got %#v", msg)
 		}
 	}
@@ -1474,7 +1474,7 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	if len(conversation) < 1 {
 		t.Fatalf("expected system prompt, got %#v", conversation)
 	}
-	if conversation[0].Role != domain.MessageRoleSystem {
+	if conversation[0].Role != provider.RoleSystem {
 		t.Fatalf("expected leading system prompt, got %#v", conversation)
 	}
 	if !strings.Contains(conversation[0].Content, "$skill-name") || !strings.Contains(conversation[0].Content, "<name>review</name>") {
@@ -1516,7 +1516,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if len(conversation[len(conversation)-2].ToolCalls) != 1 || conversation[len(conversation)-2].ToolCalls[0].ID != "call_1" {
 		t.Fatalf("expected structured assistant tool call, got %#v", conversation[len(conversation)-2])
 	}
-	if conversation[len(conversation)-1].Role != domain.MessageRoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" || conversation[len(conversation)-1].Content != "/typed/output" {
+	if conversation[len(conversation)-1].Role != provider.RoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" || conversation[len(conversation)-1].Content != "/typed/output" {
 		t.Fatalf("expected structured tool message, got %#v", conversation[len(conversation)-1])
 	}
 }
@@ -1557,7 +1557,7 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 		t.Fatalf("expected tool message in conversation, got %#v", conversation)
 	}
 	msg := conversation[len(conversation)-1]
-	if msg.Role != domain.MessageRoleTool || msg.ToolCallID != "call_image" {
+	if msg.Role != provider.RoleTool || msg.ToolCallID != "call_image" {
 		t.Fatalf("expected tool message with tool call id, got %#v", msg)
 	}
 	if got := len(msg.ContentParts); got != 2 {
@@ -1663,13 +1663,13 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 		t.Fatalf("expected single system prompt plus saved prompt and unsent draft, got %#v", req.Messages)
 	}
 	last := req.Messages[len(req.Messages)-1]
-	if last.Role != domain.MessageRoleUser || last.Content != "unsent draft" {
+	if last.Role != provider.RoleUser || last.Content != "unsent draft" {
 		t.Fatalf("expected unsent draft as final user message, got %#v", last)
 	}
 	if req.Messages[len(req.Messages)-2].Content != "saved prompt" {
 		t.Fatalf("expected stored conversation before draft, got %#v", req.Messages)
 	}
-	if req.Messages[0].Role != domain.MessageRoleSystem || !strings.Contains(req.Messages[0].Content, "Permission mode changed") {
+	if req.Messages[0].Role != provider.RoleSystem || !strings.Contains(req.Messages[0].Content, "Permission mode changed") {
 		t.Fatalf("expected transient note folded into leading system prompt, got %#v", req.Messages)
 	}
 	if got := strings.Count(req.Messages[0].Content, "Session update:\nPermission mode changed"); got != 1 {
@@ -1714,10 +1714,10 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 	if len(req.Messages) != 2 {
 		t.Fatalf("expected one system and one user message, got %#v", req.Messages)
 	}
-	if req.Messages[0].Role != domain.MessageRoleSystem {
+	if req.Messages[0].Role != provider.RoleSystem {
 		t.Fatalf("expected leading system message, got %#v", req.Messages)
 	}
-	if req.Messages[1].Role != domain.MessageRoleUser {
+	if req.Messages[1].Role != provider.RoleUser {
 		t.Fatalf("expected trailing user message, got %#v", req.Messages)
 	}
 	for _, want := range []string{
@@ -5338,7 +5338,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
-			Role:    domain.MessageRoleUser,
+			Role:    provider.RoleUser,
 			Content: "hello",
 		}},
 		Stream: true,
@@ -5408,7 +5408,7 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 	_, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
-			Role:    domain.MessageRoleUser,
+			Role:    provider.RoleUser,
 			Content: "hello",
 		}},
 		Stream: true,
@@ -5492,7 +5492,7 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
-			Role:    domain.MessageRoleUser,
+			Role:    provider.RoleUser,
 			Content: "hello",
 		}},
 		Stream:    true,
