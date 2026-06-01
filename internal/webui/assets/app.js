@@ -2337,13 +2337,13 @@
           this.providerState = this.settings.providers || this.providerState;
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
         },
-        settingsTabs() { return ['general', 'access', 'tools', 'compaction', 'prompts', 'providers', 'models', 'mcp']; },
+        settingsTabs() { return ['general', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', access: 'Access', tools: 'Tools', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
         compactionModelValue() {
           const c = this.settings?.compaction || {};
@@ -2370,6 +2370,29 @@
           this.settings.compaction.use_chat_model = false;
           this.settings.compaction.provider_id = parts[0] || '';
           this.settings.compaction.model_id = parts[1] || '';
+        },
+        thinkingModelValue() {
+          const c = this.settings?.thinking || {};
+          if (c.use_chat_model || (!c.provider_id && !c.model_id)) return 'chat';
+          return JSON.stringify([c.provider_id || '', c.model_id || '']);
+        },
+        setThinkingModelValue(value) {
+          if (!this.settings?.thinking) return;
+          if (value === 'chat') {
+            this.settings.thinking.use_chat_model = true;
+            this.settings.thinking.provider_id = '';
+            this.settings.thinking.model_id = '';
+            return;
+          }
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
+          this.settings.thinking.use_chat_model = false;
+          this.settings.thinking.provider_id = parts[0] || '';
+          this.settings.thinking.model_id = parts[1] || '';
         },
         defaultModelValue() {
           const g = this.settings?.general || {};

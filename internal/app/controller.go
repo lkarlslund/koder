@@ -185,6 +185,7 @@ type PreferencesState struct {
 	General      GeneralPreferences      `json:"general"`
 	UI           BrowserPreferences      `json:"ui"`
 	Compaction   CompactionPreferences   `json:"compaction"`
+	Thinking     ThinkingPreferences     `json:"thinking"`
 	Prompts      []PromptPreference      `json:"prompts"`
 	Providers    ProviderState           `json:"providers"`
 	Models       []ModelOption           `json:"models"`
@@ -216,6 +217,15 @@ type CompactionPreferences struct {
 	ProviderID           string `json:"provider_id"`
 	ModelID              string `json:"model_id"`
 	UseChatModel         bool   `json:"use_chat_model"`
+	CurrentSelectionText string `json:"current_selection_text"`
+}
+
+type ThinkingPreferences struct {
+	CavemanEnabled       bool   `json:"caveman_enabled"`
+	ProviderID           string `json:"provider_id"`
+	ModelID              string `json:"model_id"`
+	UseChatModel         bool   `json:"use_chat_model"`
+	CavemanPrompt        string `json:"caveman_prompt"`
 	CurrentSelectionText string `json:"current_selection_text"`
 }
 

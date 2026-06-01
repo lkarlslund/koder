@@ -46,6 +46,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if !cfg.UI.AutoContinue {
 		t.Fatal("expected auto continue enabled by default")
 	}
+	if cfg.Thinking.CavemanPrompt != DefaultCavemanThinkingPrompt {
+		t.Fatalf("expected default caveman prompt, got %q", cfg.Thinking.CavemanPrompt)
+	}
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
@@ -54,6 +57,32 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(temp, "koder", "config.toml")); err != nil {
 		t.Fatalf("expected config file: %v", err)
+	}
+}
+
+func TestThinkingPreferencesRoundTrip(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanProvider = "test"
+	cfg.Thinking.CavemanModel = "model"
+	cfg.Thinking.CavemanPrompt = "rewrite:\n{{thinking}}"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" {
+		t.Fatalf("expected thinking settings to round-trip, got %#v", loaded.Thinking)
 	}
 }
 

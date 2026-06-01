@@ -446,6 +446,11 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.Compaction.ModelID = "compact-model"
 	prefs.Compaction.AutoCompactAt = 66
 	prefs.Compaction.KeepToolBatches = 3
+	prefs.Thinking.CavemanEnabled = true
+	prefs.Thinking.UseChatModel = false
+	prefs.Thinking.ProviderID = "test"
+	prefs.Thinking.ModelID = "model"
+	prefs.Thinking.CavemanPrompt = "rewrite thinking:\n{{thinking}}"
 	temperature := 0.7
 	topP := 0.9
 	prefs.ModelConfigs = []ModelConfigPreference{{
@@ -488,6 +493,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
 	}
+	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite thinking:\n{{thinking}}" {
+		t.Fatalf("expected saved thinking settings, got %#v", loaded.Thinking)
+	}
 	if got := loaded.ContextWindow("test", "model"); got != 12345 {
 		t.Fatalf("expected saved model context window, got %d", got)
 	}
@@ -511,6 +519,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if restartedPrefs.Compaction.UseChatModel || restartedPrefs.Compaction.ProviderID != "test" || restartedPrefs.Compaction.ModelID != "compact-model" {
 		t.Fatalf("expected restart preferences to restore compaction model, got %#v", restartedPrefs.Compaction)
+	}
+	if !restartedPrefs.Thinking.CavemanEnabled || restartedPrefs.Thinking.UseChatModel || restartedPrefs.Thinking.ProviderID != "test" || restartedPrefs.Thinking.ModelID != "model" {
+		t.Fatalf("expected restart preferences to restore thinking model, got %#v", restartedPrefs.Thinking)
 	}
 	if !modelOptionsContain(restartedPrefs.Models, "test", "compact-model") {
 		t.Fatalf("expected restart preferences options to include compaction model, got %#v", restartedPrefs.Models)

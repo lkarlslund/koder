@@ -321,14 +321,14 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCall
 }
 
 func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	return AppendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, usage)
+	return AppendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, domain.ReasoningContent{}, usage)
 }
 
-func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	if len(calls) == 0 && strings.TrimSpace(text) == "" {
 		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
 	}
-	assistant := domain.AssistantMessage{Text: text}
+	assistant := domain.AssistantMessage{Text: text, Reasoning: reasoning}
 	for _, call := range calls {
 		if err := assistant.AddToolCall(call); err != nil {
 			return domain.TimelineItem{}, err

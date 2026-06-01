@@ -25,6 +25,13 @@ type Store struct {
 	Backend string `toml:"backend"`
 }
 
+type Thinking struct {
+	CavemanEnabled  bool   `toml:"caveman_enabled"`
+	CavemanProvider string `toml:"caveman_provider"`
+	CavemanModel    string `toml:"caveman_model"`
+	CavemanPrompt   string `toml:"caveman_prompt"`
+}
+
 type Provider struct {
 	TemplateID              string            `toml:"template_id"`
 	Kind                    string            `toml:"kind"`
@@ -91,6 +98,7 @@ type Config struct {
 	Access                    accesssettings.Settings `toml:"access"`
 	Store                     Store                   `toml:"store"`
 	UI                        UI                      `toml:"ui"`
+	Thinking                  Thinking                `toml:"thinking"`
 	path                      string
 	configDir                 string
 	stateDir                  string
@@ -119,6 +127,7 @@ const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolBatches = 2
 const maxCompactionKeepToolBatches = 10
+const DefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
 
 func Load() (Config, error) {
 	cfg := Default()
@@ -214,6 +223,9 @@ func Default() Config {
 			Theme:        "dark",
 			AutoContinue: true,
 		},
+		Thinking: Thinking{
+			CavemanPrompt: DefaultCavemanThinkingPrompt,
+		},
 	}
 }
 
@@ -264,6 +276,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.Theme == "" {
 		c.UI = def.UI
+	}
+	c.Thinking.CavemanProvider = strings.TrimSpace(c.Thinking.CavemanProvider)
+	c.Thinking.CavemanModel = strings.TrimSpace(c.Thinking.CavemanModel)
+	if strings.TrimSpace(c.Thinking.CavemanPrompt) == "" {
+		c.Thinking.CavemanPrompt = def.Thinking.CavemanPrompt
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

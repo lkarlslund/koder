@@ -3278,6 +3278,86 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	}
 }
 
+func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done","reasoning":"I should inspect the files carefully and then edit the smallest surface."}}],"usage":{"total_tokens":10}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"me inspect files. me edit small."}}],"usage":{"total_tokens":4}}`))
+		default:
+			t.Fatalf("unexpected provider request %d: %s", len(requests), string(body))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: false},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
+	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanPrompt = "Caveman rewrite only:\n{{thinking}}"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := runLivePromptDefault(t, engine, st, session, "go")
+	var done domain.Event
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindMessageDone {
+			done = evt
+		}
+	}
+	assistant, ok := done.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant item, got %#v", done.Item)
+	}
+	if assistant.Reasoning.Text == "" || assistant.Reasoning.Caveman != "me inspect files. me edit small." {
+		t.Fatalf("expected original and caveman reasoning, got %#v", assistant.Reasoning)
+	}
+	if len(requests) != 2 || !strings.Contains(requests[1], "Caveman rewrite only") {
+		t.Fatalf("expected caveman rewrite request, got %#v", requests)
+	}
+
+	next, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assistantReplay string
+	for _, msg := range next.Messages {
+		if msg.Role == provider.RoleAssistant {
+			assistantReplay += msg.Content
+		}
+	}
+	if !strings.Contains(assistantReplay, "me inspect files. me edit small.") || strings.Contains(assistantReplay, "inspect the files carefully") {
+		raw, _ := json.Marshal(next.Messages)
+		t.Fatalf("expected next request to replay caveman reasoning only, assistant=%q messages=%s", assistantReplay, raw)
+	}
+}
+
 func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	t.Skip("permission approval profiles were replaced by session access settings")
 	t.Parallel()

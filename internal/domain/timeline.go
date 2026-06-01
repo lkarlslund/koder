@@ -165,10 +165,18 @@ func (m *AssistantMessage) ToolByID(id ToolCallID) *ToolCall {
 // ReasoningContent stores normalized reasoning and provider replay metadata.
 type ReasoningContent struct {
 	Text      string          `json:"text,omitempty"`
+	Caveman   string          `json:"caveman,omitempty"`
 	Summary   []string        `json:"summary,omitempty"`
 	Encrypted string          `json:"encrypted,omitempty"`
 	Signature string          `json:"signature,omitempty"`
 	Raw       json.RawMessage `json:"raw,omitempty"`
+}
+
+func (r ReasoningContent) ReplayText() string {
+	if text := strings.TrimSpace(r.Caveman); text != "" {
+		return text
+	}
+	return strings.TrimSpace(r.Text)
 }
 
 // ProviderTrace stores provider-native data for replay/debugging.

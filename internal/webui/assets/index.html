@@ -668,6 +668,29 @@
                 </div>
               </div>
 
+              <div class="row g-3" x-show="settingsTab === 'thinking'">
+                <div class="col-12 settings-toggles">
+                  <label class="toggle-switch">
+                    <input class="toggle-switch-input" type="checkbox" x-model="settings.thinking.caveman_enabled">
+                    <span class="toggle-switch-track" aria-hidden="true"></span>
+                    <span class="toggle-switch-label">Caveman thinking</span>
+                  </label>
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label small text-secondary">Caveman model</label>
+                  <select class="form-select" :value="thinkingModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = thinkingModelValue(); })" @change="setThinkingModelValue($event.target.value)">
+                    <option value="chat">Chat model</option>
+                    <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
+                      <option :value="modelOptionValue(model)" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="col-12">
+                  <label class="form-label small text-secondary">Caveman prompt</label>
+                  <textarea class="form-control font-monospace settings-prompt" rows="10" x-model="settings.thinking.caveman_prompt" spellcheck="false"></textarea>
+                </div>
+              </div>
+
               <div class="row g-3" x-show="settingsTab === 'prompts'">
                 <template x-for="prompt in settings.prompts || []" :key="prompt.target">
                   <div class="col-12">

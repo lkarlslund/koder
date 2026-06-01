@@ -475,6 +475,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	}
 
 	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
+	reasoningContent, reasoningErr := e.reasoningContentForResponse(ctx, chat, client, reasoning)
+	if reasoningErr != nil {
+		return chatpkg.TurnStepResult{}, reasoningErr
+	}
 	if len(resp.ToolCalls) > 0 {
 		parsed := e.parseProviderToolCallsForTranscript(resp.ToolCalls, session.ID)
 		for _, callErr := range resp.ToolCallErrors {
@@ -489,7 +493,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 			})
 		} else if len(parsed.ToolCalls) > 0 {
-			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), resp.Usage)
+			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 			if err != nil {
 				return chatpkg.TurnStepResult{}, err
 			}
@@ -528,7 +532,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		for _, callErr := range resp.ToolCallErrors {
 			toolCalls = append(toolCalls, e.failedStreamedProviderToolCall(callErr))
 		}
-		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), resp.Usage)
+		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -539,7 +543,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	call, plain := parseToolCall(text)
 	if call != nil {
 		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), domain.Usage{})
+		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -589,8 +593,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		}, nil
 	}
 	assistant := domain.AssistantMessage{Text: text}
-	if strings.TrimSpace(reasoning) != "" {
-		assistant.Reasoning.Text = reasoning
+	if strings.TrimSpace(reasoningContent.Text) != "" {
+		assistant.Reasoning = reasoningContent
 	}
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
@@ -955,12 +959,74 @@ func (e *Engine) modelPresetForChat(chat domain.Chat) string {
 }
 
 func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
-	model := e.cfg.ModelRequestOptions(chat.ProviderID, chat.ModelID)
+	return modelConfigForRequest(e.cfg, chat.ProviderID, chat.ModelID)
+}
+
+func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string) (domain.ReasoningContent, error) {
+	out := domain.ReasoningContent{Text: reasoning}
+	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+		return out, nil
+	}
+	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProvider)
+	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModel)
+	if providerID == "" && modelID == "" {
+		providerID = strings.TrimSpace(chat.ProviderID)
+		modelID = strings.TrimSpace(chat.ModelID)
+	}
+	if providerID == "" || modelID == "" {
+		return domain.ReasoningContent{}, fmt.Errorf("caveman thinking model must be set or use a chat with provider and model")
+	}
+	client := chatClient
+	if providerID != strings.TrimSpace(chat.ProviderID) || client == nil {
+		providerCfg, ok := e.cfg.Provider(providerID)
+		if !ok {
+			return domain.ReasoningContent{}, fmt.Errorf("caveman thinking provider %q is not configured", providerID)
+		}
+		var err error
+		client, err = provider.New(providerID, providerCfg, e.debug)
+		if err != nil {
+			return domain.ReasoningContent{}, err
+		}
+	}
+	prompt := cavemanThinkingPrompt(e.cfg.Thinking.CavemanPrompt, reasoning)
+	providerCfg, _ := e.cfg.Provider(providerID)
+	req := provider.ChatRequest{
+		Model:     modelID,
+		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
+		Stream:    false,
+		ExtraBody: provider.RequestExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
+	}
+	resp, err := client.CompleteChat(ctx, req)
+	if err != nil {
+		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
+	}
+	caveman := strings.TrimSpace(resp.Text)
+	if caveman == "" {
+		caveman = strings.TrimSpace(resp.Reasoning)
+	}
+	out.Caveman = caveman
+	return out, nil
+}
+
+func cavemanThinkingPrompt(prompt, reasoning string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		prompt = config.DefaultCavemanThinkingPrompt
+	}
+	reasoning = strings.TrimSpace(reasoning)
+	if strings.Contains(prompt, "{{thinking}}") {
+		return strings.ReplaceAll(prompt, "{{thinking}}", reasoning)
+	}
+	return prompt + "\n\nThinking:\n" + reasoning
+}
+
+func modelConfigForRequest(cfg config.Config, providerID, modelID string) config.ModelConfig {
+	model := cfg.ModelRequestOptions(providerID, modelID)
 	if strings.TrimSpace(model.ProviderID) == "" {
-		model.ProviderID = strings.TrimSpace(chat.ProviderID)
+		model.ProviderID = strings.TrimSpace(providerID)
 	}
 	if strings.TrimSpace(model.ModelID) == "" {
-		model.ModelID = strings.TrimSpace(chat.ModelID)
+		model.ModelID = strings.TrimSpace(modelID)
 	}
 	return model
 }
@@ -1122,7 +1188,7 @@ func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 		if strings.TrimSpace(content.Text) != "" {
 			return provider.RoleAssistant.String(), content.Text
 		}
-		return provider.RoleAssistant.String(), strings.TrimSpace(content.Reasoning.Text)
+		return provider.RoleAssistant.String(), content.Reasoning.ReplayText()
 	case domain.ToolExecution:
 		text := ""
 		if content.Result != nil {
@@ -1950,8 +2016,8 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		}
 		textChunks := []string{}
 		reasoningChunks := []string{}
-		if preserveThinking && strings.TrimSpace(content.Reasoning.Text) != "" {
-			reasoningChunks = append(reasoningChunks, content.Reasoning.Text)
+		if preserveThinking && content.Reasoning.ReplayText() != "" {
+			reasoningChunks = append(reasoningChunks, content.Reasoning.ReplayText())
 		}
 		if strings.TrimSpace(content.Text) != "" {
 			textChunks = append(textChunks, content.Text)
@@ -2874,8 +2940,8 @@ func (e *Engine) compactionUserMessageText(session domain.Session, msg domain.Us
 
 func compactAssistantMessageText(msg domain.AssistantMessage, preserveThinking bool) string {
 	blocks := make([]string, 0, 3)
-	if preserveThinking && strings.TrimSpace(msg.Reasoning.Text) != "" {
-		blocks = append(blocks, formatThinkingBlock(msg.Reasoning.Text))
+	if preserveThinking && msg.Reasoning.ReplayText() != "" {
+		blocks = append(blocks, formatThinkingBlock(msg.Reasoning.ReplayText()))
 	}
 	if text := strings.TrimSpace(msg.Text); text != "" {
 		blocks = append(blocks, text)
@@ -3242,30 +3308,30 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
 	}
-	return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
+	return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, domain.ReasoningContent{}, usage)
 }
 
-func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	item, err := chatpkg.AppendAssistantToolCallsWithItem(ctx, e.store, chatID, item, toolCalls, text, usage)
+func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+	item, err := chatpkg.AppendAssistantToolCallsWithItem(ctx, e.store, chatID, item, toolCalls, text, reasoning, usage)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil
 }
 
-func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
 	}
-	return e.persistAssistantToolCallRecordsForTurn(ctx, turn, chatID, sessionID, item, toolCalls, text, usage)
+	return e.persistAssistantToolCallRecordsForTurn(ctx, turn, chatID, sessionID, item, toolCalls, text, reasoning, usage)
 }
 
-func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	if turn == nil {
-		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
+		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, reasoning, usage)
 	}
-	assistant := domain.AssistantMessage{Text: text, Tools: toolCalls}
+	assistant := domain.AssistantMessage{Text: text, Reasoning: reasoning, Tools: toolCalls}
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage

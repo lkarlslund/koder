@@ -1225,6 +1225,12 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `'\u0000'`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
+	if !strings.Contains(fullPage, `settingsTab === 'thinking'`) ||
+		!strings.Contains(fullPage, `settings.thinking.caveman_enabled`) ||
+		!strings.Contains(fullPage, `thinkingModelValue()`) ||
+		!strings.Contains(fullPage, `settings.thinking.caveman_prompt`) {
+		t.Fatalf("expected thinking preferences tab with caveman controls")
+	}
 	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
 		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||

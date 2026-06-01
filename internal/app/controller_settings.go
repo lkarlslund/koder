@@ -256,6 +256,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
+	if err := applyThinkingPreferences(&next, prefs.Thinking); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
 	if err := applyModelConfigPreferences(&next, prefs.ModelConfigs); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -626,6 +630,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 	models, _ := c.modelOptionsLocked(ctx)
 	liveModels := slices.Clone(models)
 	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.CompactionProvider), strings.TrimSpace(c.cfg.CompactionModel))
+	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Thinking.CavemanProvider), strings.TrimSpace(c.cfg.Thinking.CavemanModel))
 	prompts, err := promptPreferences()
 	if err != nil {
 		return PreferencesState{}, err
@@ -639,6 +644,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		},
 		UI:           browserPreferencesFromConfig(c.cfg.UI),
 		Compaction:   compactionPreferencesFromConfig(c.cfg),
+		Thinking:     thinkingPreferencesFromConfig(c.cfg),
 		Prompts:      prompts,
 		Providers:    c.providerStateLocked(),
 		Models:       models,
@@ -926,6 +932,23 @@ func compactionPreferencesFromConfig(cfg config.Config) CompactionPreferences {
 	}
 }
 
+func thinkingPreferencesFromConfig(cfg config.Config) ThinkingPreferences {
+	providerID := strings.TrimSpace(cfg.Thinking.CavemanProvider)
+	modelID := strings.TrimSpace(cfg.Thinking.CavemanModel)
+	text := "Chat model"
+	if providerID != "" || modelID != "" {
+		text = providerID + " / " + modelID
+	}
+	return ThinkingPreferences{
+		CavemanEnabled:       cfg.Thinking.CavemanEnabled,
+		ProviderID:           providerID,
+		ModelID:              modelID,
+		UseChatModel:         providerID == "" && modelID == "",
+		CavemanPrompt:        strings.TrimSpace(cfg.Thinking.CavemanPrompt),
+		CurrentSelectionText: text,
+	}
+}
+
 func mcpPreferencesFromConfig(src map[string]config.MCPServer) []MCPServerPreference {
 	ids := make([]string, 0, len(src))
 	for id := range src {
@@ -1132,6 +1155,35 @@ func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences)
 	}
 	cfg.CompactionProvider = providerID
 	cfg.CompactionModel = modelID
+	return nil
+}
+
+func applyThinkingPreferences(cfg *config.Config, prefs ThinkingPreferences) error {
+	cfg.Thinking.CavemanEnabled = prefs.CavemanEnabled
+	cfg.Thinking.CavemanPrompt = strings.TrimSpace(prefs.CavemanPrompt)
+	if cfg.Thinking.CavemanPrompt == "" {
+		cfg.Thinking.CavemanPrompt = config.DefaultCavemanThinkingPrompt
+	}
+	if prefs.UseChatModel {
+		cfg.Thinking.CavemanProvider = ""
+		cfg.Thinking.CavemanModel = ""
+		return nil
+	}
+	providerID := strings.TrimSpace(prefs.ProviderID)
+	modelID := strings.TrimSpace(prefs.ModelID)
+	if providerID == "" && modelID == "" {
+		cfg.Thinking.CavemanProvider = ""
+		cfg.Thinking.CavemanModel = ""
+		return nil
+	}
+	if providerID == "" || modelID == "" {
+		return fmt.Errorf("thinking provider and model must both be set, or both empty for chat model")
+	}
+	if !cfg.HasUsableProvider(providerID) {
+		return fmt.Errorf("thinking provider %q is not configured or is disabled", providerID)
+	}
+	cfg.Thinking.CavemanProvider = providerID
+	cfg.Thinking.CavemanModel = modelID
 	return nil
 }
 
