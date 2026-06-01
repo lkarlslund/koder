@@ -80,6 +80,50 @@ func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	}
 }
 
+func TestToolPayloadUnmarshalAcceptsLintToolResult(t *testing.T) {
+	var part Part
+	err := json.Unmarshal([]byte(`{
+		"kind": "tool_output",
+		"payload": {
+			"tool": "lint",
+			"tool_call_id": "call_1",
+			"status": "ok",
+			"text": "diagnostics",
+			"result": {
+				"path": "bad.json",
+				"mode": "auto",
+				"summary": "Diagnostics found.",
+				"diagnostics": "bad.json:1:1: invalid",
+				"diagnostic_report": {
+					"diagnostics": [{
+						"source": "lint",
+						"path": "bad.json",
+						"line": 1,
+						"column": 1,
+						"severity": "error",
+						"tool": "json",
+						"message": "invalid"
+					}]
+				}
+			}
+		}
+	}`), &part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := part.Payload.(ToolOutputPayload)
+	if !ok {
+		t.Fatalf("expected tool output payload, got %#v", part.Payload)
+	}
+	result, ok := payload.Result.(LintStoredResult)
+	if !ok {
+		t.Fatalf("expected lint stored result, got %#v", payload.Result)
+	}
+	if result.Path != "bad.json" || result.Diagnostics == "" || len(result.DiagnosticReport.Diagnostics) != 1 {
+		t.Fatalf("unexpected lint result: %#v", result)
+	}
+}
+
 func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{

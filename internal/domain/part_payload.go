@@ -204,6 +204,8 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[EditStoredResult](raw)
 	case ToolKindFileWrite:
 		return decodeToolResult[WriteStoredResult](raw)
+	case ToolKindLint:
+		return decodeToolResult[LintStoredResult](raw)
 	case ToolKindFileGlob:
 		return decodeToolResult[GlobStoredResult](raw)
 	case ToolKindFileGrep:

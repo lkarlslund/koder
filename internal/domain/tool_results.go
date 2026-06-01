@@ -90,16 +90,33 @@ type ExecProcess struct {
 }
 
 type EditStoredResult struct {
-	Path         string           `json:"path"`
-	ReplaceAll   bool             `json:"replace_all,omitempty"`
-	Occurrences  int              `json:"occurrences,omitempty"`
-	Summary      string           `json:"summary,omitempty"`
-	Matcher      string           `json:"matcher,omitempty"`
-	Verification string           `json:"verification,omitempty"`
-	Diagnostics  string           `json:"diagnostics,omitempty"`
-	Diff         string           `json:"diff,omitempty"`
-	Hunks        []EditStoredHunk `json:"hunks,omitempty"`
-	Truncated    bool             `json:"truncated,omitempty"`
+	Path             string                 `json:"path"`
+	ReplaceAll       bool                   `json:"replace_all,omitempty"`
+	Occurrences      int                    `json:"occurrences,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Matcher          string                 `json:"matcher,omitempty"`
+	Verification     string                 `json:"verification,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
+	Diff             string                 `json:"diff,omitempty"`
+	Hunks            []EditStoredHunk       `json:"hunks,omitempty"`
+	Truncated        bool                   `json:"truncated,omitempty"`
+}
+
+type DiagnosticReportStored struct {
+	Diagnostics []DiagnosticStored `json:"diagnostics,omitempty"`
+	Skipped     []string           `json:"skipped,omitempty"`
+}
+
+type DiagnosticStored struct {
+	Source   string `json:"source,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 type EditStoredHunk struct {
@@ -110,11 +127,21 @@ type EditStoredHunk struct {
 }
 
 type WriteStoredResult struct {
-	Path      string `json:"path"`
-	Action    string `json:"action,omitempty"`
-	Summary   string `json:"summary,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Path             string                 `json:"path"`
+	Action           string                 `json:"action,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Content          string                 `json:"content,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
+	Truncated        bool                   `json:"truncated,omitempty"`
+}
+
+type LintStoredResult struct {
+	Path             string                 `json:"path"`
+	Mode             string                 `json:"mode,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
 }
 
 type GlobStoredResult struct {
@@ -267,6 +294,7 @@ func (ExecStoredResult) ToolResultPayload()          {}
 func (ExecListStoredResult) ToolResultPayload()      {}
 func (EditStoredResult) ToolResultPayload()          {}
 func (WriteStoredResult) ToolResultPayload()         {}
+func (LintStoredResult) ToolResultPayload()          {}
 func (GlobStoredResult) ToolResultPayload()          {}
 func (GrepStoredResult) ToolResultPayload()          {}
 func (QuestionStoredResult) ToolResultPayload()      {}
