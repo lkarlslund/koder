@@ -878,7 +878,7 @@ func (s *Session) AddTask(ctx context.Context, sessionID domain.ID, body string,
 	return task, nil
 }
 
-func (s *Session) PlanningForChat(chat domain.Chat) planning.Control {
+func (s *Session) PlanningForChat(chat domain.Chat) tools.SessionControl {
 	return scopedPlanning{session: s, chat: chat}
 }
 
@@ -1175,4 +1175,4 @@ func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
 	return out
 }
 
-var _ planning.Control = (*Session)(nil)
+var _ tools.SessionControl = (*Session)(nil)

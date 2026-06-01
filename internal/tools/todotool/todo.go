@@ -371,7 +371,7 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func persistedTodoBucket(ctx context.Context, control planning.Control, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
+func persistedTodoBucket(ctx context.Context, control tools.SessionControl, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
 	plan, err := control.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{}, nil, "", err

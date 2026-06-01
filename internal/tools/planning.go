@@ -14,7 +14,15 @@ type TaskControl interface {
 	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (planning.Task, error)
 }
 
-func RequireSessionControl(runtime Runtime) (planning.Control, error) {
+type SessionControl interface {
+	GetMilestonePlan(context.Context, domain.ID) (planning.Plan, error)
+	SetMilestonePlan(context.Context, domain.ID, string, []planning.Milestone) (planning.Plan, error)
+	AddTodoItems(context.Context, domain.ID, string, []string) ([]planning.TodoItem, error)
+	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (planning.TodoItem, error)
+	ListTodos(context.Context, domain.ID, string) ([]planning.TodoItem, error)
+}
+
+func RequireSessionControl(runtime Runtime) (SessionControl, error) {
 	if runtime.SessionControl == nil || runtime.SessionID == "" {
 		return nil, errors.New("planning tools require a loaded session")
 	}

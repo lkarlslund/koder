@@ -1,7 +1,6 @@
 package planning
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,14 +10,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
-
-type Control interface {
-	GetMilestonePlan(context.Context, domain.ID) (Plan, error)
-	SetMilestonePlan(context.Context, domain.ID, string, []Milestone) (Plan, error)
-	AddTodoItems(context.Context, domain.ID, string, []string) ([]TodoItem, error)
-	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (TodoItem, error)
-	ListTodos(context.Context, domain.ID, string) ([]TodoItem, error)
-}
 
 type Plan struct {
 	SessionID  domain.ID

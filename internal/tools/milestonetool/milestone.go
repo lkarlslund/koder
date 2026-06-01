@@ -558,7 +558,7 @@ func applyMilestoneOwner(milestone *planning.Milestone, status domain.MilestoneS
 	}
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, control planning.Control, sessionID domain.ID, milestones []planning.Milestone) error {
+func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID domain.ID, milestones []planning.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != domain.MilestoneStatusCompleted {
 			continue
