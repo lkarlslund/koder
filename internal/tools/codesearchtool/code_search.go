@@ -691,19 +691,27 @@ func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs str
 	if err := client.syncDocument(ctx, uri, languageID, before); err != nil {
 		return DiagnosticReport{}, err
 	}
-	if err := client.flushDiagnostics(ctx, uri); err != nil {
-		return DiagnosticReport{}, err
+	beforeDiagnostics, ok := client.waitDiagnostics(ctx, uri, time.Second)
+	if !ok {
+		return DiagnosticReport{Skipped: []string{"lsp: timed out waiting for diagnostics for " + path}}, nil
 	}
-	beforeDiagnostics := append([]lspDiagnostic(nil), client.diagnostics[uri]...)
 	if after != before {
 		if err := client.syncDocument(ctx, uri, languageID, after); err != nil {
 			return DiagnosticReport{}, err
 		}
-		if err := client.flushDiagnostics(ctx, uri); err != nil {
-			return DiagnosticReport{}, err
+		var ok bool
+		beforeDiagnostics = append([]lspDiagnostic(nil), beforeDiagnostics...)
+		afterDiagnostics, ok := client.waitDiagnostics(ctx, uri, time.Second)
+		if !ok {
+			return DiagnosticReport{Skipped: []string{"lsp: timed out waiting for diagnostics for " + path}}, nil
 		}
+		return lspDiagnosticReport(server, rootAbs, uri, beforeDiagnostics, afterDiagnostics, introducedOnly), nil
 	}
-	afterDiagnostics := append([]lspDiagnostic(nil), client.diagnostics[uri]...)
+	afterDiagnostics := append([]lspDiagnostic(nil), beforeDiagnostics...)
+	return lspDiagnosticReport(server, rootAbs, uri, beforeDiagnostics, afterDiagnostics, introducedOnly), nil
+}
+
+func lspDiagnosticReport(server languageServer, rootAbs string, uri string, beforeDiagnostics, afterDiagnostics []lspDiagnostic, introducedOnly bool) DiagnosticReport {
 	if introducedOnly {
 		afterDiagnostics = introducedLSPDiagnostics(beforeDiagnostics, afterDiagnostics)
 	}
@@ -711,7 +719,7 @@ func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs str
 	for _, diagnostic := range afterDiagnostics {
 		out.Diagnostics = append(out.Diagnostics, normalizeLSPDiagnostic(server, rootAbs, uri, diagnostic))
 	}
-	return out, nil
+	return out
 }
 
 func introducedLSPDiagnostics(before, after []lspDiagnostic) []lspDiagnostic {
@@ -999,7 +1007,7 @@ func (c *lspClient) notify(ctx context.Context, method string, params any) error
 	return writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: method, Params: params})
 }
 
-func (c *lspClient) waitDiagnostics(ctx context.Context, uri string, duration time.Duration) []lspDiagnostic {
+func (c *lspClient) waitDiagnostics(ctx context.Context, uri string, duration time.Duration) ([]lspDiagnostic, bool) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1009,31 +1017,34 @@ func (c *lspClient) waitDiagnostics(ctx context.Context, uri string, duration ti
 	defer c.mu.Unlock()
 	for {
 		if err := waitCtx.Err(); err != nil {
-			return append([]lspDiagnostic(nil), c.diagnostics[uri]...)
+			return nil, false
 		}
 		resp, err := c.readResponseNoKill(waitCtx)
 		if err != nil {
-			return append([]lspDiagnostic(nil), c.diagnostics[uri]...)
+			return nil, false
 		}
-		c.handleNotification(resp)
+		if c.handleNotification(resp) == uri {
+			return append([]lspDiagnostic(nil), c.diagnostics[uri]...), true
+		}
 	}
 }
 
-func (c *lspClient) handleNotification(resp lspResponse) {
+func (c *lspClient) handleNotification(resp lspResponse) string {
 	if resp.Method != "textDocument/publishDiagnostics" || len(resp.Params) == 0 {
-		return
+		return ""
 	}
 	var payload struct {
 		URI         string          `json:"uri"`
 		Diagnostics []lspDiagnostic `json:"diagnostics"`
 	}
 	if err := json.Unmarshal(resp.Params, &payload); err != nil || strings.TrimSpace(payload.URI) == "" {
-		return
+		return ""
 	}
 	if c.diagnostics == nil {
 		c.diagnostics = map[string][]lspDiagnostic{}
 	}
 	c.diagnostics[payload.URI] = append([]lspDiagnostic(nil), payload.Diagnostics...)
+	return payload.URI
 }
 
 func (c *lspClient) readResponse(ctx context.Context) (lspResponse, error) {
