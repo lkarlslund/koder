@@ -603,7 +603,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindFileEdit:
+	case domain.ToolKindFileEdit, domain.ToolKindFileWrite:
 		return false
 	default:
 		return true
@@ -784,9 +784,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 			return strings.TrimSpace(result.Summary)
 		})
 	case domain.ToolKindFileWrite:
-		return decodeAndFormat[WriteStoredResult](env.Payload, func(result WriteStoredResult) string {
-			return strings.TrimSpace(result.Summary)
-		})
+		return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForModel)
 	case domain.ToolKindLint:
 		return decodeAndFormat[LintStoredResult](env.Payload, func(result LintStoredResult) string {
 			if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
@@ -1111,6 +1109,33 @@ func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
 		text += "\n\nDiagnostics:\n" + diagnostics
 	}
 	return text
+}
+
+func formatWriteStoredResultForModel(result WriteStoredResult) string {
+	lines := []string{}
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		lines = append(lines, summary)
+	} else if path := strings.TrimSpace(result.Path); path != "" {
+		action := strings.TrimSpace(result.Action)
+		if action == "" {
+			action = "wrote"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s", action, path))
+	}
+	if content := strings.TrimSpace(result.Content); content != "" {
+		lineCount := strings.Count(content, "\n")
+		if content[len(content)-1] != '\n' {
+			lineCount++
+		}
+		lines = append(lines, fmt.Sprintf("Wrote %d lines.", lineCount))
+	}
+	if result.Truncated {
+		lines = append(lines, "Stored written content is truncated in the UI transcript.")
+	}
+	if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
+		lines = append(lines, "Diagnostics:\n"+diagnostics)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func formatLintStoredResultForDisplay(result LintStoredResult) string {

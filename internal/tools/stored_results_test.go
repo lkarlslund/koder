@@ -69,6 +69,26 @@ func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
 	}
 }
 
+func TestModelTextForPartUsesWriteSummaryWithoutContentOrDiff(t *testing.T) {
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindFileWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
+		Path:    "note.txt",
+		Action:  "created",
+		Summary: "Created note.txt",
+		Content: "first line\nsecond line",
+	}), "--- ignored diff")
+	if !ok {
+		t.Fatal("expected model text")
+	}
+	if strings.Contains(text, "first line") || strings.Contains(text, "ignored diff") {
+		t.Fatalf("expected write model text to omit content and diff, got %q", text)
+	}
+	for _, want := range []string{"Created note.txt", "Wrote 2 lines."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in %q", want, text)
+		}
+	}
+}
+
 func TestCompactModelTextForPartTruncatesExecOutput(t *testing.T) {
 	lines := make([]string, 0, 20)
 	for i := 0; i < 20; i++ {

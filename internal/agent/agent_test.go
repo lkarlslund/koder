@@ -3051,7 +3051,7 @@ func TestRunPromptPersistsOversizedStreamedToolCallAsToolError(t *testing.T) {
 		case 1:
 			args, err := json.Marshal(map[string]string{
 				"path":    "big.go",
-				"content": strings.Repeat("x", 17*1024),
+				"content": strings.Repeat("x", 65*1024),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -3120,7 +3120,7 @@ func TestRunPromptPersistsOversizedStreamedToolCallAsToolError(t *testing.T) {
 	if len(requests) < 2 {
 		t.Fatalf("expected oversized tool call to continue with tool error feedback, got %d requests", len(requests))
 	}
-	if !strings.Contains(string(requests[1]), "file_write tool arguments exceeded 16 KiB") {
+	if !strings.Contains(string(requests[1]), "file_write tool arguments exceeded 64 KiB") {
 		t.Fatalf("expected second request to include stream limit feedback, got %s", requests[1])
 	}
 }

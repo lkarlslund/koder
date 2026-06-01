@@ -67,7 +67,7 @@ func TestParseProviderCallRejectsOversizedArguments(t *testing.T) {
 		ID: "call_1",
 		Function: provider.FunctionCall{
 			Name:      domain.ToolKindBash.String(),
-			Arguments: `{"command":"` + strings.Repeat("x", 3*1024) + `"}`,
+			Arguments: `{"command":"` + strings.Repeat("x", 9*1024) + `"}`,
 		},
 	})
 	var callErr tools.ProviderCallError
@@ -77,7 +77,7 @@ func TestParseProviderCallRejectsOversizedArguments(t *testing.T) {
 	if callErr.Request.Tool != domain.ToolKindBash || callErr.Request.ToolCallID != "call_1" {
 		t.Fatalf("expected partial bash request identity, got %#v", callErr.Request)
 	}
-	if !strings.Contains(err.Error(), "bash tool arguments exceeded 2 KiB") {
+	if !strings.Contains(err.Error(), "bash tool arguments exceeded 8 KiB") {
 		t.Fatalf("expected byte limit error, got %v", err)
 	}
 }

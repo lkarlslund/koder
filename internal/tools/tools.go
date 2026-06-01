@@ -526,9 +526,9 @@ func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefiniti
 
 func ArgumentByteLimits() map[string]int {
 	return map[string]int{
-		domain.ToolKindFileWrite.String(): 16 * 1024,
-		domain.ToolKindFileEdit.String():  8 * 1024,
-		domain.ToolKindBash.String():      2 * 1024,
+		domain.ToolKindFileWrite.String(): 64 * 1024,
+		domain.ToolKindFileEdit.String():  32 * 1024,
+		domain.ToolKindBash.String():      8 * 1024,
 	}
 }
 
