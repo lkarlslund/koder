@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
@@ -95,5 +96,52 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	}
 	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "alpha", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected add todo scope error, got %v", err)
+	}
+}
+
+func TestSessionChatLoadsOnlyRequestedRuntime(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := CreateChat(ctx, st, sessionRecord.ID, "first", chatrole.Orchestrator, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CreateChat(ctx, st, sessionRecord.ID, "second", chatrole.Execution, &first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := map[domain.ID]int{}
+	owner, err := Load(ctx, st, func(_ context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
+		loads[chatRecord.ID]++
+		return chatpkg.New(session, chatRecord, nil, nil, chatpkg.Deps{Store: st}, nil)
+	}, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Chat(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Chat(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if loads[first.ID] != 1 {
+		t.Fatalf("expected first chat to load once from memory cache, got loads=%#v", loads)
+	}
+	if loads[second.ID] != 0 {
+		t.Fatalf("expected unrelated second chat not to load, got loads=%#v", loads)
+	}
+	if _, err := owner.Chat(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if loads[second.ID] != 1 {
+		t.Fatalf("expected second chat to load only when requested, got loads=%#v", loads)
 	}
 }

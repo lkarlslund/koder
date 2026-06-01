@@ -644,11 +644,78 @@ func (c *Controller) Deny(toolCallID string) error {
 func (c *Controller) SwitchChat(ctx context.Context, chatID id.ID) error {
 	c.mu.RLock()
 	sessionID := c.session.ID
+	currentChatID := c.chat.ID
 	c.mu.RUnlock()
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
 	}
-	return c.loadSession(ctx, sessionID, chatID)
+	if chatID == "" {
+		return fmt.Errorf("chat id is required")
+	}
+	if chatID == currentChatID {
+		return nil
+	}
+	return c.switchChatInCurrentSession(ctx, sessionID, chatID)
+}
+
+func (c *Controller) switchChatInCurrentSession(ctx context.Context, sessionID, chatID id.ID) error {
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	chatRecord, err := owner.EnsureChatModel(ctx, chatID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
+	if err != nil {
+		return err
+	}
+	session, chatRecord, chats, err := owner.TouchSelection(ctx, chatRecord.ID)
+	if err != nil {
+		return err
+	}
+	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return err
+	}
+	snapshot := rt.Snapshot()
+	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
+	status := sidebarStatusFromSnapshot(snapshot)
+
+	c.mu.Lock()
+	if c.session.ID != sessionID {
+		c.mu.Unlock()
+		return fmt.Errorf("session %s is no longer active", sessionID)
+	}
+	if c.runtimes == nil {
+		c.runtimes = map[id.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[id.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[id.ID]ChatSidebarStatus{}
+	}
+	c.session = session
+	c.chat = chatRecord
+	c.runtime = rt
+	c.chats = chats
+	c.runtimes[chatRecord.ID] = rt
+	c.snapshots[chatRecord.ID] = snapshot
+	c.statuses[chatRecord.ID] = status
+	c.lastErr = ""
+	c.mu.Unlock()
+
+	c.broadcast("chat_delta", chat.Update{
+		Snapshot:   snapshot,
+		Status:     snapshot.Status,
+		StatusText: snapshot.StatusText,
+		Context:    snapshot.Context,
+		Active:     snapshot.Active,
+	})
+	c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": snapshot.Chat.ID})
+	return nil
 }
 
 // NewChat creates and switches to a chat in the current session.
@@ -1479,10 +1546,8 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	if err != nil {
 		return err
 	}
-	chats, err := owner.EnsureChatModels(ctx, c.cfg.DefaultProvider, c.cfg.DefaultModel)
-	if err != nil {
-		return err
-	}
+	ownerSnapshot := owner.Snapshot()
+	chats := ownerSnapshot.Chats
 	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
 		return err
 	}
@@ -1518,44 +1583,27 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		return err
 	}
 	chatRecord.PermissionProfile = ""
-	c.mu.RLock()
-	existingRuntimes := make(map[id.ID]*chat.Chat, len(c.runtimes))
-	for id, rt := range c.runtimes {
-		existingRuntimes[id] = rt
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return err
 	}
-	c.mu.RUnlock()
-
-	runtimes := make(map[id.ID]*chat.Chat, len(chats))
-	for _, item := range chats {
-		item.PermissionProfile = ""
-		rt := existingRuntimes[item.ID]
-		if rt == nil {
-			var err error
-			rt, err = owner.Chat(ctx, item.ID)
-			if err != nil {
-				return err
-			}
-		} else {
-			rt.SetSession(session)
-			rt.SetChat(item)
-		}
-		runtimes[item.ID] = rt
-	}
-	rt := runtimes[chatRecord.ID]
-	if rt == nil {
-		return fmt.Errorf("chat %s runtime was not loaded", chatRecord.ID)
-	}
-	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
-	ownerSnapshot := owner.Snapshot()
-	milestone = ownerSnapshot.Plan
-	todos = ownerSnapshot.Todos
-	todosByRef = ownerSnapshot.TodosByRef
-	statuses := c.chatStatuses(ctx, session.ID)
-	snapshots := make(map[id.ID]chat.Snapshot, len(runtimes))
-	for id, loaded := range runtimes {
-		snapshot := loaded.Snapshot()
+	runtimes := map[id.ID]*chat.Chat{chatRecord.ID: rt}
+	ownerSnapshot = owner.Snapshot()
+	milestone := ownerSnapshot.Plan
+	todos := ownerSnapshot.Todos
+	todosByRef := ownerSnapshot.TodosByRef
+	statuses := idleStatusesForChats(chats)
+	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
+	for id, snapshot := range ownerSnapshot.Snapshots {
 		snapshots[id] = snapshot
-		statuses[id] = sidebarStatusFromSnapshot(snapshot)
+		if _, ok := statuses[id]; ok {
+			statuses[id] = sidebarStatusFromSnapshot(snapshot)
+		}
+	}
+	if _, ok := snapshots[chatRecord.ID]; !ok {
+		snapshot := rt.Snapshot()
+		snapshots[chatRecord.ID] = snapshot
+		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
 	}
 	sessionEvents, sessionUnsub := owner.Subscribe()
 
@@ -1674,19 +1722,12 @@ func cloneTodosByRef(in map[string][]planning.TodoItem) map[string][]planning.To
 	return out
 }
 
-func (c *Controller) chatStatuses(ctx context.Context, sessionID id.ID) map[id.ID]ChatSidebarStatus {
-	out := map[id.ID]ChatSidebarStatus{}
-	if sessionID == "" {
-		return out
-	}
-	if c.store == nil {
-		return out
-	}
-	chats, err := sessionpkg.ListChats(ctx, c.store, sessionID)
-	if err != nil {
-		return out
-	}
+func idleStatusesForChats(chats []domain.Chat) map[id.ID]ChatSidebarStatus {
+	out := make(map[id.ID]ChatSidebarStatus, len(chats))
 	for _, item := range chats {
+		if item.ID == "" {
+			continue
+		}
 		out[item.ID] = idleChatSidebarStatus(item.ID)
 	}
 	return out
