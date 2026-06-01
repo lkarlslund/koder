@@ -179,9 +179,16 @@ func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}
 	stored := tools.ChatListStored([]tools.ChatStatus{status})
 	return tools.Result{
-		Output: tools.DisplayTextForStored(domain.ToolKindChatPoll, stored),
+		Output: appendPollGuidance(tools.DisplayTextForStored(domain.ToolKindChatPoll, stored), status),
 		Stored: stored,
 	}, nil
+}
+
+func appendPollGuidance(output string, status tools.ChatStatus) string {
+	if !status.Busy && status.State != tools.ChatRunStateRunning && status.State != tools.ChatRunStateWaitingApproval {
+		return output
+	}
+	return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle or complete.")
 }
 
 func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {

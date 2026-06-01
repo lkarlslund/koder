@@ -151,6 +151,28 @@ func TestPollExecuteReturnsStatus(t *testing.T) {
 	if !strings.Contains(result.Output, "Completed") {
 		t.Fatalf("expected poll output to include status, got %q", result.Output)
 	}
+	if strings.Contains(result.Output, "Do not repeatedly poll") {
+		t.Fatalf("expected completed poll output not to include busy polling guidance, got %q", result.Output)
+	}
+}
+
+func TestPollExecuteHintsAgainstRepeatedBusyPolls(t *testing.T) {
+	control := &fakeChatControl{statuses: []tools.ChatStatus{{
+		Chat:       domain.Chat{ID: "chat-12", Title: "Worker", WorkflowRole: chatrole.Execution},
+		State:      tools.ChatRunStateRunning,
+		Busy:       true,
+		StatusText: "Running tools",
+	}}}
+	result, err := (pollTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatPoll,
+		Args: map[string]string{"chat_id": "chat-12"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Do not repeatedly poll this chat") || !strings.Contains(result.Output, "report back") {
+		t.Fatalf("expected busy poll output to include polling guidance, got %q", result.Output)
+	}
 }
 
 func TestArchiveExecuteArchivesCurrentChatByDefault(t *testing.T) {
