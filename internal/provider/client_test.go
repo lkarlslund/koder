@@ -608,6 +608,54 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamChatResponseStopsOnToolArgumentLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"file_read\",\"arguments\":\"{\\\"path\\\":\\\"go.mod\\\"}\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_write\",\"type\":\"function\",\"index\":1,\"function\":{\"name\":\"file_write\",\"arguments\":\"{\\\"path\\\":\\\"big.go\\\",\\\"content\\\":\\\"1234567890\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"1234567890\\\"}\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStatus, sawDone bool
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{
+		Model: "test",
+		ToolArgumentLimits: map[string]int{
+			"file_write": 30,
+		},
+	}, func(evt domain.Event) {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "file_write tool arguments exceeded 30 bytes") {
+			sawStatus = true
+		}
+		if evt.Kind == domain.EventKindMessageDone {
+			sawDone = true
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_read" {
+		t.Fatalf("expected only completed sibling call to remain, got %#v", resp.ToolCalls)
+	}
+	if len(resp.ToolCallErrors) != 1 {
+		t.Fatalf("expected oversized call error, got %#v", resp.ToolCallErrors)
+	}
+	if resp.ToolCallErrors[0].ToolCall.ID != "call_write" || !strings.Contains(resp.ToolCallErrors[0].Message, "file_write tool arguments exceeded 30 bytes") {
+		t.Fatalf("unexpected tool call error: %#v", resp.ToolCallErrors[0])
+	}
+	if !sawStatus || !sawDone {
+		t.Fatalf("expected status and done events, sawStatus=%v sawDone=%v", sawStatus, sawDone)
+	}
+}
+
 func TestStreamChatResponseEmitsPromptProgressStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

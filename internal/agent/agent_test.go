@@ -3036,6 +3036,95 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 	}
 }
 
+func TestRunPromptPersistsOversizedStreamedToolCallAsToolError(t *testing.T) {
+	t.Parallel()
+
+	var requests [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, body)
+		switch len(requests) {
+		case 1:
+			args, err := json.Marshal(map[string]string{
+				"path":    "big.go",
+				"content": strings.Repeat("x", 17*1024),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{
+					"delta": map[string]any{
+						"tool_calls": []any{map[string]any{
+							"id":    "call_big",
+							"type":  "function",
+							"index": 0,
+							"function": map[string]any{
+								"name":      "file_write",
+								"arguments": string(args),
+							},
+						}},
+					},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"I will use smaller edits."}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+
+	events := runLivePrompt(t, engine, session, chatRecord, "write a big file")
+	var sawToolDelta bool
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindToolCallDelta {
+			sawToolDelta = true
+		}
+	}
+	if !sawToolDelta {
+		t.Fatal("expected tool call delta for persisted oversized tool call")
+	}
+	if len(requests) < 2 {
+		t.Fatalf("expected oversized tool call to continue with tool error feedback, got %d requests", len(requests))
+	}
+	if !strings.Contains(string(requests[1]), "file_write tool arguments exceeded 16 KiB") {
+		t.Fatalf("expected second request to include stream limit feedback, got %s", requests[1])
+	}
+}
+
 func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	t.Parallel()
 

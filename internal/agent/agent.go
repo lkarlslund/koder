@@ -471,6 +471,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 	if len(resp.ToolCalls) > 0 {
 		parsed := e.parseProviderToolCallsForTranscript(resp.ToolCalls, session.ID)
+		for _, callErr := range resp.ToolCallErrors {
+			parsed.ToolCalls = append(parsed.ToolCalls, e.failedStreamedProviderToolCall(callErr))
+		}
 		calls := parsed.Requests
 		if len(parsed.ToolCalls) == 0 && parsed.Err != nil {
 			if strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "" {
@@ -510,6 +513,18 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			return chatpkg.TurnStepResult{Continue: true}, nil
 		}
+	}
+	if len(resp.ToolCallErrors) > 0 {
+		toolCalls := make([]domain.ToolCall, 0, len(resp.ToolCallErrors))
+		for _, callErr := range resp.ToolCallErrors {
+			toolCalls = append(toolCalls, e.failedStreamedProviderToolCall(callErr))
+		}
+		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), resp.Usage)
+		if err != nil {
+			return chatpkg.TurnStepResult{}, err
+		}
+		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
+		return chatpkg.TurnStepResult{Continue: true}, nil
 	}
 
 	call, plain := parseToolCall(text)
@@ -864,10 +879,11 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
 	_, modelID, _ := chatModel(chat)
 	req := provider.ChatRequest{
-		Model:     modelID,
-		Messages:  messages,
-		Stream:    stream,
-		ExtraBody: provider.RequestExtraBody(e.providerConfigForChat(chat), modelID, e.modelPresetForChat(chat)),
+		Model:              modelID,
+		Messages:           messages,
+		Stream:             stream,
+		ExtraBody:          provider.RequestExtraBody(e.providerConfigForChat(chat), modelID, e.modelPresetForChat(chat)),
+		ToolArgumentLimits: tools.ArgumentByteLimits(),
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
@@ -3150,6 +3166,23 @@ func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) 
 		Error:       &domain.ToolError{Message: "Invalid tool call: " + parseErr.Error()},
 		CompletedAt: now,
 	}, true
+}
+
+func (e *Engine) failedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
+	call := callErr.ToolCall
+	kind, _ := toolkind.KindString(strings.TrimSpace(call.Function.Name))
+	now := time.Now().UTC()
+	toolCallID := strings.TrimSpace(call.ID)
+	if toolCallID == "" {
+		toolCallID = "stream_argument_limit_" + strconv.FormatInt(now.UnixNano(), 10)
+	}
+	return domain.ToolCall{
+		ToolCallID:  domain.ToolCallID(toolCallID),
+		Tool:        kind,
+		Status:      domain.ToolStatusErrored,
+		Error:       &domain.ToolError{Message: callErr.Message},
+		CompletedAt: now,
+	}
 }
 
 func toolCallRecord(call tools.Request) domain.ToolCall {

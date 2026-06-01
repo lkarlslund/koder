@@ -179,13 +179,19 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
+type ToolCallError struct {
+	ToolCall ToolCall
+	Message  string
+}
+
 type ChatRequest struct {
-	Model      string           `json:"model"`
-	Messages   []Message        `json:"messages"`
-	Tools      []ToolDefinition `json:"tools,omitempty"`
-	ToolChoice string           `json:"tool_choice,omitempty"`
-	Stream     bool             `json:"stream"`
-	ExtraBody  map[string]any   `json:"-"`
+	Model              string           `json:"model"`
+	Messages           []Message        `json:"messages"`
+	Tools              []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice         string           `json:"tool_choice,omitempty"`
+	Stream             bool             `json:"stream"`
+	ExtraBody          map[string]any   `json:"-"`
+	ToolArgumentLimits map[string]int   `json:"-"`
 }
 
 func (r ChatRequest) MarshalJSON() ([]byte, error) {
@@ -289,6 +295,7 @@ type ChatResponse struct {
 	Reasoning          string
 	Usage              domain.Usage
 	ToolCalls          []ToolCall
+	ToolCallErrors     []ToolCallError
 	PromptProgressSeen bool
 }
 
@@ -800,6 +807,21 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			}
 			chunkCount++
 			aggregated.Apply(chunk)
+			if toolCallErr, ok := aggregated.TakeOversizedToolCall(input.ToolArgumentLimits); ok {
+				if onEvent != nil {
+					onEvent(domain.Event{Kind: domain.EventKindStatus, Text: toolCallErr.Message})
+					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
+				}
+				recordTrace(toolCallErr.Message, map[string]string{
+					"phase":        "stream_tool_arguments_exceeded",
+					"chunk_count":  strconv.Itoa(chunkCount),
+					"tool":         strings.TrimSpace(toolCallErr.ToolCall.Function.Name),
+					"tool_call_id": strings.TrimSpace(toolCallErr.ToolCall.ID),
+				})
+				response := aggregated.Response()
+				response.ToolCallErrors = append(response.ToolCallErrors, toolCallErr)
+				return response, nil
+			}
 			if onEvent != nil {
 				c.emitChunk(onEvent, chunk, payload, aggregated.toolCalls)
 			}
@@ -999,6 +1021,32 @@ func (r streamedChatResponse) Response() ChatResponse {
 		ToolCalls:          r.toolCalls,
 		PromptProgressSeen: r.promptProgressSeen,
 	}
+}
+
+func (r *streamedChatResponse) TakeOversizedToolCall(limits map[string]int) (ToolCallError, bool) {
+	if len(limits) == 0 {
+		return ToolCallError{}, false
+	}
+	for i, call := range r.toolCalls {
+		name := strings.TrimSpace(call.Function.Name)
+		limit := limits[name]
+		if limit <= 0 || len(call.Function.Arguments) <= limit {
+			continue
+		}
+		r.toolCalls = slices.Delete(r.toolCalls, i, len(r.toolCalls))
+		return ToolCallError{
+			ToolCall: call,
+			Message:  fmt.Sprintf("%s tool arguments exceeded %s while streaming. Use smaller tool calls.", name, formatByteLimit(limit)),
+		}, true
+	}
+	return ToolCallError{}, false
+}
+
+func formatByteLimit(limit int) string {
+	if limit > 0 && limit%1024 == 0 {
+		return fmt.Sprintf("%d KiB", limit/1024)
+	}
+	return fmt.Sprintf("%d bytes", limit)
 }
 
 func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {

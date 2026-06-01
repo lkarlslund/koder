@@ -524,6 +524,14 @@ func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefiniti
 	return providerDefinition(kind, spec), true
 }
 
+func ArgumentByteLimits() map[string]int {
+	return map[string]int{
+		domain.ToolKindFileWrite.String(): 16 * 1024,
+		domain.ToolKindFileEdit.String():  8 * 1024,
+		domain.ToolKindBash.String():      2 * 1024,
+	}
+}
+
 func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	name := strings.TrimSpace(call.Function.Name)
 	if name == "" {
@@ -533,23 +541,33 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if err != nil {
 		return Request{}, fmt.Errorf("unknown tool %q", name)
 	}
-	args, err := decodeStringMap([]byte(call.Function.Arguments))
-	if err != nil {
-		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
-	}
 	req := Request{
 		Tool:       kind,
 		ToolCallID: strings.TrimSpace(call.ID),
-		Args:       args,
 	}
 	if req.ToolCallID == "" {
 		return Request{}, fmt.Errorf("provider tool call for %s missing id", kind)
 	}
+	if limit := ArgumentByteLimits()[kind.String()]; limit > 0 && len(call.Function.Arguments) > limit {
+		return Request{}, ProviderCallError{Request: req, Err: fmt.Errorf("%s tool arguments exceeded %s. Use smaller tool calls.", kind, formatArgumentByteLimit(limit))}
+	}
+	args, err := decodeStringMap([]byte(call.Function.Arguments))
+	if err != nil {
+		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
+	}
+	req.Args = args
 	normalized, err := Normalize(req)
 	if err != nil {
 		return Request{}, ProviderCallError{Request: req, Err: err}
 	}
 	return normalized, nil
+}
+
+func formatArgumentByteLimit(limit int) string {
+	if limit > 0 && limit%1024 == 0 {
+		return fmt.Sprintf("%d KiB", limit/1024)
+	}
+	return fmt.Sprintf("%d bytes", limit)
 }
 
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
