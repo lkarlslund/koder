@@ -204,6 +204,13 @@
                 <span class="planning-counts" x-text="milestoneTodoSummary(milestone)"></span>
                 <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
               </button>
+              <div class="milestone-progress" :title="milestoneProgressTitle(milestone)">
+                <span class="milestone-progress-segment milestone-progress-done" :style="milestoneProgressStyle(milestone, 'completed')"></span>
+                <span class="milestone-progress-segment milestone-progress-active" :style="milestoneProgressStyle(milestone, 'active')"></span>
+                <span class="milestone-progress-segment milestone-progress-failed" :style="milestoneProgressStyle(milestone, 'failed')"></span>
+                <span class="milestone-progress-segment milestone-progress-cancelled" :style="milestoneProgressStyle(milestone, 'cancelled')"></span>
+                <span class="milestone-progress-segment milestone-progress-pending" :style="milestoneProgressStyle(milestone, 'pending')"></span>
+              </div>
               <div class="planning-children" x-show="milestoneExpanded(milestoneRef(milestone))" x-transition>
                 <template x-if="todoItemsForMilestone(milestone).length === 0">
                   <div class="planning-empty">No todos</div>

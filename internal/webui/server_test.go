@@ -933,6 +933,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `milestoneTodoSummary(milestone)`) {
 		t.Fatalf("expected collapsed milestones to show todo counts")
 	}
+	if !strings.Contains(fullPage, `milestone-progress`) ||
+		!strings.Contains(fullPage, `milestoneProgressStyle(milestone, 'failed')`) ||
+		!strings.Contains(fullPage, `milestoneProgressStyle(milestone, 'cancelled')`) ||
+		!strings.Contains(fullPage, `.milestone-progress-failed`) {
+		t.Fatalf("expected milestone progress bars with failed/cancelled segments")
+	}
 	if !strings.Contains(fullPage, `const sameSession =`) || !strings.Contains(fullPage, `if (!sameSession)`) {
 		t.Fatalf("expected pushed planning state to update dynamically for the current session")
 	}

@@ -119,6 +119,13 @@
     .planning-node { border-bottom: 1px solid var(--bs-border-color-translucent); padding-bottom: .05rem; }
     .planning-row { width: 100%; display: grid; grid-template-columns: 1rem 1rem minmax(0, 1fr) auto auto auto; align-items: center; gap: .28rem; border: 0; background: transparent; color: inherit; padding: .12rem 0; text-align: left; }
     .planning-row:hover { color: var(--bs-emphasis-color); background: var(--bs-secondary-bg); }
+    .milestone-progress { height: 3px; display: flex; overflow: hidden; background: var(--bs-secondary-bg); border-radius: 999px; margin: 0 0 .16rem 2.56rem; }
+    .milestone-progress-segment { min-width: 0; transition: flex-basis .18s ease; }
+    .milestone-progress-done { background: var(--bs-success); }
+    .milestone-progress-active { background: var(--bs-warning); }
+    .milestone-progress-failed { background: var(--bs-danger); }
+    .milestone-progress-cancelled { background: var(--bs-secondary-color); }
+    .milestone-progress-pending { background: transparent; }
     .planning-expander, .planning-status { font-size: .85rem; line-height: 1; }
     .planning-ref, .planning-counts { color: var(--bs-secondary-color); font-size: .78rem; white-space: nowrap; }
     .planning-todo-status { font-size: .68rem; white-space: nowrap; }

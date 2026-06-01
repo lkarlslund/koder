@@ -1092,12 +1092,14 @@
           return [];
         },
         milestoneTodoCounts(milestone) {
-          const counts = {total: 0, completed: 0, active: 0, pending: 0};
+          const counts = {total: 0, completed: 0, active: 0, failed: 0, cancelled: 0, pending: 0};
           for (const todo of this.todoItemsForMilestone(milestone)) {
             counts.total++;
             const status = this.todoStatus(todo);
             if (status === 'completed') counts.completed++;
             else if (status === 'in_progress') counts.active++;
+            else if (status === 'failed' || status === 'blocked') counts.failed++;
+            else if (status === 'cancelled') counts.cancelled++;
             else counts.pending++;
           }
           return counts;
@@ -1107,19 +1109,45 @@
           if (!counts.total) return '0 todos';
           const details = [];
           if (counts.active) details.push(counts.active + ' active');
+          if (counts.failed) details.push(counts.failed + ' failed');
+          if (counts.cancelled) details.push(counts.cancelled + ' cancelled');
           if (counts.pending) details.push(counts.pending + ' pending');
           const suffix = details.length ? ' · ' + details.join(' · ') : '';
           return counts.completed + '/' + counts.total + ' done' + suffix;
+        },
+        milestoneProgressPercent(milestone, key) {
+          const counts = this.milestoneTodoCounts(milestone);
+          if (!counts.total) return key === 'pending' ? 100 : 0;
+          return Math.max(0, Math.min(100, ((counts[key] || 0) / counts.total) * 100));
+        },
+        milestoneProgressStyle(milestone, key) {
+          return 'flex-basis: ' + this.milestoneProgressPercent(milestone, key).toFixed(2) + '%;';
+        },
+        milestoneProgressTitle(milestone) {
+          const counts = this.milestoneTodoCounts(milestone);
+          if (!counts.total) return '0 todos';
+          const parts = [
+            counts.completed + ' done',
+            counts.active + ' active',
+            counts.failed + ' failed',
+            counts.cancelled + ' cancelled',
+            counts.pending + ' pending',
+          ];
+          return parts.join(' · ');
         },
         todoStatus(todo) { return todo.Status || todo.status || 'pending'; },
         todoIcon(status) {
           if (status === 'completed') return 'bi-check-circle-fill text-success';
           if (status === 'in_progress') return 'bi-arrow-repeat text-primary';
+          if (status === 'failed' || status === 'blocked') return 'bi-exclamation-octagon-fill text-danger';
+          if (status === 'cancelled') return 'bi-x-circle-fill text-secondary';
           return 'bi-circle text-secondary';
         },
         todoBadge(status) {
           if (status === 'completed') return 'planning-badge-completed';
           if (status === 'in_progress') return 'planning-badge-executing';
+          if (status === 'failed' || status === 'blocked') return 'planning-badge-blocked';
+          if (status === 'cancelled') return 'planning-badge-cancelled';
           return 'planning-badge-pending';
         },
         chatID(chat) { return String(chat?.ID || chat?.id || '').trim(); },
