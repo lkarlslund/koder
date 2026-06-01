@@ -151,9 +151,13 @@ func TestExecuteWarnsAboutDetectedMissingLanguageServer(t *testing.T) {
 
 func TestDetectsAdditionalPopularLanguages(t *testing.T) {
 	workdir := t.TempDir()
+	writeFile(t, workdir, "astro.config.mjs", "export default {}\n")
 	writeFile(t, workdir, "build.zig", "const std = @import(\"std\");\n")
 	writeFile(t, workdir, "composer.json", "{}\n")
+	writeFile(t, workdir, "mix.exs", "defmodule Example.MixProject do\nend\n")
+	writeFile(t, workdir, "schema.prisma", "datasource db { provider = \"sqlite\" url = \"file:dev.db\" }\n")
 	writeFile(t, workdir, "style.scss", ".target { color: red; }\n")
+	writeFile(t, workdir, "typst.toml", "[package]\nname = \"example\"\n")
 
 	detected, err := detectLanguages(workdir)
 	if err != nil {
@@ -163,10 +167,44 @@ func TestDetectsAdditionalPopularLanguages(t *testing.T) {
 	for _, server := range detected {
 		got[server.ID] = true
 	}
-	for _, id := range []string{"zig", "php", "css"} {
+	for _, id := range []string{"astro", "zig", "php", "elixir", "prisma", "css", "typst"} {
 		if !got[id] {
 			t.Fatalf("expected detected language %q in %#v", id, got)
 		}
+	}
+}
+
+func TestExpandedLanguageServerPathMapping(t *testing.T) {
+	tests := []struct {
+		path     string
+		serverID string
+		langID   string
+	}{
+		{path: "component.astro", serverID: "astro", langID: "astro"},
+		{path: "types.pyi", serverID: "python", langID: "python"},
+		{path: "script.ksh", serverID: "bash", langID: "shellscript"},
+		{path: "main.zon", serverID: "zig", langID: "zig"},
+		{path: "Package.swift", serverID: "swift", langID: "swift"},
+		{path: "ViewController.m", serverID: "swift", langID: "objective-c"},
+		{path: "schema.prisma", serverID: "prisma", langID: "prisma"},
+		{path: "paper.bib", serverID: "latex", langID: "bibtex"},
+		{path: "deploy/Dockerfile", serverID: "dockerfile", langID: "dockerfile"},
+		{path: "Containerfile", serverID: "dockerfile", langID: "dockerfile"},
+		{path: "main.typ", serverID: "typst", langID: "typst"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			server, ok := languageForPath(tt.path)
+			if !ok {
+				t.Fatalf("expected server for %s", tt.path)
+			}
+			if server.ID != tt.serverID {
+				t.Fatalf("server ID: got %q want %q", server.ID, tt.serverID)
+			}
+			if got := languageIDForPath(server, tt.path); got != tt.langID {
+				t.Fatalf("language ID: got %q want %q", got, tt.langID)
+			}
+		})
 	}
 }
 

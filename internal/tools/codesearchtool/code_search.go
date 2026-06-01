@@ -170,15 +170,21 @@ var languageServers = []languageServer{
 		ID:         "typescript",
 		Title:      "TypeScript/JavaScript",
 		Command:    []string{"typescript-language-server", "--stdio"},
-		Markers:    []string{"package.json", "tsconfig.json", "jsconfig.json"},
-		Extensions: []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
+		Markers:    []string{"package.json", "tsconfig.json", "jsconfig.json", "vite.config.js", "vite.config.ts"},
+		Extensions: []string{".ts", ".tsx", ".mts", ".cts", ".mtsx", ".ctsx", ".js", ".jsx", ".mjs", ".cjs"},
+		LanguageIDs: map[string]string{
+			".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
+			".tsx": "typescriptreact", ".mtsx": "typescriptreact", ".ctsx": "typescriptreact",
+			".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+			".jsx": "javascriptreact",
+		},
 	},
 	{
 		ID:         "python",
 		Title:      "Python",
-		Command:    []string{"pylsp"},
-		Markers:    []string{"pyproject.toml", "setup.py", "requirements.txt"},
-		Extensions: []string{".py"},
+		Command:    []string{"pyright-langserver", "--stdio"},
+		Markers:    []string{"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json"},
+		Extensions: []string{".py", ".pyi"},
 	},
 	{
 		ID:         "rust",
@@ -191,11 +197,13 @@ var languageServers = []languageServer{
 		ID:         "cpp",
 		Title:      "C/C++",
 		Command:    []string{"clangd"},
-		Markers:    []string{"compile_commands.json", "compile_flags.txt", "CMakeLists.txt", "Makefile"},
-		Extensions: []string{".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"},
+		Markers:    []string{"compile_commands.json", "compile_flags.txt", ".clangd", "CMakeLists.txt", "Makefile"},
+		Extensions: []string{".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".ipp", ".tcc", ".tpp"},
 		LanguageIDs: map[string]string{
 			".c": "c", ".h": "c",
-			".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hh": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+			".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".c++": "cpp",
+			".hh": "cpp", ".hpp": "cpp", ".hxx": "cpp", ".h++": "cpp",
+			".inl": "cpp", ".ipp": "cpp", ".tcc": "cpp", ".tpp": "cpp",
 		},
 	},
 	{
@@ -209,8 +217,8 @@ var languageServers = []languageServer{
 		ID:         "csharp",
 		Title:      "C#",
 		Command:    []string{"csharp-ls"},
-		Markers:    []string{"*.sln", "*.csproj"},
-		Extensions: []string{".cs"},
+		Markers:    []string{"*.sln", "*.slnx", "*.csproj", "global.json"},
+		Extensions: []string{".cs", ".csx"},
 	},
 	{
 		ID:         "php",
@@ -223,14 +231,14 @@ var languageServers = []languageServer{
 		ID:         "ruby",
 		Title:      "Ruby",
 		Command:    []string{"ruby-lsp"},
-		Markers:    []string{"Gemfile", ".ruby-version"},
-		Extensions: []string{".rb"},
+		Markers:    []string{"Gemfile", ".ruby-version", "*.gemspec"},
+		Extensions: []string{".rb", ".rake", ".gemspec", ".ru"},
 	},
 	{
 		ID:         "lua",
 		Title:      "Lua",
 		Command:    []string{"lua-language-server"},
-		Markers:    []string{".luarc.json", ".luarc.jsonc", "stylua.toml"},
+		Markers:    []string{".luarc.json", ".luarc.jsonc", ".luacheckrc", ".stylua.toml", "stylua.toml", "selene.toml", "selene.yml"},
 		Extensions: []string{".lua"},
 	},
 	{
@@ -238,9 +246,9 @@ var languageServers = []languageServer{
 		Title:      "Shell",
 		Command:    []string{"bash-language-server", "start"},
 		Markers:    []string{".shellcheckrc"},
-		Extensions: []string{".sh", ".bash", ".zsh"},
+		Extensions: []string{".sh", ".bash", ".zsh", ".ksh"},
 		LanguageIDs: map[string]string{
-			".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript",
+			".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript", ".ksh": "shellscript",
 		},
 	},
 	{
@@ -248,9 +256,9 @@ var languageServers = []languageServer{
 		Title:      "JSON",
 		Command:    []string{"vscode-json-language-server", "--stdio"},
 		Markers:    []string{},
-		Extensions: []string{".json", ".jsonc"},
+		Extensions: []string{".json", ".jsonc", ".json5"},
 		LanguageIDs: map[string]string{
-			".json": "json", ".jsonc": "jsonc",
+			".json": "json", ".jsonc": "jsonc", ".json5": "json",
 		},
 	},
 	{
@@ -298,6 +306,13 @@ var languageServers = []languageServer{
 		Extensions: []string{".svelte"},
 	},
 	{
+		ID:         "astro",
+		Title:      "Astro",
+		Command:    []string{"astro-ls", "--stdio"},
+		Markers:    []string{"astro.config.js", "astro.config.mjs", "astro.config.ts"},
+		Extensions: []string{".astro"},
+	},
+	{
 		ID:         "kotlin",
 		Title:      "Kotlin",
 		Command:    []string{"kotlin-language-server"},
@@ -309,10 +324,13 @@ var languageServers = []languageServer{
 	},
 	{
 		ID:         "swift",
-		Title:      "Swift",
+		Title:      "Swift/Objective-C",
 		Command:    []string{"sourcekit-lsp"},
-		Markers:    []string{"Package.swift"},
-		Extensions: []string{".swift"},
+		Markers:    []string{"Package.swift", "*.xcodeproj", "*.xcworkspace"},
+		Extensions: []string{".swift", ".m", ".mm"},
+		LanguageIDs: map[string]string{
+			".swift": "swift", ".m": "objective-c", ".mm": "objective-cpp",
+		},
 	},
 	{
 		ID:         "dart",
@@ -343,23 +361,23 @@ var languageServers = []languageServer{
 		Title:      "Zig",
 		Command:    []string{"zls"},
 		Markers:    []string{"build.zig", "build.zig.zon"},
-		Extensions: []string{".zig"},
+		Extensions: []string{".zig", ".zon"},
 	},
 	{
 		ID:         "haskell",
 		Title:      "Haskell",
 		Command:    []string{"haskell-language-server-wrapper", "--lsp"},
-		Markers:    []string{"cabal.project", "stack.yaml", "package.yaml"},
-		Extensions: []string{".hs", ".lhs"},
+		Markers:    []string{"cabal.project", "stack.yaml", "package.yaml", "hie.yaml", "*.cabal"},
+		Extensions: []string{".hs", ".lhs", ".hsc"},
 		LanguageIDs: map[string]string{
-			".hs": "haskell", ".lhs": "literate haskell",
+			".hs": "haskell", ".lhs": "literate haskell", ".hsc": "haskell",
 		},
 	},
 	{
 		ID:         "ocaml",
 		Title:      "OCaml",
 		Command:    []string{"ocamllsp"},
-		Markers:    []string{"dune-project", "dune"},
+		Markers:    []string{"dune-project", "dune-workspace", "dune", ".merlin", "*.opam"},
 		Extensions: []string{".ml", ".mli"},
 		LanguageIDs: map[string]string{
 			".ml": "ocaml", ".mli": "ocaml.interface",
@@ -380,6 +398,81 @@ var languageServers = []languageServer{
 		Extensions: []string{".clj", ".cljs", ".cljc", ".edn"},
 		LanguageIDs: map[string]string{
 			".clj": "clojure", ".cljs": "clojure", ".cljc": "clojure", ".edn": "clojure",
+		},
+	},
+	{
+		ID:         "elixir",
+		Title:      "Elixir",
+		Command:    []string{"elixir-ls"},
+		Markers:    []string{"mix.exs", "mix.lock"},
+		Extensions: []string{".ex", ".exs"},
+	},
+	{
+		ID:         "erlang",
+		Title:      "Erlang",
+		Command:    []string{"erlang_ls"},
+		Markers:    []string{"rebar.config", "erlang.mk", "*.app.src"},
+		Extensions: []string{".erl", ".hrl", ".xrl", ".yrl"},
+	},
+	{
+		ID:         "fsharp",
+		Title:      "F#",
+		Command:    []string{"fsautocomplete"},
+		Markers:    []string{"*.sln", "*.slnx", "*.fsproj", "global.json"},
+		Extensions: []string{".fs", ".fsi", ".fsx", ".fsscript"},
+		LanguageIDs: map[string]string{
+			".fs": "fsharp", ".fsi": "fsharp", ".fsx": "fsharp", ".fsscript": "fsharp",
+		},
+	},
+	{
+		ID:         "gleam",
+		Title:      "Gleam",
+		Command:    []string{"gleam", "lsp"},
+		Markers:    []string{"gleam.toml", "manifest.toml"},
+		Extensions: []string{".gleam"},
+	},
+	{
+		ID:         "julia",
+		Title:      "Julia",
+		Command:    []string{"julia", "--startup-file=no", "--history-file=no", "-e", "using LanguageServer; runserver()"},
+		Markers:    []string{"Project.toml", "Manifest.toml"},
+		Extensions: []string{".jl"},
+	},
+	{
+		ID:         "prisma",
+		Title:      "Prisma",
+		Command:    []string{"prisma", "language-server"},
+		Markers:    []string{"schema.prisma", "prisma/schema.prisma"},
+		Extensions: []string{".prisma"},
+	},
+	{
+		ID:         "latex",
+		Title:      "LaTeX",
+		Command:    []string{"texlab"},
+		Markers:    []string{".latexmkrc", "latexmkrc", ".texlabroot", "texlabroot"},
+		Extensions: []string{".tex", ".bib"},
+		LanguageIDs: map[string]string{
+			".tex": "latex", ".bib": "bibtex",
+		},
+	},
+	{
+		ID:         "dockerfile",
+		Title:      "Dockerfile",
+		Command:    []string{"docker-langserver", "--stdio"},
+		Markers:    []string{"Dockerfile", "Containerfile"},
+		Extensions: []string{".dockerfile", "Dockerfile", "Containerfile"},
+		LanguageIDs: map[string]string{
+			".dockerfile": "dockerfile", "Dockerfile": "dockerfile", "Containerfile": "dockerfile",
+		},
+	},
+	{
+		ID:         "typst",
+		Title:      "Typst",
+		Command:    []string{"tinymist"},
+		Markers:    []string{"typst.toml"},
+		Extensions: []string{".typ", ".typc"},
+		LanguageIDs: map[string]string{
+			".typ": "typst", ".typc": "typst",
 		},
 	},
 }
@@ -1195,7 +1288,7 @@ func detectsLanguage(rootAbs string, server languageServer) (bool, error) {
 			}
 			return nil
 		}
-		_, found = extensions[filepath.Ext(path)]
+		found = matchesLanguagePath(path, extensions)
 		return nil
 	})
 	return found, err
@@ -1237,7 +1330,7 @@ func missingDetectedServers(detected []languageServer) []string {
 }
 
 func languageIDForPath(server languageServer, path string) string {
-	ext := filepath.Ext(path)
+	ext := languagePathKey(path)
 	if server.LanguageIDs != nil {
 		if id := server.LanguageIDs[ext]; id != "" {
 			return id
@@ -1256,15 +1349,33 @@ func languageByID(id string) (languageServer, bool) {
 }
 
 func languageForPath(path string) (languageServer, bool) {
-	ext := filepath.Ext(path)
 	for _, server := range languageServers {
+		extensions := make(map[string]struct{}, len(server.Extensions))
 		for _, candidate := range server.Extensions {
-			if ext == candidate {
-				return server, true
-			}
+			extensions[candidate] = struct{}{}
+		}
+		if matchesLanguagePath(path, extensions) {
+			return server, true
 		}
 	}
 	return languageServer{}, false
+}
+
+func matchesLanguagePath(path string, candidates map[string]struct{}) bool {
+	if _, ok := candidates[languagePathKey(path)]; ok {
+		return true
+	}
+	_, ok := candidates[filepath.Ext(path)]
+	return ok
+}
+
+func languagePathKey(path string) string {
+	base := filepath.Base(path)
+	switch base {
+	case "Dockerfile", "Containerfile":
+		return base
+	}
+	return filepath.Ext(path)
 }
 
 func validAction(action string) bool {
