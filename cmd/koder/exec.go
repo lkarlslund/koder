@@ -248,7 +248,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			Tools:      defs,
 			ToolChoice: "auto",
 			Stream:     false,
-			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), modelID, r.modelPreset(providerID, modelID)),
+			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), r.modelConfig(providerID, modelID)),
 		})
 		if err != nil {
 			return "", err
@@ -415,8 +415,15 @@ func (r *execRunner) setPromptProgressSupport(providerID string, supported bool)
 	_ = r.cfg.Save()
 }
 
-func (r execRunner) modelPreset(providerID, modelID string) string {
-	return r.cfg.ModelPreset(providerID, modelID)
+func (r execRunner) modelConfig(providerID, modelID string) config.ModelConfig {
+	model := r.cfg.ModelRequestOptions(providerID, modelID)
+	if strings.TrimSpace(model.ProviderID) == "" {
+		model.ProviderID = strings.TrimSpace(providerID)
+	}
+	if strings.TrimSpace(model.ModelID) == "" {
+		model.ModelID = strings.TrimSpace(modelID)
+	}
+	return model
 }
 
 func firstNonEmpty(values ...string) string {

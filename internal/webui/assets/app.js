@@ -510,7 +510,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
-        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
+        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -1933,10 +1933,11 @@
           this.rpc('set_access_settings', this.accessDraft).then(() => { this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
         },
         openModelDialog() {
-          this.showModels = true; this.modelQuery = '';
+          this.showModels = true; this.modelQuery = ''; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.refreshModelOptions();
+          this.loadActiveModelSettings();
         },
         refreshModelOptions() {
           this.modelLoading = true; this.modelOptions = [];
@@ -1945,7 +1946,7 @@
             .catch(err => { this.showToast(err.message); })
             .finally(() => { this.modelLoading = false; });
         },
-        closeModelDialog() { this.showModels = false; this.reportClientStateSoon(); },
+        closeModelDialog() { this.showModels = false; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
         filteredModels() {
           const q = this.modelQuery.trim().toLowerCase();
           const models = this.modelOptions || [];
@@ -1954,8 +1955,64 @@
         },
         selectModel(model) {
           this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(() => {
-            this.closeModelDialog();
+            this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {current: item.provider_id === model.provider_id && item.model_id === model.model_id}));
+            this.loadModelSettings(model.provider_id, model.model_id);
           });
+        },
+        blankableNumber(value) {
+          if (value === null || value === undefined || value === '') return null;
+          const number = Number(value);
+          return Number.isFinite(number) ? number : null;
+        },
+        normalizeModelSettingsDraft(raw = {}) {
+          return Object.assign({
+            original_provider_id: raw.provider_id || '',
+            original_model_id: raw.model_id || '',
+            provider_id: raw.provider_id || '',
+            model_id: raw.model_id || '',
+            context_window: raw.context_window || 32768,
+            model_preset: raw.model_preset || 'auto',
+            temperature: raw.temperature ?? null,
+            top_p: raw.top_p ?? null,
+            min_p: raw.min_p ?? null,
+            top_k: raw.top_k || 0,
+            repeat_penalty: raw.repeat_penalty ?? null,
+            thinking_mode: raw.thinking_mode || 'auto',
+            thinking_budget: raw.thinking_budget || 0,
+          }, raw || {});
+        },
+        activeModelSettingsKey() {
+          const info = this.activeModelInfo();
+          return {provider_id: info.provider_id || this.activeProvider(), model_id: info.model_id || this.activeModel()};
+        },
+        loadActiveModelSettings() {
+          const key = this.activeModelSettingsKey();
+          if (!key.provider_id || !key.model_id) return;
+          this.loadModelSettings(key.provider_id, key.model_id);
+        },
+        loadModelSettings(providerID, modelID) {
+          providerID = String(providerID || '').trim(); modelID = String(modelID || '').trim();
+          if (!providerID || !modelID) return;
+          this.rpc('model_config', {provider_id: providerID, model_id: modelID})
+            .then(result => { this.modelSettingsDraft = this.normalizeModelSettingsDraft(result); })
+            .catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; });
+        },
+        saveActiveModelSettings() {
+          if (!this.modelSettingsDraft) return;
+          const payload = Object.assign({}, this.modelSettingsDraft, {
+            context_window: Number(this.modelSettingsDraft.context_window || 0),
+            temperature: this.blankableNumber(this.modelSettingsDraft.temperature),
+            top_p: this.blankableNumber(this.modelSettingsDraft.top_p),
+            min_p: this.blankableNumber(this.modelSettingsDraft.min_p),
+            top_k: Number(this.modelSettingsDraft.top_k || 0),
+            repeat_penalty: this.blankableNumber(this.modelSettingsDraft.repeat_penalty),
+            thinking_budget: Number(this.modelSettingsDraft.thinking_budget || 0),
+          });
+          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.rpc('save_model_config', payload).then(result => {
+            this.modelSettingsDraft = this.normalizeModelSettingsDraft(result);
+            this.modelSettingsStatus = 'Saved model settings'; this.modelSettingsStatusKind = 'success';
+          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
@@ -2113,6 +2170,7 @@
           this.reportClientStateSoon();
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
+            if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
           }).finally(() => { this.settingsLoading = false; });
         },
         closeSettingsDialog() {
@@ -2122,8 +2180,13 @@
         setSettingsState(state) {
           this.settings = state || {};
           this.providerState = this.settings.providers || this.providerState;
+          if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
         },
         settingsTabs() { return ['general', 'access', 'tools', 'compaction', 'prompts', 'providers', 'models', 'mcp']; },
+        selectSettingsTab(tab) {
+          this.settingsTab = tab;
+          if (tab === 'models') this.ensureDetectedDefaultModel();
+        },
         settingsTabLabel(tab) {
           return {general: 'General', access: 'Access', tools: 'Tools', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
@@ -2153,6 +2216,31 @@
           this.settings.compaction.provider_id = parts[0] || '';
           this.settings.compaction.model_id = parts[1] || '';
         },
+        defaultModelValue() {
+          const g = this.settings?.general || {};
+          return JSON.stringify([g.default_provider || '', g.default_model || '']);
+        },
+        setDefaultModelValue(value) {
+          if (!this.settings?.general) return;
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
+          this.settings.general.default_provider = parts[0] || '';
+          this.settings.general.default_model = parts[1] || '';
+          if (this.settings.providers) {
+            this.settings.providers.default_provider = this.settings.general.default_provider;
+            this.settings.providers.default_model = this.settings.general.default_model;
+          }
+        },
+        ensureDetectedDefaultModel() {
+          if (!this.settings?.general || !Array.isArray(this.settings.models) || this.settings.models.length === 0) return;
+          const current = this.defaultModelValue();
+          if (this.settings.models.some(model => this.modelOptionValue(model) === current)) return;
+          this.setDefaultModelValue(this.modelOptionValue(this.settings.models[0]));
+        },
         settingsListRows(kind) {
           if (kind === 'providers') return this.providerRows();
           if (kind === 'models') return this.settings?.model_configs || [];
@@ -2167,7 +2255,7 @@
         },
         settingsItemSubtitle(kind, item) {
           if (kind === 'providers') return (item.id || '-') + (item.base_url ? ' / ' + item.base_url : '');
-          if (kind === 'models') return (item.provider_id || '-') + ' / ' + (item.context_window || 32768) + ' context';
+          if (kind === 'models') return (item.provider_id || '-') + ' / ' + (item.context_window || 32768) + ' context' + (item.thinking_mode && item.thinking_mode !== 'auto' ? ' / thinking ' + item.thinking_mode : '');
           if (kind === 'mcp') return (item.id || '-') + (item.url ? ' / ' + item.url : '');
           return '';
         },
@@ -2231,14 +2319,21 @@
             provider_id: providerID,
             model_id: modelID,
             context_window: 32768,
-            model_preset: 'auto'
+            model_preset: 'auto',
+            temperature: null,
+            top_p: null,
+            min_p: null,
+            top_k: 0,
+            repeat_penalty: null,
+            thinking_mode: 'auto',
+            thinking_budget: 0
           }, existing || {}, values, {provider_id: providerID, model_id: modelID});
           if (existing) Object.assign(existing, next); else this.settings.model_configs.push(next);
           this.settings.model_configs.sort((a, b) => (String(a.provider_id || '') + '\0' + String(a.model_id || '')).localeCompare(String(b.provider_id || '') + '\0' + String(b.model_id || '')));
         },
         addModelConfig() {
           const providerID = this.settings?.general?.default_provider || this.providerIDOptions()[0] || '';
-          this.modelConfigDraft = {original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: '', context_window: 32768, model_preset: 'auto'};
+          this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: ''});
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
         },
         editModelConfig(key) {
@@ -2248,7 +2343,8 @@
             original_provider_id: item.provider_id || '',
             original_model_id: item.model_id || '',
             context_window: 32768,
-            model_preset: 'auto'
+            model_preset: 'auto',
+            thinking_mode: 'auto'
           }, item)));
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
         },
@@ -2274,7 +2370,14 @@
             provider_id: providerID,
             model_id: modelID,
             context_window: contextWindow,
-            model_preset: String(this.modelConfigDraft.model_preset || 'auto').trim() || 'auto'
+            model_preset: String(this.modelConfigDraft.model_preset || 'auto').trim() || 'auto',
+            temperature: this.blankableNumber(this.modelConfigDraft.temperature),
+            top_p: this.blankableNumber(this.modelConfigDraft.top_p),
+            min_p: this.blankableNumber(this.modelConfigDraft.min_p),
+            top_k: Number(this.modelConfigDraft.top_k || 0),
+            repeat_penalty: this.blankableNumber(this.modelConfigDraft.repeat_penalty),
+            thinking_mode: String(this.modelConfigDraft.thinking_mode || 'auto').trim() || 'auto',
+            thinking_budget: Number(this.modelConfigDraft.thinking_budget || 0)
           }));
           rows.sort((a, b) => (String(a.provider_id || '') + '\0' + String(a.model_id || '')).localeCompare(String(b.provider_id || '') + '\0' + String(b.model_id || '')));
           this.settings.model_configs = rows;

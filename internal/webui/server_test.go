@@ -995,6 +995,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
+	if !strings.Contains(fullPage, `save_model_config`) ||
+		!strings.Contains(fullPage, `modelSettingsDraft.thinking_mode`) ||
+		!strings.Contains(fullPage, `modelSettingsDraft.temperature`) {
+		t.Fatalf("expected model dialog to edit chat model settings")
+	}
 	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
 	}
@@ -1197,8 +1202,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `showModelConfigEditor`) ||
 		!strings.Contains(fullPage, `list="model-config-options"`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||
-		!strings.Contains(fullPage, `settings.general.default_provider = this.providerState.default_provider`) {
-		t.Fatalf("expected model settings editor to offer detected model choices and sync deleted defaults")
+		!strings.Contains(fullPage, `defaultModelValue()`) ||
+		!strings.Contains(fullPage, `modelConfigDraft.thinking_mode`) {
+		t.Fatalf("expected model settings editor to offer detected model choices, defaults, and model request settings")
 	}
 	if !strings.Contains(fullPage, `Chat model`) ||
 		!strings.Contains(fullPage, `settings-prompt`) ||

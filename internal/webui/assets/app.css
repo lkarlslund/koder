@@ -167,8 +167,14 @@
     .git-file.git-deleted, .diff-del { color: var(--bs-danger-text-emphasis); }
     .git-file.git-untracked { color: var(--bs-info-text-emphasis); }
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
-    .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
-    .model-list { overflow: auto; }
+    .model-dialog { width: min(980px, 100%); max-height: min(760px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
+    .model-dialog-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); overflow: hidden; }
+    .model-list { min-height: 0; overflow: auto; }
+    .model-settings-panel { min-height: 0; overflow: auto; padding: 1rem; }
+    @media (max-width: 860px) {
+      .model-dialog-body { grid-template-columns: 1fr; }
+      .model-settings-panel { border-left: 0 !important; border-top: 1px solid var(--bs-border-color); }
+    }
     .session-dialog { width: min(820px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .session-list { overflow: auto; }
     .settings-dialog { width: min(1120px, 100%); max-height: min(860px, 94vh); overflow: hidden; display: flex; flex-direction: column; }

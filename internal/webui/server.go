@@ -675,6 +675,21 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"models": options}, nil
+	case "model_config":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			ModelID    string `json:"model_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.ModelConfig(in.ProviderID, in.ModelID), nil
+	case "save_model_config":
+		var in app.ModelConfigPreference
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SaveModelConfig(ctx, in)
 	case "set_model":
 		var in struct {
 			ProviderID string `json:"provider_id"`

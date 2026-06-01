@@ -1918,6 +1918,48 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	}
 }
 
+func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: "http://127.0.0.1:8000/v1",
+		},
+	}
+	temperature := 0.6
+	topP := 0.8
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:     "test",
+		ModelID:        "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset:    provider.ModelPresetDefault,
+		Temperature:    &temperature,
+		TopP:           &topP,
+		ThinkingMode:   "disabled",
+		ThinkingBudget: 2048,
+	})
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ExtraBody["temperature"] != 0.6 || req.ExtraBody["top_p"] != 0.8 {
+		t.Fatalf("expected sampling settings in request, got %#v", req.ExtraBody)
+	}
+	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
+	if !ok || got["enable_thinking"] != false || got["preserve_thinking"] != false {
+		t.Fatalf("expected thinking disabled in request, got %#v", req.ExtraBody)
+	}
+}
+
 func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
@@ -5705,7 +5747,7 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 			Content: "hello",
 		}},
 		Stream:    true,
-		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], "test-model", provider.ModelPresetDefault),
+		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], config.ModelConfig{ModelID: "test-model", ModelPreset: provider.ModelPresetDefault}),
 	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
 	close(events)
 	if err != nil {

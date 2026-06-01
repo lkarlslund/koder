@@ -44,10 +44,17 @@ type Provider struct {
 
 // ModelConfig stores settings for one provider/model pair.
 type ModelConfig struct {
-	ProviderID    string `toml:"provider_id"`
-	ModelID       string `toml:"model_id"`
-	ContextWindow int    `toml:"context_window"`
-	ModelPreset   string `toml:"model_preset"`
+	ProviderID     string   `toml:"provider_id"`
+	ModelID        string   `toml:"model_id"`
+	ContextWindow  int      `toml:"context_window"`
+	ModelPreset    string   `toml:"model_preset"`
+	Temperature    *float64 `toml:"temperature,omitempty"`
+	TopP           *float64 `toml:"top_p,omitempty"`
+	MinP           *float64 `toml:"min_p,omitempty"`
+	TopK           int      `toml:"top_k,omitempty"`
+	RepeatPenalty  *float64 `toml:"repeat_penalty,omitempty"`
+	ThinkingMode   string   `toml:"thinking_mode,omitempty"`
+	ThinkingBudget int      `toml:"thinking_budget,omitempty"`
 }
 
 type MCPServer struct {
@@ -418,6 +425,12 @@ func (c Config) ModelPreset(providerID, modelID string) string {
 	return "auto"
 }
 
+// ModelRequestOptions returns request-level settings for a provider/model pair.
+func (c Config) ModelRequestOptions(providerID, modelID string) ModelConfig {
+	model, _ := c.ModelConfig(providerID, modelID)
+	return model
+}
+
 func normalizeModelConfigs(src []ModelConfig) []ModelConfig {
 	seen := map[string]int{}
 	out := make([]ModelConfig, 0, len(src))
@@ -450,7 +463,20 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 	if model.ModelPreset == "" {
 		model.ModelPreset = "auto"
 	}
+	model.ThinkingMode = normalizeThinkingMode(model.ThinkingMode)
+	if model.ThinkingBudget < 0 {
+		model.ThinkingBudget = 0
+	}
 	return model
+}
+
+func normalizeThinkingMode(mode string) string {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case "enabled", "disabled":
+		return strings.TrimSpace(strings.ToLower(mode))
+	default:
+		return "auto"
+	}
 }
 
 func providerDefaults() Provider {

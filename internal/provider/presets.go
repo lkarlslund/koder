@@ -72,11 +72,13 @@ func PreserveThinkingEnabled(modelID, selected string) bool {
 	return ResolvePresetID(modelID, selected) == ModelPresetQwen36PreserveThinking
 }
 
-func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]any {
+func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]any {
 	body := map[string]any{}
 	if PromptProgressRequested(cfg) {
 		body["return_progress"] = true
 	}
+	modelID := strings.TrimSpace(model.ModelID)
+	selected := strings.TrimSpace(model.ModelPreset)
 	if PreserveThinkingEnabled(modelID, selected) {
 		if isDashScopeBaseURL(cfg.BaseURL) {
 			body["enable_thinking"] = false
@@ -88,10 +90,76 @@ func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]
 			}
 		}
 	}
+	applyModelRequestOptions(body, cfg, model)
 	if len(body) == 0 {
 		return nil
 	}
 	return body
+}
+
+func applyModelRequestOptions(body map[string]any, cfg config.Provider, model config.ModelConfig) {
+	if model.Temperature != nil {
+		body["temperature"] = *model.Temperature
+	}
+	if model.TopP != nil {
+		body["top_p"] = *model.TopP
+	}
+	if model.MinP != nil {
+		body["min_p"] = *model.MinP
+	}
+	if model.TopK > 0 {
+		body["top_k"] = model.TopK
+	}
+	if model.RepeatPenalty != nil {
+		body["repeat_penalty"] = *model.RepeatPenalty
+	}
+	switch strings.TrimSpace(strings.ToLower(model.ThinkingMode)) {
+	case "enabled":
+		setThinkingOptions(body, cfg, true, model.ThinkingBudget)
+	case "disabled":
+		setThinkingOptions(body, cfg, false, 0)
+	case "auto", "":
+		if model.ThinkingBudget > 0 {
+			setThinkingBudget(body, cfg, model.ThinkingBudget)
+		}
+	}
+}
+
+func setThinkingOptions(body map[string]any, cfg config.Provider, enabled bool, budget int) {
+	if isDashScopeBaseURL(cfg.BaseURL) {
+		body["enable_thinking"] = enabled
+		body["preserve_thinking"] = enabled
+		if budget > 0 {
+			body["thinking_budget"] = budget
+		}
+		return
+	}
+	kwargs := chatTemplateKwargs(body)
+	kwargs["enable_thinking"] = enabled
+	kwargs["preserve_thinking"] = enabled
+	if budget > 0 {
+		kwargs["thinking_budget"] = budget
+	}
+}
+
+func setThinkingBudget(body map[string]any, cfg config.Provider, budget int) {
+	if budget <= 0 {
+		return
+	}
+	if isDashScopeBaseURL(cfg.BaseURL) {
+		body["thinking_budget"] = budget
+		return
+	}
+	chatTemplateKwargs(body)["thinking_budget"] = budget
+}
+
+func chatTemplateKwargs(body map[string]any) map[string]any {
+	if existing, ok := body["chat_template_kwargs"].(map[string]any); ok {
+		return existing
+	}
+	next := map[string]any{}
+	body["chat_template_kwargs"] = next
+	return next
 }
 
 func PromptProgressEnabled(cfg config.Provider) bool {

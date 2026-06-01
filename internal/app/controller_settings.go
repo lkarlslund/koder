@@ -393,6 +393,46 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 	return options, nil
 }
 
+// ModelConfig returns editable settings for a provider/model pair.
+func (c *Controller) ModelConfig(providerID, modelID string) ModelConfigPreference {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID))
+}
+
+// SaveModelConfig validates and persists one provider/model settings row.
+func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPreference) (ModelConfigPreference, error) {
+	providerID := strings.TrimSpace(pref.ProviderID)
+	modelID := strings.TrimSpace(pref.ModelID)
+	if providerID == "" {
+		return ModelConfigPreference{}, fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return ModelConfigPreference{}, fmt.Errorf("model id is required")
+	}
+	model, err := configModelFromPreference(pref)
+	if err != nil {
+		return ModelConfigPreference{}, err
+	}
+	c.mu.Lock()
+	if !c.cfg.HasUsableProvider(providerID) {
+		c.mu.Unlock()
+		return ModelConfigPreference{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	c.cfg.SetModelConfig(model)
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return ModelConfigPreference{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	saved := modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID))
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return saved, nil
+}
+
 // SetModel persists the active chat model and updates the live chat runtime.
 func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) error {
 	providerID = strings.TrimSpace(providerID)
@@ -584,6 +624,7 @@ func deleteModelConfigs(cfg *config.Config, providerID string) {
 
 func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
 	models, _ := c.modelOptionsLocked(ctx)
+	liveModels := slices.Clone(models)
 	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.CompactionProvider), strings.TrimSpace(c.cfg.CompactionModel))
 	prompts, err := promptPreferences()
 	if err != nil {
@@ -606,10 +647,27 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Access:       accessPreferencesFromConfig(c.cfg.Access),
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
 	}
+	repairPreferencesDefaultModel(&state, liveModels)
 	if c.cfg.Store.Backend != config.Default().Store.Backend {
 		state.RestartKeys = append(state.RestartKeys, "store.backend")
 	}
 	return state, nil
+}
+
+func repairPreferencesDefaultModel(state *PreferencesState, liveModels []ModelOption) {
+	if state == nil || len(liveModels) == 0 {
+		return
+	}
+	for _, option := range liveModels {
+		if option.ProviderID == state.General.DefaultProvider && option.ModelID == state.General.DefaultModel {
+			return
+		}
+	}
+	first := liveModels[0]
+	state.General.DefaultProvider = first.ProviderID
+	state.General.DefaultModel = first.ModelID
+	state.Providers.DefaultProvider = first.ProviderID
+	state.Providers.DefaultModel = first.ModelID
 }
 
 func ensureModelOption(options []ModelOption, cfg config.Config, providerID, modelID string) []ModelOption {
@@ -656,16 +714,46 @@ func modelConfigPreferencesFromConfig(src []config.ModelConfig) []ModelConfigPre
 		if model.ProviderID == "" || model.ModelID == "" {
 			continue
 		}
-		out = append(out, ModelConfigPreference{
-			OriginalProviderID: model.ProviderID,
-			OriginalModelID:    model.ModelID,
-			ProviderID:         model.ProviderID,
-			ModelID:            model.ModelID,
-			ContextWindow:      model.ContextWindow,
-			ModelPreset:        strings.TrimSpace(model.ModelPreset),
-		})
+		out = append(out, modelConfigPreferenceFromConfig(model))
 	}
 	return out
+}
+
+func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPreference {
+	return ModelConfigPreference{
+		OriginalProviderID: model.ProviderID,
+		OriginalModelID:    model.ModelID,
+		ProviderID:         model.ProviderID,
+		ModelID:            model.ModelID,
+		ContextWindow:      model.ContextWindow,
+		ModelPreset:        strings.TrimSpace(model.ModelPreset),
+		Temperature:        model.Temperature,
+		TopP:               model.TopP,
+		MinP:               model.MinP,
+		TopK:               model.TopK,
+		RepeatPenalty:      model.RepeatPenalty,
+		ThinkingMode:       strings.TrimSpace(model.ThinkingMode),
+		ThinkingBudget:     model.ThinkingBudget,
+	}
+}
+
+func modelConfigForPair(cfg config.Config, providerID, modelID string) config.ModelConfig {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	model, ok := cfg.ModelConfig(providerID, modelID)
+	if !ok {
+		model = config.ModelConfig{
+			ProviderID:    providerID,
+			ModelID:       modelID,
+			ContextWindow: cfg.ContextWindow(providerID, modelID),
+			ModelPreset:   cfg.ModelPreset(providerID, modelID),
+			ThinkingMode:  "auto",
+		}
+	}
+	if model.ContextWindow <= 0 {
+		model.ContextWindow = cfg.ContextWindow(providerID, modelID)
+	}
+	return model
 }
 
 func (c *Controller) providerStateLocked() ProviderState {
@@ -960,21 +1048,54 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 		if !cfg.HasUsableProvider(providerID) {
 			continue
 		}
-		if pref.ContextWindow <= 0 {
-			return fmt.Errorf("context window for %s/%s must be greater than zero", providerID, modelID)
+		model, err := configModelFromPreference(pref)
+		if err != nil {
+			return err
 		}
-		next = append(next, config.ModelConfig{
-			ProviderID:    providerID,
-			ModelID:       modelID,
-			ContextWindow: pref.ContextWindow,
-			ModelPreset:   strings.TrimSpace(pref.ModelPreset),
-		})
+		next = append(next, model)
 	}
 	cfg.Models = nil
 	for _, model := range next {
 		cfg.SetModelConfig(model)
 	}
 	return nil
+}
+
+func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, error) {
+	providerID := strings.TrimSpace(pref.ProviderID)
+	modelID := strings.TrimSpace(pref.ModelID)
+	if pref.ContextWindow <= 0 {
+		return config.ModelConfig{}, fmt.Errorf("context window for %s/%s must be greater than zero", providerID, modelID)
+	}
+	for name, value := range map[string]*float64{
+		"temperature":    pref.Temperature,
+		"top_p":          pref.TopP,
+		"min_p":          pref.MinP,
+		"repeat_penalty": pref.RepeatPenalty,
+	} {
+		if value != nil && *value < 0 {
+			return config.ModelConfig{}, fmt.Errorf("%s for %s/%s must not be negative", name, providerID, modelID)
+		}
+	}
+	if pref.TopK < 0 {
+		return config.ModelConfig{}, fmt.Errorf("top_k for %s/%s must not be negative", providerID, modelID)
+	}
+	if pref.ThinkingBudget < 0 {
+		return config.ModelConfig{}, fmt.Errorf("thinking budget for %s/%s must not be negative", providerID, modelID)
+	}
+	return config.ModelConfig{
+		ProviderID:     providerID,
+		ModelID:        modelID,
+		ContextWindow:  pref.ContextWindow,
+		ModelPreset:    strings.TrimSpace(pref.ModelPreset),
+		Temperature:    pref.Temperature,
+		TopP:           pref.TopP,
+		MinP:           pref.MinP,
+		TopK:           pref.TopK,
+		RepeatPenalty:  pref.RepeatPenalty,
+		ThinkingMode:   strings.TrimSpace(pref.ThinkingMode),
+		ThinkingBudget: pref.ThinkingBudget,
+	}, nil
 }
 
 func applyBrowserPreferences(cfg *config.Config, prefs BrowserPreferences) error {

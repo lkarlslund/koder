@@ -17,7 +17,7 @@ func TestAutoMatchPresetIDMatchesQwen36(t *testing.T) {
 }
 
 func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, "qwen3.6-plus", ModelPresetQwen36PreserveThinking)
+	got := RequestExtraBody(config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, config.ModelConfig{ModelID: "qwen3.6-plus", ModelPreset: ModelPresetQwen36PreserveThinking})
 	want := map[string]any{
 		"enable_thinking":   false,
 		"preserve_thinking": false,
@@ -29,7 +29,7 @@ func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
 }
 
 func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, "Qwen/Qwen3.6-35B-A3B", ModelPresetAuto)
+	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: ModelPresetAuto})
 	want := map[string]any{
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   false,
@@ -47,7 +47,7 @@ func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
 		PromptProgressMode:      "auto",
 		PromptProgressProbed:    true,
 		PromptProgressSupported: true,
-	}, "model-a", ModelPresetDefault)
+	}, config.ModelConfig{ModelID: "model-a", ModelPreset: ModelPresetDefault})
 	want := map[string]any{
 		"return_progress": true,
 	}
@@ -59,11 +59,42 @@ func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
 func TestRequestExtraBodyIncludesPendingAutoPromptProgress(t *testing.T) {
 	got := RequestExtraBody(config.Provider{
 		PromptProgressMode: "auto",
-	}, "model-a", ModelPresetDefault)
+	}, config.ModelConfig{ModelID: "model-a", ModelPreset: ModelPresetDefault})
 	want := map[string]any{
 		"return_progress": true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected pending prompt progress body: %#v", got)
+	}
+}
+
+func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
+	temperature := 0.7
+	topP := 0.9
+	repeatPenalty := 1.05
+	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+		ModelID:        "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset:    ModelPresetDefault,
+		Temperature:    &temperature,
+		TopP:           &topP,
+		TopK:           40,
+		RepeatPenalty:  &repeatPenalty,
+		ThinkingMode:   "enabled",
+		ThinkingBudget: 4096,
+	})
+	want := map[string]any{
+		"temperature":     0.7,
+		"top_p":           0.9,
+		"top_k":           40,
+		"repeat_penalty":  1.05,
+		"return_progress": true,
+		"chat_template_kwargs": map[string]any{
+			"enable_thinking":   true,
+			"preserve_thinking": true,
+			"thinking_budget":   4096,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected explicit options body: %#v", got)
 	}
 }

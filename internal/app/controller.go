@@ -165,12 +165,19 @@ type ProviderProbeResult struct {
 }
 
 type ModelConfigPreference struct {
-	OriginalProviderID string `json:"original_provider_id"`
-	OriginalModelID    string `json:"original_model_id"`
-	ProviderID         string `json:"provider_id"`
-	ModelID            string `json:"model_id"`
-	ContextWindow      int    `json:"context_window"`
-	ModelPreset        string `json:"model_preset"`
+	OriginalProviderID string   `json:"original_provider_id"`
+	OriginalModelID    string   `json:"original_model_id"`
+	ProviderID         string   `json:"provider_id"`
+	ModelID            string   `json:"model_id"`
+	ContextWindow      int      `json:"context_window"`
+	ModelPreset        string   `json:"model_preset"`
+	Temperature        *float64 `json:"temperature,omitempty"`
+	TopP               *float64 `json:"top_p,omitempty"`
+	MinP               *float64 `json:"min_p,omitempty"`
+	TopK               int      `json:"top_k,omitempty"`
+	RepeatPenalty      *float64 `json:"repeat_penalty,omitempty"`
+	ThinkingMode       string   `json:"thinking_mode"`
+	ThinkingBudget     int      `json:"thinking_budget,omitempty"`
 }
 
 // PreferencesState is the complete settings payload exposed to browser clients.

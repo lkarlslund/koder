@@ -894,7 +894,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 		Model:              modelID,
 		Messages:           messages,
 		Stream:             stream,
-		ExtraBody:          provider.RequestExtraBody(e.providerConfigForChat(chat), modelID, e.modelPresetForChat(chat)),
+		ExtraBody:          provider.RequestExtraBody(e.providerConfigForChat(chat), e.modelConfigForChat(chat)),
 		ToolArgumentLimits: tools.ArgumentByteLimits(),
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
@@ -952,6 +952,17 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 
 func (e *Engine) modelPresetForChat(chat domain.Chat) string {
 	return e.cfg.ModelPreset(chat.ProviderID, chat.ModelID)
+}
+
+func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
+	model := e.cfg.ModelRequestOptions(chat.ProviderID, chat.ModelID)
+	if strings.TrimSpace(model.ProviderID) == "" {
+		model.ProviderID = strings.TrimSpace(chat.ProviderID)
+	}
+	if strings.TrimSpace(model.ModelID) == "" {
+		model.ModelID = strings.TrimSpace(chat.ModelID)
+	}
+	return model
 }
 
 func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {

@@ -446,11 +446,17 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.Compaction.ModelID = "compact-model"
 	prefs.Compaction.AutoCompactAt = 66
 	prefs.Compaction.KeepToolBatches = 3
+	temperature := 0.7
+	topP := 0.9
 	prefs.ModelConfigs = []ModelConfigPreference{{
-		ProviderID:    "test",
-		ModelID:       "model",
-		ContextWindow: 12345,
-		ModelPreset:   provider.ModelPresetDefault,
+		ProviderID:     "test",
+		ModelID:        "model",
+		ContextWindow:  12345,
+		ModelPreset:    provider.ModelPresetDefault,
+		Temperature:    &temperature,
+		TopP:           &topP,
+		ThinkingMode:   "enabled",
+		ThinkingBudget: 4096,
 	}}
 	prefs.MCPServers = []MCPServerPreference{{
 		ID:             "docs",
@@ -487,6 +493,10 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if got := loaded.ModelPreset("test", "model"); got != provider.ModelPresetDefault {
 		t.Fatalf("expected saved model preset, got %q", got)
+	}
+	modelCfg, ok := loaded.ModelConfig("test", "model")
+	if !ok || modelCfg.Temperature == nil || *modelCfg.Temperature != 0.7 || modelCfg.TopP == nil || *modelCfg.TopP != 0.9 || modelCfg.ThinkingMode != "enabled" || modelCfg.ThinkingBudget != 4096 {
+		t.Fatalf("expected saved model request settings, got %#v", modelCfg)
 	}
 	if loaded.MCPServers["docs"].URL != "https://mcp.example.invalid/sse" || loaded.MCPServers["docs"].Headers["X-Test"] != "yes" {
 		t.Fatalf("expected saved MCP server, got %#v", loaded.MCPServers["docs"])
@@ -565,6 +575,49 @@ func TestControllerSavePreferencesRepairsDeletedDefaultProvider(t *testing.T) {
 	}
 	if updated.General.DefaultProvider != "other" || updated.General.DefaultModel != "new-model" {
 		t.Fatalf("expected repaired default provider, got %#v", updated.General)
+	}
+}
+
+func TestControllerPreferencesRepairsMissingDefaultModel(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":"new-model"}]}`)
+	}))
+	defer modelServer.Close()
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "old-model"
+	cfg.Providers = map[string]config.Provider{"test": {Name: "Test", BaseURL: modelServer.URL + "/v1"}}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "old-model", ContextWindow: 32768})
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil))
+	if err := ctrl.Start(context.Background(), StartupModeNew, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	prefs, err := ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.General.DefaultProvider != "test" || prefs.General.DefaultModel != "new-model" {
+		t.Fatalf("expected default model to move to detected model, got %#v", prefs.General)
 	}
 }
 
