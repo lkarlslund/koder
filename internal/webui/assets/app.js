@@ -1208,6 +1208,26 @@
             if (this.interruptArmedChatID === id) this.interruptArmedChatID = '';
           });
         },
+        activeChat() {
+          const snapshot = this.activeSnapshot();
+          return snapshot.chat || snapshot.Chat || {};
+        },
+        activeChatRole() {
+          const chat = this.activeChat();
+          return String(chat.workflow_role || chat.WorkflowRole || chat.role || chat.Role || 'general').trim() || 'general';
+        },
+        activeChatRoleLabel() {
+          return this.activeChatRole().replace(/_/g, ' ');
+        },
+        activeChatRoleTooltip() {
+          const chat = this.activeChat();
+          const title = chat.title || chat.Title || '';
+          const id = chat.id || chat.ID || this.activeChatID() || '';
+          const lines = ['Kind: ' + this.activeChatRoleLabel()];
+          if (title) lines.push('Title: ' + title);
+          if (id) lines.push('Chat: ' + id);
+          return lines.join('\n');
+        },
         activeProvider() { return this.activeSnapshot()?.chat?.provider_id || this.activeSnapshot()?.Chat?.ProviderID || this.activeSnapshot()?.chat?.ProviderID || this.state.snapshot?.Chat?.ProviderID || ''; },
         activeModel() { return this.activeSnapshot()?.chat?.model_id || this.activeSnapshot()?.Chat?.ModelID || this.activeSnapshot()?.chat?.ModelID || this.state.snapshot?.Chat?.ModelID || ''; },
         activeModelInfo() { return this.state.model_info || this.state.ModelInfo || {}; },
@@ -1240,6 +1260,53 @@
           ];
           if (source) lines.push('Source: ' + source);
           return lines.join('\n');
+        },
+        activeContextTokens() {
+          const snapshot = this.activeSnapshot();
+          const context = snapshot.Context || snapshot.context || {};
+          const total = context.TotalTokens || context.total_tokens || 0;
+          if (total > 0) return total;
+          const chat = this.activeChat();
+          return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+        },
+        activeContextWindow() {
+          const info = this.activeModelInfo();
+          return info.context_window || info.ContextWindow || this.state.context_window || this.state.ContextWindow || 0;
+        },
+        activeContextPercent() {
+          const windowSize = this.activeContextWindow();
+          const tokens = this.activeContextTokens();
+          if (!windowSize || !tokens) return 0;
+          return Math.max(0, Math.min(999, Math.round((tokens / windowSize) * 100)));
+        },
+        activeContextFillPercent() {
+          return Math.max(0, Math.min(100, this.activeContextPercent()));
+        },
+        activeContextLabel() {
+          return 'Context ' + this.activeContextPercent() + '%';
+        },
+        activeContextTokenLabel() {
+          return this.formatContextTokens(this.activeContextTokens()) + ' / ' + this.formatTokens(this.activeContextWindow());
+        },
+        activeContextTooltip() {
+          const tokens = this.activeContextTokens();
+          const windowSize = this.activeContextWindow();
+          const pct = this.activeContextPercent();
+          const lines = ['Context: ' + this.formatContextTokens(tokens) + ' / ' + this.formatTokens(windowSize) + ' tokens (' + pct + '%)'];
+          if (windowSize > 0) lines.push('Remaining: ' + this.formatContextTokens(Math.max(0, windowSize - tokens)) + ' tokens');
+          const snapshot = this.activeSnapshot();
+          const context = snapshot.Context || snapshot.context || {};
+          if (context.Estimated || context.estimated) lines.push('Estimate includes pending or unanchored transcript content');
+          return lines.join('\n');
+        },
+        activeContextStyle() {
+          return 'width: ' + this.activeContextFillPercent() + '%;';
+        },
+        activeContextClass() {
+          const pct = this.activeContextPercent();
+          if (pct >= 90) return 'context-danger';
+          if (pct >= 75) return 'context-warn';
+          return '';
         },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },
         milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },

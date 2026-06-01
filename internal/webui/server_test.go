@@ -991,7 +991,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
-	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
+	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
 	}
 	if !strings.Contains(fullPage, `topbar-workspace`) || strings.Contains(fullPage, `class="sidebar-label">Workspace`) {
@@ -1108,6 +1108,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `Remaining: `) ||
 		!strings.Contains(fullPage, `'% ctx)'`) {
 		t.Fatalf("expected chat sidebar to render context percentage with hover details")
+	}
+	if !strings.Contains(fullPage, `class="context-meter"`) ||
+		!strings.Contains(fullPage, `activeContextStyle()`) ||
+		!strings.Contains(fullPage, `activeContextClass()`) ||
+		!strings.Contains(fullPage, `.context-meter-fill.context-danger`) {
+		t.Fatalf("expected active chat context to render as a progress meter")
 	}
 	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) || !strings.Contains(fullPage, `estimateTextTokens(text)`) || !strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) {
 		t.Fatalf("expected reasoning summary to render live token count")

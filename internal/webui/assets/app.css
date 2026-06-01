@@ -16,6 +16,12 @@
     .sidebar-heading { font-weight: 600; }
     .sidebar-value { min-width: 0; flex: 1 1 auto; }
     .sidebar-note { color: var(--bs-secondary-color); font-size: .82rem; line-height: 1.25; margin: .15rem 0 .25rem; }
+    .context-meter { display: grid; gap: .18rem; margin-top: .12rem; }
+    .context-meter-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; color: var(--bs-secondary-color); font-size: .78rem; line-height: 1.2; }
+    .context-meter-track { height: 4px; overflow: hidden; border-radius: 999px; background: var(--bs-secondary-bg); }
+    .context-meter-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--bs-success); transition: width .18s ease, background-color .18s ease; }
+    .context-meter-fill.context-warn { background: var(--bs-warning); }
+    .context-meter-fill.context-danger { background: var(--bs-danger); }
     .sidebar-list { margin-top: .25rem; }
     .sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }
     .sidebar-list .chat-list-item .btn { line-height: 1.1; }

@@ -117,6 +117,10 @@
     <aside class="sidebar p-3 bg-body-tertiary">
       <div class="sidebar-section">
         <div class="sidebar-info-row">
+          <span class="sidebar-label">Chat</span>
+          <span class="sidebar-value text-truncate" :title="activeChatRoleTooltip()" x-text="activeChatRoleLabel()"></span>
+        </div>
+        <div class="sidebar-info-row">
           <span class="sidebar-label">Model</span>
           <button type="button" class="btn btn-link model-trigger p-0 text-start text-truncate" :title="activeModelTooltip()" @click="openModelDialog()">
             <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
@@ -134,6 +138,15 @@
         <div class="sidebar-info-row">
           <span class="sidebar-label">Status</span>
           <span class="sidebar-value text-truncate" x-text="statusText()"></span>
+        </div>
+        <div class="context-meter" :title="activeContextTooltip()">
+          <div class="context-meter-row">
+            <span x-text="activeContextLabel()"></span>
+            <span x-text="activeContextTokenLabel()"></span>
+          </div>
+          <div class="context-meter-track">
+            <span class="context-meter-fill" :class="activeContextClass()" :style="activeContextStyle()"></span>
+          </div>
         </div>
       </div>
       <div class="sidebar-section" x-show="execProcesses().length > 0" style="display: none;">
