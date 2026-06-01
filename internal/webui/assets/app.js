@@ -1835,7 +1835,7 @@
         },
         handleSlash(text) {
           if (text === '/permissions') { this.openAccessDialog(); return true; }
-          if (text === '/compact') { this.rpc('compact', {}); return true; }
+          if (text === '/compact' || text.startsWith('/compact ')) { this.rpc('compact', {instructions: text.slice('/compact'.length).trim()}); return true; }
           if (text === '/chat new') { this.newChat(); return true; }
           if (text === '/model') { this.openModelDialog(); return true; }
           if (text === '/providers') { this.openProviderDialog(); return true; }

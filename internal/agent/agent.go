@@ -149,7 +149,7 @@ func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
 	return provider.New(providerID, providerCfg, e.debug)
 }
 
-func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) error {
+func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, instructions string, out chan<- domain.Event) error {
 	if turn == nil {
 		return fmt.Errorf("turn state is required")
 	}
@@ -160,7 +160,7 @@ func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, out c
 		return err
 	}
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
-	if err := e.compactSession(ctx, session, chatRecord.ID, client, "manual", out); err != nil {
+	if err := e.compactSession(ctx, session, chatRecord.ID, client, "manual", instructions, out); err != nil {
 		return err
 	}
 	out <- domain.Event{Kind: domain.EventKindMessageDone}
@@ -2368,6 +2368,15 @@ func (e *Engine) compactPrompt() string {
 	return managedPrompt("compaction-prompt.md")
 }
 
+func (e *Engine) compactPromptWithInstructions(instructions string) string {
+	prompt := e.compactPrompt()
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return prompt
+	}
+	return strings.TrimSpace(prompt + "\n\nAdditional compaction instructions:\n" + instructions)
+}
+
 func managedPrompt(name string) string {
 	if root := managedAssetRoot(); root != "" {
 		data, err := os.ReadFile(filepath.Join(root, name))
@@ -2463,7 +2472,7 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 	return min(100, (tokens*100)/contextWindow), true
 }
 
-func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID id.ID, client *provider.Client, trigger string, out chan<- domain.Event) error {
+func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID id.ID, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
 	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
 	if err != nil {
 		return err
@@ -2518,7 +2527,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	}
 	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
 		Role:    provider.RoleUser,
-		Content: e.compactPrompt(),
+		Content: e.compactPromptWithInstructions(instructions),
 	}), e.providerStreamingEnabled(compactionChat))
 	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {

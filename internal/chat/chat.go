@@ -191,7 +191,7 @@ type PendingToolService interface {
 }
 
 type CompactService interface {
-	CompactTurn(context.Context, *TurnState, chan<- domain.Event) error
+	CompactTurn(context.Context, *TurnState, string, chan<- domain.Event) error
 }
 
 type PromptTurnService interface {
@@ -709,11 +709,12 @@ func (r *Chat) DenyTool(toolCallID string) {
 	r.inbox <- denyCmd{toolCallID: strings.TrimSpace(toolCallID)}
 }
 
-func (r *Chat) Compact() error {
+func (r *Chat) Compact(instructions string) error {
 	service := r.deps.Compact
 	if service == nil {
 		return fmt.Errorf("compaction service is not configured")
 	}
+	instructions = strings.TrimSpace(instructions)
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {
@@ -733,7 +734,7 @@ func (r *Chat) Compact() error {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		if err := service.CompactTurn(ctx, r.turnState(), out); err != nil {
+		if err := service.CompactTurn(ctx, r.turnState(), instructions, out); err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 		}
 	}()

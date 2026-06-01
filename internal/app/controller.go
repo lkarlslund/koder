@@ -612,12 +612,12 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 }
 
 // Compact starts compaction on the active chat.
-func (c *Controller) Compact() error {
+func (c *Controller) Compact(instructions string) error {
 	rt := c.currentRuntime()
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	return rt.Compact()
+	return rt.Compact(instructions)
 }
 
 // Approve approves a pending tool call in the active chat.
@@ -1365,7 +1365,7 @@ type composerCommand struct {
 
 var composerCommands = []composerCommand{
 	{Command: "/chat new", Description: "Start a new chat"},
-	{Command: "/compact", Description: "Compact the active chat"},
+	{Command: "/compact", Description: "Compact the active chat; append instructions to guide the summary"},
 	{Command: "/model", Description: "Select the chat model"},
 	{Command: "/permissions", Description: "Change access settings"},
 	{Command: "/providers", Description: "Configure providers"},

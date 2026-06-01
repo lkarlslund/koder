@@ -514,7 +514,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return map[string]bool{"restarting": true}, nil
 	case "compact":
-		return map[string]bool{"started": true}, s.controller.Compact()
+		var in struct {
+			Instructions string `json:"instructions"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"started": true}, s.controller.Compact(in.Instructions)
 	case "refresh_workspace":
 		if err := s.controller.RefreshWorkspace(ctx); err != nil {
 			return nil, err

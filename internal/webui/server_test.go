@@ -970,6 +970,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `text === '/settings'`) || !strings.Contains(fullPage, `text === '/model'`) {
 		t.Fatalf("expected settings and model slash commands to be handled locally")
 	}
+	if !strings.Contains(fullPage, `text.startsWith('/compact ')`) ||
+		!strings.Contains(fullPage, `instructions: text.slice('/compact'.length).trim()`) {
+		t.Fatalf("expected /compact to accept optional instructions")
+	}
 	if !strings.Contains(fullPage, `set_access_settings`) {
 		t.Fatalf("expected access UI to call set_access_settings")
 	}
