@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -78,6 +79,26 @@ func TestParseProviderCallStoresNormalizedArguments(t *testing.T) {
 	}
 	if got := req.Args["end_line"]; got != "175" {
 		t.Fatalf("expected normalized end_line, got %q", got)
+	}
+}
+
+func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
+	_, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_1",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindTodoUpdateItem.String(),
+			Arguments: `{"id":"019aa000-0000-7000-8000-000000000001","status":"in_progress"}`,
+		},
+	})
+	var callErr tools.ProviderCallError
+	if !errors.As(err, &callErr) {
+		t.Fatalf("expected ProviderCallError, got %T %v", err, err)
+	}
+	if callErr.Request.Tool != domain.ToolKindTodoUpdateItem || callErr.Request.ToolCallID != "call_1" {
+		t.Fatalf("expected partial todo request identity, got %#v", callErr.Request)
+	}
+	if callErr.Request.Args["status"] != "in_progress" {
+		t.Fatalf("expected raw status in partial request, got %#v", callErr.Request.Args)
 	}
 }
 

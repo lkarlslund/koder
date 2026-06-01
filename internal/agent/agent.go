@@ -3068,14 +3068,6 @@ type providerToolCallParseResult struct {
 	Err       error
 }
 
-func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID domain.ID) ([]tools.Request, error) {
-	parsed := e.parseProviderToolCallsForTranscript(raw, sessionID)
-	if len(parsed.Requests) == 0 {
-		return nil, parsed.Err
-	}
-	return parsed.Requests, nil
-}
-
 func (e *Engine) parseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID domain.ID) providerToolCallParseResult {
 	var out providerToolCallParseResult
 	var parseErr error
@@ -3133,54 +3125,31 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	if req.ToolCallID == "" {
 		return tools.Request{}, fmt.Errorf("provider MCP tool call for %s missing id", name)
 	}
-	return tools.Normalize(req)
+	normalized, err := tools.Normalize(req)
+	if err != nil {
+		return tools.Request{}, tools.ProviderCallError{Request: req, Err: err}
+	}
+	return normalized, nil
 }
 
 func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) (domain.ToolCall, bool) {
-	kind, args, ok := e.providerToolCallDisplayState(item)
-	if !ok {
+	var callErr tools.ProviderCallError
+	if !errors.As(parseErr, &callErr) {
 		return domain.ToolCall{}, false
 	}
-	callID := strings.TrimSpace(item.ID)
-	if callID == "" {
-		callID = "invalid_" + string(domain.NewIDAt(time.Now().UTC()))
+	req := callErr.Request
+	if req.Tool == 0 || strings.TrimSpace(req.ToolCallID) == "" {
+		return domain.ToolCall{}, false
 	}
 	now := time.Now().UTC()
 	return domain.ToolCall{
-		ToolCallID:  domain.ToolCallID(callID),
-		Tool:        kind,
-		Args:        args,
+		ToolCallID:  domain.ToolCallID(req.ToolCallID),
+		Tool:        req.Tool,
+		Args:        req.Args,
 		Status:      domain.ToolStatusErrored,
 		Error:       &domain.ToolError{Message: "Invalid tool call: " + parseErr.Error()},
 		CompletedAt: now,
 	}, true
-}
-
-func (e *Engine) providerToolCallDisplayState(item provider.ToolCall) (domain.ToolKind, map[string]string, bool) {
-	name := strings.TrimSpace(item.Function.Name)
-	if name == "" {
-		return 0, nil, false
-	}
-	if e.mcp != nil {
-		localDefs := tools.Definitions(e.toolRuntime(domain.Session{}, domain.Chat{}))
-		serverID, toolName, ok := e.mcp.ResolveToolName(name, localDefs)
-		if ok {
-			return domain.ToolKindMCP, map[string]string{
-				"server":        serverID,
-				"tool":          toolName,
-				"arguments_raw": strings.TrimSpace(item.Function.Arguments),
-			}, true
-		}
-	}
-	kind, err := domain.ToolKindString(name)
-	if err != nil {
-		return 0, nil, false
-	}
-	args, err := tools.DecodeStringMap([]byte(item.Function.Arguments))
-	if err != nil {
-		args = map[string]string{"arguments_raw": strings.TrimSpace(item.Function.Arguments)}
-	}
-	return kind, args, true
 }
 
 func toolCallRecord(call tools.Request) domain.ToolCall {

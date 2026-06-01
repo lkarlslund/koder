@@ -35,12 +35,28 @@ func TestTodoUpdateItemDefinitionUsesUUIDStringID(t *testing.T) {
 		if !strings.Contains(params, `"id":{"type":"string"`) || strings.Contains(params, `"id":{"type":"integer"`) {
 			t.Fatalf("expected todo_update_item id to be a string UUID, got %s", params)
 		}
+		if !strings.Contains(params, `"enum":["Pending","InProgress","Completed"]`) || strings.Contains(params, "in_progress") {
+			t.Fatalf("expected todo_update_item status enum to match TodoStatus strings, got %s", params)
+		}
 		if !strings.Contains(def.Function.Description, "exact UUID id") {
 			t.Fatalf("expected todo_update_item description to tell model to use UUID ids, got %q", def.Function.Description)
 		}
 		return
 	}
 	t.Fatal("todo_update_item definition not found")
+}
+
+func TestTodoStatusRejectsSnakeCase(t *testing.T) {
+	if _, err := planning.ParseTodoStatus("in_progress"); err == nil {
+		t.Fatal("expected in_progress to be rejected")
+	}
+	status, err := planning.ParseTodoStatus("InProgress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != domain.TodoStatusInProgress {
+		t.Fatalf("expected InProgress, got %s", status)
+	}
 }
 
 func TestMilestoneAndTodoWorkflow(t *testing.T) {
@@ -105,7 +121,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
-		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "in_progress"},
+		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "InProgress"},
 	}); err != nil {
 		t.Fatal(err)
 	}

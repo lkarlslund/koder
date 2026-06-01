@@ -66,13 +66,27 @@ type Request struct {
 	Args       map[string]string `json:"-"`
 }
 
+type ProviderCallError struct {
+	Request Request
+	Err     error
+}
+
+func (e ProviderCallError) Error() string {
+	if e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+func (e ProviderCallError) Unwrap() error { return e.Err }
+
 func (r Request) MarshalJSON() ([]byte, error) {
 	payload := r.Meta()
 	return json.Marshal(payload)
 }
 
 func (r *Request) UnmarshalJSON(data []byte) error {
-	raw, err := DecodeStringMap(data)
+	raw, err := decodeStringMap(data)
 	if err != nil {
 		return err
 	}
@@ -422,7 +436,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if err != nil {
 		return Request{}, fmt.Errorf("unknown tool %q", name)
 	}
-	args, err := DecodeStringMap([]byte(call.Function.Arguments))
+	args, err := decodeStringMap([]byte(call.Function.Arguments))
 	if err != nil {
 		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
 	}
@@ -434,11 +448,15 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if req.ToolCallID == "" {
 		return Request{}, fmt.Errorf("provider tool call for %s missing id", kind)
 	}
-	return Normalize(req)
+	normalized, err := Normalize(req)
+	if err != nil {
+		return Request{}, ProviderCallError{Request: req, Err: err}
+	}
+	return normalized, nil
 }
 
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
-	args, err := DecodeStringMap([]byte(raw))
+	args, err := decodeStringMap([]byte(raw))
 	if err != nil {
 		return Request{}, fmt.Errorf("decode stored tool arguments for %s: %w", kind, err)
 	}
@@ -706,8 +724,7 @@ func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
 	}
 }
 
-// DecodeStringMap decodes provider/tool JSON arguments into the string map used by tool requests.
-func DecodeStringMap(data []byte) (map[string]string, error) {
+func decodeStringMap(data []byte) (map[string]string, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" || trimmed == "null" {
 		return map[string]string{}, nil

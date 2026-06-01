@@ -977,18 +977,18 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	calls, err := engine.parseProviderToolCalls([]provider.ToolCall{{
+	parsed := engine.parseProviderToolCallsForTranscript([]provider.ToolCall{{
 		ID: "call_1",
 		Function: provider.FunctionCall{
 			Name:      domain.ToolKindFileRead.String(),
 			Arguments: `{"path":"README.md","start_line":"150.0000","end_line":"175.0000"}`,
 		},
 	}}, session.ID)
-	if err != nil {
-		t.Fatal(err)
+	if parsed.Err != nil {
+		t.Fatal(parsed.Err)
 	}
 	itemSeed := domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	if _, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, calls, "", domain.Usage{}); err != nil {
+	if _, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, parsed.Requests, "", domain.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 

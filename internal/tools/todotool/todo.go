@@ -28,14 +28,14 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update todo item",
 		Description: "Update one todo item's status or content.",
-		Usage:       "Update one todo item's status, and optionally its content. Use the exact UUID id returned by todo_list, todo_fetch_next, or todo_add_items. Do not invent numeric ids. Keep at most one todo item in_progress in a milestone bucket.",
-		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todo_add_items"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
+		Usage:       "Update one todo item's status, and optionally its content. Use the exact UUID id returned by todo_list, todo_fetch_next, or todo_add_items. Do not invent numeric ids. Keep at most one todo item InProgress in a milestone bucket.",
+		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todo_add_items"},"status":{"type":"string","enum":["Pending","InProgress","Completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
 		Title:       "Fetch next todo",
 		Description: "Find the next todo item to work on.",
-		Usage:       "Find the next todo item to work on for a milestone. If there is already an in_progress item, it is returned. Otherwise the first pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.",
+		Usage:       "Find the next todo item to work on for a milestone. If there is already an InProgress item, it is returned. Otherwise the first Pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})

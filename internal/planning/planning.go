@@ -370,9 +370,7 @@ func ParseTodoID(raw string) (domain.ID, error) {
 }
 
 func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
-	value := strings.TrimSpace(raw)
-	value = strings.ReplaceAll(value, "_", "")
-	status, err := domain.TodoStatusString(value)
+	status, err := domain.TodoStatusString(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("invalid todo status %q", raw)
 	}
@@ -410,7 +408,7 @@ func ValidateTodoProgress(items []TodoItem) error {
 		}
 	}
 	if inProgress > 1 {
-		return errors.New("todo bucket may contain at most one in_progress item")
+		return errors.New("todo bucket may contain at most one InProgress item")
 	}
 	return nil
 }
