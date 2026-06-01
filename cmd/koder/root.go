@@ -24,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/runtimeprefs"
@@ -362,7 +363,7 @@ func newDebugCommand() *cobra.Command {
 }
 
 func newSessionDumpCommand() *cobra.Command {
-	var sessionID domain.ID
+	var sessionID id.ID
 	cmd := &cobra.Command{
 		Use:   "dump",
 		Short: "Dump raw stored chat for a session as JSON",
@@ -389,7 +390,7 @@ func newSessionDumpCommand() *cobra.Command {
 				Timeline []domain.TimelineItem `json:"timeline"`
 			}
 			out := struct {
-				SessionID domain.ID  `json:"session_id"`
+				SessionID id.ID      `json:"session_id"`
 				Chats     []chatDump `json:"chats"`
 			}{
 				SessionID: sessionID,
@@ -411,7 +412,7 @@ func newSessionDumpCommand() *cobra.Command {
 }
 
 func newSessionTailCommand() *cobra.Command {
-	var sessionID domain.ID
+	var sessionID id.ID
 	var addr string
 	var interval time.Duration
 	cmd := &cobra.Command{

@@ -20,7 +20,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -62,8 +62,8 @@ type TerminalSize struct {
 }
 
 type StartRequest struct {
-	SessionID      domain.ID
-	ChatID         domain.ID
+	SessionID      id.ID
+	ChatID         id.ID
 	ToolCallID     string
 	Command        string
 	Workdir        string
@@ -77,22 +77,22 @@ type StartRequest struct {
 }
 
 type StatusRequest struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 	ProcessID string
 	MaxBytes  int
 }
 
 type ListRequest struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 	Scope     Scope
 	MaxBytes  int
 }
 
 type WriteStdinRequest struct {
-	SessionID  domain.ID
-	ChatID     domain.ID
+	SessionID  id.ID
+	ChatID     id.ID
 	ProcessID  string
 	Chars      string
 	CloseStdin bool
@@ -100,31 +100,31 @@ type WriteStdinRequest struct {
 }
 
 type ResizeRequest struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 	ProcessID string
 	Size      TerminalSize
 	MaxBytes  int
 }
 
 type TerminateRequest struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 	ProcessID string
 	MaxBytes  int
 }
 
 type CleanupRequest struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 	Scope     Scope
 	MaxBytes  int
 }
 
 type Snapshot struct {
 	ProcessID   string
-	SessionID   domain.ID
-	ChatID      domain.ID
+	SessionID   id.ID
+	ChatID      id.ID
 	ToolCallID  string
 	Command     string
 	Workdir     string
@@ -161,14 +161,14 @@ type Manager struct {
 	mu          sync.RWMutex
 	nextID      uint64
 	processes   map[string]*process
-	subscribers map[domain.ID]map[chan Event]struct{}
+	subscribers map[id.ID]map[chan Event]struct{}
 }
 
 type process struct {
 	mu          sync.RWMutex
 	processID   string
-	sessionID   domain.ID
-	chatID      domain.ID
+	sessionID   id.ID
+	chatID      id.ID
 	toolCallID  string
 	command     string
 	workdir     string
@@ -193,11 +193,11 @@ type process struct {
 func NewManager() *Manager {
 	return &Manager{
 		processes:   map[string]*process{},
-		subscribers: map[domain.ID]map[chan Event]struct{}{},
+		subscribers: map[id.ID]map[chan Event]struct{}{},
 	}
 }
 
-func (m *Manager) Subscribe(chatID domain.ID) (<-chan Event, func()) {
+func (m *Manager) Subscribe(chatID id.ID) (<-chan Event, func()) {
 	ch := make(chan Event, defaultSubscriberCap)
 	m.mu.Lock()
 	if m.subscribers[chatID] == nil {
@@ -480,7 +480,7 @@ func (m *Manager) enforceTimeout(p *process, timeout time.Duration) {
 	}
 }
 
-func (m *Manager) lookup(sessionID, chatID domain.ID, processID string) (*process, error) {
+func (m *Manager) lookup(sessionID, chatID id.ID, processID string) (*process, error) {
 	m.mu.RLock()
 	p := m.processes[strings.TrimSpace(processID)]
 	m.mu.RUnlock()
@@ -611,7 +611,7 @@ func terminateProcess(p *process) error {
 	return p.proc.Process.Kill()
 }
 
-func matchesScope(p *process, sessionID, chatID domain.ID, scope Scope) bool {
+func matchesScope(p *process, sessionID, chatID id.ID, scope Scope) bool {
 	switch scope {
 	case ScopeSession:
 		return p.sessionID == sessionID

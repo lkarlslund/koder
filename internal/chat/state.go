@@ -2,11 +2,13 @@ package chat
 
 import (
 	"fmt"
-	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
@@ -260,7 +262,7 @@ func (s *ChatState) AppendTimelineItem(item domain.TimelineItem) *TimelineRecord
 		s.byItem = map[string]*TimelineRecord{}
 	}
 	if item.ID == "" {
-		item.ID = domain.NewTimelineID(item.CreatedAt)
+		item.ID = NewTimelineID(item.CreatedAt)
 	}
 	record := &TimelineRecord{Item: item}
 	s.timeline = append(s.timeline, record)
@@ -277,7 +279,7 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 		s.byItem = map[string]*TimelineRecord{}
 	}
 	if item.ID == "" {
-		item.ID = domain.NewTimelineID(item.CreatedAt)
+		item.ID = NewTimelineID(item.CreatedAt)
 	}
 	if record := s.replaceTemporaryActiveAssistant(item); record != nil {
 		return record, false
@@ -304,7 +306,7 @@ func (s *ChatState) EnsureTimelineItem(item domain.TimelineItem) (*TimelineRecor
 		s.byItem = map[string]*TimelineRecord{}
 	}
 	if item.ID == "" {
-		item.ID = domain.NewTimelineID(item.CreatedAt)
+		item.ID = NewTimelineID(item.CreatedAt)
 	}
 	if record := s.byItem[item.ID]; record != nil {
 		return record, false
@@ -399,7 +401,7 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 }
 
 // ActiveAssistant returns the latest unsealed assistant item, creating one when absent.
-func (s *ChatState) ActiveAssistant(chatID domain.ID, now time.Time) *TimelineRecord {
+func (s *ChatState) ActiveAssistant(chatID id.ID, now time.Time) *TimelineRecord {
 	if record := s.LatestActiveAssistant(); record != nil {
 		return record
 	}
@@ -411,7 +413,7 @@ func (s *ChatState) ActiveAssistant(chatID domain.ID, now time.Time) *TimelineRe
 	}
 	seq := int64(len(s.timeline) + 1)
 	item := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    chatID,
 		Seq:       seq,
 		Content:   domain.AssistantMessage{},
@@ -440,7 +442,7 @@ func (s *ChatState) LatestActiveAssistant() *TimelineRecord {
 }
 
 // AppendAssistantText appends text to the active assistant item.
-func (s *ChatState) AppendAssistantText(chatID domain.ID, text string) error {
+func (s *ChatState) AppendAssistantText(chatID id.ID, text string) error {
 	if s == nil || text == "" {
 		return nil
 	}
@@ -462,7 +464,7 @@ func (s *ChatState) AppendAssistantText(chatID domain.ID, text string) error {
 }
 
 // AppendAssistantReasoning appends reasoning to the active assistant item.
-func (s *ChatState) AppendAssistantReasoning(chatID domain.ID, text string) error {
+func (s *ChatState) AppendAssistantReasoning(chatID id.ID, text string) error {
 	if s == nil || text == "" {
 		return nil
 	}
@@ -561,7 +563,7 @@ func (s *ChatState) UpsertApproval(approval Approval) {
 }
 
 // RemoveApproval removes one approval snapshot by ID.
-func (s *ChatState) RemoveApproval(approvalID domain.ID) {
+func (s *ChatState) RemoveApproval(approvalID id.ID) {
 	if s == nil || approvalID == "" {
 		return
 	}

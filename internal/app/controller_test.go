@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -29,7 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID domain.ID, root string) error {
+func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
 	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
 		session.ProjectRoot = root
 	})
@@ -1025,7 +1026,7 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 		t.Fatalf("default chat: %v", err)
 	}
 	if err := chatpkg.SetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
-		ID:        domain.NewID(),
+		ID:        id.New(),
 		Kind:      domain.QueuedInputKindSteer,
 		Text:      "run the user request",
 		Source:    domain.UserMessageSourceUser,

@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
 type Approval struct {
-	ID         domain.ID
-	SessionID  domain.ID
-	ChatID     domain.ID
+	ID         id.ID
+	SessionID  id.ID
+	ChatID     id.ID
 	Tool       domain.ToolKind
 	ToolCallID string
 	Command    string
@@ -60,7 +61,7 @@ func ChatCollection(st *store.Store) store.Collection[domain.Chat] {
 	})
 }
 
-func GetChat(ctx context.Context, st *store.Store, chatID domain.ID) (domain.Chat, error) {
+func GetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
 	return ChatCollection(st).Get(ctx, chatID)
 }
 
@@ -85,7 +86,7 @@ func UpdateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) er
 	return PutChat(ctx, st, chatRecord)
 }
 
-func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID domain.ID, items []domain.QueuedInput) error {
+func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
 	chatRecord, err := GetChat(ctx, st, chatID)
 	if err != nil {
 		return err
@@ -109,7 +110,7 @@ func storageCloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
 	return dst
 }
 
-func TimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+func TimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
 	items, err := TimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
@@ -143,7 +144,7 @@ func InsertTimelineItem(ctx context.Context, st *store.Store, item domain.Timeli
 	return TimelineCollection(st).Insert(ctx, item)
 }
 
-func AppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	if chatID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("append timeline: chat id is required")
 	}
@@ -165,7 +166,7 @@ func AppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, cont
 	return InsertTimelineItem(ctx, st, item)
 }
 
-func AttachToolResult(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+func AttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Result = &result
 		call.Error = nil
@@ -183,7 +184,7 @@ func AttachToolResult(ctx context.Context, st *store.Store, chatID domain.ID, to
 	})
 }
 
-func AttachToolError(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+func AttachToolError(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Error = &toolErr
 		call.Result = nil
@@ -197,17 +198,17 @@ func AttachToolError(ctx context.Context, st *store.Store, chatID domain.ID, too
 	})
 }
 
-func FailInterruptedToolCalls(ctx context.Context, st *store.Store, chatID domain.ID, message string) (int, error) {
+func FailInterruptedToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
 	return failToolCallsMatching(ctx, st, chatID, message, interruptedToolStatus)
 }
 
-func FailRunningToolCalls(ctx context.Context, st *store.Store, chatID domain.ID, message string) (int, error) {
+func FailRunningToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
 	return failToolCallsMatching(ctx, st, chatID, message, func(status domain.ToolStatus) bool {
 		return status == domain.ToolStatusRunning
 	})
 }
 
-func failToolCallsMatching(ctx context.Context, st *store.Store, chatID domain.ID, message string, match func(domain.ToolStatus) bool) (int, error) {
+func failToolCallsMatching(ctx context.Context, st *store.Store, chatID id.ID, message string, match func(domain.ToolStatus) bool) (int, error) {
 	if chatID == "" || match == nil {
 		return 0, nil
 	}
@@ -260,7 +261,7 @@ func interruptedToolStatus(status domain.ToolStatus) bool {
 	return status == domain.ToolStatusPending || status == domain.ToolStatusRunning
 }
 
-func AttachToolApproval(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
+func AttachToolApproval(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
 	_ = approval
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Approval = nil
@@ -270,7 +271,7 @@ func AttachToolApproval(ctx context.Context, st *store.Store, chatID domain.ID, 
 	})
 }
 
-func MarkToolRunning(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string) (domain.TimelineItem, error) {
+func MarkToolRunning(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Status = domain.ToolStatusRunning
 		call.Approval = nil
@@ -282,7 +283,7 @@ func MarkToolRunning(ctx context.Context, st *store.Store, chatID domain.ID, too
 	})
 }
 
-func updateToolCall(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, update func(*domain.ToolCall) error) (domain.TimelineItem, error) {
+func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, update func(*domain.ToolCall) error) (domain.TimelineItem, error) {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if chatID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("update tool call: chat id is required")
@@ -319,11 +320,11 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID domain.ID, tool
 	return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
 }
 
-func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID domain.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	return AppendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, usage)
 }
 
-func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID domain.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	if len(calls) == 0 && strings.TrimSpace(text) == "" {
 		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
 	}
@@ -371,7 +372,7 @@ func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 	return item, nil
 }
 
-func PendingApprovalsForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]Approval, error) {
+func PendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]Approval, error) {
 	chatRecord, err := GetChat(ctx, st, chatID)
 	if err != nil {
 		return nil, err
@@ -405,7 +406,7 @@ func PendingApprovalsForChat(ctx context.Context, st *store.Store, chatID domain
 	return approvals, nil
 }
 
-func SyntheticApprovalID(toolCallID string) domain.ID {
+func SyntheticApprovalID(toolCallID string) id.ID {
 	return strings.TrimSpace(toolCallID)
 }
 

@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
 // LoadSession returns the live owner for a persisted session, hydrating it on demand.
-func (e *Engine) LoadSession(ctx context.Context, sessionID domain.ID) (*sessionpkg.Session, error) {
+func (e *Engine) LoadSession(ctx context.Context, sessionID id.ID) (*sessionpkg.Session, error) {
 	if e == nil || e.store == nil {
 		return nil, fmt.Errorf("engine store is required")
 	}
@@ -41,7 +42,7 @@ func (e *Engine) LoadSession(ctx context.Context, sessionID domain.ID) (*session
 }
 
 // Session returns an already loaded session owner, loading it if needed.
-func (e *Engine) Session(ctx context.Context, sessionID domain.ID) (*sessionpkg.Session, error) {
+func (e *Engine) Session(ctx context.Context, sessionID id.ID) (*sessionpkg.Session, error) {
 	return e.LoadSession(ctx, sessionID)
 }
 
@@ -90,7 +91,7 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 }
 
 // DeleteSession closes any live runtimes and deletes the persisted session.
-func (e *Engine) DeleteSession(ctx context.Context, sessionID domain.ID) error {
+func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if e == nil || e.store == nil {
 		return fmt.Errorf("engine store is required")
 	}

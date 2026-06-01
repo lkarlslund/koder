@@ -10,6 +10,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -34,7 +35,7 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 	}
 }
 
-func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
+func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -51,7 +52,7 @@ func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.Ch
 	return statuses, nil
 }
 
-func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+func (e *Engine) PollChat(ctx context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
@@ -59,7 +60,7 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (too
 	return owner.PollChat(ctx, chatID)
 }
 
-func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
@@ -86,7 +87,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 		return tools.ChatStatus{}, err
 	}
 	milestoneRef := strings.TrimSpace(req.MilestoneRef)
-	todoRef := domain.ID(strings.TrimSpace(string(req.TodoRef)))
+	todoRef := id.ID(strings.TrimSpace(string(req.TodoRef)))
 	var scopedTodo *planning.TodoItem
 	if todoRef != "" {
 		todo, err := sessionTodoByID(ctx, owner, sessionID, plan, todoRef)
@@ -123,7 +124,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 	}
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:                    domain.NewID(),
+		ID:                    id.New(),
 		SessionID:             sessionID,
 		ParentChatID:          &parentID,
 		Title:                 chatTitle,
@@ -163,7 +164,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 	return e.startPreparedChat(ctx, owner, chatRecord.ID, milestone, scopedTodo, role, objective)
 }
 
-func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
@@ -173,8 +174,8 @@ func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID domain.ID) (
 }
 
 func sessionTodoByID(ctx context.Context, owner interface {
-	ListTodos(context.Context, domain.ID, string) ([]planning.TodoItem, error)
-}, sessionID domain.ID, plan planning.Plan, todoID domain.ID) (planning.TodoItem, error) {
+	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
+}, sessionID id.ID, plan planning.Plan, todoID id.ID) (planning.TodoItem, error) {
 	for _, milestone := range plan.Milestones {
 		todos, err := owner.ListTodos(ctx, sessionID, milestone.Ref)
 		if err != nil {
@@ -198,7 +199,7 @@ func sessionTodoByID(ctx context.Context, owner interface {
 	return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
 }
 
-func updateMilestoneStatus(plan planning.Plan, ref string, status domain.MilestoneStatus, ownerChatID domain.ID) (planning.Plan, error) {
+func updateMilestoneStatus(plan planning.Plan, ref string, status domain.MilestoneStatus, ownerChatID id.ID) (planning.Plan, error) {
 	next := plan
 	next.Milestones = slices.Clone(plan.Milestones)
 	found := false
@@ -264,7 +265,7 @@ func milestoneByRef(plan planning.Plan, ref string) (planning.Milestone, bool) {
 	return planning.Milestone{}, false
 }
 
-func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
+func chatByID(chats []domain.Chat, chatID id.ID) (domain.Chat, bool) {
 	for _, item := range chats {
 		if item.ID == chatID {
 			return item, true
@@ -273,7 +274,7 @@ func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
 	return domain.Chat{}, false
 }
 
-func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID domain.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
+func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID id.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
 	if owner == nil {
 		return tools.ChatStatus{}, fmt.Errorf("session is required")
 	}
@@ -302,7 +303,7 @@ func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Sessio
 	}, nil
 }
 
-func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Update, unsub func()) {
+func (e *Engine) consumeChatUpdates(chatID id.ID, updates <-chan chatpkg.Update, unsub func()) {
 	defer func() {
 		if unsub != nil {
 			unsub()
@@ -348,7 +349,7 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 	}
 }
 
-func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, text string) {
+func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID id.ID, text string) {
 	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
 	if err != nil || source.ParentChatID == nil || strings.TrimSpace(text) == "" {
 		return
@@ -356,7 +357,7 @@ func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, t
 	e.enqueueSteer(ctx, *source.ParentChatID, text)
 }
 
-func (e *Engine) completedChildChatNotification(ctx context.Context, chatID domain.ID) string {
+func (e *Engine) completedChildChatNotification(ctx context.Context, chatID id.ID) string {
 	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
 	if err != nil || chatRecord.ParentChatID == nil {
 		return ""
@@ -388,7 +389,7 @@ func (e *Engine) completedChildChatNotification(ctx context.Context, chatID doma
 	return ""
 }
 
-func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceChatID domain.ID) bool {
+func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceChatID id.ID) bool {
 	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
 	if err != nil || source.ParentChatID == nil {
 		return false
@@ -416,7 +417,7 @@ func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceCha
 	return false
 }
 
-func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string) {
+func (e *Engine) enqueueSteer(ctx context.Context, chatID id.ID, text string) {
 	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
 		return
@@ -436,7 +437,7 @@ func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string
 	parent.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: text})
 }
 
-func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) string {
+func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID id.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) string {
 	lines := []string{
 		fmt.Sprintf("Profile: %s", role),
 		"Objective:",

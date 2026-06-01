@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
@@ -127,7 +128,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected global events status: %d", resp.StatusCode)
 	}
 	var global struct {
-		SessionID domain.ID       `json:"session_id"`
+		SessionID id.ID           `json:"session_id"`
 		Events    []RecordedEvent `json:"events"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&global); err != nil {
@@ -284,7 +285,7 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	if !got.Hydrated || got.Hydration != "hydrated" || got.StoredChatCount != 2 || got.HydratedChatCount != 1 || got.SelectedClientCount != 1 {
 		t.Fatalf("unexpected session hydration summary: %#v", got)
 	}
-	byID := map[domain.ID]SessionChatDebug{}
+	byID := map[id.ID]SessionChatDebug{}
 	for _, chat := range got.Chats {
 		byID[chat.ID] = chat
 	}
@@ -298,7 +299,7 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	}
 }
 
-func appendDebugTimelineItem(st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+func appendDebugTimelineItem(st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	item, err := modeltest.AppendTimeline(context.Background(), st, chatID, content)
 	if err != nil {
 		return domain.TimelineItem{}, err

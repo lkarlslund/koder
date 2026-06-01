@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -124,7 +125,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 		Result struct {
 			State struct {
 				Session struct {
-					ID domain.ID
+					ID id.ID
 				}
 			}
 		} `json:"result"`
@@ -144,7 +145,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 func TestWebSocketHelloIgnoresStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := ctrl.State().Session.ID
-	staleID := domain.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
+	staleID := id.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
 	if staleID == activeID {
 		t.Fatal("test stale id unexpectedly matches active session")
 	}
@@ -169,7 +170,7 @@ func TestWebSocketHelloIgnoresStaleURLSessionSelection(t *testing.T) {
 		Result struct {
 			State struct {
 				Session struct {
-					ID domain.ID
+					ID id.ID
 				}
 			}
 		} `json:"result"`
@@ -511,7 +512,7 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 }
 
 func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
-	itemID := domain.ID("019aa000-0000-7000-8000-000000000043")
+	itemID := id.ID("019aa000-0000-7000-8000-000000000043")
 	emptyEventItem := domain.TimelineItem{
 		ID:      itemID,
 		ChatID:  "chat-7",
@@ -559,7 +560,7 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		},
 		Todos:      []planning.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}},
 		TodosByRef: map[string][]planning.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}}},
-		Snapshots: map[domain.ID]chat.Snapshot{
+		Snapshots: map[id.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
 				Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: "chat-7", Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
@@ -1299,10 +1300,10 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveChatID domain.ID `json:"active_chat_id"`
+			ActiveChatID id.ID `json:"active_chat_id"`
 			Snapshot     struct {
 				Chat struct {
-					ID domain.ID
+					ID id.ID
 				}
 			}
 		} `json:"result"`
@@ -1367,11 +1368,11 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 		t.Fatal("expected reorder_chats acknowledgement")
 	}
 	state := ctrl.State()
-	got := make([]domain.ID, 0, len(state.Chats))
+	got := make([]id.ID, 0, len(state.Chats))
 	for _, chat := range state.Chats {
 		got = append(got, chat.ID)
 	}
-	if !slices.Equal(got, []domain.ID{thirdID, firstID, secondID}) {
+	if !slices.Equal(got, []id.ID{thirdID, firstID, secondID}) {
 		t.Fatalf("unexpected chat order: %#v", got)
 	}
 	for idx, chat := range state.Chats {
@@ -1455,9 +1456,9 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	var listResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveID domain.ID `json:"active_id"`
+			ActiveID id.ID `json:"active_id"`
 			Sessions []struct {
-				ID domain.ID
+				ID id.ID
 			} `json:"sessions"`
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1481,7 +1482,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID          domain.ID
+				ID          id.ID
 				Title       string
 				ProjectRoot string
 			}
@@ -1507,10 +1508,10 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID domain.ID
+				ID id.ID
 			}
 			Sessions []struct {
-				ID    domain.ID
+				ID    id.ID
 				Title string
 			}
 		} `json:"result"`
@@ -1540,7 +1541,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID domain.ID
+				ID id.ID
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1563,10 +1564,10 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID domain.ID
+				ID id.ID
 			}
 			Sessions []struct {
-				ID domain.ID
+				ID id.ID
 			}
 		} `json:"result"`
 		Error string `json:"error"`

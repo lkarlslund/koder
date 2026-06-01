@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/planning"
@@ -51,9 +52,9 @@ type Engine struct {
 	mcp        *mcp.Manager
 	exec       *execruntime.Manager
 	envMu      sync.Mutex
-	envPrompts map[domain.ID]string
+	envPrompts map[id.ID]string
 	sessionMu  sync.RWMutex
-	sessions   map[domain.ID]*sessionpkg.Session
+	sessions   map[id.ID]*sessionpkg.Session
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -78,7 +79,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
 		exec:       execruntime.NewManager(),
-		sessions:   map[domain.ID]*sessionpkg.Session{},
+		sessions:   map[id.ID]*sessionpkg.Session{},
 		retryPause: waitForRetry,
 	}
 }
@@ -164,7 +165,7 @@ func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, out c
 	return nil
 }
 
-func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID domain.ID) ([]tools.Request, error) {
+func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID id.ID) ([]tools.Request, error) {
 	if chatID == "" {
 		return nil, nil
 	}
@@ -288,7 +289,7 @@ func (e *Engine) HandleTurnError(ctx context.Context, turn *chatpkg.TurnState, o
 	if err == nil {
 		return
 	}
-	sessionID, chatID := domain.ID(""), domain.ID("")
+	sessionID, chatID := id.ID(""), id.ID("")
 	if turn != nil {
 		sessionID = turn.Session().ID
 		chatID = turn.Chat().ID
@@ -620,7 +621,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	return chatpkg.TurnStepResult{Done: true}, nil
 }
 
-func (e *Engine) RefreshAgents(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
+func (e *Engine) RefreshAgents(ctx context.Context, sessionID id.ID) (domain.Session, error) {
 	session, err := sessionpkg.GetSession(ctx, e.store, sessionID)
 	if err != nil {
 		return domain.Session{}, err
@@ -688,7 +689,7 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return sessionpkg.GetSession(ctx, e.store, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, source string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID id.ID, prompt string, source string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
 	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -882,16 +883,16 @@ func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
 	return cfg
 }
 
-func (e *Engine) providerConfig(providerID domain.ID) (config.Provider, bool) {
+func (e *Engine) providerConfig(providerID id.ID) (config.Provider, bool) {
 	return e.cfg.Provider(string(providerID))
 }
 
-func (e *Engine) promptProgressProbePending(providerID domain.ID) bool {
+func (e *Engine) promptProgressProbePending(providerID id.ID) bool {
 	cfg, ok := e.providerConfig(providerID)
 	return ok && provider.PromptProgressProbePending(cfg)
 }
 
-func (e *Engine) setPromptProgressSupport(providerID domain.ID, supported bool) {
+func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 	id := strings.TrimSpace(string(providerID))
 	if id == "" || e.cfg.Providers == nil {
 		return
@@ -946,7 +947,7 @@ func shouldRefreshSessionTitle(session domain.Session, timeline []domain.Timelin
 	return false
 }
 
-func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID domain.ID) (string, error) {
+func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string, error) {
 	if chatID == "" {
 		return "", nil
 	}
@@ -1042,7 +1043,7 @@ func hasCustomSessionTitle(title string) bool {
 	return title != "" && title != "New Session"
 }
 
-func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID domain.ID) ([]domain.TimelineItem, []provider.Message, error) {
+func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID id.ID) ([]domain.TimelineItem, []provider.Message, error) {
 	chat, err := sessionpkg.DefaultChat(ctx, e.store, sessionID)
 	if err != nil {
 		return nil, nil, err
@@ -1114,7 +1115,7 @@ func normalizeSessionTitle(raw string) string {
 	return strings.Join(words, " ")
 }
 
-func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID id.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	beforePlan, trackMilestones := e.milestonePlanForNotification(ctx, sessionID, req.Tool)
 	session, chat, err := e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
 	if err != nil {
@@ -1137,7 +1138,7 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 	return events, nil
 }
 
-func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID domain.ID, tool domain.ToolKind) (planning.Plan, bool) {
+func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID id.ID, tool domain.ToolKind) (planning.Plan, bool) {
 	switch tool {
 	case domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindMilestoneAdd:
 	default:
@@ -1150,7 +1151,7 @@ func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID dom
 	return plan, true
 }
 
-func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, before planning.Plan) {
+func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID id.ID, before planning.Plan) {
 	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
 	if err != nil || chatRecord.ParentChatID == nil {
 		return
@@ -1173,7 +1174,7 @@ func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, b
 	}
 }
 
-func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {
+func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {
 	if execErr == nil {
 		return nil, errors.New("tool failure error is nil")
 	}
@@ -1231,7 +1232,7 @@ func concatEvents(streams ...<-chan domain.Event) <-chan domain.Event {
 	return out
 }
 
-func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event, chatID, sessionID domain.ID, err error) {
+func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event, chatID, sessionID id.ID, err error) {
 	item, _ := e.recordAssistantError(ctx, chatID, sessionID, err)
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	if item.ID != "" {
@@ -1240,7 +1241,7 @@ func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event
 	out <- evt
 }
 
-func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID domain.ID, err error) (domain.TimelineItem, bool) {
+func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID id.ID, err error) (domain.TimelineItem, bool) {
 	if err == nil || sessionID == "" {
 		return domain.TimelineItem{}, false
 	}
@@ -1254,14 +1255,14 @@ func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID dom
 	})
 }
 
-func (e *Engine) recordLifecycle(sessionID domain.ID, kind, text string, meta map[string]string) {
+func (e *Engine) recordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
 	if e.debug == nil {
 		return
 	}
 	e.debug.RecordLifecycle(sessionID, kind, text, meta)
 }
 
-func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID domain.ID) {
+func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID id.ID) {
 	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
 	item, ok := e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
 		Kind:     "interrupted",
@@ -1371,7 +1372,7 @@ func providerRefusalPauseBody(reasoning string) string {
 	return body + "\n\nProvider reasoning:\n" + strings.TrimSpace(reasoning)
 }
 
-func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain.ID, pause continuationPause, out chan<- domain.Event) {
+func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID id.ID, pause continuationPause, out chan<- domain.Event) {
 	body := strings.TrimSpace(pause.Body)
 	if body == "" {
 		body = "Paused continuation."
@@ -1426,7 +1427,7 @@ func continuationPauseSubtitle(pause continuationPause) string {
 	}
 }
 
-func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID domain.ID, body string, meta transcriptNotice) (domain.TimelineItem, bool) {
+func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID id.ID, body string, meta transcriptNotice) (domain.TimelineItem, bool) {
 	if sessionID == "" || chatID == "" || e.store == nil {
 		return domain.TimelineItem{}, false
 	}
@@ -1495,7 +1496,7 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 	}
 }
 
-func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID domain.ID, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
+func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
 	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
 	promptProgressRetried := false
 	for attempt := 0; ; attempt++ {
@@ -1590,14 +1591,14 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID domain
 	}
 }
 
-func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID domain.ID) (domain.TimelineItem, error) {
+func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID id.ID) (domain.TimelineItem, error) {
 	now := time.Now().UTC()
 	items, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        chatpkg.NewTimelineID(now),
 		ChatID:    chatID,
 		Seq:       int64(len(items) + 1),
 		Content:   domain.AssistantMessage{},
@@ -1606,7 +1607,7 @@ func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID domain.ID
 	}, nil
 }
 
-func (e *Engine) nextAssistantTimelineItemForTurn(ctx context.Context, chatID domain.ID, turn *chatpkg.TurnState) (domain.TimelineItem, error) {
+func (e *Engine) nextAssistantTimelineItemForTurn(ctx context.Context, chatID id.ID, turn *chatpkg.TurnState) (domain.TimelineItem, error) {
 	if turn != nil {
 		return turn.NextAssistantItem(), nil
 	}
@@ -1682,7 +1683,7 @@ func transientTurnMessages(note string, continuePrompt string) []provider.Instru
 	return out
 }
 
-func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID domain.ID) ([]provider.Message, error) {
+func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID) ([]provider.Message, error) {
 	session, err := sessionpkg.GetSession(ctx, e.store, sessionID)
 	if err != nil {
 		return nil, err
@@ -1690,7 +1691,7 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID domain
 	return e.buildConversationPreview(ctx, session, chatID, "", nil, nil, nil)
 }
 
-func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
 	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, prompt, drafts, refs, transient)
 	if err != nil {
 		return nil, err
@@ -1710,7 +1711,7 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func filterQueuedTimelineItems(timeline []domain.TimelineItem, queued map[domain.ID]struct{}) []domain.TimelineItem {
+func filterQueuedTimelineItems(timeline []domain.TimelineItem, queued map[id.ID]struct{}) []domain.TimelineItem {
 	if len(timeline) == 0 || len(queued) == 0 {
 		return timeline
 	}
@@ -1739,7 +1740,7 @@ func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat d
 	return len(payload) / 4, nil
 }
 
-func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	chat := domain.Chat{WorkflowRole: chatrole.General}
 	if chatID != "" {
 		stored, err := chatpkg.GetChat(ctx, e.store, chatID)
@@ -1760,11 +1761,11 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, transient)
 }
 
-func queuedTimelineIDs(items []domain.QueuedInput) map[domain.ID]struct{} {
+func queuedTimelineIDs(items []domain.QueuedInput) map[id.ID]struct{} {
 	if len(items) == 0 {
 		return nil
 	}
-	out := map[domain.ID]struct{}{}
+	out := map[id.ID]struct{}{}
 	for _, item := range items {
 		if item.TimelineID != "" {
 			out[item.TimelineID] = struct{}{}
@@ -2069,7 +2070,7 @@ func sessionAccessSettings(session domain.Session, cfg config.Config) accesssett
 	return accesssettings.Normalize(settings)
 }
 
-func (e *Engine) loadedSession(sessionID domain.ID) *sessionpkg.Session {
+func (e *Engine) loadedSession(sessionID id.ID) *sessionpkg.Session {
 	if e == nil || sessionID == "" {
 		return nil
 	}
@@ -2425,7 +2426,7 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 	return min(100, (tokens*100)/contextWindow), true
 }
 
-func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, trigger string, out chan<- domain.Event) error {
+func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID id.ID, client *provider.Client, trigger string, out chan<- domain.Event) error {
 	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
 	if err != nil {
 		return err
@@ -2548,7 +2549,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
 	now := time.Now().UTC()
 	compactionItem := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        chatpkg.NewTimelineID(now),
 		ChatID:    chat.ID,
 		Seq:       int64(len(timeline) + 1),
 		CreatedAt: now,
@@ -3051,8 +3052,8 @@ type preparedToolCall struct {
 	req       tools.Request
 	event     domain.Event
 	run       bool
-	sessionID domain.ID
-	chatID    domain.ID
+	sessionID id.ID
+	chatID    id.ID
 }
 
 type completedToolCall struct {
@@ -3066,7 +3067,7 @@ type providerToolCallParseResult struct {
 	Err       error
 }
 
-func (e *Engine) parseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID domain.ID) providerToolCallParseResult {
+func (e *Engine) parseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID id.ID) providerToolCallParseResult {
 	var out providerToolCallParseResult
 	var parseErr error
 	for _, item := range raw {
@@ -3159,7 +3160,7 @@ func toolCallRecord(call tools.Request) domain.ToolCall {
 	}
 }
 
-func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID domain.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
@@ -3167,7 +3168,7 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 	return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
 }
 
-func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID domain.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	item, err := chatpkg.AppendAssistantToolCallsWithItem(ctx, e.store, chatID, item, toolCalls, text, usage)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -3175,7 +3176,7 @@ func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, se
 	return item, nil
 }
 
-func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
@@ -3183,7 +3184,7 @@ func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *cha
 	return e.persistAssistantToolCallRecordsForTurn(ctx, turn, chatID, sessionID, item, toolCalls, text, usage)
 }
 
-func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	if turn == nil {
 		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, usage)
 	}
@@ -3343,7 +3344,7 @@ func (e *Engine) persistedToolCallState(ctx context.Context, session domain.Sess
 	return session, chat, nil
 }
 
-func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request) (domain.Event, error) {
+func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID id.ID, req tools.Request) (domain.Event, error) {
 	text := fmt.Sprintf("%s disabled for this session", req.Tool)
 	if sessionID == "" {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
@@ -3355,7 +3356,7 @@ func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID
 	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
 }
 
-func (e *Engine) recordRoleDeniedToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, role domain.WorkflowRole) (domain.Event, error) {
+func (e *Engine) recordRoleDeniedToolResult(ctx context.Context, chatID, sessionID id.ID, req tools.Request, role domain.WorkflowRole) (domain.Event, error) {
 	text := fmt.Sprintf("%s is not available to %s chats", req.Tool, role)
 	if sessionID == "" {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
@@ -3367,7 +3368,7 @@ func (e *Engine) recordRoleDeniedToolResult(ctx context.Context, chatID, session
 	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
 }
 
-func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID domain.ID, req tools.Request, text string) (domain.TimelineItem, error) {
+func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID id.ID, req tools.Request, text string) (domain.TimelineItem, error) {
 	result := domain.ToolResult{
 		Text:   text,
 		Status: domain.ToolResultStatusDenied,
@@ -3404,11 +3405,11 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 	return true
 }
 
-func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID domain.ID, req tools.Request) ([]domain.Event, error) {
+func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
 	return e.executePreparedToolCallForTurn(ctx, nil, chatID, sessionID, req)
 }
 
-func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, req tools.Request) ([]domain.Event, error) {
+func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 	if strings.TrimSpace(req.ToolCallID) != "" {
 		item, err := chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
@@ -3571,7 +3572,7 @@ func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
 
-func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID domain.ID, tool domain.ToolKind, approvalID, preview, toolCallID string) (domain.TimelineItem, error) {
+func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID id.ID, tool domain.ToolKind, approvalID, preview, toolCallID string) (domain.TimelineItem, error) {
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
 	item, err := chatpkg.AttachToolApproval(ctx, e.store, chatID, toolCallID, domain.ApprovalRequest{
 		Body: body,
@@ -3582,7 +3583,7 @@ func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID do
 	return item, nil
 }
 
-func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID domain.ID, tool domain.ToolKind, approvalID domain.ID, status, preview, toolCallID string) (domain.TimelineItem, error) {
+func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID id.ID, tool domain.ToolKind, approvalID id.ID, status, preview, toolCallID string) (domain.TimelineItem, error) {
 	body := fmt.Sprintf("Approval %s %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
 		"approval_id": approvalID,
@@ -3619,7 +3620,7 @@ func approvalPreviewFromStored(tool domain.ToolKind, raw string) string {
 	return tools.Preview(req)
 }
 
-func (e *Engine) requestForToolCall(ctx context.Context, chatID domain.ID, toolCallID string) (tools.Request, error) {
+func (e *Engine) requestForToolCall(ctx context.Context, chatID id.ID, toolCallID string) (tools.Request, error) {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if chatID == "" {
 		return tools.Request{}, fmt.Errorf("chat id is required")
@@ -3652,7 +3653,7 @@ func (e *Engine) requestForToolCall(ctx context.Context, chatID domain.ID, toolC
 	return tools.Request{}, fmt.Errorf("tool call %q not found", toolCallID)
 }
 
-func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID, approvalID domain.ID) (domain.Session, domain.Chat, tools.Request, error) {
+func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID, approvalID id.ID) (domain.Session, domain.Chat, tools.Request, error) {
 	var chats []domain.Chat
 	if chatID != "" {
 		chat, err := chatpkg.GetChat(ctx, e.store, chatID)

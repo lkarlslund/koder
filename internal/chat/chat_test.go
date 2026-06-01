@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -490,7 +491,7 @@ func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 	}
 
 	errorItem := domain.TimelineItem{
-		ID:        domain.NewTimelineID(time.Now().UTC()),
+		ID:        NewTimelineID(time.Now().UTC()),
 		ChatID:    chatRecord.ID,
 		Content:   domain.Notice{Text: "provider failed", Kind: "model_error", Level: "error"},
 		CreatedAt: time.Now().UTC(),
@@ -673,7 +674,7 @@ func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	var thirdID domain.ID
+	var thirdID id.ID
 	for _, item := range rt.Snapshot().QueuedInputs {
 		if item.Text == "third" {
 			thirdID = item.ID
@@ -709,7 +710,7 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	queuedID := domain.NewIDAt(time.Now().UTC())
+	queuedID := id.NewAt(time.Now().UTC())
 	rt.ReplaceQueue([]domain.QueuedInput{{
 		ID:        queuedID,
 		Kind:      domain.QueuedInputKindQueued,
@@ -1041,7 +1042,7 @@ func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
 	}
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "queued steer"})
 	deadline = time.After(2 * time.Second)
-	var queuedID domain.ID
+	var queuedID id.ID
 	for queuedID == "" {
 		select {
 		case <-deadline:

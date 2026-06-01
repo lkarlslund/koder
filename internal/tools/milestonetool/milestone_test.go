@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
@@ -34,7 +35,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 	return tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st), ChatRole: chatrole.Orchestrator}, st, session
 }
 
-func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
+func seedPlan(t *testing.T, st *store.Store, sessionID id.ID) {
 	t.Helper()
 	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: sessionID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
@@ -174,8 +175,8 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 }
 
 func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
-	ownerID := domain.NewID()
-	otherID := domain.NewID()
+	ownerID := id.New()
+	otherID := id.New()
 	plan := planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
@@ -203,7 +204,7 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 }
 
 func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
-	ownerID := domain.NewID()
+	ownerID := id.New()
 	plan := planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{

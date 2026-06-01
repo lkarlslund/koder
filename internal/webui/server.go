@@ -30,6 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -70,8 +71,8 @@ type Server struct {
 }
 
 type clientSelection struct {
-	SessionID domain.ID
-	ChatID    domain.ID
+	SessionID id.ID
+	ChatID    id.ID
 }
 
 // Start starts the web UI server.
@@ -203,16 +204,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(renderIndexHTML()))
 }
 
-func sessionIDFromPath(path string) domain.ID {
+func sessionIDFromPath(path string) id.ID {
 	path = strings.Trim(strings.TrimSpace(path), "/")
 	if !strings.HasPrefix(path, "s/") {
 		return ""
 	}
-	id := strings.TrimSpace(strings.TrimPrefix(path, "s/"))
-	if id == "" || strings.Contains(id, "/") {
+	value := strings.TrimSpace(strings.TrimPrefix(path, "s/"))
+	if value == "" || strings.Contains(value, "/") {
 		return ""
 	}
-	return domain.ID(id)
+	return id.ID(value)
 }
 
 func handleFavicon(w http.ResponseWriter, r *http.Request) {
@@ -335,8 +336,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
 
 	ctx := r.Context()
-	clientID := string(domain.NewID())
-	if sessionID := domain.ID(strings.TrimSpace(r.URL.Query().Get("session"))); sessionID != "" {
+	clientID := string(id.New())
+	if sessionID := id.ID(strings.TrimSpace(r.URL.Query().Get("session"))); sessionID != "" {
 		s.setClientSelection(clientID, clientSelection{SessionID: sessionID})
 	}
 	if s.debug != nil {
@@ -456,7 +457,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"queued": true}, s.controller.Continue(in.Note)
 	case "reorder_queue":
 		var in struct {
-			IDs []domain.ID `json:"ids"`
+			IDs []id.ID `json:"ids"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -464,7 +465,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"reordered": true}, s.controller.ReorderQueue(in.IDs)
 	case "delete_queue_item":
 		var in struct {
-			ID domain.ID `json:"id"`
+			ID id.ID `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -472,7 +473,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"deleted": true}, s.controller.DeleteQueueItem(in.ID)
 	case "send_queue_item_now":
 		var in struct {
-			ID domain.ID `json:"id"`
+			ID id.ID `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -496,7 +497,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"started": true}, nil
 	case "switch_chat":
 		var in struct {
-			ChatID domain.ID `json:"chat_id"`
+			ChatID id.ID `json:"chat_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -518,7 +519,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.Sessions(ctx)
 	case "switch_session":
 		var in struct {
-			SessionID domain.ID `json:"session_id"`
+			SessionID id.ID `json:"session_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -539,8 +540,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.State(), nil
 	case "rename_session":
 		var in struct {
-			SessionID domain.ID `json:"session_id"`
-			Title     string    `json:"title"`
+			SessionID id.ID  `json:"session_id"`
+			Title     string `json:"title"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -551,7 +552,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.State(), nil
 	case "delete_session":
 		var in struct {
-			SessionID domain.ID `json:"session_id"`
+			SessionID id.ID `json:"session_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -568,7 +569,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]string{"project_root": path}, nil
 	case "delete_chat":
 		var in struct {
-			ChatID domain.ID `json:"chat_id"`
+			ChatID id.ID `json:"chat_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -579,7 +580,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"archived": true}, nil
 	case "reorder_chats":
 		var in struct {
-			ChatIDs []domain.ID `json:"chat_ids"`
+			ChatIDs []id.ID `json:"chat_ids"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -786,7 +787,7 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 	return s.controller.State(), nil
 }
 
-func (s *Server) sessionExists(ctx context.Context, sessionID domain.ID) (bool, error) {
+func (s *Server) sessionExists(ctx context.Context, sessionID id.ID) (bool, error) {
 	state, err := s.controller.Sessions(ctx)
 	if err != nil {
 		return false, err
@@ -847,25 +848,25 @@ func (s *Server) deleteClientSelection(clientID string) {
 }
 
 type stateDelta struct {
-	Session       any       `json:"session,omitempty"`
-	Sessions      any       `json:"sessions,omitempty"`
-	Chats         any       `json:"chats,omitempty"`
-	ChatStatuses  any       `json:"chat_statuses,omitempty"`
-	ActiveChatID  domain.ID `json:"active_chat_id,omitempty"`
-	Access        any       `json:"access,omitempty"`
-	Milestones    any       `json:"milestones,omitempty"`
-	Todos         any       `json:"todos,omitempty"`
-	TodosByRef    any       `json:"todos_by_milestone,omitempty"`
-	Workspace     any       `json:"workspace_status,omitempty"`
-	ContextWindow int       `json:"context_window,omitempty"`
-	ModelInfo     any       `json:"model_info,omitempty"`
-	Theme         string    `json:"theme,omitempty"`
-	ProjectRoot   string    `json:"project_root,omitempty"`
-	Error         string    `json:"error,omitempty"`
+	Session       any    `json:"session,omitempty"`
+	Sessions      any    `json:"sessions,omitempty"`
+	Chats         any    `json:"chats,omitempty"`
+	ChatStatuses  any    `json:"chat_statuses,omitempty"`
+	ActiveChatID  id.ID  `json:"active_chat_id,omitempty"`
+	Access        any    `json:"access,omitempty"`
+	Milestones    any    `json:"milestones,omitempty"`
+	Todos         any    `json:"todos,omitempty"`
+	TodosByRef    any    `json:"todos_by_milestone,omitempty"`
+	Workspace     any    `json:"workspace_status,omitempty"`
+	ContextWindow int    `json:"context_window,omitempty"`
+	ModelInfo     any    `json:"model_info,omitempty"`
+	Theme         string `json:"theme,omitempty"`
+	ProjectRoot   string `json:"project_root,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 type chatDelta struct {
-	ChatID            domain.ID            `json:"chat_id"`
+	ChatID            id.ID                `json:"chat_id"`
 	Chat              any                  `json:"chat,omitempty"`
 	Item              *domain.TimelineItem `json:"item,omitempty"`
 	Approvals         any                  `json:"approvals,omitempty"`
@@ -952,7 +953,7 @@ func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
 	return timeline[len(timeline)-1], true
 }
 
-func snapshotTimelineItem(timeline []domain.TimelineItem, id domain.ID) (domain.TimelineItem, bool) {
+func snapshotTimelineItem(timeline []domain.TimelineItem, id id.ID) (domain.TimelineItem, bool) {
 	for idx := len(timeline) - 1; idx >= 0; idx-- {
 		if timeline[idx].ID == id {
 			return timeline[idx], true
@@ -1030,7 +1031,7 @@ func (s *Server) updateDebugChats() {
 }
 
 func chatDebugFromState(state app.State) []debugsrv.ChatDebug {
-	statuses := make(map[domain.ID]app.ChatSidebarStatus, len(state.ChatStatuses))
+	statuses := make(map[id.ID]app.ChatSidebarStatus, len(state.ChatStatuses))
 	for _, status := range state.ChatStatuses {
 		statuses[status.ChatID] = status
 	}

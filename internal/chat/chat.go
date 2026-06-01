@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
@@ -83,7 +84,7 @@ type Update struct {
 
 type Chat struct {
 	deps    Deps
-	onClose func(domain.ID)
+	onClose func(id.ID)
 
 	mu               sync.RWMutex
 	session          domain.Session
@@ -94,7 +95,7 @@ type Chat struct {
 	active           bool
 	cancel           context.CancelFunc
 	queue            []domain.QueuedInput
-	queueNotes       map[domain.ID]string
+	queueNotes       map[id.ID]string
 	activeUserSource string
 	cancelState      CancelState
 	running          map[string]struct{}
@@ -126,15 +127,15 @@ type replaceQueueCmd struct {
 }
 
 type reorderQueueCmd struct {
-	ids []domain.ID
+	ids []id.ID
 }
 
 type deleteQueueItemCmd struct {
-	id domain.ID
+	id id.ID
 }
 
 type sendQueueItemNowCmd struct {
-	id domain.ID
+	id id.ID
 }
 
 type dispatchQueuedCmd struct {
@@ -197,7 +198,7 @@ type TurnErrorHandler interface {
 }
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
-func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(domain.ID)) (*Chat, error) {
+func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(id.ID)) (*Chat, error) {
 	if deps.Store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -223,7 +224,7 @@ func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 }
 
 // New builds a live chat from hydrated persisted state.
-func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(domain.ID)) (*Chat, error) {
+func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID)) (*Chat, error) {
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
@@ -242,7 +243,7 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		status:     status,
 		statusText: statusText,
 		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
-		queueNotes: map[domain.ID]string{},
+		queueNotes: map[id.ID]string{},
 		inbox:      make(chan any, 64),
 		subs:       map[int]chan Update{},
 	}
@@ -310,13 +311,13 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 }
 
 // QueuedTimelineIDs returns timeline items that already render queued inputs.
-func (t *TurnState) QueuedTimelineIDs() map[domain.ID]struct{} {
+func (t *TurnState) QueuedTimelineIDs() map[id.ID]struct{} {
 	if t == nil || t.chat == nil {
 		return nil
 	}
 	t.chat.mu.RLock()
 	defer t.chat.mu.RUnlock()
-	out := map[domain.ID]struct{}{}
+	out := map[id.ID]struct{}{}
 	for _, item := range t.chat.queue {
 		if item.TimelineID != "" {
 			out[item.TimelineID] = struct{}{}
@@ -353,7 +354,7 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 		seq = int64(len(r.state.Timeline()) + 1)
 	}
 	item := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
 		Seq:       seq,
 		Content:   user,
@@ -412,7 +413,7 @@ func (t *TurnState) NextAssistantItem() domain.TimelineItem {
 		seq = int64(len(t.chat.state.Timeline()) + 1)
 	}
 	return domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    t.chat.chat.ID,
 		Seq:       seq,
 		Content:   domain.AssistantMessage{},
@@ -515,7 +516,7 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 		seq = int64(len(r.state.Timeline()) + 1)
 	}
 	item := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
 		Seq:       seq,
 		Content:   user,
@@ -641,15 +642,15 @@ func (r *Chat) Enqueue(item QueueItem) {
 	r.inbox <- enqueueCmd{item: item}
 }
 
-func (r *Chat) ReorderQueue(ids []domain.ID) {
+func (r *Chat) ReorderQueue(ids []id.ID) {
 	r.inbox <- reorderQueueCmd{ids: slices.Clone(ids)}
 }
 
-func (r *Chat) DeleteQueueItem(id domain.ID) {
+func (r *Chat) DeleteQueueItem(id id.ID) {
 	r.inbox <- deleteQueueItemCmd{id: id}
 }
 
-func (r *Chat) SendQueueItemNow(id domain.ID) {
+func (r *Chat) SendQueueItemNow(id id.ID) {
 	r.inbox <- sendQueueItemNowCmd{id: id}
 }
 
@@ -908,7 +909,7 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 		}
 	} else {
 		item = domain.TimelineItem{
-			ID:        domain.NewTimelineID(now),
+			ID:        NewTimelineID(now),
 			ChatID:    r.chat.ID,
 			Seq:       1,
 			Content:   domain.ToolExecution{Tool: tool, Args: args, Result: &result, StartedAt: now, EndedAt: now},
@@ -1066,7 +1067,7 @@ func (r *Chat) appendQueuedUserInputLocked(queued domain.QueuedInput) domain.Tim
 		user.References = append(user.References, domain.Reference(ref))
 	}
 	item := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
 		Seq:       int64(len(r.state.Timeline()) + 1),
 		Content:   user,
@@ -1093,12 +1094,12 @@ func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) handleReorderQueue(ids []domain.ID) {
+func (r *Chat) handleReorderQueue(ids []id.ID) {
 	if len(ids) == 0 {
 		return
 	}
 	r.mu.Lock()
-	queueMap := make(map[domain.ID]domain.QueuedInput, len(r.queue))
+	queueMap := make(map[id.ID]domain.QueuedInput, len(r.queue))
 	for _, item := range r.queue {
 		queueMap[item.ID] = item
 	}
@@ -1120,7 +1121,7 @@ func (r *Chat) handleReorderQueue(ids []domain.ID) {
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 }
 
-func (r *Chat) handleDeleteQueueItem(id domain.ID) {
+func (r *Chat) handleDeleteQueueItem(id id.ID) {
 	if id == "" {
 		return
 	}
@@ -1146,7 +1147,7 @@ func (r *Chat) handleDeleteQueueItem(id domain.ID) {
 	}
 }
 
-func (r *Chat) handleSendQueueItemNow(id domain.ID) {
+func (r *Chat) handleSendQueueItemNow(id id.ID) {
 	if id == "" {
 		return
 	}
@@ -1371,7 +1372,7 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 			return
 		}
 	}
-	r.state.RemoveApproval(domain.ID(toolCallID))
+	r.state.RemoveApproval(id.ID(toolCallID))
 }
 
 func (r *Chat) handleResumePendingTools() {
@@ -1971,7 +1972,7 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	}
 	r.mu.Lock()
 	timelineItem := domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    chat.ID,
 		Seq:       int64(len(r.state.Timeline()) + 1),
 		Content:   user,
@@ -1997,7 +1998,7 @@ func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 	}
 	now := time.Now().UTC()
 	r.state.AppendTimelineItem(domain.TimelineItem{
-		ID:        domain.NewTimelineID(now),
+		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
 		Seq:       int64(len(r.state.Timeline()) + 1),
 		Content:   domain.Notice{Text: body, Kind: kind, Level: severity},
@@ -2032,7 +2033,7 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 		}
 	} else {
 		item = domain.TimelineItem{
-			ID:        domain.NewTimelineID(now),
+			ID:        NewTimelineID(now),
 			ChatID:    r.chat.ID,
 			Content:   notice,
 			CreatedAt: now,
@@ -2086,7 +2087,7 @@ func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 		kind = domain.QueuedInputKindContinue
 	}
 	return domain.QueuedInput{
-		ID:          domain.NewID(),
+		ID:          id.New(),
 		Kind:        kind,
 		Text:        strings.TrimSpace(item.Text),
 		Source:      strings.TrimSpace(item.Source),

@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 )
 
 type StoredResultStatus string
@@ -207,14 +208,14 @@ type MilestonePlanStoredResult struct {
 }
 
 type ChatStoredItem struct {
-	ID                 domain.ID `json:"id"`
-	Title              string    `json:"title"`
-	Role               string    `json:"role,omitempty"`
-	State              string    `json:"state,omitempty"`
-	Archived           bool      `json:"archived,omitempty"`
-	ActiveMilestoneRef string    `json:"active_milestone_ref,omitempty"`
-	AssignedTodoRef    domain.ID `json:"assigned_todo_ref,omitempty"`
-	StatusText         string    `json:"status_text,omitempty"`
+	ID                 id.ID  `json:"id"`
+	Title              string `json:"title"`
+	Role               string `json:"role,omitempty"`
+	State              string `json:"state,omitempty"`
+	Archived           bool   `json:"archived,omitempty"`
+	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
+	AssignedTodoRef    id.ID  `json:"assigned_todo_ref,omitempty"`
+	StatusText         string `json:"status_text,omitempty"`
 }
 
 type ChatListStoredResult struct {
@@ -222,9 +223,9 @@ type ChatListStoredResult struct {
 }
 
 type TodoStoredItem struct {
-	ID      domain.ID `json:"id"`
-	Content string    `json:"content"`
-	Status  string    `json:"status"`
+	ID      id.ID  `json:"id"`
+	Content string `json:"content"`
+	Status  string `json:"status"`
 }
 
 type TodoListStoredResult struct {

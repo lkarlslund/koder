@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -154,7 +155,7 @@ func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.R
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_ref"],
-		TodoRef:      domain.ID(req.Args["todo_ref"]),
+		TodoRef:      id.ID(req.Args["todo_ref"]),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -188,7 +189,7 @@ func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	chatID := domain.ID(strings.TrimSpace(req.Args["chat_id"]))
+	chatID := id.ID(strings.TrimSpace(req.Args["chat_id"]))
 	if chatID == "" {
 		chatID = runtime.ChatID
 	}

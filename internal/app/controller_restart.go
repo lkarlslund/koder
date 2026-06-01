@@ -7,6 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
@@ -39,7 +40,7 @@ func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Sess
 	return session, session.ID != "", nil
 }
 
-func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
+func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID id.ID) (bool, error) {
 	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
 	if err != nil {
 		return false, err
@@ -51,7 +52,7 @@ func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID do
 	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart, nil
 }
 
-func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*chat.Chat, snapshots map[domain.ID]chat.Snapshot) {
+func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[id.ID]*chat.Chat, snapshots map[id.ID]chat.Snapshot) {
 	for id, snapshot := range snapshots {
 		if !shouldAutoResumeRestartInterrupted(snapshot) {
 			continue
@@ -97,7 +98,7 @@ func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats 
 	return nil
 }
 
-func (c *Controller) chatEndsWithProcessInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
+func (c *Controller) chatEndsWithProcessInterrupt(ctx context.Context, chatID id.ID) (bool, error) {
 	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
 	if err != nil {
 		return false, err
@@ -141,7 +142,7 @@ func hasUserQueuedInput(snapshot chat.Snapshot) bool {
 }
 
 func allSnapshotQueuedInputs(snapshot chat.Snapshot) []domain.QueuedInput {
-	seen := map[domain.ID]struct{}{}
+	seen := map[id.ID]struct{}{}
 	out := make([]domain.QueuedInput, 0, len(snapshot.Chat.QueuedInputs)+len(snapshot.QueuedInputs))
 	for _, item := range snapshot.Chat.QueuedInputs {
 		if item.ID != "" {

@@ -7,34 +7,35 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type fakeChatControl struct {
 	statuses         []tools.ChatStatus
 	lastStart        tools.ChatStartRequest
-	lastSessionID    domain.ID
-	lastParentChatID domain.ID
-	lastChatID       domain.ID
+	lastSessionID    id.ID
+	lastParentChatID id.ID
+	lastChatID       id.ID
 }
 
-func (f *fakeChatControl) ListChats(context.Context, domain.ID) ([]tools.ChatStatus, error) {
+func (f *fakeChatControl) ListChats(context.Context, id.ID) ([]tools.ChatStatus, error) {
 	return f.statuses, nil
 }
 
-func (f *fakeChatControl) StartChat(_ context.Context, sessionID, parentChatID domain.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+func (f *fakeChatControl) StartChat(_ context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
 	f.lastSessionID = sessionID
 	f.lastParentChatID = parentChatID
 	f.lastStart = req
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) PollChat(_ context.Context, _ domain.ID, chatID domain.ID) (tools.ChatStatus, error) {
+func (f *fakeChatControl) PollChat(_ context.Context, _ id.ID, chatID id.ID) (tools.ChatStatus, error) {
 	f.lastChatID = chatID
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) ArchiveChat(_ context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+func (f *fakeChatControl) ArchiveChat(_ context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
 	f.lastSessionID = sessionID
 	f.lastChatID = chatID
 	status := f.statuses[0]

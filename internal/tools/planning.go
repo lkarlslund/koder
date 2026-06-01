@@ -7,19 +7,20 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 )
 
 type TaskControl interface {
-	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (planning.Task, error)
+	AddTask(context.Context, id.ID, string, domain.TaskStatus) (planning.Task, error)
 }
 
 type SessionControl interface {
-	GetMilestonePlan(context.Context, domain.ID) (planning.Plan, error)
-	SetMilestonePlan(context.Context, domain.ID, string, []planning.Milestone) (planning.Plan, error)
-	AddTodoItems(context.Context, domain.ID, string, []string) ([]planning.TodoItem, error)
-	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (planning.TodoItem, error)
-	ListTodos(context.Context, domain.ID, string) ([]planning.TodoItem, error)
+	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
+	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
+	AddTodoItems(context.Context, id.ID, string, []string) ([]planning.TodoItem, error)
+	UpdateTodoItem(context.Context, id.ID, domain.TodoStatus, string) (planning.TodoItem, error)
+	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
 }
 
 func RequireSessionControl(runtime Runtime) (SessionControl, error) {
@@ -56,11 +57,11 @@ func AssignedMilestoneRef(runtime Runtime) string {
 	return assigned
 }
 
-func AssignedTodoRef(runtime Runtime) domain.ID {
-	return domain.ID(strings.TrimSpace(string(runtime.AssignedTodoRef)))
+func AssignedTodoRef(runtime Runtime) id.ID {
+	return id.ID(strings.TrimSpace(string(runtime.AssignedTodoRef)))
 }
 
-func TodoScopeAllows(runtime Runtime, todoID domain.ID) error {
+func TodoScopeAllows(runtime Runtime, todoID id.ID) error {
 	assigned := AssignedTodoRef(runtime)
 	if assigned == "" || todoID == assigned {
 		return nil
@@ -215,4 +216,4 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	return text
 }
 
-func FormatTodoID(id domain.ID) string { return id }
+func FormatTodoID(id id.ID) string { return id }

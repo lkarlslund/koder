@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
@@ -23,9 +24,9 @@ const (
 )
 
 type debugApproval struct {
-	ID         domain.ID             `json:"ID"`
-	SessionID  domain.ID             `json:"SessionID"`
-	ChatID     domain.ID             `json:"ChatID"`
+	ID         id.ID                 `json:"ID"`
+	SessionID  id.ID                 `json:"SessionID"`
+	ChatID     id.ID                 `json:"ChatID"`
 	Tool       domain.ToolKind       `json:"Tool"`
 	ToolCallID string                `json:"ToolCallID"`
 	Command    string                `json:"Command"`
@@ -35,7 +36,7 @@ type debugApproval struct {
 
 type RecordedEvent struct {
 	Timestamp time.Time         `json:"timestamp"`
-	SessionID domain.ID         `json:"session_id"`
+	SessionID id.ID             `json:"session_id"`
 	Source    string            `json:"source"`
 	Kind      string            `json:"kind"`
 	Text      string            `json:"text,omitempty"`
@@ -84,8 +85,8 @@ type ClientDebug struct {
 	LastSeen               time.Time `json:"last_seen"`
 	RemoteAddr             string    `json:"remote_addr,omitempty"`
 	UserAgent              string    `json:"user_agent,omitempty"`
-	SelectedSession        domain.ID `json:"selected_session,omitempty"`
-	SelectedChat           domain.ID `json:"selected_chat,omitempty"`
+	SelectedSession        id.ID     `json:"selected_session,omitempty"`
+	SelectedChat           id.ID     `json:"selected_chat,omitempty"`
 	DocumentVisible        bool      `json:"document_visible"`
 	WindowFocused          bool      `json:"window_focused"`
 	ComposerFocused        bool      `json:"composer_focused"`
@@ -101,18 +102,18 @@ type ClientDebug struct {
 }
 
 type ChatDebug struct {
-	ID                        domain.ID `json:"id"`
-	SessionID                 domain.ID `json:"session_id"`
-	Title                     string    `json:"title,omitempty"`
-	Status                    string    `json:"status"`
-	StatusText                string    `json:"status_text,omitempty"`
-	Active                    bool      `json:"active"`
-	Busy                      bool      `json:"busy"`
-	QueueLen                  int       `json:"queue_len"`
-	PendingAssistantText      int       `json:"pending_assistant_text_len"`
-	PendingAssistantReasoning int       `json:"pending_assistant_reasoning_len"`
-	PendingApprovals          int       `json:"pending_approvals"`
-	RunningToolCalls          int       `json:"running_tool_calls"`
+	ID                        id.ID  `json:"id"`
+	SessionID                 id.ID  `json:"session_id"`
+	Title                     string `json:"title,omitempty"`
+	Status                    string `json:"status"`
+	StatusText                string `json:"status_text,omitempty"`
+	Active                    bool   `json:"active"`
+	Busy                      bool   `json:"busy"`
+	QueueLen                  int    `json:"queue_len"`
+	PendingAssistantText      int    `json:"pending_assistant_text_len"`
+	PendingAssistantReasoning int    `json:"pending_assistant_reasoning_len"`
+	PendingApprovals          int    `json:"pending_approvals"`
+	RunningToolCalls          int    `json:"running_tool_calls"`
 }
 
 type ArchitectureDebug struct {
@@ -123,7 +124,7 @@ type ArchitectureDebug struct {
 }
 
 type SessionDebug struct {
-	ID                  domain.ID          `json:"id"`
+	ID                  id.ID              `json:"id"`
 	Title               string             `json:"title,omitempty"`
 	ProjectRoot         string             `json:"project_root,omitempty"`
 	Hydration           string             `json:"hydration"`
@@ -139,8 +140,8 @@ type SessionDebug struct {
 }
 
 type SessionChatDebug struct {
-	ID                         domain.ID  `json:"id"`
-	SessionID                  domain.ID  `json:"session_id"`
+	ID                         id.ID      `json:"id"`
+	SessionID                  id.ID      `json:"session_id"`
 	Title                      string     `json:"title,omitempty"`
 	WorkflowRole               string     `json:"workflow_role,omitempty"`
 	Archived                   bool       `json:"archived"`
@@ -159,7 +160,7 @@ type SessionChatDebug struct {
 }
 
 type SessionAnalysis struct {
-	SessionID       domain.ID               `json:"session_id"`
+	SessionID       id.ID                   `json:"session_id"`
 	ContinueCount   int                     `json:"continue_count"`
 	Continues       []SessionContinueRecord `json:"continues,omitempty"`
 	BadStopCount    int                     `json:"bad_stop_count"`
@@ -176,7 +177,7 @@ type SessionContinueRecord struct {
 
 type SessionBadStopRecord struct {
 	MessageID        string    `json:"message_id"`
-	ChatID           domain.ID `json:"chat_id"`
+	ChatID           id.ID     `json:"chat_id"`
 	CreatedAt        time.Time `json:"created_at"`
 	Summary          string    `json:"summary,omitempty"`
 	Text             string    `json:"text,omitempty"`
@@ -197,9 +198,9 @@ type Recorder struct {
 	maxHTTP       int
 	process       ProcessDebug
 	clients       map[string]ClientDebug
-	chats         map[domain.ID]ChatDebug
+	chats         map[id.ID]ChatDebug
 	events        []RecordedEvent
-	sessionEvents map[domain.ID][]RecordedEvent
+	sessionEvents map[id.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
 }
 
@@ -208,8 +209,8 @@ func NewRecorder() *Recorder {
 		maxEvents:     defaultMaxLogs,
 		maxHTTP:       defaultMaxHTTP,
 		clients:       map[string]ClientDebug{},
-		chats:         map[domain.ID]ChatDebug{},
-		sessionEvents: map[domain.ID][]RecordedEvent{},
+		chats:         map[id.ID]ChatDebug{},
+		sessionEvents: map[id.ID][]RecordedEvent{},
 	}
 }
 
@@ -245,7 +246,7 @@ func (r *Recorder) DeepDebug() bool {
 	return r.deepDebug
 }
 
-func (r *Recorder) RecordEvent(sessionID domain.ID, evt domain.Event) {
+func (r *Recorder) RecordEvent(sessionID id.ID, evt domain.Event) {
 	if r == nil {
 		return
 	}
@@ -277,7 +278,7 @@ func (r *Recorder) RecordEvent(sessionID domain.ID, evt domain.Event) {
 	}
 }
 
-func (r *Recorder) RecordLifecycle(sessionID domain.ID, kind, text string, meta map[string]string) {
+func (r *Recorder) RecordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
 	if r == nil {
 		return
 	}
@@ -337,7 +338,7 @@ func (r *Recorder) RegisterClient(client ClientDebug) ClientDebug {
 	now := time.Now().UTC()
 	client.ID = strings.TrimSpace(client.ID)
 	if client.ID == "" {
-		client.ID = string(domain.NewID())
+		client.ID = string(id.New())
 	}
 	client.Connected = true
 	client.ConnectedAt = now
@@ -404,7 +405,7 @@ func (r *Recorder) UpdateChats(chats []ChatDebug) {
 	if r == nil {
 		return
 	}
-	next := make(map[domain.ID]ChatDebug, len(chats))
+	next := make(map[id.ID]ChatDebug, len(chats))
 	for _, chat := range chats {
 		if chat.ID == "" {
 			continue
@@ -462,7 +463,7 @@ func (r *Recorder) Chats() []ChatDebug {
 	return cloneChats(r.chats)
 }
 
-func (r *Recorder) Chat(chatID domain.ID) (ChatDebug, bool) {
+func (r *Recorder) Chat(chatID id.ID) (ChatDebug, bool) {
 	if r == nil {
 		return ChatDebug{}, false
 	}
@@ -472,7 +473,7 @@ func (r *Recorder) Chat(chatID domain.ID) (ChatDebug, bool) {
 	return chat, ok
 }
 
-func (r *Recorder) Events(sessionID domain.ID) []RecordedEvent {
+func (r *Recorder) Events(sessionID id.ID) []RecordedEvent {
 	if r == nil {
 		return nil
 	}
@@ -600,7 +601,7 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	chatID := domain.ID(strings.Trim(strings.TrimPrefix(r.URL.Path, "/debug/chats/"), "/"))
+	chatID := id.ID(strings.Trim(strings.TrimPrefix(r.URL.Path, "/debug/chats/"), "/"))
 	if chatID == "" {
 		http.NotFound(w, r)
 		return
@@ -655,7 +656,7 @@ func (s *Server) debugSession(ctx context.Context, session domain.Session) (Sess
 		return SessionDebug{}, nil, err
 	}
 	runtime := s.recorder.Runtime()
-	runtimeByChat := make(map[domain.ID]ChatDebug, len(runtime.Chats))
+	runtimeByChat := make(map[id.ID]ChatDebug, len(runtime.Chats))
 	for _, chat := range runtime.Chats {
 		runtimeByChat[chat.ID] = chat
 	}
@@ -699,7 +700,7 @@ func (s *Server) debugSession(ctx context.Context, session domain.Session) (Sess
 	return out, chats, nil
 }
 
-func (s *Server) debugChat(ctx context.Context, chatRecord domain.Chat, runtimeByChat map[domain.ID]ChatDebug, selectedChats map[domain.ID]int) (SessionChatDebug, error) {
+func (s *Server) debugChat(ctx context.Context, chatRecord domain.Chat, runtimeByChat map[id.ID]ChatDebug, selectedChats map[id.ID]int) (SessionChatDebug, error) {
 	timeline, err := debugTimelineForChat(ctx, s.store, chatRecord.ID)
 	if err != nil {
 		return SessionChatDebug{}, err
@@ -739,9 +740,9 @@ func (s *Server) debugChat(ctx context.Context, chatRecord domain.Chat, runtimeB
 	return out, nil
 }
 
-func selectedClientCounts(clients []ClientDebug) (map[domain.ID]int, map[domain.ID]int) {
-	sessions := map[domain.ID]int{}
-	chats := map[domain.ID]int{}
+func selectedClientCounts(clients []ClientDebug) (map[id.ID]int, map[id.ID]int) {
+	sessions := map[id.ID]int{}
+	chats := map[id.ID]int{}
 	for _, client := range clients {
 		if !client.Connected {
 			continue
@@ -848,11 +849,11 @@ func debugListSessions(ctx context.Context, st *store.Store) ([]domain.Session, 
 	return sessions, nil
 }
 
-func debugGetSession(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Session, error) {
+func debugGetSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
 	return debugSessionCollection(st).Get(ctx, sessionID)
 }
 
-func debugListChats(ctx context.Context, st *store.Store, sessionID domain.ID) ([]domain.Chat, error) {
+func debugListChats(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
 	chats, err := debugChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -869,7 +870,7 @@ func debugListChats(ctx context.Context, st *store.Store, sessionID domain.ID) (
 	return chats, nil
 }
 
-func debugDefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
+func debugDefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
 	chats, err := debugListChats(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
@@ -885,7 +886,7 @@ func debugDefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID)
 	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
 }
 
-func debugGetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (planning.Plan, error) {
+func debugGetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
 	plan, err := debugPlanCollection(st).Get(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{SessionID: sessionID}, nil
@@ -893,7 +894,7 @@ func debugGetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (pl
 	return plan, nil
 }
 
-func debugListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func debugListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	if milestoneRef != "" {
@@ -907,7 +908,7 @@ func debugListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, m
 	return items, nil
 }
 
-func debugListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) ([]planning.Task, error) {
+func debugListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
 	items, err := debugTaskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -921,7 +922,7 @@ func debugListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) (
 	return items, nil
 }
 
-func debugTimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+func debugTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
 	items, err := debugTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
@@ -951,7 +952,7 @@ func debugPendingApprovalsForChat(ctx context.Context, st *store.Store, chatReco
 				continue
 			}
 			approvals = append(approvals, debugApproval{
-				ID:         domain.ID(strings.TrimSpace(string(call.ToolCallID))),
+				ID:         id.ID(strings.TrimSpace(string(call.ToolCallID))),
 				SessionID:  chatRecord.SessionID,
 				ChatID:     chatRecord.ID,
 				Tool:       call.Tool,
@@ -1039,7 +1040,7 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	session, err := debugGetSession(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1087,7 +1088,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 	})
 }
 
-func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1099,14 +1100,14 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessio
 	})
 }
 
-func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID domain.ID) {
+func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID id.ID) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"events":     s.recorder.Events(sessionID),
 	})
 }
 
-func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1115,7 +1116,7 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionI
 	writeJSON(w, http.StatusOK, analyzeSession(sessionID, timeline, s.recorder.Events(sessionID)))
 }
 
-func (s *Server) sessionTimeline(ctx context.Context, sessionID domain.ID) ([]domain.TimelineItem, error) {
+func (s *Server) sessionTimeline(ctx context.Context, sessionID id.ID) ([]domain.TimelineItem, error) {
 	chat, err := debugDefaultChat(ctx, s.store, sessionID)
 	if err != nil {
 		return nil, err
@@ -1130,7 +1131,7 @@ func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	approvals, err := s.sessionApprovals(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1142,7 +1143,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
-func (s *Server) sessionApprovals(ctx context.Context, sessionID domain.ID) ([]debugApproval, error) {
+func (s *Server) sessionApprovals(ctx context.Context, sessionID id.ID) ([]debugApproval, error) {
 	chats, err := debugListChats(ctx, s.store, sessionID)
 	if err != nil {
 		return nil, err
@@ -1158,7 +1159,7 @@ func (s *Server) sessionApprovals(ctx context.Context, sessionID domain.ID) ([]d
 	return approvals, nil
 }
 
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	tasks, err := debugListTasks(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1170,7 +1171,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID d
 	})
 }
 
-func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	plan, err := debugGetPlan(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1182,7 +1183,7 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessio
 	})
 }
 
-func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
+func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	plan, err := debugGetPlan(r.Context(), s.store, sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1283,7 +1284,7 @@ func cloneClients(src map[string]ClientDebug) []ClientDebug {
 	return out
 }
 
-func cloneChats(src map[domain.ID]ChatDebug) []ChatDebug {
+func cloneChats(src map[id.ID]ChatDebug) []ChatDebug {
 	if len(src) == 0 {
 		return nil
 	}
@@ -1332,7 +1333,7 @@ type analyzedTranscriptMessage struct {
 	hasToolCall bool
 }
 
-func analyzeSession(sessionID domain.ID, timeline []domain.TimelineItem, events []RecordedEvent) SessionAnalysis {
+func analyzeSession(sessionID id.ID, timeline []domain.TimelineItem, events []RecordedEvent) SessionAnalysis {
 	transcript := make([]analyzedTranscriptMessage, 0, len(timeline))
 	for _, item := range timeline {
 		transcript = append(transcript, analyzeTranscriptItem(item))

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -558,7 +559,7 @@ func applyMilestoneOwner(milestone *planning.Milestone, status domain.MilestoneS
 	}
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID domain.ID, milestones []planning.Milestone) error {
+func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != domain.MilestoneStatusCompleted {
 			continue

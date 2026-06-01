@@ -12,6 +12,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -35,11 +36,11 @@ const (
 // Event reports a mutation made by the session owner.
 type Event struct {
 	Kind       EventKind
-	SessionID  domain.ID
+	SessionID  id.ID
 	Chat       domain.Chat
 	Snapshot   chatpkg.Snapshot
 	Update     chatpkg.Update
-	NextChatID domain.ID
+	NextChatID id.ID
 	Session    domain.Session
 	Plan       planning.Plan
 	Todos      []planning.TodoItem
@@ -56,8 +57,8 @@ type Session struct {
 	mu         sync.RWMutex
 	session    domain.Session
 	chats      []domain.Chat
-	runtimes   map[domain.ID]*chatpkg.Chat
-	unsubs     map[domain.ID]func()
+	runtimes   map[id.ID]*chatpkg.Chat
+	unsubs     map[id.ID]func()
 	plan       planning.Plan
 	todosByRef map[string][]planning.TodoItem
 	tasks      []planning.Task
@@ -68,7 +69,7 @@ type Session struct {
 }
 
 // Load hydrates a live session owner from persisted state.
-func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID domain.ID) (*Session, error) {
+func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID id.ID) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -103,8 +104,8 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 		chatLoader: chatLoader,
 		session:    session,
 		chats:      slices.Clone(chats),
-		runtimes:   map[domain.ID]*chatpkg.Chat{},
-		unsubs:     map[domain.ID]func(){},
+		runtimes:   map[id.ID]*chatpkg.Chat{},
+		unsubs:     map[id.ID]func(){},
 		plan:       plan,
 		todosByRef: todosByRef,
 		tasks:      slices.Clone(tasks),
@@ -112,7 +113,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	}, nil
 }
 
-func loadTodosByRef(ctx context.Context, st *store.Store, sessionID domain.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
+func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
 	out := map[string][]planning.TodoItem{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
@@ -137,7 +138,7 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID domain.ID, p
 type SessionSnapshot struct {
 	Session    domain.Session
 	Chats      []domain.Chat
-	Snapshots  map[domain.ID]chatpkg.Snapshot
+	Snapshots  map[id.ID]chatpkg.Snapshot
 	Plan       planning.Plan
 	Todos      []planning.TodoItem
 	TodosByRef map[string][]planning.TodoItem
@@ -151,7 +152,7 @@ func (s *Session) Snapshot() SessionSnapshot {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snapshots := make(map[domain.ID]chatpkg.Snapshot, len(s.runtimes))
+	snapshots := make(map[id.ID]chatpkg.Snapshot, len(s.runtimes))
 	for id, rt := range s.runtimes {
 		if rt != nil {
 			snapshots[id] = rt.Snapshot()
@@ -206,7 +207,7 @@ func (s *Session) emit(event Event) {
 }
 
 // Chat returns the live chat runtime owned by this session.
-func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, error) {
+func (s *Session) Chat(ctx context.Context, chatID id.ID) (*chatpkg.Chat, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
@@ -235,7 +236,7 @@ func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, er
 }
 
 // NewChat creates a new orchestrator chat under parentChatID.
-func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title string) (*chatpkg.Chat, error) {
+func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string) (*chatpkg.Chat, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
@@ -257,7 +258,7 @@ func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title str
 	parentID := parent.ID
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:           domain.NewID(),
+		ID:           id.New(),
 		SessionID:    session.ID,
 		ParentChatID: &parentID,
 		Title:        title,
@@ -315,12 +316,12 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	return rt, nil
 }
 
-func (s *Session) trackRuntimeLocked(chatID domain.ID, rt *chatpkg.Chat) {
+func (s *Session) trackRuntimeLocked(chatID id.ID, rt *chatpkg.Chat) {
 	if s.runtimes == nil {
-		s.runtimes = map[domain.ID]*chatpkg.Chat{}
+		s.runtimes = map[id.ID]*chatpkg.Chat{}
 	}
 	if s.unsubs == nil {
-		s.unsubs = map[domain.ID]func(){}
+		s.unsubs = map[id.ID]func(){}
 	}
 	if existing := s.runtimes[chatID]; existing == rt && s.unsubs[chatID] != nil {
 		return
@@ -334,7 +335,7 @@ func (s *Session) trackRuntimeLocked(chatID domain.ID, rt *chatpkg.Chat) {
 	go s.forwardRuntime(chatID, updates)
 }
 
-func (s *Session) forwardRuntime(chatID domain.ID, updates <-chan chatpkg.Update) {
+func (s *Session) forwardRuntime(chatID id.ID, updates <-chan chatpkg.Update) {
 	for update := range updates {
 		if update.Snapshot.Chat.ID == "" {
 			update.Snapshot.Chat.ID = chatID
@@ -387,7 +388,7 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 }
 
 // ArchiveChat marks a chat archived, preserving its history.
-func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, domain.ID, error) {
+func (s *Session) ArchiveChat(ctx context.Context, chatID id.ID) (tools.ChatStatus, id.ID, error) {
 	if s == nil {
 		return tools.ChatStatus{}, "", fmt.Errorf("session is required")
 	}
@@ -441,7 +442,7 @@ func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.Chat
 }
 
 // ReorderChats persists and applies the complete chat order.
-func (s *Session) ReorderChats(ctx context.Context, ids []domain.ID) ([]domain.Chat, error) {
+func (s *Session) ReorderChats(ctx context.Context, ids []id.ID) ([]domain.Chat, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
@@ -533,7 +534,7 @@ func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings
 }
 
 // SetChatModel persists the provider/model used by a chat and updates its runtime.
-func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID, modelID string) (domain.Chat, error) {
+func (s *Session) SetChatModel(ctx context.Context, chatID id.ID, providerID, modelID string) (domain.Chat, error) {
 	if s == nil {
 		return domain.Chat{}, fmt.Errorf("session is required")
 	}
@@ -589,7 +590,7 @@ func (s *Session) EnsureChatModels(ctx context.Context, defaultProvider, default
 }
 
 // EnsureChatModel fills missing provider/model fields from session defaults.
-func (s *Session) EnsureChatModel(ctx context.Context, chatID domain.ID, defaultProvider, defaultModel string) (domain.Chat, error) {
+func (s *Session) EnsureChatModel(ctx context.Context, chatID id.ID, defaultProvider, defaultModel string) (domain.Chat, error) {
 	if s == nil {
 		return domain.Chat{}, fmt.Errorf("session is required")
 	}
@@ -611,7 +612,7 @@ func (s *Session) EnsureChatModel(ctx context.Context, chatID domain.ID, default
 }
 
 // TouchSelection marks the session and selected chat as recently used.
-func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.Session, domain.Chat, []domain.Chat, error) {
+func (s *Session) TouchSelection(ctx context.Context, chatID id.ID) (domain.Session, domain.Chat, []domain.Chat, error) {
 	if s == nil {
 		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session is required")
 	}
@@ -661,7 +662,7 @@ func newestSessionChat(chats []domain.Chat) domain.Chat {
 	return best
 }
 
-func (s *Session) PollChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, error) {
+func (s *Session) PollChat(ctx context.Context, chatID id.ID) (tools.ChatStatus, error) {
 	if s == nil {
 		return tools.ChatStatus{}, fmt.Errorf("session is required")
 	}
@@ -716,7 +717,7 @@ func (s *Session) Close(ctx context.Context) error {
 	return nil
 }
 
-func (s *Session) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
+func (s *Session) GetMilestonePlan(ctx context.Context, sessionID id.ID) (planning.Plan, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return planning.Plan{}, err
 	}
@@ -725,7 +726,7 @@ func (s *Session) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (pl
 	return cloneMilestonePlan(s.plan), nil
 }
 
-func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
+func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return planning.Plan{}, err
 	}
@@ -747,7 +748,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, sum
 	return cloneMilestonePlan(plan), nil
 }
 
-func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
@@ -763,7 +764,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 			continue
 		}
 		items = append(items, planning.TodoItem{
-			ID:           domain.NewID(),
+			ID:           id.New(),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
@@ -791,7 +792,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	if s == nil {
 		return planning.TodoItem{}, fmt.Errorf("session is required")
 	}
@@ -843,7 +844,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 	return item, nil
 }
 
-func (s *Session) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func (s *Session) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
@@ -856,12 +857,12 @@ func (s *Session) ListTodos(ctx context.Context, sessionID domain.ID, milestoneR
 	return slices.Clone(s.todosByRef[milestoneRef]), nil
 }
 
-func (s *Session) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (planning.Task, error) {
+func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status domain.TaskStatus) (planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return planning.Task{}, err
 	}
 	task := planning.Task{
-		ID:        domain.NewID(),
+		ID:        id.New(),
 		SessionID: sessionID,
 		Body:      strings.TrimSpace(body),
 		Status:    status,
@@ -887,7 +888,7 @@ type scopedPlanning struct {
 	chat    domain.Chat
 }
 
-func (p scopedPlanning) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
+func (p scopedPlanning) GetMilestonePlan(ctx context.Context, sessionID id.ID) (planning.Plan, error) {
 	plan, err := p.session.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{}, err
@@ -898,7 +899,7 @@ func (p scopedPlanning) GetMilestonePlan(ctx context.Context, sessionID domain.I
 	return plan, nil
 }
 
-func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
+func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	ref := assignedMilestoneRef(p.chat)
 	if ref == "" {
 		return p.session.SetMilestonePlan(ctx, sessionID, summary, milestones)
@@ -924,7 +925,7 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID domain.I
 	return p.session.SetMilestonePlan(ctx, sessionID, current.Summary, current.Milestones)
 }
 
-func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	if assignedTodoRef(p.chat) != "" {
 		return nil, fmt.Errorf("chat is scoped to todo %q", assignedTodoRef(p.chat))
 	}
@@ -935,7 +936,7 @@ func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID domain.ID, m
 	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
 }
 
-func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
 		return planning.TodoItem{}, fmt.Errorf("chat is scoped to todo %q", assigned)
 	}
@@ -962,7 +963,7 @@ func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID domain.ID, st
 	return updated, nil
 }
 
-func (p scopedPlanning) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func (p scopedPlanning) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	ref, err := p.allowedMilestoneRef(milestoneRef)
 	if err != nil {
 		return nil, err
@@ -1002,11 +1003,11 @@ func assignedMilestoneRef(chat domain.Chat) string {
 	return assigned
 }
 
-func assignedTodoRef(chat domain.Chat) domain.ID {
-	return domain.ID(strings.TrimSpace(string(chat.AssignedTodoRef)))
+func assignedTodoRef(chat domain.Chat) id.ID {
+	return id.ID(strings.TrimSpace(string(chat.AssignedTodoRef)))
 }
 
-func (s *Session) requireSession(sessionID domain.ID) error {
+func (s *Session) requireSession(sessionID id.ID) error {
 	if s == nil {
 		return fmt.Errorf("session is required")
 	}
@@ -1019,7 +1020,7 @@ func (s *Session) requireSession(sessionID domain.ID) error {
 	return nil
 }
 
-func (s *Session) chatStatusLocked(chatID domain.ID) tools.ChatStatus {
+func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 	chatRecord, _ := chatByID(s.chats, chatID)
 	status := tools.ChatRunStateIdle
 	statusText := string(chatpkg.StatusIdle)
@@ -1061,13 +1062,13 @@ func (s *Session) chatStatusLocked(chatID domain.ID) tools.ChatStatus {
 	}
 }
 
-func (s *Session) snapshotForChat(chatID domain.ID) chatpkg.Snapshot {
+func (s *Session) snapshotForChat(chatID id.ID) chatpkg.Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.snapshotForChatLocked(chatID)
 }
 
-func (s *Session) snapshotForChatLocked(chatID domain.ID) chatpkg.Snapshot {
+func (s *Session) snapshotForChatLocked(chatID id.ID) chatpkg.Snapshot {
 	chatRecord, _ := chatByID(s.chats, chatID)
 	if rt := s.runtimes[chatID]; rt != nil {
 		snapshot := rt.Snapshot()
@@ -1079,7 +1080,7 @@ func (s *Session) snapshotForChatLocked(chatID domain.ID) chatpkg.Snapshot {
 	return chatpkg.Snapshot{Session: s.session, Chat: chatRecord, Status: chatpkg.StatusIdle, StatusText: string(chatpkg.StatusIdle)}
 }
 
-func chatByID(chats []domain.Chat, id domain.ID) (domain.Chat, bool) {
+func chatByID(chats []domain.Chat, id id.ID) (domain.Chat, bool) {
 	for _, item := range chats {
 		if item.ID == id {
 			return item, true
@@ -1104,7 +1105,7 @@ func upsertSessionChatLocked(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
-func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) domain.ID {
+func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) id.ID {
 	if archiving.ParentChatID != nil {
 		for _, item := range chats {
 			if item.ID == *archiving.ParentChatID && item.ID != archiving.ID && !item.Archived {

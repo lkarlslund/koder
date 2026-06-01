@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 )
 
 const environmentProbeTimeout = 500 * time.Millisecond
@@ -47,7 +48,7 @@ func (e *Engine) sessionEnvironmentPrompt(session domain.Session) string {
 	e.envMu.Lock()
 	defer e.envMu.Unlock()
 	if e.envPrompts == nil {
-		e.envPrompts = map[domain.ID]string{}
+		e.envPrompts = map[id.ID]string{}
 	}
 	if text := e.envPrompts[session.ID]; text != "" {
 		return text

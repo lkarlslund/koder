@@ -10,14 +10,15 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
 type approval struct {
-	ID         domain.ID
-	SessionID  domain.ID
-	ChatID     domain.ID
+	ID         id.ID
+	SessionID  id.ID
+	ChatID     id.ID
 	Tool       domain.ToolKind
 	ToolCallID string
 	Command    string
@@ -110,10 +111,10 @@ func EnsureSession(ctx context.Context, st *store.Store, providerID, modelID str
 	return CreateSession(ctx, st, "New Session", providerID, modelID, nil)
 }
 
-func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *domain.ID) (domain.Session, error) {
+func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
-		ID:                domain.NewIDAt(now),
+		ID:                id.NewAt(now),
 		ParentID:          parentID,
 		Title:             title,
 		PermissionProfile: "",
@@ -124,7 +125,7 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 		UpdatedAt:         now,
 	}
 	chatRecord := domain.Chat{
-		ID:                domain.NewIDAt(now),
+		ID:                id.NewAt(now),
 		SessionID:         session.ID,
 		Title:             "Main",
 		WorkflowRole:      chatrole.Orchestrator,
@@ -168,7 +169,7 @@ func ListSessions(ctx context.Context, st *store.Store) ([]domain.Session, error
 	return sessions, nil
 }
 
-func GetSession(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Session, error) {
+func GetSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
 	return SessionCollection(st).Get(ctx, sessionID)
 }
 
@@ -179,7 +180,7 @@ func PutSession(ctx context.Context, st *store.Store, session domain.Session) er
 	return SessionCollection(st).Put(ctx, session)
 }
 
-func TouchSession(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Session, error) {
+func TouchSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
 	session, err := GetSession(ctx, st, sessionID)
 	if err != nil {
 		return domain.Session{}, err
@@ -201,7 +202,7 @@ func PutPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
 	return planCollection(st).Put(ctx, plan)
 }
 
-func GetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (planning.Plan, error) {
+func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
 	plan, err := planCollection(st).Get(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{SessionID: sessionID}, nil
@@ -222,11 +223,11 @@ func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error
 	return todoCollection(st).Put(ctx, item)
 }
 
-func GetTodo(ctx context.Context, st *store.Store, todoID domain.ID) (planning.TodoItem, error) {
+func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoItem, error) {
 	return todoCollection(st).Get(ctx, todoID)
 }
 
-func ListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	if milestoneRef != "" {
@@ -240,7 +241,7 @@ func ListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milest
 	return items, nil
 }
 
-func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	now := time.Now().UTC()
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	existing, err := ListTodos(ctx, st, sessionID, milestoneRef)
@@ -254,7 +255,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, mil
 			continue
 		}
 		items = append(items, planning.TodoItem{
-			ID:           domain.NewIDAt(now),
+			ID:           id.NewAt(now),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
@@ -272,7 +273,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, mil
 	return items, nil
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	item, err := todoCollection(st).Get(ctx, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -298,7 +299,7 @@ func PutTask(ctx context.Context, st *store.Store, task planning.Task) error {
 	return taskCollection(st).Put(ctx, task)
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) ([]planning.Task, error) {
+func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
 	items, err := taskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -320,7 +321,7 @@ func ListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) ([]pla
 	return items, nil
 }
 
-func ListChats(ctx context.Context, st *store.Store, sessionID domain.ID) ([]domain.Chat, error) {
+func ListChats(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
 	chats, err := chatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -329,7 +330,7 @@ func ListChats(ctx context.Context, st *store.Store, sessionID domain.ID) ([]dom
 	return chats, nil
 }
 
-func getChat(ctx context.Context, st *store.Store, chatID domain.ID) (domain.Chat, error) {
+func getChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
 	return chatCollection(st).Get(ctx, chatID)
 }
 
@@ -354,7 +355,7 @@ func updateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) er
 	return putChat(ctx, st, chatRecord)
 }
 
-func timelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
 	items, err := timelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
@@ -376,7 +377,7 @@ func timelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]
 	return items, nil
 }
 
-func DefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
+func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
 	chats, err := ListChats(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
@@ -392,7 +393,7 @@ func DefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID) (dom
 	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
 }
 
-func CreateChat(ctx context.Context, st *store.Store, sessionID domain.ID, title string, role domain.WorkflowRole, parentID *domain.ID) (domain.Chat, error) {
+func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title string, role domain.WorkflowRole, parentID *id.ID) (domain.Chat, error) {
 	session, err := GetSession(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
@@ -403,7 +404,7 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID domain.ID, title
 	}
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:                domain.NewIDAt(now),
+		ID:                id.NewAt(now),
 		SessionID:         sessionID,
 		ParentChatID:      parentID,
 		Title:             strings.TrimSpace(title),
@@ -430,7 +431,7 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID domain.ID, title
 	return chatRecord, nil
 }
 
-func ReorderChats(ctx context.Context, st *store.Store, sessionID domain.ID, orderedIDs []domain.ID) ([]domain.Chat, error) {
+func ReorderChats(ctx context.Context, st *store.Store, sessionID id.ID, orderedIDs []id.ID) ([]domain.Chat, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("reorder chats: session id is required")
 	}
@@ -441,11 +442,11 @@ func ReorderChats(ctx context.Context, st *store.Store, sessionID domain.ID, ord
 	if len(orderedIDs) != len(chats) {
 		return nil, fmt.Errorf("reorder chats: expected %d chat ids, got %d", len(chats), len(orderedIDs))
 	}
-	byID := make(map[domain.ID]domain.Chat, len(chats))
+	byID := make(map[id.ID]domain.Chat, len(chats))
 	for _, chatRecord := range chats {
 		byID[chatRecord.ID] = chatRecord
 	}
-	seen := make(map[domain.ID]bool, len(orderedIDs))
+	seen := make(map[id.ID]bool, len(orderedIDs))
 	ordered := make([]domain.Chat, 0, len(orderedIDs))
 	for idx, chatID := range orderedIDs {
 		if chatID == "" {
@@ -470,7 +471,7 @@ func ReorderChats(ctx context.Context, st *store.Store, sessionID domain.ID, ord
 	return ordered, nil
 }
 
-func UpdateSession(ctx context.Context, st *store.Store, sessionID domain.ID, update func(*domain.Session)) error {
+func UpdateSession(ctx context.Context, st *store.Store, sessionID id.ID, update func(*domain.Session)) error {
 	session, err := GetSession(ctx, st, sessionID)
 	if err != nil {
 		return err
@@ -480,7 +481,7 @@ func UpdateSession(ctx context.Context, st *store.Store, sessionID domain.ID, up
 	return PutSession(ctx, st, session)
 }
 
-func DeleteSession(ctx context.Context, st *store.Store, sessionID domain.ID) error {
+func DeleteSession(ctx context.Context, st *store.Store, sessionID id.ID) error {
 	if sessionID == "" {
 		return fmt.Errorf("delete session: session id is required")
 	}

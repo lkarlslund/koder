@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -50,7 +51,7 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
-func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) domain.Chat {
+func defaultChatForSession(t *testing.T, st *store.Store, sessionID id.ID) domain.Chat {
 	t.Helper()
 	chat, err := sessionpkg.DefaultChat(context.Background(), st, sessionID)
 	if err != nil {
@@ -59,19 +60,19 @@ func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) d
 	return chat
 }
 
-func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID domain.ID, root string) error {
+func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
 	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
 		session.ProjectRoot = root
 	})
 }
 
-func setSessionPermissionProfile(ctx context.Context, st *store.Store, sessionID domain.ID, profile string) error {
+func setSessionPermissionProfile(ctx context.Context, st *store.Store, sessionID id.ID, profile string) error {
 	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
 	})
 }
 
-func setSessionToolStates(ctx context.Context, st *store.Store, sessionID domain.ID, states map[domain.ToolKind]bool) error {
+func setSessionToolStates(ctx context.Context, st *store.Store, sessionID id.ID, states map[domain.ToolKind]bool) error {
 	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
 		session.ToolStates = states
 	})
@@ -175,12 +176,12 @@ func runLiveContinueDefault(t *testing.T, engine *Engine, st *store.Store, sessi
 	}
 }
 
-func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, text string) domain.TimelineItem {
+func appendUserTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text string) domain.TimelineItem {
 	t.Helper()
 	return appendUserTimelineItemWithAttachments(t, st, chatID, text, nil)
 }
 
-func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID domain.ID, text string, attachments []domain.Attachment) domain.TimelineItem {
+func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID id.ID, text string, attachments []domain.Attachment) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.UserMessage{Text: text, Attachments: attachments})
 	if err != nil {
@@ -193,7 +194,7 @@ func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID
 	return item
 }
 
-func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, msg domain.AssistantMessage) domain.TimelineItem {
+func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID id.ID, msg domain.AssistantMessage) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, msg)
 	if err != nil {
@@ -206,7 +207,7 @@ func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID domain.ID
 	return item
 }
 
-func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, notice domain.Notice) domain.TimelineItem {
+func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID id.ID, notice domain.Notice) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, notice)
 	if err != nil {
@@ -219,7 +220,7 @@ func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, n
 	return item
 }
 
-func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string) domain.TimelineItem {
+func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendAssistantToolCalls(context.Background(), st, chatID, []domain.ToolCall{{
 		ToolCallID: domain.ToolCallID(req.ToolCallID),
@@ -233,7 +234,7 @@ func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID domai
 	return item
 }
 
-func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
+func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AttachToolResult(context.Background(), st, chatID, req.ToolCallID, domain.ToolResult{
 		Text:   text,
@@ -246,7 +247,7 @@ func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID domain.I
 	return item
 }
 
-func waitForToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) bool {
+func waitForToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string, want domain.ToolStatus) bool {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -258,7 +259,7 @@ func waitForToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCall
 	return false
 }
 
-func waitForTimelineCondition(t *testing.T, st *store.Store, chatID domain.ID, want func([]domain.TimelineItem) bool) []domain.TimelineItem {
+func waitForTimelineCondition(t *testing.T, st *store.Store, chatID id.ID, want func([]domain.TimelineItem) bool) []domain.TimelineItem {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var items []domain.TimelineItem
@@ -290,7 +291,7 @@ func waitForChatInactive(t *testing.T, rt *chatpkg.Chat) {
 	t.Fatalf("timed out waiting for chat to become inactive; snapshot=%#v", rt.Snapshot())
 }
 
-func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, st *store.Store, chatID domain.ID) []domain.Event {
+func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, st *store.Store, chatID id.ID) []domain.Event {
 	t.Helper()
 	pending, err := chatpkg.PendingApprovalsForChat(context.Background(), st, chatID)
 	if err != nil {
@@ -305,7 +306,7 @@ func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatp
 	})
 }
 
-func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) {
+func assertToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string, want domain.ToolStatus) {
 	t.Helper()
 	got := currentToolStatus(t, st, chatID, toolCallID)
 	if got != want {
@@ -313,7 +314,7 @@ func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallI
 	}
 }
 
-func currentToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string) domain.ToolStatus {
+func currentToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string) domain.ToolStatus {
 	t.Helper()
 	items, err := chatpkg.TimelineForChat(context.Background(), st, chatID)
 	if err != nil {
@@ -333,7 +334,7 @@ func currentToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCall
 	return ""
 }
 
-func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, summary string, firstKeptItemID string) domain.TimelineItem {
+func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID id.ID, summary string, firstKeptItemID string) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.Compaction{
 		Summary:         summary,
@@ -350,7 +351,7 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.I
 	return item
 }
 
-func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID domain.ID) ([]domain.Message, map[domain.ID][]domain.Part, error) {
+func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID id.ID) ([]domain.Message, map[id.ID][]domain.Part, error) {
 	t.Helper()
 	chat, err := sessionpkg.DefaultChat(context.Background(), st, sessionID)
 	if err != nil {
@@ -359,14 +360,14 @@ func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID domai
 	return timelineTranscriptForChat(t, st, chat)
 }
 
-func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[domain.ID][]domain.Part, error) {
+func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[id.ID][]domain.Part, error) {
 	t.Helper()
 	items, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	messages := make([]domain.Message, 0, len(items))
-	parts := make(map[domain.ID][]domain.Part, len(items))
+	parts := make(map[id.ID][]domain.Part, len(items))
 	for _, item := range items {
 		msg, itemParts := testTranscriptItem(chat.SessionID, item)
 		if msg.ID == "" {
@@ -378,11 +379,11 @@ func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) 
 	return messages, parts, nil
 }
 
-func testTranscriptItem(sessionID domain.ID, item domain.TimelineItem) (domain.Message, []domain.Part) {
-	messageID := domain.ID(item.ID)
+func testTranscriptItem(sessionID id.ID, item domain.TimelineItem) (domain.Message, []domain.Part) {
+	messageID := id.ID(item.ID)
 	msg := domain.Message{ID: messageID, SessionID: sessionID, ChatID: item.ChatID, CreatedAt: item.CreatedAt}
 	addPart := func(parts *[]domain.Part, kind domain.PartKind, payload domain.PartPayload, offset int64) {
-		part := domain.Part{ID: domain.ID(fmt.Sprintf("%s-part-%d", messageID, offset)), MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part := domain.Part{ID: id.ID(fmt.Sprintf("%s-part-%d", messageID, offset)), MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
 		part.Body = part.Text()
 		*parts = append(*parts, part)
 	}
@@ -431,7 +432,7 @@ func testTranscriptItem(sessionID domain.ID, item domain.TimelineItem) (domain.M
 	return msg, parts
 }
 
-func timelineNoticesForChat(t *testing.T, st *store.Store, chatID domain.ID) []domain.Notice {
+func timelineNoticesForChat(t *testing.T, st *store.Store, chatID id.ID) []domain.Notice {
 	t.Helper()
 	items, err := chatpkg.TimelineForChat(context.Background(), st, chatID)
 	if err != nil {
@@ -805,7 +806,7 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent.QueuedInputs = []domain.QueuedInput{{
-		ID:        domain.NewID(),
+		ID:        id.New(),
 		Kind:      domain.QueuedInputKindSteer,
 		Text:      "Chat " + child.ID + " is done: todo list completed.",
 		Source:    domain.UserMessageSourceSubchat,
@@ -965,7 +966,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	itemSeed := domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	itemSeed := domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	item, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -1021,7 +1022,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	if parsed.Err != nil {
 		t.Fatal(parsed.Err)
 	}
-	itemSeed := domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	itemSeed := domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if _, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, parsed.Requests, "", domain.Usage{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2044,7 +2045,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
-	var approvalID domain.ID
+	var approvalID id.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -2153,7 +2154,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
-	var approvalID domain.ID
+	var approvalID id.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
@@ -2506,7 +2507,7 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 	queuedUser := appendUserTimelineItem(t, st, chat.ID, "next user turn")
 	chat.QueuedInputs = []domain.QueuedInput{{
-		ID:         domain.NewID(),
+		ID:         id.New(),
 		Kind:       domain.QueuedInputKindSteer,
 		Text:       "next user turn",
 		Source:     domain.UserMessageSourceUser,
@@ -3523,7 +3524,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
-	var approvalID domain.ID
+	var approvalID id.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -3635,7 +3636,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
-	var approvalID domain.ID
+	var approvalID id.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
@@ -3688,7 +3689,7 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	if err := chatpkg.SetChatQueuedInputs(context.Background(), st, chat.ID, []domain.QueuedInput{{
-		ID:   domain.NewID(),
+		ID:   id.New(),
 		Kind: domain.QueuedInputKindSteer,
 		Text: "steer the running turn",
 	}}); err != nil {
@@ -4146,7 +4147,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
-	var approvalID domain.ID
+	var approvalID id.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -5341,7 +5342,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 			Content: "hello",
 		}},
 		Stream: true,
-	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
+	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
 	if err != nil {
 		t.Fatalf("expected transient retry to succeed, got %v", err)
 	}
@@ -5411,7 +5412,7 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 			Content: "hello",
 		}},
 		Stream: true,
-	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
+	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
 	close(events)
 	if err == nil {
 		t.Fatal("expected stream failure error")
@@ -5496,7 +5497,7 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 		}},
 		Stream:    true,
 		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], "test-model", provider.ModelPresetDefault),
-	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
+	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
 	close(events)
 	if err != nil {
 		t.Fatal(err)
@@ -6263,8 +6264,8 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	}
 }
 
-func parseApprovalID(raw string) (domain.ID, error) {
-	id := domain.ID(strings.TrimSpace(raw))
+func parseApprovalID(raw string) (id.ID, error) {
+	id := id.ID(strings.TrimSpace(raw))
 	if id == "" {
 		return "", fmt.Errorf("approval id is required")
 	}

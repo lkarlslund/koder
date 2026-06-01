@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 )
 
 type Plan struct {
-	SessionID  domain.ID
+	SessionID  id.ID
 	Summary    string
 	Milestones []Milestone
 	UpdatedAt  time.Time
@@ -24,12 +25,12 @@ type Milestone struct {
 	Status      domain.MilestoneStatus
 	Notes       string
 	Position    int
-	OwnerChatID *domain.ID
+	OwnerChatID *id.ID
 }
 
 type TodoItem struct {
-	ID           domain.ID
-	SessionID    domain.ID
+	ID           id.ID
+	SessionID    id.ID
 	MilestoneRef string
 	Content      string
 	Status       domain.TodoStatus
@@ -39,8 +40,8 @@ type TodoItem struct {
 }
 
 type Task struct {
-	ID        domain.ID
-	SessionID domain.ID
+	ID        id.ID
+	SessionID id.ID
 	Body      string
 	Status    domain.TaskStatus
 	CreatedAt time.Time
@@ -195,7 +196,7 @@ func ParseTodoAddItems(raw string) ([]string, error) {
 	return out, nil
 }
 
-func ParseTodoID(raw string) (domain.ID, error) {
+func ParseTodoID(raw string) (id.ID, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", errors.New("id is required")

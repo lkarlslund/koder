@@ -10,6 +10,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -75,10 +76,10 @@ func TaskCollection(st *store.Store) store.Collection[planning.Task] {
 	})
 }
 
-func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *domain.ID) (domain.Session, error) {
+func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
-		ID:              domain.NewIDAt(now),
+		ID:              id.NewAt(now),
 		ParentID:        parentID,
 		Title:           strings.TrimSpace(title),
 		ToolStates:      map[domain.ToolKind]bool{},
@@ -91,7 +92,7 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 		session.Title = "test"
 	}
 	chat := domain.Chat{
-		ID:           domain.NewIDAt(now),
+		ID:           id.NewAt(now),
 		SessionID:    session.ID,
 		Title:        "Main",
 		WorkflowRole: chatrole.Orchestrator,
@@ -110,7 +111,7 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 	return session, nil
 }
 
-func DefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
+func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
 	chats, err := ListChats(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
@@ -126,13 +127,13 @@ func DefaultChat(ctx context.Context, st *store.Store, sessionID domain.ID) (dom
 	return chats[0], nil
 }
 
-func CreateChat(ctx context.Context, st *store.Store, sessionID domain.ID, title string, role domain.WorkflowRole, parentID *domain.ID) (domain.Chat, error) {
+func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title string, role domain.WorkflowRole, parentID *id.ID) (domain.Chat, error) {
 	chats, err := ListChats(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
 	now := time.Now().UTC()
-	chat := domain.Chat{ID: domain.NewIDAt(now), SessionID: sessionID, ParentChatID: parentID, Title: title, WorkflowRole: role, Position: len(chats), CreatedAt: now, UpdatedAt: now}
+	chat := domain.Chat{ID: id.NewAt(now), SessionID: sessionID, ParentChatID: parentID, Title: title, WorkflowRole: role, Position: len(chats), CreatedAt: now, UpdatedAt: now}
 	if chat.Title == "" {
 		chat.Title = "New Chat"
 	}
@@ -145,7 +146,7 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID domain.ID, title
 	return chat, nil
 }
 
-func ListChats(ctx context.Context, st *store.Store, sessionID domain.ID) ([]domain.Chat, error) {
+func ListChats(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
 	chats, err := ChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -166,7 +167,7 @@ func PutPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
 	return PlanCollection(st).Put(ctx, plan)
 }
 
-func GetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (planning.Plan, error) {
+func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
 	plan, err := PlanCollection(st).Get(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{SessionID: sessionID}, nil
@@ -174,7 +175,7 @@ func GetPlan(ctx context.Context, st *store.Store, sessionID domain.ID) (plannin
 	return plan, nil
 }
 
-func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, ref string, contents []string) ([]planning.TodoItem, error) {
+func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, ref string, contents []string) ([]planning.TodoItem, error) {
 	existing, err := ListTodos(ctx, st, sessionID, ref)
 	if err != nil {
 		return nil, err
@@ -186,7 +187,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID domain.ID, ref
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{ID: domain.NewIDAt(now), SessionID: sessionID, MilestoneRef: ref, Content: content, Status: domain.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		items = append(items, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: ref, Content: content, Status: domain.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
 	}
 	for _, item := range items {
 		if err := TodoCollection(st).Put(ctx, item); err != nil {
@@ -200,11 +201,11 @@ func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error
 	return TodoCollection(st).Put(ctx, item)
 }
 
-func GetTodo(ctx context.Context, st *store.Store, todoID domain.ID) (planning.TodoItem, error) {
+func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoItem, error) {
 	return TodoCollection(st).Get(ctx, todoID)
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	item, err := GetTodo(ctx, st, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -220,7 +221,7 @@ func UpdateTodo(ctx context.Context, st *store.Store, todoID domain.ID, status d
 	return item, nil
 }
 
-func ListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) ([]planning.TodoItem, error) {
+func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, ref string) ([]planning.TodoItem, error) {
 	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
 	if strings.TrimSpace(ref) != "" {
 		query = store.ByIndex[planning.TodoItem]("milestone", string(sessionID)+"/"+strings.TrimSpace(ref))
@@ -233,7 +234,7 @@ func ListTodos(ctx context.Context, st *store.Store, sessionID domain.ID, ref st
 	return items, nil
 }
 
-func AppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	items, err := TimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -242,7 +243,7 @@ func AppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, cont
 	return TimelineCollection(st).Insert(ctx, domain.TimelineItem{ChatID: chatID, Seq: int64(len(items) + 1), Content: content, CreatedAt: now, UpdatedAt: now})
 }
 
-func TimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+func TimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
 	items, err := TimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
@@ -263,7 +264,7 @@ func PutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineI
 	return TimelineCollection(st).Put(ctx, item)
 }
 
-func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID domain.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	assistant := domain.AssistantMessage{Text: text}
 	for _, call := range calls {
 		if err := assistant.AddToolCall(call); err != nil {
@@ -285,7 +286,7 @@ func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID domai
 	return item, nil
 }
 
-func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID domain.ID, items []domain.QueuedInput) error {
+func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
 	chat, err := ChatCollection(st).Get(ctx, chatID)
 	if err != nil {
 		return err
@@ -299,7 +300,7 @@ func PutTask(ctx context.Context, st *store.Store, task planning.Task) error {
 	return TaskCollection(st).Put(ctx, task)
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID domain.ID) ([]planning.Task, error) {
+func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
 	items, err := TaskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
 	if err != nil {
 		return nil, err

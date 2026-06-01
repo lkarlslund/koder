@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -49,14 +50,14 @@ type ChatStartRequest struct {
 	Objective    string
 	Title        string
 	MilestoneRef string
-	TodoRef      domain.ID
+	TodoRef      id.ID
 }
 
 type ChatControl interface {
-	ListChats(context.Context, domain.ID) ([]ChatStatus, error)
-	StartChat(context.Context, domain.ID, domain.ID, ChatStartRequest) (ChatStatus, error)
-	PollChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
-	ArchiveChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
+	ListChats(context.Context, id.ID) ([]ChatStatus, error)
+	StartChat(context.Context, id.ID, id.ID, ChatStartRequest) (ChatStatus, error)
+	PollChat(context.Context, id.ID, id.ID) (ChatStatus, error)
+	ArchiveChat(context.Context, id.ID, id.ID) (ChatStatus, error)
 }
 
 type Request struct {
@@ -148,12 +149,12 @@ type Runtime struct {
 	Workdir               string
 	HTTPClient            *http.Client
 	Store                 *store.Store
-	SessionID             domain.ID
-	ChatID                domain.ID
+	SessionID             id.ID
+	ChatID                id.ID
 	ChatRole              domain.WorkflowRole
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
-	AssignedTodoRef       domain.ID
+	AssignedTodoRef       id.ID
 	ChatControl           ChatControl
 	SessionControl        SessionControl
 	TaskControl           TaskControl
@@ -315,7 +316,7 @@ func normalizeRuntime(runtime Runtime) Runtime {
 	return runtime
 }
 
-func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID domain.ID) (domain.Chat, error) {
+func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
 	chats, err := toolChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return domain.Chat{}, err
@@ -371,7 +372,7 @@ func toolTimelineCollection(st *store.Store) store.Collection[domain.TimelineIte
 	})
 }
 
-func toolTimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID) ([]domain.TimelineItem, error) {
+func toolTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
 	items, err := toolTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
@@ -393,7 +394,7 @@ func toolTimelineForChat(ctx context.Context, st *store.Store, chatID domain.ID)
 	return items, nil
 }
 
-func toolAppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+func toolAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	items, err := toolTimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -408,7 +409,7 @@ func toolAppendTimeline(ctx context.Context, st *store.Store, chatID domain.ID, 
 	})
 }
 
-func toolAttachToolResult(ctx context.Context, st *store.Store, chatID domain.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+func toolAttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
 	items, err := toolTimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -743,18 +744,18 @@ func domainToolResultPayload(tool domain.ToolKind, status domain.ToolResultStatu
 	return domain.DecodeToolResultPayload(tool, status, raw)
 }
 
-func WithChatID(ctx context.Context, chatID domain.ID) context.Context {
+func WithChatID(ctx context.Context, chatID id.ID) context.Context {
 	if chatID == "" {
 		return ctx
 	}
 	return context.WithValue(ctx, chatIDContextKey{}, chatID)
 }
 
-func ChatIDFromContext(ctx context.Context) (domain.ID, bool) {
+func ChatIDFromContext(ctx context.Context) (id.ID, bool) {
 	if ctx == nil {
 		return "", false
 	}
-	value, ok := ctx.Value(chatIDContextKey{}).(domain.ID)
+	value, ok := ctx.Value(chatIDContextKey{}).(id.ID)
 	if !ok || value == "" {
 		return "", false
 	}

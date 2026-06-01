@@ -8,11 +8,12 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
 type execRuntimeSubscription struct {
-	chatID domain.ID
+	chatID id.ID
 	events <-chan execruntime.Event
 }
 
@@ -79,7 +80,7 @@ func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []domain.ExecP
 	return out
 }
 
-func (c *Controller) forwardExecRuntime(chatID domain.ID, events <-chan execruntime.Event) {
+func (c *Controller) forwardExecRuntime(chatID id.ID, events <-chan execruntime.Event) {
 	for range events {
 		c.mu.Lock()
 		snapshot, ok := c.snapshots[chatID]
@@ -106,7 +107,7 @@ func (c *Controller) forwardExecRuntime(chatID domain.ID, events <-chan execrunt
 	}
 }
 
-func (c *Controller) forwardSessionEvents(sessionID domain.ID, events <-chan sessionpkg.Event) {
+func (c *Controller) forwardSessionEvents(sessionID id.ID, events <-chan sessionpkg.Event) {
 	for event := range events {
 		if event.SessionID != sessionID {
 			continue
@@ -160,10 +161,10 @@ func (c *Controller) applySessionChatEvent(event sessionpkg.Event) {
 		return
 	}
 	if c.snapshots == nil {
-		c.snapshots = map[domain.ID]chat.Snapshot{}
+		c.snapshots = map[id.ID]chat.Snapshot{}
 	}
 	if c.statuses == nil {
-		c.statuses = map[domain.ID]ChatSidebarStatus{}
+		c.statuses = map[id.ID]ChatSidebarStatus{}
 	}
 	if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
 		if existing, ok := chatByID(c.chats, chatID); ok {
@@ -190,7 +191,7 @@ func (c *Controller) applySessionChatEvent(event sessionpkg.Event) {
 		c.mu.RLock()
 		activeChatID := c.chat.ID
 		c.mu.RUnlock()
-		c.broadcast("selection_delta", map[string]domain.ID{"active_chat_id": activeChatID})
+		c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": activeChatID})
 	}
 }
 
