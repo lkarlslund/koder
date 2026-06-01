@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -17,8 +18,8 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List milestones",
 		Description: "Read the current session milestone plan.",
-		Usage:       "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
-		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
+		Usage:       "Read the current session milestone plan. Completed milestones are hidden by default; pass completed=true when you need to inspect finished work. Use this to understand the long-horizon plan before choosing or breaking down work. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
+		Parameters:  `{"type":"object","properties":{"completed":{"type":"boolean","description":"Include completed milestones. Defaults to false."}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
@@ -80,8 +81,16 @@ func (planTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.To
 	return addItemsTool{}.Definition(runtime, spec)
 }
 
-func (listTool) NormalizeArgs(map[string]string) (map[string]string, error) {
-	return map[string]string{}, nil
+func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	raw := strings.TrimSpace(tools.FirstArg(args, "completed"))
+	if raw == "" {
+		return map[string]string{}, nil
+	}
+	completed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, fmt.Errorf("completed: %w", err)
+	}
+	return map[string]string{"completed": strconv.FormatBool(completed)}, nil
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -183,7 +192,45 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, plan)), nil
+	scoped := tools.ScopedMilestonePlan(runtime, plan)
+	result := tools.MilestonePlanResult(filterListedMilestones(scoped, req.Args["completed"] == "true"))
+	if summary := milestoneSummary(scoped.Milestones); summary != "" {
+		result.Output = summary + "\n" + result.Output
+	}
+	return result, nil
+}
+
+func filterListedMilestones(plan planning.Plan, includeCompleted bool) planning.Plan {
+	if includeCompleted {
+		return plan
+	}
+	filtered := plan
+	filtered.Milestones = make([]planning.Milestone, 0, len(plan.Milestones))
+	for _, milestone := range plan.Milestones {
+		if milestone.Status != planning.MilestoneStatusCompleted {
+			filtered.Milestones = append(filtered.Milestones, milestone)
+		}
+	}
+	return filtered
+}
+
+func milestoneSummary(milestones []planning.Milestone) string {
+	if len(milestones) == 0 {
+		return "Milestones summary: none"
+	}
+	counts := make(map[planning.MilestoneStatus]int)
+	for _, milestone := range milestones {
+		counts[milestone.Status]++
+	}
+	parts := make([]string, 0, len(counts))
+	for _, status := range planning.MilestoneStatusValues() {
+		count := counts[status]
+		if count == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", count, status.String()))
+	}
+	return "Milestones summary: " + strings.Join(parts, ", ")
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {

@@ -45,6 +45,16 @@ func seedPlan(t *testing.T, st *store.Store, sessionID id.ID) {
 }
 
 func TestNormalizeArgsAndDefinitions(t *testing.T) {
+	listed, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed["completed"] != "true" {
+		t.Fatalf("expected completed=true, got %#v", listed)
+	}
+	if _, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "sometimes"}); err == nil {
+		t.Fatal("expected invalid completed boolean error")
+	}
 	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
 		t.Fatal("expected empty items error")
 	}
@@ -321,24 +331,44 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 
 func TestListAndAddExecute(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
-	seedPlan(t, st, session.ID)
+	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusCompleted, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady, Position: 1},
+		{Ref: "gamma", Title: "Gamma", Status: planning.MilestoneStatusExecuting, Position: 2},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := (listTool{}).Execute(context.Background(), runtime, tools.Request{Tool: domain.ToolKindMilestoneList})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Alpha") {
-		t.Fatalf("expected list output to contain milestone title, got %q", result.Output)
+	if strings.Contains(result.Output, "Alpha") || !strings.Contains(result.Output, "Beta") || !strings.Contains(result.Output, "Gamma") {
+		t.Fatalf("expected default list output to hide completed milestones, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "Milestones summary: 1 ready, 1 executing, 1 completed") {
+		t.Fatalf("expected milestone status summary, got %q", result.Output)
 	}
 
-	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
-		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"items": `[{"ref":"beta","title":"Beta"}]`},
+	result, err = (listTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneList,
+		Args: map[string]string{"completed": "true"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Beta") {
+	if !strings.Contains(result.Output, "Alpha") {
+		t.Fatalf("expected completed=true list output to include completed milestone, got %q", result.Output)
+	}
+
+	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"items": `[{"ref":"delta","title":"Delta"}]`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Delta") {
 		t.Fatalf("expected add output to contain new milestone, got %q", result.Output)
 	}
 }
