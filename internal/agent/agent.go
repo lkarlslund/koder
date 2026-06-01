@@ -341,6 +341,11 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 	if err != nil {
 		return false, err
 	}
+	item, err := e.markPreparedToolRunning(ctx, turn, turn.Chat().ID, session.ID, req)
+	if err != nil {
+		return false, err
+	}
+	out <- domain.Event{Kind: domain.EventKindToolStart, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: tools.Preview(req), Item: item}
 	events, execErr := e.executePreparedToolCallForTurn(ctx, turn, turn.Chat().ID, session.ID, req)
 	if execErr != nil {
 		return false, execErr
@@ -3063,6 +3068,9 @@ func (e *Engine) handleModelToolCallForTurn(ctx context.Context, session domain.
 	if !prepared.run {
 		return prepared.event, nil
 	}
+	if _, err := e.markPreparedToolRunning(ctx, turn, prepared.chatID, prepared.sessionID, prepared.req); err != nil {
+		return domain.Event{}, err
+	}
 	events, err := e.executePreparedToolCallForTurn(ctx, turn, prepared.chatID, prepared.sessionID, prepared.req)
 	if err != nil {
 		return domain.Event{}, err
@@ -3289,7 +3297,11 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 		if !item.run {
 			continue
 		}
-		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, ToolCallID: item.req.ToolCallID, Text: tools.Preview(item.req)}
+		runningItem, err := e.markPreparedToolRunning(ctx, turn, item.chatID, item.sessionID, item.req)
+		if err != nil {
+			return needsApproval, err
+		}
+		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, ToolCallID: item.req.ToolCallID, Text: tools.Preview(item.req), Item: runningItem}
 		go func(item preparedToolCall) {
 			events, err := e.executePreparedToolCallForTurn(ctx, turn, item.chatID, item.sessionID, item.req)
 			results <- completedToolCall{events: events, err: err}
@@ -3330,6 +3342,24 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 		return needsApproval, err
 	}
 	return needsApproval, nil
+}
+
+func (e *Engine) markPreparedToolRunning(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request) (domain.TimelineItem, error) {
+	if strings.TrimSpace(req.ToolCallID) == "" {
+		return domain.TimelineItem{}, nil
+	}
+	item, err := chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	if turn != nil && item.ID != "" {
+		item, err = turn.UpsertTimelineItem(ctx, item)
+		if err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	e.recordLifecycle(sessionID, "tool_execution_running", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+	return item, nil
 }
 
 func touchedPathFromToolResultEvent(evt domain.Event) (string, bool) {
@@ -3596,22 +3626,14 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
+	if _, err := e.markPreparedToolRunning(ctx, nil, chatID, sessionID, req); err != nil {
+		return nil, err
+	}
 	return e.executePreparedToolCallForTurn(ctx, nil, chatID, sessionID, req)
 }
 
 func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
-	if strings.TrimSpace(req.ToolCallID) != "" {
-		item, err := chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
-		if err != nil {
-			return nil, err
-		}
-		if turn != nil && item.ID != "" {
-			if _, err := turn.UpsertTimelineItem(ctx, item); err != nil {
-				return nil, err
-			}
-		}
-	}
 	var (
 		session domain.Session
 		chat    domain.Chat

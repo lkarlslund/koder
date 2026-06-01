@@ -2617,8 +2617,14 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	var sawRunning bool
+	var sawRunningEventItem bool
 	events := runLivePromptObserve(t, engine, session, chat, "run slow command", func(evt domain.Event) {
 		if evt.Kind == domain.EventKindToolStart {
+			if assistant, ok := evt.Item.Content.(domain.AssistantMessage); ok {
+				if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Status == domain.ToolStatusRunning {
+					sawRunningEventItem = true
+				}
+			}
 			sawRunning = waitForToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusRunning)
 		}
 	})
@@ -2630,6 +2636,9 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	}
 	if !sawRunning {
 		t.Fatal("expected allowed tool to transition to running before completion")
+	}
+	if !sawRunningEventItem {
+		t.Fatal("expected tool start event to carry running timeline item")
 	}
 	if !sawDone {
 		t.Fatal("expected allowed tool result")
