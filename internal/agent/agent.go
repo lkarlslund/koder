@@ -31,7 +31,6 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
-	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -1224,7 +1223,6 @@ func normalizeSessionTitle(raw string) string {
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID id.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	beforePlan, trackMilestones := e.milestonePlanForNotification(ctx, sessionID, req.Tool)
 	session, chat, err := e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
 	if err != nil {
 		return nil, err
@@ -1238,48 +1236,9 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID id.ID,
 	if err != nil {
 		return nil, err
 	}
-	if trackMilestones {
-		e.notifyMilestoneChanges(ctx, chatID, beforePlan)
-	}
 	summary, _ := tools.SummarizeResult(req, result)
 	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": req.Tool.String()})
 	return events, nil
-}
-
-func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID id.ID, tool domain.ToolKind) (planning.Plan, bool) {
-	switch tool {
-	case domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindMilestoneAdd:
-	default:
-		return planning.Plan{}, false
-	}
-	plan, err := sessionpkg.GetPlan(ctx, e.store, sessionID)
-	if err != nil {
-		return planning.Plan{}, false
-	}
-	return plan, true
-}
-
-func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID id.ID, before planning.Plan) {
-	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
-	if err != nil || chatRecord.ParentChatID == nil {
-		return
-	}
-	after, err := sessionpkg.GetPlan(ctx, e.store, chatRecord.SessionID)
-	if err != nil {
-		return
-	}
-	beforeByRef := make(map[string]planning.Milestone, len(before.Milestones))
-	for _, milestone := range before.Milestones {
-		beforeByRef[milestone.Ref] = milestone
-	}
-	for _, milestone := range after.Milestones {
-		prev, ok := beforeByRef[milestone.Ref]
-		if !ok || prev.Status == milestone.Status {
-			continue
-		}
-		text := fmt.Sprintf("Milestone %s changed from %s to %s by chat %s.", milestone.Ref, prev.Status, milestone.Status, chatID)
-		e.enqueueSteer(ctx, *chatRecord.ParentChatID, text)
-	}
 }
 
 func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {

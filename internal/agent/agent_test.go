@@ -28,6 +28,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -812,7 +813,7 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
 		for _, item := range items {
 			msg, ok := item.Content.(domain.UserMessage)
-			if ok && strings.Contains(msg.Text, " is idle: Idle") {
+			if ok && msg.Text == "Chat "+child.ID+" is now idle." {
 				return true
 			}
 		}
@@ -825,7 +826,7 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	}
 }
 
-func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
+func TestConsumeChatUpdatesSummarizesPartialMilestoneProgress(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -843,14 +844,18 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent.QueuedInputs = []domain.QueuedInput{{
-		ID:        id.New(),
-		Kind:      domain.QueuedInputKindSteer,
-		Text:      "Chat " + child.ID + " is done: todo list completed.",
-		Source:    domain.UserMessageSourceSubchat,
-		CreatedAt: time.Now().UTC(),
-	}}
-	if err := chatpkg.UpdateChat(context.Background(), st, parent); err != nil {
+	child.ActiveMilestoneRef = "alpha"
+	if err := chatpkg.UpdateChat(context.Background(), st, child); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionpkg.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}}}); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := sessionpkg.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"first", "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessionpkg.UpdateTodo(context.Background(), st, todos[0].ID, planning.TodoStatusCompleted, ""); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
@@ -861,12 +866,76 @@ func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	got, err := chatpkg.GetChat(context.Background(), st, parent.ID)
+	want := "Chat " + child.ID + " is now idle. Chat completed 1 out of 2 todos for milestone alpha, but is now stopped."
+	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
+		for _, item := range items {
+			msg, ok := item.Content.(domain.UserMessage)
+			if ok && msg.Text == want {
+				return true
+			}
+		}
+		return false
+	})
+	if owner := engine.loadedSession(session.ID); owner != nil {
+		if err := owner.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConsumeChatUpdatesSummarizesCompletedMilestoneTodos(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.QueuedInputs) != 1 || strings.Contains(got.QueuedInputs[0].Text, " is idle: Idle") {
-		t.Fatalf("expected idle notification to be suppressed after done, got %#v", got.QueuedInputs)
+	defer st.Close()
+
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := sessionpkg.CreateChat(context.Background(), st, session.ID, "child", chatrole.Execution, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.ActiveMilestoneRef = "alpha"
+	if err := chatpkg.UpdateChat(context.Background(), st, child); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := sessionpkg.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"first", "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, todo := range todos {
+		if _, err := sessionpkg.UpdateTodo(context.Background(), st, todo.ID, planning.TodoStatusCompleted, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := New(cfg, st, nil)
+
+	updates := make(chan chatpkg.Update, 2)
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusWaitingLLM, Active: true}, Status: chatpkg.StatusWaitingLLM, StatusText: "Running", Active: true}
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusIdle, Active: false}, Status: chatpkg.StatusIdle, StatusText: "Idle", Active: false}
+	close(updates)
+	engine.consumeChatUpdates(child.ID, updates, nil)
+
+	want := "Chat " + child.ID + " is now idle. All 2 todos for milestone alpha are done."
+	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
+		for _, item := range items {
+			msg, ok := item.Content.(domain.UserMessage)
+			if ok && msg.Text == want {
+				return true
+			}
+		}
+		return false
+	})
+	if owner := engine.loadedSession(session.ID); owner != nil {
+		if err := owner.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

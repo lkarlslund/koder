@@ -337,14 +337,7 @@ func (e *Engine) consumeChatUpdates(chatID id.ID, updates <-chan chatpkg.Update,
 		}
 		if !update.Active && sawActive && !notifiedIdle {
 			notifiedIdle = true
-			if e.parentAlreadyHasDoneNotification(context.Background(), chatID) {
-				continue
-			}
-			if text := e.completedChildChatNotification(context.Background(), chatID); text != "" {
-				e.notifyParentChat(context.Background(), chatID, text)
-			} else {
-				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is idle: %s", chatID, strings.TrimSpace(statusText)))
-			}
+			e.notifyParentChat(context.Background(), chatID, e.childIdleNotification(context.Background(), update.Snapshot.Chat, chatID, statusText))
 		}
 	}
 }
@@ -357,64 +350,51 @@ func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID id.ID, text 
 	e.enqueueSteer(ctx, *source.ParentChatID, text)
 }
 
-func (e *Engine) completedChildChatNotification(ctx context.Context, chatID id.ID) string {
-	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
-	if err != nil || chatRecord.ParentChatID == nil {
-		return ""
+func (e *Engine) childIdleNotification(ctx context.Context, chatRecord domain.Chat, chatID id.ID, statusText string) string {
+	if chatRecord.ID != "" {
+		chatID = chatRecord.ID
+	}
+	text := fmt.Sprintf("Chat %s is now idle.", chatID)
+	if chatRecord.ParentChatID == nil {
+		return text
 	}
 	if chatRecord.AssignedTodoRef != "" {
-		todos, err := sessionpkg.ListTodos(ctx, e.store, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
+		todos, err := e.todosForNotification(ctx, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
 		if err == nil {
 			for _, todo := range todos {
-				if todo.ID == chatRecord.AssignedTodoRef && todo.Status == planning.TodoStatusCompleted {
-					return fmt.Sprintf("Chat %s is done: todo #%s is completed.", chatID, todo.ID)
+				if todo.ID == chatRecord.AssignedTodoRef {
+					return fmt.Sprintf("%s Assigned todo #%s is %s.", text, todo.ID, todo.Status)
 				}
 			}
 		}
 	}
 	if ref := strings.TrimSpace(chatRecord.ActiveMilestoneRef); ref != "" {
-		plan, err := sessionpkg.GetPlan(ctx, e.store, chatRecord.SessionID)
-		if err == nil {
-			for _, milestone := range plan.Milestones {
-				if milestone.Ref != ref {
-					continue
-				}
-				switch milestone.Status {
-				case planning.MilestoneStatusCompleted, planning.MilestoneStatusBlocked, planning.MilestoneStatusCancelled, planning.MilestoneStatusReady:
-					return fmt.Sprintf("Chat %s is done: milestone %s is %s.", chatID, ref, milestone.Status)
+		todos, err := e.todosForNotification(ctx, chatRecord.SessionID, ref)
+		if err == nil && len(todos) > 0 {
+			completed := 0
+			for _, todo := range todos {
+				if todo.Status == planning.TodoStatusCompleted {
+					completed++
 				}
 			}
+			if completed == len(todos) {
+				return fmt.Sprintf("%s All %d todos for milestone %s are done.", text, len(todos), ref)
+			}
+			return fmt.Sprintf("%s Chat completed %d out of %d todos for milestone %s, but is now stopped.", text, completed, len(todos), ref)
 		}
 	}
-	return ""
+	statusText = strings.TrimSpace(statusText)
+	if statusText == "" || strings.EqualFold(statusText, "idle") {
+		return text
+	}
+	return fmt.Sprintf("%s Last status: %s.", text, statusText)
 }
 
-func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceChatID id.ID) bool {
-	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
-	if err != nil || source.ParentChatID == nil {
-		return false
+func (e *Engine) todosForNotification(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
+	if owner := e.loadedSession(sessionID); owner != nil {
+		return owner.ListTodos(ctx, sessionID, milestoneRef)
 	}
-	needle := "chat " + strings.ToLower(string(sourceChatID)) + " is done"
-	if owner := e.loadedSession(source.SessionID); owner != nil {
-		parent, err := owner.Chat(ctx, *source.ParentChatID)
-		if err == nil {
-			for _, item := range parent.Snapshot().QueuedInputs {
-				if strings.Contains(strings.ToLower(item.Text), needle) {
-					return true
-				}
-			}
-		}
-	}
-	parentRecord, err := chatpkg.GetChat(ctx, e.store, *source.ParentChatID)
-	if err != nil {
-		return false
-	}
-	for _, item := range parentRecord.QueuedInputs {
-		if strings.Contains(strings.ToLower(item.Text), needle) {
-			return true
-		}
-	}
-	return false
+	return sessionpkg.ListTodos(ctx, e.store, sessionID, milestoneRef)
 }
 
 func (e *Engine) enqueueSteer(ctx context.Context, chatID id.ID, text string) {

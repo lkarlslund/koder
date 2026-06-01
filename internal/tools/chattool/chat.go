@@ -24,7 +24,7 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or todo_ref to scope what the child chat can see. A todo_ref scopes the child to that single todo item. After starting it, go idle unless you have unrelated work; subchat idle/completion updates will be sent to you automatically.",
+		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or todo_ref to scope what the child chat can see. A todo_ref scopes the child to that single todo item. After starting it, go idle unless you have unrelated work; the child chat will report back when it becomes idle, including todo or milestone progress.",
 		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"todo_ref":{"type":"string","description":"Optional todo item UUID to scope the child chat to one todo"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -238,7 +238,7 @@ func appendPollGuidance(output string, status tools.ChatStatus) string {
 	if !status.Busy && status.State != tools.ChatRunStateRunning && status.State != tools.ChatRunStateWaitingApproval {
 		return output
 	}
-	return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle or complete.")
+	return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle, including todo or milestone progress.")
 }
 
 func (updateTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
