@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
 )
@@ -21,6 +22,8 @@ type Status struct {
 	ProjectRoot    string       `json:"project_root"`
 	AgentsChecksum string       `json:"agents_checksum"`
 	AgentsFiles    int          `json:"agents_files"`
+	Stale          bool         `json:"stale,omitempty"`
+	RefreshedAt    time.Time    `json:"refreshed_at,omitempty"`
 	Branch         string       `json:"branch"`
 	Upstream       string       `json:"upstream"`
 	Summary        string       `json:"summary"`
@@ -33,7 +36,7 @@ type Status struct {
 
 func Snapshot(ctx context.Context, dir string) (Status, error) {
 	projectRoot := agents.FindProjectRoot(dir)
-	status := Status{ProjectRoot: projectRoot}
+	status := Status{ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}
 	snapshot, discoverErr := agents.NewManager("", "").Discover(ctx, dir)
 	if discoverErr == nil {
 		if snapshot.ProjectRoot != "" {
@@ -60,6 +63,7 @@ func Snapshot(ctx context.Context, dir string) (Status, error) {
 	parsed.ProjectRoot = status.ProjectRoot
 	parsed.AgentsChecksum = status.AgentsChecksum
 	parsed.AgentsFiles = status.AgentsFiles
+	parsed.RefreshedAt = status.RefreshedAt
 	return parsed, nil
 }
 

@@ -33,6 +33,8 @@ const (
 	StartupModeResume
 )
 
+const defaultWorkspaceRefreshMinInterval = 10 * time.Second
+
 // Event is a browser app pushed UI update.
 type Event struct {
 	Seq     uint64 `json:"seq"`
@@ -278,26 +280,31 @@ type Controller struct {
 	store *store.Store
 	agent *agent.Engine
 
-	mu                         sync.RWMutex
-	session                    domain.Session
-	sessions                   []domain.Session
-	chats                      []domain.Chat
-	statuses                   map[id.ID]ChatSidebarStatus
-	chat                       domain.Chat
-	runtime                    *chat.Chat
-	unsub                      func()
-	sessionUnsub               func()
-	runtimes                   map[id.ID]*chat.Chat
-	execUnsubs                 map[id.ID]func()
-	snapshots                  map[id.ID]chat.Snapshot
-	milestone                  planning.Plan
-	todos                      []planning.TodoItem
-	todosByRef                 map[string][]planning.TodoItem
-	workspace                  workspacepkg.Status
-	theme                      string
-	lastErr                    string
-	restartNeeded              bool
-	clearedStartupRunningTools bool
+	mu                          sync.RWMutex
+	session                     domain.Session
+	sessions                    []domain.Session
+	chats                       []domain.Chat
+	statuses                    map[id.ID]ChatSidebarStatus
+	chat                        domain.Chat
+	runtime                     *chat.Chat
+	unsub                       func()
+	sessionUnsub                func()
+	runtimes                    map[id.ID]*chat.Chat
+	execUnsubs                  map[id.ID]func()
+	snapshots                   map[id.ID]chat.Snapshot
+	milestone                   planning.Plan
+	todos                       []planning.TodoItem
+	todosByRef                  map[string][]planning.TodoItem
+	workspace                   workspacepkg.Status
+	workspaceWatchCancel        context.CancelFunc
+	workspaceRefreshMinInterval time.Duration
+	lastWorkspaceRefresh        time.Time
+	workspaceRefreshTimer       *time.Timer
+	workspaceRefreshPending     bool
+	theme                       string
+	lastErr                     string
+	restartNeeded               bool
+	clearedStartupRunningTools  bool
 
 	subMu   sync.Mutex
 	nextSub int
@@ -308,15 +315,16 @@ type Controller struct {
 // New constructs a browser app controller.
 func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 	return &Controller{
-		cfg:        cfg,
-		store:      st,
-		agent:      engine,
-		theme:      normalizeTheme(cfg.UI.Theme),
-		statuses:   map[id.ID]ChatSidebarStatus{},
-		runtimes:   map[id.ID]*chat.Chat{},
-		execUnsubs: map[id.ID]func(){},
-		snapshots:  map[id.ID]chat.Snapshot{},
-		subs:       map[int]chan Event{},
+		cfg:                         cfg,
+		store:                       st,
+		agent:                       engine,
+		theme:                       normalizeTheme(cfg.UI.Theme),
+		statuses:                    map[id.ID]ChatSidebarStatus{},
+		runtimes:                    map[id.ID]*chat.Chat{},
+		execUnsubs:                  map[id.ID]func(){},
+		snapshots:                   map[id.ID]chat.Snapshot{},
+		subs:                        map[int]chan Event{},
+		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 	}
 }
 
@@ -577,6 +585,12 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 	}
 	if c.sessionUnsub != nil {
 		unsubs = append(unsubs, c.sessionUnsub)
+	}
+	if c.workspaceWatchCancel != nil {
+		unsubs = append(unsubs, c.workspaceWatchCancel)
+	}
+	if c.workspaceRefreshTimer != nil {
+		c.workspaceRefreshTimer.Stop()
 	}
 	c.mu.RUnlock()
 	for _, unsub := range unsubs {
@@ -1083,23 +1097,122 @@ func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID id.ID, cha
 	return nil
 }
 
-// RefreshWorkspace scans workspace metadata and publishes an event on change.
+type workspaceRefreshTrigger uint8
+
+const (
+	workspaceRefreshInitial workspaceRefreshTrigger = iota
+	workspaceRefreshUser
+	workspaceRefreshWatcher
+	workspaceRefreshTimer
+)
+
+// RefreshWorkspace requests a workspace metadata scan and publishes an event on change.
 func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	c.mu.RLock()
+	sessionID := c.session.ID
 	projectRoot := c.session.ProjectRoot
 	c.mu.RUnlock()
+	return c.requestWorkspaceRefresh(ctx, sessionID, projectRoot, workspaceRefreshUser)
+}
+
+func (c *Controller) requestWorkspaceRefresh(ctx context.Context, sessionID id.ID, projectRoot string, trigger workspaceRefreshTrigger) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := time.Now()
+	var staleStatus workspacepkg.Status
+	var broadcastStale bool
+	var delay time.Duration
+	c.mu.Lock()
+	if c.session.ID != sessionID || c.session.ProjectRoot != projectRoot {
+		c.mu.Unlock()
+		return nil
+	}
+	minInterval := c.workspaceRefreshMinInterval
+	if minInterval <= 0 {
+		minInterval = defaultWorkspaceRefreshMinInterval
+	}
+	due := trigger == workspaceRefreshInitial || c.lastWorkspaceRefresh.IsZero() || now.Sub(c.lastWorkspaceRefresh) >= minInterval
+	if !due {
+		if !c.workspace.Stale {
+			c.workspace.Stale = true
+			staleStatus = c.workspace
+			broadcastStale = true
+		}
+		delay = minInterval - now.Sub(c.lastWorkspaceRefresh)
+		if delay < 0 {
+			delay = 0
+		}
+		if !c.workspaceRefreshPending {
+			c.workspaceRefreshPending = true
+			c.workspaceRefreshTimer = time.AfterFunc(delay, func() {
+				_ = c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshTimer)
+			})
+		}
+		c.mu.Unlock()
+		if broadcastStale {
+			c.broadcastWorkspace(staleStatus)
+		}
+		return nil
+	}
+	if c.workspaceRefreshTimer != nil {
+		c.workspaceRefreshTimer.Stop()
+		c.workspaceRefreshTimer = nil
+	}
+	c.workspaceRefreshPending = false
+	c.lastWorkspaceRefresh = now
+	c.mu.Unlock()
+
 	status, err := workspacepkg.Snapshot(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
+	status.Stale = false
 	c.mu.Lock()
+	if c.session.ID != sessionID || c.session.ProjectRoot != projectRoot {
+		c.mu.Unlock()
+		return nil
+	}
 	changed := workspaceSignature(c.workspace) != workspaceSignature(status)
 	c.workspace = status
+	if !status.RefreshedAt.IsZero() {
+		c.lastWorkspaceRefresh = status.RefreshedAt
+	}
 	c.mu.Unlock()
 	if changed {
-		c.broadcast("workspace_delta", map[string]any{"workspace_status": status})
+		c.broadcastWorkspace(status)
 	}
 	return nil
+}
+
+func (c *Controller) broadcastWorkspace(status workspacepkg.Status) {
+	c.broadcast("workspace_delta", map[string]any{"workspace_status": status})
+}
+
+func (c *Controller) replaceWorkspaceWatcher(sessionID id.ID, projectRoot string) {
+	c.mu.Lock()
+	if c.workspaceWatchCancel != nil {
+		c.workspaceWatchCancel()
+		c.workspaceWatchCancel = nil
+	}
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := workspacepkg.Watch(ctx, projectRoot)
+	if err != nil {
+		cancel()
+		return
+	}
+	c.mu.Lock()
+	c.workspaceWatchCancel = cancel
+	c.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		for range watcher.Events() {
+			_ = c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshWatcher)
+		}
+	}()
 }
 
 // CompleteComposer returns command, skill, and reference completions for the current composer token.
@@ -1437,7 +1550,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	milestone = ownerSnapshot.Plan
 	todos = ownerSnapshot.Todos
 	todosByRef = ownerSnapshot.TodosByRef
-	workspaceStatus, _ := workspacepkg.Snapshot(ctx, session.ProjectRoot)
 	statuses := c.chatStatuses(ctx, session.ID)
 	snapshots := make(map[id.ID]chat.Snapshot, len(runtimes))
 	for id, loaded := range runtimes {
@@ -1484,7 +1596,13 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	c.milestone = milestone
 	c.todos = todos
 	c.todosByRef = todosByRef
-	c.workspace = workspaceStatus
+	c.workspace = workspacepkg.Status{ProjectRoot: session.ProjectRoot}
+	c.lastWorkspaceRefresh = time.Time{}
+	if c.workspaceRefreshTimer != nil {
+		c.workspaceRefreshTimer.Stop()
+		c.workspaceRefreshTimer = nil
+	}
+	c.workspaceRefreshPending = false
 	c.lastErr = ""
 	c.mu.Unlock()
 
@@ -1492,6 +1610,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
 	go c.forwardSessionEvents(session.ID, sessionEvents)
+	if err := c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshInitial); err != nil {
+		return err
+	}
+	c.replaceWorkspaceWatcher(session.ID, session.ProjectRoot)
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -1839,10 +1961,11 @@ func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) id.ID {
 
 func workspaceSignature(status workspacepkg.Status) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%s\n%s\n%s\n%d/%d/%d/%d\n",
+	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
 		status.Available,
 		status.ProjectRoot,
 		status.AgentsChecksum,
+		status.Stale,
 		status.Branch,
 		status.Upstream,
 		status.Summary,

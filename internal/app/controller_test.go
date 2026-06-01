@@ -28,6 +28,7 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
 func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
@@ -1311,6 +1312,65 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatal("expected workspace delta")
+		}
+	}
+}
+
+func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workdir := t.TempDir()
+	runGit(t, workdir, "init")
+	runGit(t, workdir, "config", "user.email", "test@example.com")
+	runGit(t, workdir, "config", "user.name", "Test User")
+	path := filepath.Join(workdir, "tracked.txt")
+	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workdir, "add", "tracked.txt")
+	runGit(t, workdir, "commit", "-m", "initial")
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil))
+	ctrl.workspaceRefreshMinInterval = 500 * time.Millisecond
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	events, unsub := ctrl.Subscribe()
+	defer unsub()
+	ctrl.mu.Lock()
+	ctrl.lastWorkspaceRefresh = time.Now()
+	ctrl.mu.Unlock()
+
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleSeen := false
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type != "workspace_delta" {
+				continue
+			}
+			status := event.Payload.(map[string]any)["workspace_status"].(workspacepkg.Status)
+			if status.Stale {
+				staleSeen = true
+				continue
+			}
+			if staleSeen && status.Modified == 1 {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("expected stale and refreshed workspace deltas, staleSeen=%v state=%#v", staleSeen, ctrl.State().Workspace)
 		}
 	}
 }

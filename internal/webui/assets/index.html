@@ -225,6 +225,7 @@
           <span class="sidebar-heading">Git</span>
           <span class="fw-semibold text-truncate" x-show="gitStatus().available" x-text="gitStatus().branch || '-'"></span>
           <span class="small text-secondary text-truncate" x-show="gitStatus().available && gitStatus().upstream" x-text="gitStatus().upstream"></span>
+          <span class="badge text-bg-warning" x-show="gitStatus().stale || gitStatus().Stale">changed</span>
           <span class="badge text-bg-secondary" x-show="gitStatus().available && gitStatus().summary" x-text="gitStatus().summary"></span>
           <span class="small text-nowrap ms-auto" x-show="gitStatus().available">
             <span class="diff-add" x-text="'+' + (gitStatus().added || 0)"></span>

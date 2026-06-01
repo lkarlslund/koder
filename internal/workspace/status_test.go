@@ -1,6 +1,12 @@
 package workspace
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
 
 func TestParseStatus(t *testing.T) {
 	raw := "## main...origin/main [ahead 1]\n M internal/webui/server.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
@@ -30,5 +36,25 @@ func TestParseStatus(t *testing.T) {
 	}
 	if got.Files[3].Additions != 0 || got.Files[3].Deletions != 0 {
 		t.Fatalf("unexpected untracked diff stats: %#v", got.Files[3])
+	}
+}
+
+func TestWatcherReportsFileChanges(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	watcher, err := Watch(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+
+	if err := os.WriteFile(filepath.Join(root, "changed.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-watcher.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected file watcher event")
 	}
 }
