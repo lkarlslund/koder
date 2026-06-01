@@ -130,6 +130,13 @@
     .planning-badge-completed { color: var(--bs-success-text-emphasis); background: var(--bs-success-bg-subtle); border-color: var(--bs-success-border-subtle); }
     .planning-badge-blocked { color: var(--bs-danger-text-emphasis); background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); }
     .planning-badge-cancelled { color: var(--bs-light-text-emphasis); background: var(--bs-dark-bg-subtle); border-color: var(--bs-dark-border-subtle); }
+    .tool-status-badge { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; border: 1px solid transparent; vertical-align: text-bottom; }
+    .tool-status-badge-pending { color: var(--bs-secondary-text-emphasis); background: var(--bs-secondary-bg-subtle); border-color: var(--bs-secondary-border-subtle); }
+    .tool-status-badge-running { color: var(--bs-primary-text-emphasis); background: var(--bs-primary-bg-subtle); border-color: var(--bs-primary-border-subtle); }
+    .tool-status-badge-awaiting { color: var(--bs-warning-text-emphasis); background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); }
+    .tool-status-badge-done { color: var(--bs-success-text-emphasis); background: var(--bs-success-bg-subtle); border-color: var(--bs-success-border-subtle); }
+    .tool-status-badge-error { color: var(--bs-danger-text-emphasis); background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); }
+    .tool-status-badge-canceled { color: var(--bs-light-text-emphasis); background: var(--bs-dark-bg-subtle); border-color: var(--bs-dark-border-subtle); }
     .planning-children { margin-left: 1.35rem; padding: .05rem 0 .18rem .55rem; border-left: 1px solid var(--bs-border-color); }
     .planning-todo { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: .28rem; min-height: 1.25rem; font-size: .84rem; }
     .planning-empty { color: var(--bs-secondary-color); font-size: .82rem; padding: .1rem 0; }

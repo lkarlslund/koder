@@ -67,7 +67,7 @@
               <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3">
-                  <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="toolStatusBadge(tool)"></span></div>
+                  <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-text="toolStatusBadge(tool)"></span></div>
                   <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
                   <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">
                     <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>

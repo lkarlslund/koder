@@ -720,7 +720,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
-	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) {
+	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
 		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
 	}
 	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) || strings.Contains(fullPage, `JSON.stringify(item.content`) {
@@ -745,7 +745,13 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected bash tool rendering to show Ran command, exit code, and compact output")
 	}
 	if !strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')`) {
-		t.Fatalf("expected completed and errored bash tool rendering to avoid repeating the command preview")
+		t.Fatalf("expected done and errored bash tool rendering to avoid repeating the command preview")
+	}
+	if !strings.Contains(fullPage, `return status === 'completed' ? 'done' : status`) ||
+		!strings.Contains(fullPage, `tool-status-badge-done`) ||
+		!strings.Contains(fullPage, `tool-status-badge-running`) ||
+		!strings.Contains(fullPage, `tool-status-badge-error`) {
+		t.Fatalf("expected colorful tool status badges with done wording")
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")

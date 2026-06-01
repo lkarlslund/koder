@@ -78,6 +78,10 @@
     function toolStatus(tool) {
       return String((tool && (tool.status || tool.Status)) || '').toLowerCase();
     }
+    function normalizedToolStatus(tool) {
+      const status = toolStatus(tool);
+      return status === 'completed' ? 'done' : status;
+    }
     function toolExitCode(tool) {
       const data = toolData(tool);
       const direct = firstValue(data, ['exit_code', 'ExitCode']);
@@ -90,7 +94,16 @@
       const kind = String((tool && tool.tool) || '');
       const exitCode = toolExitCode(tool);
       if ((kind === 'bash' || kind.startsWith('exec_')) && exitCode !== '') return 'exit ' + exitCode;
-      return toolStatus(tool);
+      return normalizedToolStatus(tool);
+    }
+    function toolStatusBadgeClassName(tool) {
+      const status = normalizedToolStatus(tool);
+      if (status === 'done') return 'tool-status-badge-done';
+      if (status === 'running') return 'tool-status-badge-running';
+      if (status === 'awaiting_approval') return 'tool-status-badge-awaiting';
+      if (status === 'errored' || status === 'error' || status === 'failed' || status === 'denied') return 'tool-status-badge-error';
+      if (status === 'canceled' || status === 'cancelled') return 'tool-status-badge-canceled';
+      return 'tool-status-badge-pending';
     }
     function isBareExitStatus(text) {
       return /^bash failed:\s*exit status\s+-?\d+\s*$/i.test(String(text || '').trim());
@@ -1201,6 +1214,7 @@
         toolTitle(tool) { return toolTitleText(tool); },
         toolPreview(tool) { return toolPreviewText(tool); },
         toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
+        toolStatusBadgeClass(tool) { return toolStatusBadgeClassName(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
         toolApprovalPending(tool) {
           return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
