@@ -7,11 +7,9 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 
-	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -117,8 +115,6 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	if string(verifyBytes) != after {
 		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes). The edit did not persist as intended; re-read the file and try again", rel, len(after), len(verifyBytes))
 	}
-	report := codediag.CheckEdit(ctx, runtime.Workdir, rel, before, after, codediag.Options{Mode: "auto", Timeout: 2 * time.Second})
-	diagnostics := codediag.NewProblemsText(report)
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(before, after, false)
 	mode := "replaced 1 occurrence"
@@ -126,13 +122,9 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
 	}
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
-	output := summary
-	if diagnostics != "" {
-		output += "\n\nNew problems detected after editing file:\n" + diagnostics
-	}
 	hunks, truncated := buildStoredHunksFromRanges(before, match.ranges, match.newString)
 	return tools.Result{
-		Output:   output,
+		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
 		Meta: map[string]string{
 			"path":         rel,
@@ -148,36 +140,14 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			Summary:      summary,
 			Matcher:      match.stage,
 			Verification: "ok",
-			Diagnostics:  diagnostics,
-			DiagnosticReport: tools.DiagnosticReportStored{
-				Diagnostics: storedDiagnostics(report.Diagnostics),
-				Skipped:     report.Skipped,
-			},
-			Diff:      buildUnifiedStoredDiff(rel, before, after),
-			Hunks:     hunks,
-			Truncated: truncated,
+			Diff:         buildUnifiedStoredDiff(rel, before, after),
+			Hunks:        hunks,
+			Truncated:    truncated,
 		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "file_edit", result.Output
-}
-
-func storedDiagnostics(in []codediag.Diagnostic) []tools.DiagnosticStored {
-	out := make([]tools.DiagnosticStored, 0, len(in))
-	for _, diagnostic := range in {
-		out = append(out, tools.DiagnosticStored{
-			Source:   string(diagnostic.Source),
-			Path:     diagnostic.Path,
-			Line:     diagnostic.Line,
-			Column:   diagnostic.Column,
-			Severity: diagnostic.Severity,
-			Tool:     diagnostic.Tool,
-			Code:     diagnostic.Code,
-			Message:  diagnostic.Message,
-		})
-	}
-	return out
 }
 
 const maxStoredHunks = 8

@@ -23,6 +23,7 @@ const (
 	TimelineKindTool       TimelineKind = "tool"
 	TimelineKindNotice     TimelineKind = "notice"
 	TimelineKindCompaction TimelineKind = "compaction"
+	TimelineKindLint       TimelineKind = "lint"
 )
 
 // TimelineItem is the durable ordered unit of chat transcript state.
@@ -475,6 +476,15 @@ type Compaction struct {
 // TimelineKind returns the timeline payload kind.
 func (Compaction) TimelineKind() TimelineKind { return TimelineKindCompaction }
 
+// LintMessage stores post-tool diagnostics for files touched in the last tool batch.
+type LintMessage struct {
+	Text  string   `json:"text"`
+	Files []string `json:"files,omitempty"`
+}
+
+// TimelineKind returns the timeline payload kind.
+func (LintMessage) TimelineKind() TimelineKind { return TimelineKindLint }
+
 // MarshalJSON stores timeline content behind a discriminator.
 func (i TimelineItem) MarshalJSON() ([]byte, error) {
 	kind := TimelineKind("")
@@ -540,6 +550,8 @@ func decodeTimelineContent(kind TimelineKind, raw json.RawMessage) (TimelineCont
 		return decodeTimelinePayload[Notice](raw)
 	case TimelineKindCompaction:
 		return decodeTimelinePayload[Compaction](raw)
+	case TimelineKindLint:
+		return decodeTimelinePayload[LintMessage](raw)
 	default:
 		return nil, fmt.Errorf("unsupported timeline kind %q", kind)
 	}

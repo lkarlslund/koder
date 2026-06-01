@@ -97,18 +97,21 @@ func TestExecuteOverwritesFileWithForceOverwrite(t *testing.T) {
 	}
 }
 
-func TestExecuteReportsWrittenFileDiagnostics(t *testing.T) {
+func TestExecuteDefersWrittenFileDiagnosticsToLintMessage(t *testing.T) {
 	dir := t.TempDir()
 	req := tools.Request{Args: map[string]string{"path": "bad.json", "content": "{"}}
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Problems detected after writing file") {
-		t.Fatalf("expected diagnostics in output, got %q", result.Output)
+	if strings.Contains(result.Output, "Problems detected") || strings.Contains(result.Output, "Diagnostics") {
+		t.Fatalf("expected no inline diagnostics in output, got %q", result.Output)
 	}
 	stored, ok := result.Stored.(tools.WriteStoredResult)
-	if !ok || !strings.Contains(stored.Diagnostics, "bad.json") {
-		t.Fatalf("expected stored diagnostics, got %#v", result.Stored)
+	if !ok {
+		t.Fatalf("unexpected stored result type %T", result.Stored)
+	}
+	if stored.Diagnostics != "" || len(stored.DiagnosticReport.Diagnostics) != 0 {
+		t.Fatalf("expected diagnostics to be emitted as a later lint message, got %#v", stored)
 	}
 }

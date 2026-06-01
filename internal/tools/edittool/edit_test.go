@@ -282,7 +282,7 @@ func TestExecuteEditInlineUnicodeNormalizedExpandedRune(t *testing.T) {
 	}
 }
 
-func TestExecuteEditReportsIntroducedGoDiagnostics(t *testing.T) {
+func TestExecuteEditDefersDiagnosticsToLintMessage(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.go")
 	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {\n\tprintln(\"ok\")\n}\n"), 0o644); err != nil {
@@ -298,19 +298,19 @@ func TestExecuteEditReportsIntroducedGoDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "New problems detected after editing file") {
-		t.Fatalf("expected diagnostics in output, got %q", result.Output)
+	if strings.Contains(result.Output, "problems detected") || strings.Contains(result.Output, "Diagnostics") {
+		t.Fatalf("expected no inline diagnostics in output, got %q", result.Output)
 	}
 	stored, ok := result.Stored.(tools.EditStoredResult)
 	if !ok {
 		t.Fatalf("unexpected stored result type %T", result.Stored)
 	}
-	if !strings.Contains(stored.Diagnostics, "file.go") {
-		t.Fatalf("expected stored diagnostics, got %#v", stored)
+	if stored.Diagnostics != "" || len(stored.DiagnosticReport.Diagnostics) != 0 {
+		t.Fatalf("expected diagnostics to be emitted as a later lint message, got %#v", stored)
 	}
 }
 
-func TestExecuteEditReportsStructuredFileDiagnostics(t *testing.T) {
+func TestExecuteEditDoesNotInlineStructuredFileDiagnostics(t *testing.T) {
 	tests := []struct {
 		name      string
 		file      string
@@ -354,8 +354,8 @@ func TestExecuteEditReportsStructuredFileDiagnostics(t *testing.T) {
 			if !ok {
 				t.Fatalf("unexpected stored result type %T", result.Stored)
 			}
-			if !strings.Contains(result.Output, "New problems detected after editing file") || !strings.Contains(stored.Diagnostics, tt.file) {
-				t.Fatalf("expected diagnostics for %s, output=%q stored=%#v", tt.file, result.Output, stored)
+			if strings.Contains(result.Output, "problems detected") || stored.Diagnostics != "" || len(stored.DiagnosticReport.Diagnostics) != 0 {
+				t.Fatalf("expected diagnostics to be emitted as a later lint message for %s, output=%q stored=%#v", tt.file, result.Output, stored)
 			}
 		})
 	}

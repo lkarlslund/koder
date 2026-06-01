@@ -1660,6 +1660,8 @@ func timelineItemSummary(item domain.TimelineItem) string {
 		return strings.TrimSpace(payload.Text)
 	case domain.Compaction:
 		return strings.TrimSpace(payload.Summary)
+	case domain.LintMessage:
+		return strings.TrimSpace(payload.Text)
 	}
 	return ""
 }

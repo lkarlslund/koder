@@ -1132,9 +1132,6 @@ func formatWriteStoredResultForModel(result WriteStoredResult) string {
 	if result.Truncated {
 		lines = append(lines, "Stored written content is truncated in the UI transcript.")
 	}
-	if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
-		lines = append(lines, "Diagnostics:\n"+diagnostics)
-	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 

@@ -140,6 +140,13 @@
       if (reason) parts.push(reason);
       return parts.join(' · ');
     }
+    function lintText(content) {
+      return firstValue(content, ['text', 'Text']) || '';
+    }
+    function lintFiles(content) {
+      const files = firstValue(content, ['files', 'Files']);
+      return Array.isArray(files) ? files.filter(Boolean).join(', ') : '';
+    }
     function userMessageContent(item) {
       return (item && (item.content || item.Content)) || {};
     }
@@ -1350,6 +1357,8 @@
         noticeLevel(content) { return noticeLevel(content); },
         noticeText(content) { return noticeText(content); },
         noticeDetail(content) { return noticeDetail(content); },
+        lintText(content) { return lintText(content); },
+        lintFiles(content) { return lintFiles(content); },
         attachmentName(attachment) { return attachment?.name || attachment?.Name || 'image'; },
         attachmentIcon(attachment) {
           const mime = String(attachment?.mime || attachment?.MIME || '').toLowerCase();

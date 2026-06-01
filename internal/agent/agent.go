@@ -23,6 +23,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -1113,6 +1114,8 @@ func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 		return "notice", content.Text
 	case domain.Compaction:
 		return "compaction", content.Summary
+	case domain.LintMessage:
+		return "lint", content.Text
 	default:
 		return "", ""
 	}
@@ -1962,6 +1965,12 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		return []provider.Message{{Role: provider.RoleUser, Content: fmt.Sprintf("%s output:\n%s", content.Tool, body)}}, nil
 	case domain.Notice:
 		return nil, nil
+	case domain.LintMessage:
+		body := strings.TrimSpace(content.Text)
+		if body == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: provider.RoleUser, Content: "Post-edit diagnostics:\n" + body}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
 	}
@@ -3288,6 +3297,7 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 	}
 
 	var firstErr error
+	touched := map[string]struct{}{}
 	for i := 0; i < execCount; i++ {
 		completed := <-results
 		if completed.err != nil {
@@ -3302,6 +3312,9 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 		}
 		for _, evt := range completed.events {
 			out <- evt
+			if touchedPath, ok := touchedPathFromToolResultEvent(evt); ok {
+				touched[touchedPath] = struct{}{}
+			}
 			if evt.Kind == domain.EventKindApprovalAsk {
 				needsApproval = true
 			}
@@ -3313,7 +3326,150 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 	if chatpkg.ShouldStop(ctx) {
 		return needsApproval, context.Canceled
 	}
+	if err := e.appendLintMessageForTouchedFiles(ctx, session, chat, turn, orderedTouchedFiles(touched), out); err != nil {
+		return needsApproval, err
+	}
 	return needsApproval, nil
+}
+
+func touchedPathFromToolResultEvent(evt domain.Event) (string, bool) {
+	if evt.Kind != domain.EventKindToolResult {
+		return "", false
+	}
+	switch evt.Tool {
+	case domain.ToolKindFileEdit, domain.ToolKindFileWrite:
+	default:
+		return "", false
+	}
+	path := strings.TrimSpace(toolResultPath(evt.Item, evt.ToolCallID))
+	if path == "" {
+		return "", false
+	}
+	return path, true
+}
+
+func toolResultPath(item domain.TimelineItem, toolCallID string) string {
+	assistant, ok := item.Content.(domain.AssistantMessage)
+	if !ok {
+		if execution, ok := item.Content.(domain.ToolExecution); ok && execution.Result != nil {
+			return pathFromToolResultData(execution.Result.Data)
+		}
+		return ""
+	}
+	for _, call := range assistant.Tools {
+		if strings.TrimSpace(toolCallID) != "" && string(call.ToolCallID) != toolCallID {
+			continue
+		}
+		if call.Result == nil {
+			continue
+		}
+		if path := pathFromToolResultData(call.Result.Data); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func pathFromToolResultData(data domain.ToolResultPayload) string {
+	switch result := data.(type) {
+	case domain.EditStoredResult:
+		return strings.TrimSpace(result.Path)
+	case domain.WriteStoredResult:
+		return strings.TrimSpace(result.Path)
+	default:
+		return ""
+	}
+}
+
+func orderedTouchedFiles(files map[string]struct{}) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(files))
+	for file := range files {
+		out = append(out, file)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (e *Engine) appendLintMessageForTouchedFiles(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, paths []string, out chan<- domain.Event) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	root := strings.TrimSpace(session.ProjectRoot)
+	if turn != nil && root == "" {
+		root = strings.TrimSpace(turn.Session().ProjectRoot)
+	}
+	if root == "" {
+		return nil
+	}
+	report := lintTouchedFiles(ctx, root, paths)
+	text := codediag.NewProblemsText(report)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	item, err := appendLintTimelineItem(ctx, e.store, turn, chat.ID, domain.LintMessage{Text: text, Files: paths})
+	if err != nil {
+		return err
+	}
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Lint diagnostics detected", Item: item}
+	return nil
+}
+
+func lintTouchedFiles(ctx context.Context, root string, paths []string) codediag.Report {
+	touched := make(map[string]struct{}, len(paths))
+	var report codediag.Report
+	for _, path := range paths {
+		rel := tools.NormalizePathInput(path)
+		if rel == "" {
+			continue
+		}
+		abs, cleanRel, err := tools.WorkspacePath(root, rel)
+		if err != nil {
+			continue
+		}
+		touched[cleanRel] = struct{}{}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		fileReport := codediag.CheckFile(ctx, root, cleanRel, string(data), codediag.Options{
+			Mode:            "auto",
+			IncludeExisting: true,
+			Timeout:         2 * time.Second,
+		})
+		for _, diagnostic := range fileReport.Diagnostics {
+			if _, ok := touched[tools.NormalizePathInput(diagnostic.Path)]; ok {
+				report.Diagnostics = append(report.Diagnostics, diagnostic)
+			}
+		}
+	}
+	return report
+}
+
+func appendLintTimelineItem(ctx context.Context, st *store.Store, turn *chatpkg.TurnState, chatID id.ID, lint domain.LintMessage) (domain.TimelineItem, error) {
+	now := time.Now().UTC()
+	if turn != nil {
+		item := domain.TimelineItem{
+			ID:        chatpkg.NewTimelineID(now),
+			ChatID:    turn.Chat().ID,
+			Content:   lint,
+			CreatedAt: now,
+			UpdatedAt: now,
+			SealedAt:  now,
+		}
+		return turn.UpsertTimelineItem(ctx, item)
+	}
+	item, err := chatpkg.AppendTimeline(ctx, st, chatID, lint)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(now)
+	if err := chatpkg.PutTimelineItem(ctx, st, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
 }
 
 func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (preparedToolCall, error) {

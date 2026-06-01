@@ -241,6 +241,8 @@ func estimateTimelineItemTokens(item domain.TimelineItem) int {
 		texts = append(texts, payload.Text)
 	case domain.Compaction:
 		texts = append(texts, payload.Summary)
+	case domain.LintMessage:
+		texts = append(texts, payload.Text)
 	}
 	return tokenestimate.Text(strings.Join(texts, "\n"))
 }

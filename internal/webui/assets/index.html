@@ -88,7 +88,13 @@
                   <span class="text-secondary" x-show="noticeDetail(item.content || {})" x-text="noticeDetail(item.content || {})"></span>
                 </div>
               </template>
-              <template x-if="item.kind !== 'notice'">
+              <template x-if="item.kind === 'lint'">
+                <div class="lint-message">
+                  <div class="small fw-semibold"><i class="bi bi-bug"></i> lint <span class="text-secondary" x-show="lintFiles(item.content || {})" x-text="lintFiles(item.content || {})"></span></div>
+                  <pre x-text="lintText(item.content || {})"></pre>
+                </div>
+              </template>
+              <template x-if="item.kind !== 'notice' && item.kind !== 'lint'">
                 <div class="message p-2 bg-body-tertiary">
                   <span class="small text-secondary"><i class="bi bi-info-circle"></i> <span x-text="item.kind"></span></span>
                 </div>

@@ -26,6 +26,33 @@ func TestNewTimelineIDReturnsUUIDv7(t *testing.T) {
 	}
 }
 
+func TestTimelineItemMarshalRoundTripsLintMessage(t *testing.T) {
+	item := TimelineItem{
+		ID:      "019aa000-0000-7000-8000-000000000001",
+		ChatID:  "019aa000-0000-7000-8000-000000000002",
+		Seq:     1,
+		Content: LintMessage{Text: "bad.json\n- [syntax error] Line 1: invalid", Files: []string{"bad.json"}},
+	}
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"kind":"lint"`) {
+		t.Fatalf("expected lint discriminator, got %s", data)
+	}
+	var decoded TimelineItem
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	lint, ok := decoded.Content.(LintMessage)
+	if !ok {
+		t.Fatalf("expected lint content, got %#v", decoded.Content)
+	}
+	if lint.Text != "bad.json\n- [syntax error] Line 1: invalid" || len(lint.Files) != 1 || lint.Files[0] != "bad.json" {
+		t.Fatalf("unexpected lint payload: %#v", lint)
+	}
+}
+
 func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{

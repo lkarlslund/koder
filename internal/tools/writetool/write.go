@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -67,51 +65,23 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
 	summary := fmt.Sprintf("%s %s", cases.Title(language.English).String(action), rel)
-	report := codediag.CheckFile(ctx, runtime.Workdir, rel, req.Args["content"], codediag.Options{Mode: "auto", IncludeExisting: true, Timeout: 2 * time.Second})
-	diagnostics := codediag.NewProblemsText(report)
-	output := summary
-	if diagnostics != "" {
-		output += "\n\nProblems detected after writing file:\n" + diagnostics
-	}
 	content, truncated := tools.TruncateText(req.Args["content"], tools.DefaultToolOutputLimit)
 	return tools.Result{
-		Output:   output,
+		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
 		Meta: map[string]string{
 			"path":   rel,
 			"action": action,
 		},
 		Stored: tools.WriteStoredResult{
-			Path:        rel,
-			Action:      action,
-			Summary:     summary,
-			Content:     content,
-			Diagnostics: diagnostics,
-			DiagnosticReport: tools.DiagnosticReportStored{
-				Diagnostics: storedDiagnostics(report.Diagnostics),
-				Skipped:     report.Skipped,
-			},
+			Path:      rel,
+			Action:    action,
+			Summary:   summary,
+			Content:   content,
 			Truncated: truncated,
 		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "file_write", result.Output
-}
-
-func storedDiagnostics(in []codediag.Diagnostic) []tools.DiagnosticStored {
-	out := make([]tools.DiagnosticStored, 0, len(in))
-	for _, diagnostic := range in {
-		out = append(out, tools.DiagnosticStored{
-			Source:   string(diagnostic.Source),
-			Path:     diagnostic.Path,
-			Line:     diagnostic.Line,
-			Column:   diagnostic.Column,
-			Severity: diagnostic.Severity,
-			Tool:     diagnostic.Tool,
-			Code:     diagnostic.Code,
-			Message:  diagnostic.Message,
-		})
-	}
-	return out
 }

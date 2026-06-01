@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -44,6 +45,28 @@ func TestParseToolCall(t *testing.T) {
 	}
 	if plain != "I will inspect the repo." {
 		t.Fatalf("unexpected plain text: %q", plain)
+	}
+}
+
+func TestLintTouchedFilesReportsOnlyTouchedFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := lintTouchedFiles(context.Background(), dir, []string{"bad.json", "good.json"})
+	text := codediag.NewProblemsText(report)
+	if !strings.Contains(text, "bad.json") {
+		t.Fatalf("expected touched file diagnostic, got %q", text)
+	}
+	if strings.Contains(text, "other.json") || strings.Contains(text, "good.json") {
+		t.Fatalf("expected only touched files with errors, got %q", text)
 	}
 }
 
