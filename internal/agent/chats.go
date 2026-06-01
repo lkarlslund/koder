@@ -114,7 +114,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 	if role == chatrole.Execution && milestoneRef == "" {
 		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or todo_ref")
 	}
-	if role == chatrole.Execution && milestone.Status != domain.MilestoneStatusReady {
+	if role == chatrole.Execution && milestone.Status != planning.MilestoneStatusReady {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
 	}
 	parentID := parentChat.ID
@@ -154,8 +154,8 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		}
 		milestone, _ = milestoneByRef(plan, milestoneRef)
 	}
-	if todoRef != "" && role == chatrole.Execution && scopedTodo != nil && scopedTodo.Status == domain.TodoStatusPending {
-		todo, err := owner.UpdateTodoItem(ctx, todoRef, domain.TodoStatusInProgress, scopedTodo.Content)
+	if todoRef != "" && role == chatrole.Execution && scopedTodo != nil && scopedTodo.Status == planning.TodoStatusPending {
+		todo, err := owner.UpdateTodoItem(ctx, todoRef, planning.TodoStatusInProgress, scopedTodo.Content)
 		if err != nil {
 			return tools.ChatStatus{}, err
 		}
@@ -199,7 +199,7 @@ func sessionTodoByID(ctx context.Context, owner interface {
 	return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
 }
 
-func updateMilestoneStatus(plan planning.Plan, ref string, status domain.MilestoneStatus, ownerChatID id.ID) (planning.Plan, error) {
+func updateMilestoneStatus(plan planning.Plan, ref string, status planning.MilestoneStatus, ownerChatID id.ID) (planning.Plan, error) {
 	next := plan
 	next.Milestones = slices.Clone(plan.Milestones)
 	found := false
@@ -212,7 +212,7 @@ func updateMilestoneStatus(plan planning.Plan, ref string, status domain.Milesto
 			return planning.Plan{}, fmt.Errorf("milestone %q is owned by chat %s", ref, *next.Milestones[idx].OwnerChatID)
 		}
 		next.Milestones[idx].Status = status
-		if status == domain.MilestoneStatusDecomposing || status == domain.MilestoneStatusExecuting {
+		if status == planning.MilestoneStatusDecomposing || status == planning.MilestoneStatusExecuting {
 			owner := ownerChatID
 			next.Milestones[idx].OwnerChatID = &owner
 		} else {
@@ -225,10 +225,10 @@ func updateMilestoneStatus(plan planning.Plan, ref string, status domain.Milesto
 	return next, nil
 }
 
-func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
+func roleMilestoneStatus(role domain.WorkflowRole) planning.MilestoneStatus {
 	switch role {
 	case chatrole.Execution:
-		return domain.MilestoneStatusExecuting
+		return planning.MilestoneStatusExecuting
 	default:
 		return 0
 	}
@@ -366,7 +366,7 @@ func (e *Engine) completedChildChatNotification(ctx context.Context, chatID id.I
 		todos, err := sessionpkg.ListTodos(ctx, e.store, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
 		if err == nil {
 			for _, todo := range todos {
-				if todo.ID == chatRecord.AssignedTodoRef && todo.Status == domain.TodoStatusCompleted {
+				if todo.ID == chatRecord.AssignedTodoRef && todo.Status == planning.TodoStatusCompleted {
 					return fmt.Sprintf("Chat %s is done: todo #%s is completed.", chatID, todo.ID)
 				}
 			}
@@ -380,7 +380,7 @@ func (e *Engine) completedChildChatNotification(ctx context.Context, chatID id.I
 					continue
 				}
 				switch milestone.Status {
-				case domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled, domain.MilestoneStatusReady:
+				case planning.MilestoneStatusCompleted, planning.MilestoneStatusBlocked, planning.MilestoneStatusCancelled, planning.MilestoneStatusReady:
 					return fmt.Sprintf("Chat %s is done: milestone %s is %s.", chatID, ref, milestone.Status)
 				}
 			}

@@ -768,7 +768,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
-			Status:       domain.TodoStatusPending,
+			Status:       planning.TodoStatusPending,
 			Position:     position + len(items),
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -792,7 +792,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	if s == nil {
 		return planning.TodoItem{}, fmt.Errorf("session is required")
 	}
@@ -857,7 +857,7 @@ func (s *Session) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef s
 	return slices.Clone(s.todosByRef[milestoneRef]), nil
 }
 
-func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status domain.TaskStatus) (planning.Task, error) {
+func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return planning.Task{}, err
 	}
@@ -936,7 +936,7 @@ func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, miles
 	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
 }
 
-func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
 		return planning.TodoItem{}, fmt.Errorf("chat is scoped to todo %q", assigned)
 	}

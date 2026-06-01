@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 )
 
@@ -22,7 +21,7 @@ type Plan struct {
 type Milestone struct {
 	Ref         string
 	Title       string
-	Status      domain.MilestoneStatus
+	Status      MilestoneStatus
 	Notes       string
 	Position    int
 	OwnerChatID *id.ID
@@ -33,7 +32,7 @@ type TodoItem struct {
 	SessionID    id.ID
 	MilestoneRef string
 	Content      string
-	Status       domain.TodoStatus
+	Status       TodoStatus
 	Position     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -43,7 +42,7 @@ type Task struct {
 	ID        id.ID
 	SessionID id.ID
 	Body      string
-	Status    domain.TaskStatus
+	Status    TaskStatus
 	CreatedAt time.Time
 }
 
@@ -95,7 +94,7 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 	for idx, item := range items {
 		ref := strings.TrimSpace(item.Ref)
 		title := strings.TrimSpace(item.Title)
-		status, err := domain.MilestoneStatusString(strings.TrimSpace(item.Status))
+		status, err := MilestoneStatusString(strings.TrimSpace(item.Status))
 		if err != nil {
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
@@ -142,7 +141,7 @@ func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
 		out = append(out, Milestone{
 			Ref:    ref,
 			Title:  title,
-			Status: domain.MilestoneStatusPending,
+			Status: MilestoneStatusPending,
 			Notes:  notes,
 		})
 	}
@@ -160,17 +159,17 @@ func ParseMilestoneRef(raw string) (string, error) {
 	return ref, nil
 }
 
-func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
-	status, err := domain.MilestoneStatusString(strings.TrimSpace(raw))
+func ParseMilestoneStatus(raw string) (MilestoneStatus, error) {
+	status, err := MilestoneStatusString(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("invalid milestone status %q", raw)
 	}
 	return status, nil
 }
 
-func ValidMilestoneStatus(status domain.MilestoneStatus) bool {
+func ValidMilestoneStatus(status MilestoneStatus) bool {
 	switch status {
-	case domain.MilestoneStatusPending, domain.MilestoneStatusDecomposing, domain.MilestoneStatusReady, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
+	case MilestoneStatusPending, MilestoneStatusDecomposing, MilestoneStatusReady, MilestoneStatusExecuting, MilestoneStatusCompleted, MilestoneStatusBlocked, MilestoneStatusCancelled:
 		return true
 	default:
 		return false
@@ -204,8 +203,8 @@ func ParseTodoID(raw string) (id.ID, error) {
 	return value, nil
 }
 
-func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
-	status, err := domain.TodoStatusString(strings.TrimSpace(raw))
+func ParseTodoStatus(raw string) (TodoStatus, error) {
+	status, err := TodoStatusString(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("invalid todo status %q", raw)
 	}
@@ -214,12 +213,12 @@ func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
 
 func ActiveMilestone(plan Plan) (Milestone, bool) {
 	for _, item := range plan.Milestones {
-		if item.Status == domain.MilestoneStatusExecuting {
+		if item.Status == MilestoneStatusExecuting {
 			return item, true
 		}
 	}
 	for _, item := range plan.Milestones {
-		if item.Status == domain.MilestoneStatusDecomposing {
+		if item.Status == MilestoneStatusDecomposing {
 			return item, true
 		}
 	}
@@ -238,7 +237,7 @@ func MilestoneTitle(plan Plan, ref string) string {
 func ValidateTodoProgress(items []TodoItem) error {
 	inProgress := 0
 	for _, item := range items {
-		if item.Status == domain.TodoStatusInProgress {
+		if item.Status == TodoStatusInProgress {
 			inProgress++
 		}
 	}

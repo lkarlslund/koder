@@ -248,9 +248,9 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	status, err := domain.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
+	status, err := planning.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
 	if err != nil {
-		status = domain.MilestoneStatusReady
+		status = planning.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
 		Ref:    ref,
@@ -270,7 +270,7 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}
 	todos := make([]planning.TodoItem, 0, len(items))
 	for _, item := range items {
-		todos = append(todos, planning.TodoItem{Content: item, Status: domain.TodoStatusPending})
+		todos = append(todos, planning.TodoItem{Content: item, Status: planning.TodoStatusPending})
 	}
 	return tools.TodoBucketResultWithTitle(ref, strings.TrimSpace(req.Args["title"]), todos, "Updated milestone and appended todo items"), nil
 }
@@ -387,9 +387,9 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return nil, err
 	}
-	status, err := domain.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
+	status, err := planning.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
 	if err != nil {
-		status = domain.MilestoneStatusReady
+		status = planning.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
 		Ref:    req.Args["ref"],
@@ -495,7 +495,7 @@ func actorChatFromRuntime(runtime tools.Runtime) domain.Chat {
 
 func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Chat) (planning.Plan, error) {
 	ref := req.Args["ref"]
-	status, err := domain.MilestoneStatusString(req.Args["status"])
+	status, err := planning.MilestoneStatusString(req.Args["status"])
 	if err != nil {
 		return plan, fmt.Errorf("invalid milestone status %q", req.Args["status"])
 	}
@@ -531,7 +531,7 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Ch
 	}, nil
 }
 
-func validateMilestoneOwner(milestone planning.Milestone, next domain.MilestoneStatus, actor domain.Chat) error {
+func validateMilestoneOwner(milestone planning.Milestone, next planning.MilestoneStatus, actor domain.Chat) error {
 	if actor.ID == "" || actor.WorkflowRole == chatrole.Orchestrator {
 		return nil
 	}
@@ -539,7 +539,7 @@ func validateMilestoneOwner(milestone planning.Milestone, next domain.MilestoneS
 		return fmt.Errorf("milestone %q is owned by chat %s", milestone.Ref, *milestone.OwnerChatID)
 	}
 	switch next {
-	case domain.MilestoneStatusExecuting:
+	case planning.MilestoneStatusExecuting:
 		if actor.WorkflowRole != chatrole.Execution {
 			return fmt.Errorf("milestone %q can only be set to executing by an execution chat", milestone.Ref)
 		}
@@ -547,9 +547,9 @@ func validateMilestoneOwner(milestone planning.Milestone, next domain.MilestoneS
 	return nil
 }
 
-func applyMilestoneOwner(milestone *planning.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
+func applyMilestoneOwner(milestone *planning.Milestone, status planning.MilestoneStatus, actor domain.Chat) {
 	switch status {
-	case domain.MilestoneStatusExecuting:
+	case planning.MilestoneStatusExecuting:
 		if actor.ID != "" && actor.WorkflowRole != chatrole.Orchestrator {
 			owner := actor.ID
 			milestone.OwnerChatID = &owner
@@ -561,7 +561,7 @@ func applyMilestoneOwner(milestone *planning.Milestone, status domain.MilestoneS
 
 func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) error {
 	for _, milestone := range milestones {
-		if milestone.Status != domain.MilestoneStatusCompleted {
+		if milestone.Status != planning.MilestoneStatusCompleted {
 			continue
 		}
 		todos, err := control.ListTodos(ctx, sessionID, milestone.Ref)
@@ -569,7 +569,7 @@ func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionC
 			return err
 		}
 		for _, todo := range todos {
-			if todo.Status == domain.TodoStatusCompleted {
+			if todo.Status == planning.TodoStatusCompleted {
 				continue
 			}
 			name := strings.TrimSpace(milestone.Title)

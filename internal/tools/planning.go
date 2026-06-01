@@ -12,14 +12,14 @@ import (
 )
 
 type TaskControl interface {
-	AddTask(context.Context, id.ID, string, domain.TaskStatus) (planning.Task, error)
+	AddTask(context.Context, id.ID, string, planning.TaskStatus) (planning.Task, error)
 }
 
 type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
 	AddTodoItems(context.Context, id.ID, string, []string) ([]planning.TodoItem, error)
-	UpdateTodoItem(context.Context, id.ID, domain.TodoStatus, string) (planning.TodoItem, error)
+	UpdateTodoItem(context.Context, id.ID, planning.TodoStatus, string) (planning.TodoItem, error)
 	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
 }
 

@@ -259,7 +259,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milesto
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
-			Status:       domain.TodoStatusPending,
+			Status:       planning.TodoStatusPending,
 			Position:     len(existing) + len(items),
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -273,7 +273,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milesto
 	return items, nil
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	item, err := todoCollection(st).Get(ctx, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err

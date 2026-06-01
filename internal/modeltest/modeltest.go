@@ -187,7 +187,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, ref str
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: ref, Content: content, Status: domain.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		items = append(items, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
 	}
 	for _, item := range items {
 		if err := TodoCollection(st).Put(ctx, item); err != nil {
@@ -205,7 +205,7 @@ func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoI
 	return TodoCollection(st).Get(ctx, todoID)
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	item, err := GetTodo(ctx, st, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err

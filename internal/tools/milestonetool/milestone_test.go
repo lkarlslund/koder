@@ -38,7 +38,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 func seedPlan(t *testing.T, st *store.Store, sessionID id.ID) {
 	t.Helper()
 	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: sessionID, Summary: "Ship it", Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planned["status"] != domain.MilestoneStatusReady.String() {
+	if planned["status"] != planning.MilestoneStatusReady.String() {
 		t.Fatalf("expected ready status string, got %#v", planned)
 	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
@@ -84,7 +84,7 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated["status"] != domain.MilestoneStatusCancelled.String() {
+	if updated["status"] != planning.MilestoneStatusCancelled.String() {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
@@ -101,7 +101,7 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed[0].Status != domain.MilestoneStatusCancelled {
+	if parsed[0].Status != planning.MilestoneStatusCancelled {
 		t.Fatalf("expected cancelled milestone status, got %#v", parsed[0])
 	}
 
@@ -118,8 +118,8 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 		t.Fatal("expected duplicate ref error")
 	}
 	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting},
-		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting},
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusExecuting},
 	}); err != nil {
 		t.Fatalf("expected multiple active milestones to be allowed, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	items := upsertMilestone([]planning.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}, planning.Milestone{
 		Ref:    "alpha",
 		Title:  "Alpha updated",
-		Status: domain.MilestoneStatusReady,
+		Status: planning.MilestoneStatusReady,
 	})
 	if items[0].Title != "Alpha updated" || items[0].Position != 0 {
 		t.Fatalf("unexpected updated milestone: %#v", items[0])
@@ -142,13 +142,13 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	plan, err := updatedMilestonePlan(planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
-			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
+			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
 		},
 	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}}, domain.Chat{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Milestones[0].Status != domain.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" {
+	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" {
 		t.Fatalf("unexpected updated plan: %#v", plan)
 	}
 	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, domain.Chat{}); err == nil {
@@ -160,8 +160,8 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 	plan := planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
-			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
-			{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
+			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, Position: 0},
+			{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
 		},
 	}
 
@@ -169,7 +169,7 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Milestones[0].Status != domain.MilestoneStatusExecuting || updated.Milestones[1].Status != domain.MilestoneStatusExecuting {
+	if updated.Milestones[0].Status != planning.MilestoneStatusExecuting || updated.Milestones[1].Status != planning.MilestoneStatusExecuting {
 		t.Fatalf("expected both milestones to remain active, got %#v", updated.Milestones)
 	}
 }
@@ -180,7 +180,7 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 	plan := planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
-			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, OwnerChatID: &ownerID, Position: 0},
+			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, OwnerChatID: &ownerID, Position: 0},
 		},
 	}
 
@@ -208,7 +208,7 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 	plan := planning.Plan{
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
-			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
 		},
 	}
 
@@ -229,8 +229,8 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	runtime.ChatRole = chatrole.Execution
 	runtime.ActiveMilestoneRef = "beta"
 	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
-		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting, Position: 1},
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusExecuting, Position: 1},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.UpdateTodo(context.Background(), st, items[0].ID, domain.TodoStatusCompleted, items[0].Content); err != nil {
+	if _, err := modeltest.UpdateTodo(context.Background(), st, items[0].ID, planning.TodoStatusCompleted, items[0].Content); err != nil {
 		t.Fatal(err)
 	}
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -39,11 +40,11 @@ func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.
 	if err != nil {
 		return nil, err
 	}
-	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], domain.TaskStatusPending)
+	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], planning.TaskStatusPending)
 	if err != nil {
 		return nil, err
 	}
-	result.Stored = domain.TaskStoredResult{
+	result.Stored = tools.TaskStoredResult{
 		Body:   task.Body,
 		Status: task.Status,
 	}

@@ -54,7 +54,7 @@ func TestTodoStatusUsesSnakeCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != domain.TodoStatusInProgress {
+	if status != planning.TodoStatusInProgress {
 		t.Fatalf("expected in_progress, got %s", status)
 	}
 }
@@ -197,7 +197,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
-		{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusExecuting},
+		{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
-		Args: map[string]string{"id": string(todos[1].ID), "status": domain.TodoStatusCompleted.String()},
+		Args: map[string]string{"id": string(todos[1].ID), "status": planning.TodoStatusCompleted.String()},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected scoped todo error, got %v", err)
 	}

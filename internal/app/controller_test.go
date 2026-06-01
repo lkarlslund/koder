@@ -269,7 +269,7 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 		t.Fatal("expected active session and chat")
 	}
 	if _, err := ctrl.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}

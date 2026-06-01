@@ -23,8 +23,8 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady},
-		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusReady},
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if _, err := control.ListTodos(ctx, sessionRecord.ID, "beta"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
 		t.Fatalf("expected beta scope error, got %v", err)
 	}
-	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, domain.TodoStatusInProgress, ""); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
+	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, ""); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
 		t.Fatalf("expected beta update scope error, got %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady}}}); err != nil {
+	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
 	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})

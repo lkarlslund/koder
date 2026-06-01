@@ -768,7 +768,7 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID id.ID, mileston
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) UpdateTodoItem(ctx context.Context, todoID id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (c *Controller) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	c.mu.RLock()
 	sessionID := c.session.ID
 	c.mu.RUnlock()
@@ -793,7 +793,7 @@ func (c *Controller) ListTodos(ctx context.Context, sessionID id.ID, milestoneRe
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTask(ctx context.Context, sessionID id.ID, body string, status domain.TaskStatus) (planning.Task, error) {
+func (c *Controller) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			task, err := owner.AddTask(ctx, sessionID, body, status)

@@ -556,10 +556,10 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		ActiveChatID: "chat-7",
 		Milestones: planning.Plan{
 			Summary:    "Live plan",
-			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting}},
+			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}},
 		},
-		Todos:      []planning.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}},
-		TodosByRef: map[string][]planning.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}}},
+		Todos:      []planning.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: planning.TodoStatusInProgress}},
+		TodosByRef: map[string][]planning.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: planning.TodoStatusInProgress}}},
 		Snapshots: map[id.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},

@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/planning"
 )
 
 type StoredResultStatus string
@@ -180,8 +181,8 @@ type QuestionStoredResult struct {
 }
 
 type TaskStoredResult struct {
-	Body   string            `json:"body"`
-	Status domain.TaskStatus `json:"status"`
+	Body   string              `json:"body"`
+	Status planning.TaskStatus `json:"status"`
 }
 
 type PlanStoredStep struct {
@@ -711,7 +712,7 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 			Payload:  raw,
 		}, true
 	case domain.TaskUpdatePayload:
-		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: payload.Status})
+		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: planning.TaskStatus(payload.Status)})
 		if err != nil {
 			return storedResultEnvelope{}, false
 		}

@@ -162,7 +162,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	for _, content := range items {
 		todos = append(todos, planning.TodoItem{
 			Content: content,
-			Status:  domain.TodoStatusPending,
+			Status:  planning.TodoStatusPending,
 		})
 	}
 	return tools.TodoBucketResultWithTitle(ref, title, todos, ""), nil
@@ -236,12 +236,12 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	}
 	todos = tools.ScopedTodos(runtime, todos)
 	for _, item := range todos {
-		if item.Status == domain.TodoStatusInProgress {
+		if item.Status == planning.TodoStatusInProgress {
 			return tools.TodoBucketResult(plan, ref, []planning.TodoItem{item}, ""), nil
 		}
 	}
 	for _, item := range todos {
-		if item.Status == domain.TodoStatusPending {
+		if item.Status == planning.TodoStatusPending {
 			return tools.TodoBucketResult(plan, ref, []planning.TodoItem{item}, ""), nil
 		}
 	}
@@ -356,13 +356,13 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	}
 	message := ""
 	for _, item := range todos {
-		if item.Status == domain.TodoStatusInProgress {
+		if item.Status == planning.TodoStatusInProgress {
 			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
 	for _, item := range todos {
-		if item.Status == domain.TodoStatusPending {
+		if item.Status == planning.TodoStatusPending {
 			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}

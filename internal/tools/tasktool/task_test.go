@@ -6,6 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/modeltest"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
@@ -61,7 +62,7 @@ func TestPersistResultCreatesPendingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].Status != domain.TaskStatusPending || tasks[0].Body != "Ship it" {
+	if len(tasks) != 1 || tasks[0].Status != planning.TaskStatusPending || tasks[0].Body != "Ship it" {
 		t.Fatalf("unexpected tasks: %#v", tasks)
 	}
 }

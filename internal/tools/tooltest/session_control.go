@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
@@ -44,7 +43,7 @@ func (c SessionControl) AddTodoItems(ctx context.Context, sessionID id.ID, ref s
 		if content == "" {
 			continue
 		}
-		out = append(out, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: strings.TrimSpace(ref), Content: content, Status: domain.TodoStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		out = append(out, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: strings.TrimSpace(ref), Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
 	}
 	for _, item := range out {
 		if err := modeltest.PutTodo(ctx, c.Store, item); err != nil {
@@ -54,7 +53,7 @@ func (c SessionControl) AddTodoItems(ctx context.Context, sessionID id.ID, ref s
 	return out, nil
 }
 
-func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
 	item, err := modeltest.GetTodo(ctx, c.Store, id)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -74,7 +73,7 @@ func (c SessionControl) ListTodos(ctx context.Context, sessionID id.ID, ref stri
 	return modeltest.ListTodos(ctx, c.Store, sessionID, ref)
 }
 
-func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status domain.TaskStatus) (planning.Task, error) {
+func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
 	now := time.Now().UTC()
 	task := planning.Task{ID: id.NewAt(now), SessionID: sessionID, Body: strings.TrimSpace(body), Status: status, CreatedAt: now}
 	if err := modeltest.PutTask(ctx, c.Store, task); err != nil {
