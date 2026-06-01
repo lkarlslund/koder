@@ -123,7 +123,7 @@ func (p ToolOutputPayload) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON loads the typed result payload from the tool/status discriminator.
 func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	type encodedToolOutput struct {
-		Tool       ToolKind          `json:"tool"`
+		Tool       string            `json:"tool"`
 		ToolCallID string            `json:"tool_call_id,omitempty"`
 		Args       map[string]string `json:"args,omitempty"`
 		Status     ToolResultStatus  `json:"status"`
@@ -135,11 +135,18 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	result, err := decodeToolResultPayload(encoded.Tool, encoded.Status, encoded.Result)
+	tool, err := parsePersistedToolKind(encoded.Tool)
 	if err != nil {
-		return err
+		tool = 0
 	}
-	p.Tool = encoded.Tool
+	var result ToolResultPayload
+	if tool != 0 {
+		result, err = decodeToolResultPayload(tool, encoded.Status, encoded.Result)
+		if err != nil {
+			return err
+		}
+	}
+	p.Tool = tool
 	p.ToolCallID = encoded.ToolCallID
 	p.Args = encoded.Args
 	p.Status = encoded.Status

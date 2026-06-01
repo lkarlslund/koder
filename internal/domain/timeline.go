@@ -251,7 +251,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	}
 	type encodedToolCall struct {
 		ToolCallID  ToolCallID         `json:"tool_call_id"`
-		Tool        ToolKind           `json:"tool"`
+		Tool        string             `json:"tool"`
 		Args        map[string]string  `json:"args,omitempty"`
 		Status      ToolStatus         `json:"status"`
 		Result      *encodedToolResult `json:"result,omitempty"`
@@ -265,11 +265,15 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
+	tool, err := parsePersistedToolKind(in.Tool)
+	if err != nil {
+		tool = 0
+	}
 	var result *ToolResult
-	if in.Result != nil {
-		decoded, err := DecodeToolResultPayload(in.Tool, in.Result.Status, in.Result.Data)
+	if in.Result != nil && tool != 0 {
+		decoded, err := DecodeToolResultPayload(tool, in.Result.Status, in.Result.Data)
 		if err != nil {
-			return fmt.Errorf("decode tool result %s: %w", in.Tool, err)
+			return fmt.Errorf("decode tool result %s: %w", tool, err)
 		}
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
 	}
@@ -282,7 +286,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 		}
 	}
 	*c = ToolCall{
-		ToolCallID: in.ToolCallID, Tool: in.Tool, Args: in.Args, Status: status, Result: result,
+		ToolCallID: in.ToolCallID, Tool: tool, Args: in.Args, Status: status, Result: result,
 		Error: in.Error, ApprovalID: approvalID, StartedAt: in.StartedAt, CompletedAt: in.CompletedAt,
 	}
 	return nil
@@ -339,7 +343,7 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 		Status ToolResultStatus `json:"status,omitempty"`
 	}
 	type encodedToolExecution struct {
-		Tool       ToolKind           `json:"tool"`
+		Tool       string             `json:"tool"`
 		ToolCallID ToolCallID         `json:"tool_call_id,omitempty"`
 		Args       map[string]string  `json:"args,omitempty"`
 		Result     *encodedToolResult `json:"result,omitempty"`
@@ -351,15 +355,19 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
+	tool, err := parsePersistedToolKind(in.Tool)
+	if err != nil {
+		tool = 0
+	}
 	var result *ToolResult
-	if in.Result != nil {
-		decoded, err := DecodeToolResultPayload(in.Tool, in.Result.Status, in.Result.Data)
+	if in.Result != nil && tool != 0 {
+		decoded, err := DecodeToolResultPayload(tool, in.Result.Status, in.Result.Data)
 		if err != nil {
-			return fmt.Errorf("decode tool result %s: %w", in.Tool, err)
+			return fmt.Errorf("decode tool result %s: %w", tool, err)
 		}
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
 	}
-	*e = ToolExecution{Tool: in.Tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
+	*e = ToolExecution{Tool: tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
 	return nil
 }
 

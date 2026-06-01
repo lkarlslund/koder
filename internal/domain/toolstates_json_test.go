@@ -31,3 +31,32 @@ func TestToolStatesUnmarshalAcceptsPersistedSnakeCaseKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestToolStatesUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+	var states ToolStates
+	err := json.Unmarshal([]byte(`{
+		"read": false,
+		"write": false,
+		"edit": false,
+		"grep": false,
+		"glob": false,
+		"removed_tool": false
+	}`), &states)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []ToolKind{
+		ToolKindFileRead,
+		ToolKindFileWrite,
+		ToolKindFileEdit,
+		ToolKindFileGrep,
+		ToolKindFileGlob,
+	} {
+		if states[kind] {
+			t.Fatalf("expected %s to stay disabled: %#v", kind, states)
+		}
+	}
+	if len(states) != 5 {
+		t.Fatalf("expected unknown tool key to be ignored, got %#v", states)
+	}
+}

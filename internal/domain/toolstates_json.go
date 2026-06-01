@@ -8,9 +8,14 @@ import (
 
 var toolStateKeyAliases = map[string]ToolKind{
 	"execcleanupbackground":     ToolKindExecCleanup,
+	"edit":                      ToolKindFileEdit,
+	"glob":                      ToolKindFileGlob,
+	"grep":                      ToolKindFileGrep,
 	"milestoneadditems":         ToolKindMilestoneAdd,
 	"milestoneplananddecompose": ToolKindMilestonePlan,
 	"milestoneupdateitem":       ToolKindMilestoneUpdate,
+	"read":                      ToolKindFileRead,
+	"write":                     ToolKindFileWrite,
 }
 
 func (s *ToolStates) UnmarshalJSON(data []byte) error {
@@ -22,7 +27,7 @@ func (s *ToolStates) UnmarshalJSON(data []byte) error {
 	for name, enabled := range raw {
 		kind, err := parsePersistedToolKind(name)
 		if err != nil {
-			return err
+			continue
 		}
 		states[kind] = enabled
 	}
