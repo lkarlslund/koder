@@ -107,16 +107,76 @@
         }
       }
     }
+    const markdownCache = new Map();
+    function markdownCacheKey(source, options) {
+      return (options.deferDiagrams ? 'defer' : 'full') + ':' + source;
+    }
+    function cachedMarkdown(source, options, render) {
+      const key = markdownCacheKey(source, options);
+      if (markdownCache.has(key)) return markdownCache.get(key);
+      const html = render();
+      markdownCache.set(key, html);
+      if (markdownCache.size > 120) markdownCache.delete(markdownCache.keys().next().value);
+      return html;
+    }
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
-      if (!window.marked) return '<pre>' + escapeHTML(source) + '</pre>';
-      marked.setOptions({gfm: true, breaks: false});
-      let html = marked.parse(source);
-      html = sanitizeHTML(html);
-      if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
-      html = highlightMarkdownCode(html);
-      return sanitizeHTML(html);
+      return cachedMarkdown(source, options, () => {
+        if (!window.marked) return '<pre>' + escapeHTML(source) + '</pre>';
+        marked.setOptions({gfm: true, breaks: false});
+        let html = marked.parse(source);
+        html = sanitizeHTML(html);
+        if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
+        html = highlightMarkdownCode(html);
+        return sanitizeHTML(html);
+      });
+    }
+    function stableMarkdownPrefixLength(source) {
+      const text = String(source || '');
+      let inFence = false;
+      let offset = 0;
+      let stable = 0;
+      const lines = text.split(/(\n)/);
+      for (let i = 0; i < lines.length; i += 2) {
+        const line = lines[i] || '';
+        const newline = lines[i + 1] || '';
+        if (/^\s*```/.test(line)) inFence = !inFence;
+        offset += line.length + newline.length;
+        if (!inFence && line.trim() === '' && newline) stable = offset;
+      }
+      return stable;
+    }
+    function renderMarkdownIntoElement(el, text, options = {}) {
+      if (!el) return;
+      const source = String(text || '');
+      const key = JSON.stringify({deferDiagrams: !!options.deferDiagrams, incremental: !!options.incremental});
+      if (el._koderMarkdownSource === source && el._koderMarkdownOptions === key) return;
+      el._koderMarkdownSource = source;
+      el._koderMarkdownOptions = key;
+      if (!options.incremental || !source.trim()) {
+        el.innerHTML = renderMarkdown(source, options);
+        el._koderMarkdownStable = '';
+        return;
+      }
+      let stableNode = el.querySelector(':scope > [data-markdown-stable]');
+      let tailNode = el.querySelector(':scope > [data-markdown-tail]');
+      if (!stableNode || !tailNode) {
+        el.textContent = '';
+        stableNode = document.createElement('div');
+        stableNode.dataset.markdownStable = 'true';
+        tailNode = document.createElement('div');
+        tailNode.dataset.markdownTail = 'true';
+        el.append(stableNode, tailNode);
+      }
+      const stableLen = stableMarkdownPrefixLength(source);
+      const stableSource = source.slice(0, stableLen);
+      const tailSource = source.slice(stableLen);
+      if (el._koderMarkdownStable !== stableSource) {
+        stableNode.innerHTML = renderMarkdown(stableSource, options);
+        el._koderMarkdownStable = stableSource;
+      }
+      tailNode.innerHTML = renderMarkdown(tailSource, options);
     }
     function firstValue(obj, names) {
       if (!obj) return '';
@@ -728,10 +788,17 @@
           this.applyTheme();
           this.error = this.state.error || '';
           this.syncInterruptArmed();
+          const renderDiagrams = this.shouldRenderDiagramsAfterChatDelta(delta, current, next);
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-          });
+          }, {renderDiagrams});
           this.reportClientStateSoon();
+        },
+        shouldRenderDiagramsAfterChatDelta(delta, previous, next) {
+          if (!delta) return false;
+          if (this.snapshotIsStreaming(next)) return false;
+          const wasStreaming = this.snapshotIsStreaming(previous);
+          return !!delta.item || !!delta.transcript_changed || !!delta.TranscriptChanged || wasStreaming;
         },
         applyRestartDelta(delta) {
           if (!delta) return;
@@ -904,12 +971,12 @@
           const nearBottom = distance <= 48;
           return {el, top: el.scrollTop, nearBottom, stickToBottom: this.transcriptStickToBottom || nearBottom};
         },
-        afterTranscriptDOMUpdate(fn) {
+        afterTranscriptDOMUpdate(fn, options = {}) {
           this.$nextTick(() => {
             requestAnimationFrame(() => {
-              this.renderDiagrams();
+              if (options.renderDiagrams !== false) this.renderDiagrams();
               fn();
-              setTimeout(() => { this.renderDiagrams(); fn(); }, 0);
+              setTimeout(() => { if (options.renderDiagrams !== false) this.renderDiagrams(); fn(); }, 0);
             });
           });
         },
@@ -1034,6 +1101,23 @@
         execProcesses() { const snapshot = this.activeSnapshot(); return snapshot.ExecProcesses || snapshot.exec_processes || []; },
         activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
+        snapshotStatus(snapshot) { return String(snapshot?.Status || snapshot?.status || '').trim(); },
+        snapshotIsStreaming(snapshot) {
+          const status = this.snapshotStatus(snapshot);
+          return status === 'streaming_response' || status === 'streaming_thoughts' || status === 'waiting_llm';
+        },
+        timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
+        timelineItemIsLatest(item) {
+          const id = this.timelineItemID(item);
+          if (!id) return false;
+          const timeline = this.timeline();
+          const latest = timeline.length ? timeline[timeline.length - 1] : null;
+          return this.timelineItemID(latest) === id;
+        },
+        itemMarkdownOptions(item) {
+          const streaming = this.snapshotIsStreaming(this.activeSnapshot()) && this.timelineItemIsLatest(item);
+          return {deferDiagrams: streaming, incremental: streaming};
+        },
         thinkingLabel(reasoning) {
           const explicit = Number(reasoning?.tokens || reasoning?.Tokens || reasoning?.token_count || reasoning?.TokenCount || 0);
           const tokens = explicit > 0 ? explicit : this.estimateTextTokens(reasoning?.text || reasoning?.Text || '');
@@ -1045,6 +1129,7 @@
           return Math.max(1, Math.ceil(source.length / 4));
         },
         markdownHTML(text, options = {}) { return renderMarkdown(text, options); },
+        renderMarkdownElement(el, text, options = {}) { renderMarkdownIntoElement(el, text, options); },
         userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
         userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },

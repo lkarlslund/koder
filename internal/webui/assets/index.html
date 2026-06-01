@@ -65,7 +65,7 @@
                   <pre x-text="item.content.reasoning.text"></pre>
                 </details>
               </template>
-              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
+              <div class="markdown-body" x-effect="renderMarkdownElement($el, item.content?.text || '', itemMarkdownOptions(item))"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3">
                   <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-text="toolStatusBadge(tool)"></span></div>
@@ -107,7 +107,7 @@
       <template x-if="pendingText()">
         <section class="turn assistant-turn mb-4">
           <div class="small text-secondary mb-2"><i class="bi bi-broadcast"></i> streaming</div>
-          <div class="markdown-body" x-html="markdownHTML(pendingText(), {deferDiagrams: true})"></div>
+          <div class="markdown-body" x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"></div>
         </section>
       </template>
     </main>

@@ -745,11 +745,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap:`) {
 		t.Fatalf("expected settings tabs to render as block buttons with primary active background")
 	}
-	if !strings.Contains(fullPage, `x-html="markdownHTML(item.content?.text || '')"`) {
-		t.Fatalf("expected assistant text to render as markdown HTML")
+	if !strings.Contains(fullPage, `x-effect="renderMarkdownElement($el, item.content?.text || '', itemMarkdownOptions(item))"`) {
+		t.Fatalf("expected assistant text to render through status-aware markdown element renderer")
 	}
-	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText(), {deferDiagrams: true})"`) {
-		t.Fatalf("expected streaming assistant text to render markdown with deferred diagrams")
+	if !strings.Contains(fullPage, `x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"`) {
+		t.Fatalf("expected streaming assistant text to render markdown incrementally with deferred diagrams")
 	}
 	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
 		t.Fatalf("expected user turns to use the full transcript width")
@@ -780,7 +780,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeDiagramSVG`) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams and sanitize SVG output")
 	}
-	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) {
+	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
+		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) {
 		t.Fatalf("expected streaming markdown renderer to defer Mermaid and SVG rendering")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
@@ -910,8 +911,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `scrollRestoreSeq`) || !strings.Contains(fullPage, `seq === this.scrollRestoreSeq`) {
 		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored")
 	}
-	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) || !strings.Contains(fullPage, `setTimeout(() => { this.renderDiagrams(); fn(); }, 0)`) {
-		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates")
+	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
+		!strings.Contains(fullPage, `if (options.renderDiagrams !== false) this.renderDiagrams();`) {
+		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates with optional diagram rendering")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
