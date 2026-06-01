@@ -5,7 +5,16 @@
       if (!window.DOMPurify) return html;
       return DOMPurify.sanitize(html, {
         ADD_ATTR: ['class'],
-        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button']
+        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'foreignObject']
+      });
+    }
+    function sanitizeDiagramSVG(html) {
+      if (!window.DOMPurify) return html;
+      return DOMPurify.sanitize(html, {
+        USE_PROFILES: {svg: true, svgFilters: true},
+        ADD_TAGS: ['style'],
+        ADD_ATTR: ['class', 'style'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'foreignObject']
       });
     }
     function highlightMarkdownCode(html) {
@@ -27,6 +36,55 @@
       });
       return template.innerHTML;
     }
+    function renderMermaidPlaceholders(html) {
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      template.content.querySelectorAll('pre > code').forEach(code => {
+        const lang = String(code.className || '').toLowerCase();
+        if (!/(^|\s)language-mermaid(\s|$)/.test(lang)) return;
+        const source = code.textContent || '';
+        const diagram = document.createElement('div');
+        diagram.className = 'mermaid-diagram';
+        diagram.dataset.mermaidState = 'pending';
+        const pre = document.createElement('pre');
+        pre.textContent = source;
+        diagram.appendChild(pre);
+        code.closest('pre').replaceWith(diagram);
+      });
+      return template.innerHTML;
+    }
+    function configureMermaid() {
+      if (!window.mermaid) return;
+      const theme = document.documentElement.getAttribute('data-bs-theme') === 'light' ? 'default' : 'dark';
+      if (window.koderMermaidTheme === theme) return;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme,
+        flowchart: {htmlLabels: false}
+      });
+      window.koderMermaidTheme = theme;
+    }
+    async function renderMermaidIn(root) {
+      if (!root || !window.mermaid) return;
+      configureMermaid();
+      const diagrams = root.querySelectorAll('.mermaid-diagram[data-mermaid-state="pending"]');
+      for (const diagram of diagrams) {
+        const source = (diagram.textContent || '').trim();
+        if (!source) continue;
+        diagram.dataset.mermaidState = 'rendering';
+        const id = 'mermaid-' + Math.random().toString(36).slice(2);
+        try {
+          const result = await mermaid.render(id, source);
+          diagram.innerHTML = sanitizeDiagramSVG(result.svg || '');
+          diagram.dataset.mermaidState = 'done';
+          if (result.bindFunctions) result.bindFunctions(diagram);
+        } catch (err) {
+          diagram.dataset.mermaidState = 'error';
+          diagram.innerHTML = '<div class="mermaid-error">Mermaid render failed</div><pre>' + escapeHTML(source) + '</pre>';
+        }
+      }
+    }
     function renderMarkdown(text) {
       const source = String(text || '');
       if (!source.trim()) return '';
@@ -34,6 +92,7 @@
       marked.setOptions({gfm: true, breaks: false});
       let html = marked.parse(source);
       html = sanitizeHTML(html);
+      html = renderMermaidPlaceholders(html);
       html = highlightMarkdownCode(html);
       return sanitizeHTML(html);
     }
@@ -391,7 +450,7 @@
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
           document.addEventListener('click', event => this.handleImagePreviewClick(event));
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
-          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); });
+          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); });
         },
         handleGlobalKeydown(event) {
           if (!event || event.defaultPrevented || event.isComposing) return;
@@ -445,6 +504,7 @@
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
           document.documentElement.setAttribute('data-bs-theme', resolved);
+          configureMermaid();
         },
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
         sidebarWidth() {
@@ -815,10 +875,14 @@
         afterTranscriptDOMUpdate(fn) {
           this.$nextTick(() => {
             requestAnimationFrame(() => {
+              this.renderDiagrams();
               fn();
-              setTimeout(fn, 0);
+              setTimeout(() => { this.renderDiagrams(); fn(); }, 0);
             });
           });
+        },
+        renderDiagrams() {
+          renderMermaidIn(this.transcriptElement());
         },
         restoreTranscriptScroll(scroll, options = {}) {
           const el = this.transcriptElement();

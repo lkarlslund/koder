@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -476,6 +477,19 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	for _, command := range []string{"/new", "/quit", "/permissions", "/approve", "/deny"} {
 		if strings.Contains(prompt, command) {
 			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
+		}
+	}
+}
+
+func TestSystemPromptMentionsBrowserMarkdownAndDiagrams(t *testing.T) {
+	data, err := assets.DefaultContent("system-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(data)
+	for _, want := range []string{"browser interface", "GitHub-flavored Markdown", "Mermaid diagrams", "inline SVG"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected system prompt to mention %q", want)
 		}
 	}
 }
