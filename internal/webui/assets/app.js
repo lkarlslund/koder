@@ -591,7 +591,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -857,11 +857,36 @@
         restartNeeded() {
           return !!(this.state.restart_needed || this.state.RestartNeeded);
         },
+        restartButtonClass() {
+          if (this.restartHardRequested) return 'btn-danger';
+          if (this.restartAcknowledged) return 'btn-warning';
+          return 'btn-outline-warning';
+        },
+        restartButtonIcon() {
+          if (this.restartRequestPending) return 'bi-hourglass-split';
+          if (this.restartHardRequested) return 'bi-x-octagon-fill';
+          if (this.restartAcknowledged) return 'bi-check-circle-fill';
+          return 'bi-arrow-clockwise';
+        },
+        restartButtonTitle() {
+          if (this.restartRequestPending) return this.restartAcknowledged ? 'Requesting hard restart' : 'Requesting restart';
+          if (this.restartHardRequested) return 'Hard restart acknowledged';
+          if (this.restartAcknowledged) return 'Restart acknowledged; press again for hard restart';
+          return 'New koder build is ready; restart koder';
+        },
         requestRestart() {
-          if (this.restartRequested) return;
-          this.restartRequested = true;
-          this.rpc('restart_process', {}).catch(err => {
-            this.restartRequested = false;
+          if (this.restartRequestPending || this.restartHardRequested) return;
+          const hard = !!this.restartAcknowledged;
+          this.restartRequestPending = true;
+          this.rpc('restart_process', {hard}).then(() => {
+            this.restartRequestPending = false;
+            if (hard) {
+              this.restartHardRequested = true;
+            } else {
+              this.restartAcknowledged = true;
+            }
+          }).catch(err => {
+            this.restartRequestPending = false;
             this.showToast(err.message);
           });
         },
@@ -937,6 +962,11 @@
           const needed = !!(delta.restart_needed || delta.RestartNeeded);
           this.state.restart_needed = needed;
           this.state.RestartNeeded = needed;
+          if (!needed) {
+            this.restartRequestPending = false;
+            this.restartAcknowledged = false;
+            this.restartHardRequested = false;
+          }
           this.reportClientStateSoon();
         },
         applyPlanningDelta(delta) {

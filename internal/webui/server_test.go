@@ -266,19 +266,46 @@ func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 		OK     bool   `json:"ok"`
 		Error  string `json:"error"`
 		Result struct {
-			Restarting bool `json:"restarting"`
+			Restarting   bool `json:"restarting"`
+			Acknowledged bool `json:"acknowledged"`
+			Hard         bool `json:"hard"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(msg, &resp); err != nil {
 		t.Fatalf("decode restart response: %v", err)
 	}
-	if !resp.OK || !resp.Result.Restarting {
+	if !resp.OK || !resp.Result.Restarting || !resp.Result.Acknowledged || resp.Result.Hard {
 		t.Fatalf("expected restart_process ok, got %#v", resp)
 	}
 	select {
 	case <-restarted:
 	case <-time.After(time.Second):
 		t.Fatal("expected restart_process to call restart hook")
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"restart_process","params":{"hard":true}}`)); err != nil {
+		t.Fatalf("write hard restart_process: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	resp = struct {
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Result struct {
+			Restarting   bool `json:"restarting"`
+			Acknowledged bool `json:"acknowledged"`
+			Hard         bool `json:"hard"`
+		} `json:"result"`
+	}{}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode hard restart response: %v", err)
+	}
+	if !resp.OK || !resp.Result.Restarting || !resp.Result.Acknowledged || !resp.Result.Hard {
+		t.Fatalf("expected hard restart_process ok, got %#v", resp)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected hard restart_process to call restart hook")
 	}
 }
 
@@ -749,9 +776,11 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior and Escape shortcut")
 	}
 	if !strings.Contains(fullPage, `@click="requestRestart()"`) ||
-		!strings.Contains(fullPage, `rpc('restart_process', {})`) ||
-		!strings.Contains(fullPage, `:disabled="restartRequested"`) {
-		t.Fatalf("expected restart-needed control to request a supervised process restart")
+		!strings.Contains(fullPage, `rpc('restart_process', {hard})`) ||
+		!strings.Contains(fullPage, `:disabled="restartRequestPending"`) ||
+		!strings.Contains(fullPage, `Restart acknowledged; press again for hard restart`) ||
+		!strings.Contains(fullPage, `restartHardRequested`) {
+		t.Fatalf("expected restart-needed control to acknowledge restart and allow hard restart escalation")
 	}
 	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
 		t.Fatalf("expected browser to report per-client debug state")

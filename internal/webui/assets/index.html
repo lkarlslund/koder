@@ -26,7 +26,7 @@
         <span class="text-secondary small" x-text="sessionTitle(state.session || state.Session || {})"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm btn-outline-warning restart-needed" x-show="restartNeeded()" :disabled="restartRequested" title="New koder build is ready; restart koder" @click="requestRestart()" style="display: none;"><i class="bi bi-arrow-clockwise"></i></button>
+        <button class="btn btn-sm restart-needed" :class="restartButtonClass()" x-show="restartNeeded()" :disabled="restartRequestPending" :title="restartButtonTitle()" @click="requestRestart()" style="display: none;"><i class="bi" :class="restartButtonIcon()"></i><span class="visually-hidden" x-text="restartButtonTitle()"></span></button>
         <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>

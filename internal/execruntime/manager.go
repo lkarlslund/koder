@@ -205,8 +205,14 @@ func (m *Manager) Subscribe(chatID id.ID) (<-chan Event, func()) {
 	}
 	m.subscribers[chatID][ch] = struct{}{}
 	m.mu.Unlock()
+	closed := false
 	cancel := func() {
 		m.mu.Lock()
+		if closed {
+			m.mu.Unlock()
+			return
+		}
+		closed = true
 		if set := m.subscribers[chatID]; set != nil {
 			delete(set, ch)
 			if len(set) == 0 {

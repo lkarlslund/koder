@@ -532,13 +532,25 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return map[string]bool{"stopping": true}, s.controller.ShutdownWithCancelReason(ctx, reason)
 	case "restart_process":
-		if err := s.controller.ShutdownWithCancelReason(ctx, chat.CancelReasonRestartInterrupt); err != nil {
+		var in struct {
+			Hard bool `json:"hard"`
+		}
+		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
 		if err := s.requestProcessRestart(); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"restarting": true}, nil
+		reason := chat.CancelReasonRestartInterrupt
+		if in.Hard {
+			reason = chat.CancelReasonRestartInterruptHard
+		}
+		go func() {
+			if err := s.controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
+				slog.Error("shutdown for process restart", "error", err, "hard", in.Hard)
+			}
+		}()
+		return map[string]bool{"restarting": true, "acknowledged": true, "hard": in.Hard}, nil
 	case "compact":
 		var in struct {
 			Instructions string `json:"instructions"`
