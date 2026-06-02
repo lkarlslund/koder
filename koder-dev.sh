@@ -338,11 +338,8 @@ while true; do
     wait "$child_pid" 2>/dev/null || exit_status=$?
     child_pid=""
     if (( exit_status == RESTART_EXIT_CODE )); then
-      log "koder exited for restart with $(exit_status_text "$exit_status"); rebuilding"
-      log "building koder..."
-      build_koder
+      log "koder exited for restart with $(exit_status_text "$exit_status"); relaunching last successful build"
       launch_koder "$@"
-      last_signature="$(source_signature)"
       continue
     fi
     log "koder exited unexpectedly with $(exit_status_text "$exit_status")"
