@@ -1776,6 +1776,124 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 	}
 }
 
+func TestRuntimeHardCancelAfterSoftStopCancelsStreamingContextImmediately(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chat, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	rt.StopAfterCurrentTurn()
+	select {
+	case <-runCtx.Done():
+		t.Fatal("soft stop canceled streaming context")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	rt.Cancel(CancelReasonUserInterruptHard)
+	select {
+	case <-runCtx.Done():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected second cancel to cancel streaming context immediately")
+	}
+	close(runner.events)
+}
+
+func TestRuntimeHardCancelRemovesPartialAssistantResponse(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	assistantID := NewTimelineID(time.Now().UTC())
+	events <- domain.Event{
+		Kind: domain.EventKindMessageDelta,
+		Text: "partial answer",
+		Item: domain.TimelineItem{
+			ID:        assistantID,
+			ChatID:    chatRecord.ID,
+			Content:   domain.AssistantMessage{},
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	deadline = time.After(2 * time.Second)
+	for {
+		if assistantTextInSnapshot(rt.Snapshot(), "partial answer") {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for partial assistant: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.StopAfterCurrentTurn()
+	rt.Cancel(CancelReasonUserInterruptHard)
+	events <- domain.Event{Kind: domain.EventKindMessageDelta, Text: " late text", Item: domain.TimelineItem{ID: assistantID, ChatID: chatRecord.ID, Content: domain.AssistantMessage{}}}
+	close(events)
+
+	deadline = time.After(2 * time.Second)
+	for rt.Snapshot().Active {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for hard cancel close: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if assistantTextInSnapshot(rt.Snapshot(), "partial answer") || assistantTextInSnapshot(rt.Snapshot(), "late text") {
+		t.Fatalf("partial assistant remained in snapshot: %#v", rt.Snapshot().Timeline)
+	}
+	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		if assistant, ok := item.Content.(domain.AssistantMessage); ok && strings.Contains(assistant.Text, "partial answer") {
+			t.Fatalf("partial assistant persisted: %#v", item)
+		}
+	}
+}
+
+func assistantTextInSnapshot(snapshot Snapshot, needle string) bool {
+	for _, item := range snapshot.Timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		if strings.Contains(assistant.Text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeInterruptAndCloseDoesNotPersistNoticeForStreamingInterrupt(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

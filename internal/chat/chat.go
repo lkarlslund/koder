@@ -738,12 +738,34 @@ func (r *Chat) DispatchQueued(item domain.QueuedInput, remaining []domain.Queued
 }
 
 func (r *Chat) Cancel(reason CancelReason) {
-	r.mu.RLock()
-	cancel := r.cancel
 	hard := reason.Hard()
-	r.mu.RUnlock()
+	r.mu.Lock()
+	cancel := r.cancel
+	hardUpdated := false
+	if hard && r.active && !r.closed {
+		r.draining = true
+		r.cancelState = CancelStateCancelling
+		r.statusText = "Interrupting..."
+		hardUpdated = true
+		if reason.Restart() {
+			r.chat.AutoRestart = true
+			if r.state != nil {
+				r.state.UpdateChat(func(chat *domain.Chat) {
+					chat.AutoRestart = true
+				})
+			}
+		}
+		if r.state != nil {
+			r.state.DiscardActiveAssistant()
+			r.state.ClearPendingAssistant()
+		}
+	}
+	r.mu.Unlock()
 	if cancel != nil && hard {
 		cancel()
+	}
+	if hardUpdated {
+		r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, true, false))
 	}
 	select {
 	case r.inbox <- interruptCmd{reason: reason}:
@@ -1440,6 +1462,10 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 	if reason.Hard() {
 		r.cancelState = CancelStateCancelling
 		r.statusText = "Interrupting..."
+		if r.state != nil {
+			r.state.DiscardActiveAssistant()
+			r.state.ClearPendingAssistant()
+		}
 	} else {
 		r.statusText = "Stopping after current turn"
 	}
@@ -1628,6 +1654,10 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 func (r *Chat) handleStreamEvent(evt domain.Event) {
 	refreshedQueue, queueChanged, queueErr := r.queueRefreshForEvent(evt)
 	r.mu.Lock()
+	if r.cancelState == CancelStateCancelling && discardEventDuringHardCancel(evt) {
+		r.mu.Unlock()
+		return
+	}
 	transcriptChanged := false
 	contextChanged := false
 	tokenUsageChanged := false
@@ -1808,6 +1838,19 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, queueChanged, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
 }
 
+func discardEventDuringHardCancel(evt domain.Event) bool {
+	switch evt.Kind {
+	case domain.EventKindMessageDelta,
+		domain.EventKindReasoning,
+		domain.EventKindToolCallDelta,
+		domain.EventKindMessageDone,
+		domain.EventKindUsage:
+		return true
+	default:
+		return false
+	}
+}
+
 func updateStoredChatUsage(ctx context.Context, st *store.Store, chatID id.ID, update domain.Chat) (domain.Chat, error) {
 	stored, err := GetChat(ctx, st, chatID)
 	if err != nil {
@@ -1908,13 +1951,18 @@ func (r *Chat) handleStreamClosed() {
 	if r.cancel != nil {
 		r.cancel = nil
 	}
+	discardPartialAssistant := r.cancelState == CancelStateCancelling
 	shouldDispatch := r.status != StatusWaitingApproval
 	if r.status != StatusErrored && r.status != StatusWaitingApproval {
 		r.active = false
 		r.status = StatusIdle
 		r.statusText = "Idle"
 		if r.state != nil {
-			r.state.SealActiveAssistant("")
+			if discardPartialAssistant {
+				r.state.DiscardActiveAssistant()
+			} else {
+				r.state.SealActiveAssistant("")
+			}
 			r.state.ClearPendingAssistant()
 		}
 	}

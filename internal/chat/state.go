@@ -119,6 +119,31 @@ func (s *ChatState) ClearPendingAssistant() {
 	s.pending = PendingAssistantTurn{}
 }
 
+// DiscardActiveAssistant removes the latest unsealed assistant item from the
+// live timeline. Streaming creates this item before the model response is
+// durable; hard cancellation should remove it instead of sealing a partial
+// answer into the visible transcript.
+func (s *ChatState) DiscardActiveAssistant() bool {
+	if s == nil {
+		return false
+	}
+	for idx := len(s.timeline) - 1; idx >= 0; idx-- {
+		record := s.timeline[idx]
+		if record == nil || record.Item.Sealed() {
+			continue
+		}
+		if _, ok := record.Item.Content.(domain.AssistantMessage); !ok {
+			break
+		}
+		if s.byItem != nil {
+			delete(s.byItem, record.Item.ID)
+		}
+		s.timeline = slices.Delete(s.timeline, idx, idx+1)
+		return true
+	}
+	return false
+}
+
 func (s *ChatState) HasPendingExecutableToolCalls() bool {
 	if s == nil {
 		return false
