@@ -4,9 +4,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 )
+
+func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
+	spec := tools.Info(domain.ToolKindExecCommand)
+	text := strings.Join([]string{spec.Description, spec.Usage, spec.Parameters}, "\n")
+	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected exec_command spec to contain %q, got:\n%s", want, text)
+		}
+	}
+}
 
 func TestCommandNormalizeArgs(t *testing.T) {
 	args, err := (commandTool{}).NormalizeArgs(map[string]string{

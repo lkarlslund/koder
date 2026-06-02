@@ -6,8 +6,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
+
+func TestSpecGuidesMinimalExecutableCommand(t *testing.T) {
+	spec := tools.Info(domain.ToolKindBash)
+	text := strings.Join([]string{spec.Description, spec.Usage, spec.Parameters}, "\n")
+	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected bash spec to contain %q, got:\n%s", want, text)
+		}
+	}
+}
 
 func TestNormalizeArgsValidatesCommandAndTimeout(t *testing.T) {
 	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {

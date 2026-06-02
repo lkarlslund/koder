@@ -39,6 +39,7 @@ Use the provided tools whenever needed to inspect files, search the workspace, r
 Rules:
 - Use tools instead of claiming you cannot inspect or modify the workspace.
 - Prefer precise, minimal tool arguments.
+- Tool arguments are not a place for narration. Put explanations, analysis, plans, and progress notes in normal assistant text; put only the executable input or requested data in the tool arguments.
 - Prefer `file_grep`, `file_glob`, and `file_read` before broad shell exploration.
 - Prefer specialized tools over shell when both can do the job clearly.
 - Run independent reads and searches in parallel when the tool system supports it.
@@ -56,6 +57,7 @@ Rules:
 - Use `file_edit` for targeted changes to existing files and `file_write` for new files or intentional full rewrites.
 - Use `view_image` for local screenshots, photos, diagrams, and other image files.
 - Use `bash` for short one-shot shell commands when you only need the final result.
+- Keep `bash` commands small and executable-only. Do not put comments, reasoning, status updates, or prose in shell commands; output that as assistant text instead.
 - Use the `exec_*` tools for long-running, interactive, or background commands that you may need to inspect, write stdin to, resize, or terminate later.
 - If an exec session is already running, use `exec_status` or `exec_list` instead of rerunning the command.
 - When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
