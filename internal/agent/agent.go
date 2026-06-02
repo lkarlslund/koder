@@ -1773,7 +1773,7 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 	if turn == nil {
 		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
 	}
-	timeline := filterQueuedTimelineItems(turn.Timeline(), turn.QueuedTimelineIDs())
+	timeline := filterQueuedTimelineItems(turn.Timeline())
 	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, transient)
 	if err != nil {
 		return nil, err
@@ -1781,18 +1781,13 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func filterQueuedTimelineItems(timeline []domain.TimelineItem, queued map[id.ID]struct{}) []domain.TimelineItem {
+func filterQueuedTimelineItems(timeline []domain.TimelineItem) []domain.TimelineItem {
 	if len(timeline) == 0 {
 		return timeline
 	}
 	out := make([]domain.TimelineItem, 0, len(timeline))
 	waitingToolResult := false
 	for _, item := range timeline {
-		if len(queued) > 0 {
-			if _, ok := queued[item.ID]; ok {
-				continue
-			}
-		}
 		if _, ok := item.Content.(domain.UserMessage); ok && waitingToolResult {
 			continue
 		}
@@ -1849,24 +1844,8 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 			return provider.PromptEnvelope{}, err
 		}
 	}
-	timeline = filterQueuedTimelineItems(timeline, queuedTimelineIDs(chat.QueuedInputs))
+	timeline = filterQueuedTimelineItems(timeline)
 	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, transient)
-}
-
-func queuedTimelineIDs(items []domain.QueuedInput) map[id.ID]struct{} {
-	if len(items) == 0 {
-		return nil
-	}
-	out := map[id.ID]struct{}{}
-	for _, item := range items {
-		if item.TimelineID != "" {
-			out[item.TimelineID] = struct{}{}
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {

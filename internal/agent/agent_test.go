@@ -2698,16 +2698,14 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 		Args:       map[string]string{"command": "printf hi"},
 	}
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
-	queuedUser := appendUserTimelineItem(t, st, chat.ID, "next user turn")
 	chat.QueuedInputs = []domain.QueuedInput{{
-		ID:         id.New(),
-		Kind:       domain.QueuedInputKindQueued,
-		Delivery:   domain.QueuedInputDeliveryNextTurn,
-		Origin:     domain.QueuedInputOriginUser,
-		Text:       "next user turn",
-		Source:     domain.UserMessageSourceUser,
-		TimelineID: queuedUser.ID,
-		CreatedAt:  time.Now().UTC(),
+		ID:        id.New(),
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
+		Text:      "next user turn",
+		Source:    domain.UserMessageSourceUser,
+		CreatedAt: time.Now().UTC(),
 	}}
 	if err := chatpkg.SetChatQueuedInputs(context.Background(), st, chat.ID, chat.QueuedInputs); err != nil {
 		t.Fatal(err)

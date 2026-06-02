@@ -613,15 +613,13 @@ func TestRuntimeArchiveRequiresEmptyQueue(t *testing.T) {
 	}
 }
 
-func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
+func TestRuntimeQueuedUserWaitsForNextSerialTurn(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	firstEvents := make(chan domain.Event)
 	secondEvents := make(chan domain.Event)
 	runner := &controlledTurnPromptRunner{events: []<-chan domain.Event{firstEvents, secondEvents}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
-	updates, unsub := rt.Subscribe()
-	defer unsub()
 
 	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "first prompt"})
 	deadline := time.After(2 * time.Second)
@@ -636,23 +634,22 @@ func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 
 	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
 	deadline = time.After(2 * time.Second)
+	var queued domain.QueuedInput
 	for {
-		timeline := rt.Snapshot().Timeline
-		if len(timeline) >= 2 {
-			user, ok := timeline[1].Content.(domain.UserMessage)
-			if ok && user.Text == "queued while busy" {
-				if user.Source != domain.UserMessageSourceUser {
-					t.Fatalf("queued user source = %q, want %q", user.Source, domain.UserMessageSourceUser)
-				}
-				if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
-					t.Fatalf("rendered user input should be hidden from visible queue, got %#v", got)
-				}
-				break
+		snapshot := rt.Snapshot()
+		if len(snapshot.QueuedInputs) == 1 && snapshot.QueuedInputs[0].Text == "queued while busy" {
+			queued = snapshot.QueuedInputs[0]
+			if queued.CreatedAt.IsZero() {
+				t.Fatalf("queued input missing CreatedAt: %#v", queued)
 			}
+			if len(snapshot.Timeline) != 1 {
+				t.Fatalf("queued input should not enter transcript while active, got %#v", snapshot.Timeline)
+			}
+			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for queued user render: %#v", timeline)
+			t.Fatalf("timed out waiting for queued user: %#v", snapshot)
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -667,32 +664,7 @@ func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 		SealedAt:  time.Now().UTC(),
 	}
 	firstEvents <- domain.Event{Kind: domain.EventKindError, Err: errTestProviderFailure, Item: errorItem}
-	deadline = time.After(2 * time.Second)
-	for {
-		select {
-		case update := <-updates:
-			if update.Event == nil || update.Event.Kind != domain.EventKindError {
-				continue
-			}
-			timeline := rt.Snapshot().Timeline
-			if len(timeline) < 3 {
-				t.Fatalf("expected user before error, got %#v", timeline)
-			}
-			user, ok := timeline[1].Content.(domain.UserMessage)
-			if !ok || user.Text != "queued while busy" {
-				t.Fatalf("expected queued user before error, got %#v", timeline)
-			}
-			if _, ok := timeline[2].Content.(domain.Notice); !ok {
-				t.Fatalf("expected error notice after queued user, got %#v", timeline)
-			}
-			close(firstEvents)
-			goto dispatched
-		case <-deadline:
-			t.Fatalf("timed out waiting for error: %#v", rt.Snapshot())
-		}
-	}
-
-dispatched:
+	close(firstEvents)
 	deadline = time.After(2 * time.Second)
 	for runner.promptCallCount() < 2 {
 		select {
@@ -703,18 +675,27 @@ dispatched:
 		}
 	}
 	close(secondEvents)
-	var seenQueued int
+	var seenQueuedUser int
 	for _, item := range rt.Snapshot().Timeline {
 		if user, ok := item.Content.(domain.UserMessage); ok && user.Text == "queued while busy" {
-			seenQueued++
+			seenQueuedUser++
+			if user.QueueID != queued.ID {
+				t.Fatalf("user queue id = %q, want %q", user.QueueID, queued.ID)
+			}
+			if !user.QueuedAt.Equal(queued.CreatedAt) {
+				t.Fatalf("user queued_at = %s, want %s", user.QueuedAt, queued.CreatedAt)
+			}
+			if !queued.CreatedAt.Before(item.CreatedAt) && !queued.CreatedAt.Equal(item.CreatedAt) {
+				t.Fatalf("queue created_at %s should not be after transcript created_at %s", queued.CreatedAt, item.CreatedAt)
+			}
 		}
 	}
-	if seenQueued != 1 {
-		t.Fatalf("expected one queued user timeline item, got %d in %#v", seenQueued, rt.Snapshot().Timeline)
+	if seenQueuedUser != 1 {
+		t.Fatalf("expected one queued user timeline item, got %d in %#v", seenQueuedUser, rt.Snapshot().Timeline)
 	}
 }
 
-func TestRuntimeMovesRenderedQueuedUserToActivePromptTail(t *testing.T) {
+func TestRuntimeDispatchesQueuedUserAfterPreviousAssistant(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	firstEvents := make(chan domain.Event)
@@ -736,15 +717,16 @@ func TestRuntimeMovesRenderedQueuedUserToActivePromptTail(t *testing.T) {
 	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
 	deadline = time.After(2 * time.Second)
 	for {
-		timeline := rt.Snapshot().Timeline
-		if len(timeline) >= 2 {
-			if user, ok := timeline[1].Content.(domain.UserMessage); ok && user.Text == "queued while busy" {
-				break
+		snapshot := rt.Snapshot()
+		if len(snapshot.QueuedInputs) == 1 && snapshot.QueuedInputs[0].Text == "queued while busy" {
+			if len(snapshot.Timeline) != 1 {
+				t.Fatalf("queued input should not enter transcript while active, got %#v", snapshot.Timeline)
 			}
+			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for rendered queued user: %#v", timeline)
+			t.Fatalf("timed out waiting for queued user: %#v", snapshot)
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -973,6 +955,7 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
 	queuedID := id.NewAt(time.Now().UTC())
+	queuedAt := time.Now().UTC().Add(-time.Minute)
 	rt.ReplaceQueue([]domain.QueuedInput{{
 		ID:        queuedID,
 		Kind:      domain.QueuedInputKindQueued,
@@ -981,7 +964,7 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 		Text:      "run now",
 		Source:    domain.UserMessageSourceUser,
 		Held:      true,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: queuedAt,
 	}})
 
 	rt.SendQueueItemNow(queuedID)
@@ -1003,6 +986,32 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	}
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(events)
+	deadline = time.After(2 * time.Second)
+	for {
+		snapshot := rt.Snapshot()
+		if snapshot.Status == StatusIdle {
+			if len(snapshot.Timeline) == 0 {
+				t.Fatalf("expected transcript item, got %#v", snapshot.Timeline)
+			}
+			user, ok := snapshot.Timeline[0].Content.(domain.UserMessage)
+			if !ok {
+				t.Fatalf("expected user message, got %#v", snapshot.Timeline[0])
+			}
+			if user.QueueID != queuedID {
+				t.Fatalf("queue id = %q, want %q", user.QueueID, queuedID)
+			}
+			if !user.QueuedAt.Equal(queuedAt) {
+				t.Fatalf("queued_at = %s, want %s", user.QueuedAt, queuedAt)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for idle snapshot: %#v", snapshot)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {

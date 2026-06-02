@@ -55,6 +55,8 @@ func (i *TimelineItem) Seal(now time.Time) {
 type UserMessage struct {
 	Text        string       `json:"text,omitempty"`
 	Source      string       `json:"source,omitempty"`
+	QueueID     ID           `json:"queue_id,omitempty"`
+	QueuedAt    time.Time    `json:"queued_at,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	References  []Reference  `json:"references,omitempty"`
 }

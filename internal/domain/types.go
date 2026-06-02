@@ -244,7 +244,6 @@ type QueuedInput struct {
 	Origin      QueuedInputOrigin
 	Text        string
 	Source      string
-	TimelineID  ID
 	Held        bool
 	Attachments []QueuedAttachment
 	References  []QueuedReference
