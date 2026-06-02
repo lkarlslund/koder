@@ -2673,7 +2673,9 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 	queuedUser := appendUserTimelineItem(t, st, chat.ID, "next user turn")
 	chat.QueuedInputs = []domain.QueuedInput{{
 		ID:         id.New(),
-		Kind:       domain.QueuedInputKindSteer,
+		Kind:       domain.QueuedInputKindQueued,
+		Delivery:   domain.QueuedInputDeliveryNextTurn,
+		Origin:     domain.QueuedInputOriginUser,
 		Text:       "next user turn",
 		Source:     domain.UserMessageSourceUser,
 		TimelineID: queuedUser.ID,
@@ -4032,9 +4034,11 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	if err := chatpkg.SetChatQueuedInputs(context.Background(), st, chat.ID, []domain.QueuedInput{{
-		ID:   id.New(),
-		Kind: domain.QueuedInputKindSteer,
-		Text: "steer the running turn",
+		ID:       id.New(),
+		Kind:     domain.QueuedInputKindSteer,
+		Delivery: domain.QueuedInputDeliveryTurnBoundary,
+		Origin:   domain.QueuedInputOriginUser,
+		Text:     "steer the running turn",
 	}}); err != nil {
 		t.Fatal(err)
 	}

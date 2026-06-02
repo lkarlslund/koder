@@ -2073,7 +2073,22 @@
           this.composerAttachments = this.composerAttachments.filter(item => (item.id || item.ID) !== id);
         },
         queueItemID(item) { return item?.ID || item?.id || ''; },
-        queueItemKind(item) { return String(item?.Kind || item?.kind || 'queued').replace('_', ' '); },
+        queueItemOrigin(item) { return String(item?.Origin || item?.origin || item?.Source || item?.source || 'user').toLowerCase(); },
+        queueItemDelivery(item) {
+          const delivery = String(item?.Delivery || item?.delivery || '').toLowerCase();
+          if (delivery) return delivery;
+          const kind = String(item?.Kind || item?.kind || '').toLowerCase();
+          if (kind === 'steer') return 'turn_boundary';
+          if (kind === 'continue') return 'continue';
+          return 'next_turn';
+        },
+        queueItemKind(item) {
+          const origin = this.queueItemOrigin(item).replace('_', ' ');
+          const delivery = this.queueItemDelivery(item);
+          if (delivery === 'turn_boundary') return origin === 'user' ? 'user steer' : origin;
+          if (delivery === 'continue') return 'continue';
+          return origin;
+        },
         queueItemText(item) { return String(item?.Text || item?.text || item?.Note || item?.note || ''); },
         queueItemPreview(item) {
           const text = this.queueItemText(item).replace(/\s+/g, ' ').trim();
@@ -2149,7 +2164,7 @@
           const id = this.queueItemID(item);
           if (!id) return;
           const previous = this.activeQueue().slice();
-          const promoted = {...item, Kind: 'steer', kind: 'steer'};
+          const promoted = {...item, Delivery: 'next_turn', delivery: 'next_turn'};
           this.setActiveQueue([promoted, ...previous.filter(existing => this.queueItemID(existing) !== id)]);
           this.rpc('send_queue_item_now', {id}).catch(err => {
             this.showToast(err.message);
@@ -2194,8 +2209,8 @@
             if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); this.acceptCompletion(this.completion.selected); return; }
             if (ev.key === 'Escape') { ev.preventDefault(); this.clearCompletions(); return; }
           }
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); this.send({steer: true}); return; }
           if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); this.send(); }
-          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); this.send(); }
         },
         onComposerKeyup(ev) {
           if (['ArrowDown', 'ArrowUp', 'Tab', 'Enter', 'Escape'].includes(ev.key)) return;
@@ -2222,7 +2237,7 @@
           this.clearCompletions();
           this.$nextTick(() => { const el = this.$refs.composerInput; if (el) { el.focus(); el.setSelectionRange(cursor, cursor); } this.resizeComposer(); });
         },
-        send() {
+        send(options = {}) {
           const text = this.draft.trim();
           const attachments = this.composerAttachments.slice();
           if (!text && attachments.length === 0) return;
@@ -2239,7 +2254,7 @@
           this.clearCompletions();
           this.writeComposerDraftPayload(text, attachments);
           this.$nextTick(() => this.resizeComposer());
-          this.rpc('send_prompt', {text, attachments})
+          this.rpc('send_prompt', {text, attachments, steer: !!options.steer})
             .then(() => { this.preserveComposerDraftDuringSend = false; this.clearComposerDraftStorage(); })
             .catch(() => { this.preserveComposerDraftDuringSend = false; this.draft = text; this.composerAttachments = attachments; });
         },

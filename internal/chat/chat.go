@@ -21,6 +21,7 @@ import (
 type QueueKind string
 
 const (
+	QueueKindUser     QueueKind = "user"
 	QueueKindSteer    QueueKind = "steer"
 	QueueKindQueued   QueueKind = "queue"
 	QueueKindContinue QueueKind = "continue"
@@ -523,7 +524,7 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 	return item, nil
 }
 
-// ApplyNextSteer removes and records the next queued steer message.
+// ApplyNextSteer removes and records the next queued turn-boundary message.
 func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
 	if t == nil || t.chat == nil || t.skipQueued {
 		return domain.TimelineItem{}, false, nil
@@ -533,7 +534,7 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	r.mu.Lock()
 	idx := -1
 	for i, item := range r.queue {
-		if item.Held || item.Kind != domain.QueuedInputKindSteer {
+		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryTurnBoundary {
 			continue
 		}
 		idx = i
@@ -949,13 +950,15 @@ func (r *Chat) queueShutdownContinuation() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, item := range r.queue {
-		if item.Kind == domain.QueuedInputKindContinue {
+		if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue {
 			return
 		}
 	}
 	item := domain.QueuedInput{
 		ID:        id.New(),
 		Kind:      domain.QueuedInputKindContinue,
+		Delivery:  domain.QueuedInputDeliveryContinue,
+		Origin:    domain.QueuedInputOriginAutoResume,
 		Source:    domain.UserMessageSourceAutoResume,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -1302,13 +1305,13 @@ func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 }
 
 func (r *Chat) shouldRenderQueuedUserInputLocked(queued domain.QueuedInput) bool {
-	if r.state == nil || queued.Kind != domain.QueuedInputKindSteer || queued.TimelineID != "" {
+	if r.state == nil || queued.TimelineID != "" {
 		return false
 	}
-	if strings.TrimSpace(queued.Source) != domain.UserMessageSourceUser {
+	if domain.UserMessageSourceForQueuedInput(queued) != domain.UserMessageSourceUser {
 		return false
 	}
-	return r.active || r.status == StatusWaitingApproval
+	return domain.DeliveryForQueuedInput(queued) == domain.QueuedInputDeliveryNextTurn
 }
 
 func (r *Chat) appendQueuedUserInputLocked(queued domain.QueuedInput) domain.TimelineItem {
@@ -1414,7 +1417,8 @@ func (r *Chat) handleSendQueueItemNow(id id.ID) {
 		return
 	}
 	item := r.queue[idx]
-	item.Kind = domain.QueuedInputKindSteer
+	item.Delivery = domain.QueuedInputDeliveryNextTurn
+	item.Kind = domain.QueuedInputKindQueued
 	item.Held = false
 	item.CreatedAt = time.Now().UTC()
 	remaining := append(slices.Clone(r.queue[:idx]), r.queue[idx+1:]...)
@@ -1482,7 +1486,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
-	if item.Kind == domain.QueuedInputKindContinue {
+	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue {
 		r.activeUserSource = ""
 	} else {
 		r.activeUserSource = domain.UserMessageSourceForQueuedInput(item)
@@ -1493,7 +1497,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.mu.Unlock()
 
 	_ = r.persistQueue()
-	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
+	r.broadcast(r.snapshotUpdateFlags(nil, domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue, true, true, true, false))
 	r.runItem(ctx, item)
 }
 
@@ -2079,7 +2083,7 @@ func (r *Chat) maybeDispatchNext() {
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
-	if item.Kind == domain.QueuedInputKindContinue {
+	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue {
 		r.activeUserSource = ""
 	} else {
 		r.activeUserSource = domain.UserMessageSourceForQueuedInput(item)
@@ -2090,7 +2094,7 @@ func (r *Chat) maybeDispatchNext() {
 	r.mu.Unlock()
 
 	_ = r.persistQueue()
-	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
+	r.broadcast(r.snapshotUpdateFlags(nil, domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue, true, true, true, false))
 	r.runItem(ctx, item)
 }
 
@@ -2128,8 +2132,8 @@ func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *T
 			r.handleTurnError(ctx, turn, out, fmt.Errorf("prompt preparation service is not configured"))
 			return
 		}
-		switch item.Kind {
-		case domain.QueuedInputKindContinue:
+		switch domain.DeliveryForQueuedInput(item) {
+		case domain.QueuedInputDeliveryContinue:
 			transient, err = promptService.PrepareContinueTurn(ctx, turn, note, out)
 		default:
 			transient, err = promptService.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
@@ -2294,7 +2298,7 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 
 func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
 	_ = session
-	if item.Kind == domain.QueuedInputKindContinue || r.state == nil {
+	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue || r.state == nil {
 		return
 	}
 	now := time.Now().UTC()
@@ -2395,18 +2399,17 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {
-	priority := []domain.QueuedInputKind{
-		domain.QueuedInputKindContinue,
-		domain.QueuedInputKindSteer,
-		domain.QueuedInputKindRejectedSteer,
-		domain.QueuedInputKindQueued,
+	priority := []domain.QueuedInputDelivery{
+		domain.QueuedInputDeliveryContinue,
+		domain.QueuedInputDeliveryNextTurn,
+		domain.QueuedInputDeliveryTurnBoundary,
 	}
-	for _, kind := range priority {
+	for _, delivery := range priority {
 		for idx, item := range items {
 			if item.Held {
 				continue
 			}
-			if item.Kind == kind {
+			if domain.DeliveryForQueuedInput(item) == delivery {
 				return idx
 			}
 		}
@@ -2416,15 +2419,39 @@ func nextDispatchableIndex(items []domain.QueuedInput) int {
 
 func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 	kind := domain.QueuedInputKindQueued
+	delivery := domain.QueuedInputDeliveryNextTurn
+	origin := domain.QueuedInputOriginUser
 	switch item.Kind {
 	case QueueKindSteer:
 		kind = domain.QueuedInputKindSteer
+		delivery = domain.QueuedInputDeliveryTurnBoundary
 	case QueueKindContinue:
 		kind = domain.QueuedInputKindContinue
+		delivery = domain.QueuedInputDeliveryContinue
+		origin = domain.QueuedInputOriginAutoResume
+	case QueueKindUser, QueueKindQueued:
+		kind = domain.QueuedInputKindQueued
+		delivery = domain.QueuedInputDeliveryNextTurn
+	}
+	switch strings.TrimSpace(item.Source) {
+	case domain.UserMessageSourceSubchat:
+		origin = domain.QueuedInputOriginSubchat
+	case domain.UserMessageSourceAutoGenerated:
+		origin = domain.QueuedInputOriginAutoGenerated
+	case domain.UserMessageSourceAutoResume:
+		origin = domain.QueuedInputOriginAutoResume
+	case domain.UserMessageSourceRejectedSteer:
+		origin = domain.QueuedInputOriginRejectedSteer
+	case domain.UserMessageSourceUser, "":
+		if item.Kind == QueueKindSteer {
+			origin = domain.QueuedInputOriginUser
+		}
 	}
 	return domain.QueuedInput{
 		ID:          id.New(),
 		Kind:        kind,
+		Delivery:    delivery,
+		Origin:      origin,
 		Text:        strings.TrimSpace(item.Text),
 		Source:      strings.TrimSpace(item.Source),
 		Attachments: queuedAttachmentsFromDrafts(item.Attachments),
@@ -2453,7 +2480,7 @@ func visibleQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
 	}
 	out := make([]domain.QueuedInput, 0, len(src))
 	for _, item := range src {
-		if item.TimelineID != "" && strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+		if item.TimelineID != "" && domain.UserMessageSourceForQueuedInput(item) == domain.UserMessageSourceUser {
 			continue
 		}
 		out = append(out, item)

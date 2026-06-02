@@ -503,10 +503,15 @@ func (c *Controller) SendPrompt(text string) error {
 
 // SendPromptWithAttachments appends a user prompt and uploaded attachment drafts to the active chat queue.
 func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.Draft) error {
+	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindUser, drafts)
+}
+
+// SendSteerWithAttachments appends an explicit turn-boundary steer to the active chat queue.
+func (c *Controller) SendSteerWithAttachments(text string, drafts []attachment.Draft) error {
 	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindSteer, drafts)
 }
 
-// SendPromptWithKindAndAttachments enqueues a prompt with the given queue kind (steer or queue).
+// SendPromptWithKindAndAttachments enqueues a prompt with the given delivery kind.
 func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.QueueKind, drafts []attachment.Draft) error {
 	text = strings.TrimSpace(text)
 	validated := make([]attachment.Draft, 0, len(drafts))
@@ -525,10 +530,7 @@ func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.Que
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	source := ""
-	if kind == chat.QueueKindSteer {
-		source = domain.UserMessageSourceUser
-	}
+	source := domain.UserMessageSourceUser
 	rt.Enqueue(chat.QueueItem{Kind: kind, Source: source, Text: text, Attachments: validated})
 	return nil
 }
@@ -553,7 +555,7 @@ func (c *Controller) DeleteQueueItem(id id.ID) error {
 	return nil
 }
 
-// SendQueueItemNow promotes a queued input to a steer item for the active chat.
+// SendQueueItemNow promotes a held queued input for immediate next-turn delivery.
 func (c *Controller) SendQueueItemNow(id id.ID) error {
 	rt := c.currentRuntime()
 	if rt == nil {

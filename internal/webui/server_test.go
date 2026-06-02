@@ -1049,7 +1049,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@paste.prevent="onComposerPaste($event)"`) ||
 		!strings.Contains(fullPage, `/api/attachments/clipboard-image`) ||
 		!strings.Contains(fullPage, `composerAttachments`) ||
-		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments})`) {
+		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments, steer: !!options.steer})`) ||
+		!strings.Contains(fullPage, `this.send({steer: true})`) {
 		t.Fatalf("expected composer to upload pasted images and send them as attachments")
 	}
 	if !strings.Contains(fullPage, `activeQueue().length > 0`) ||

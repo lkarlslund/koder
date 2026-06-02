@@ -398,7 +398,7 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first prompt"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first prompt"})
 
 	deadline := time.After(2 * time.Second)
 	for runner.promptCallCount() == 0 {
@@ -421,8 +421,8 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	if !ok || user.Text != "first prompt" {
 		t.Fatalf("last timeline item = %#v", last)
 	}
-	if user.Source != domain.UserMessageSourceSteer {
-		t.Fatalf("user source = %q, want %q", user.Source, domain.UserMessageSourceSteer)
+	if user.Source != domain.UserMessageSourceUser {
+		t.Fatalf("user source = %q, want %q", user.Source, domain.UserMessageSourceUser)
 	}
 
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
@@ -457,7 +457,7 @@ func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceUser, Text: "first prompt"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "first prompt"})
 	deadline := time.After(2 * time.Second)
 	for runner.promptCallCount() == 0 {
 		select {
@@ -468,7 +468,7 @@ func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 		}
 	}
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
 	deadline = time.After(2 * time.Second)
 	for {
 		timeline := rt.Snapshot().Timeline
@@ -653,7 +653,7 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	}
 }
 
-func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
+func TestRuntimeSendQueueItemNowPromotesSelectedUserItem(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	first := make(chan domain.Event)
@@ -664,8 +664,30 @@ func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
-	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
-	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "third"})
+	secondID := id.NewAt(time.Now().UTC())
+	thirdID := id.NewAt(time.Now().UTC())
+	rt.ReplaceQueue([]domain.QueuedInput{
+		{
+			ID:        secondID,
+			Kind:      domain.QueuedInputKindQueued,
+			Delivery:  domain.QueuedInputDeliveryNextTurn,
+			Origin:    domain.QueuedInputOriginUser,
+			Text:      "second",
+			Source:    domain.UserMessageSourceUser,
+			Held:      true,
+			CreatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        thirdID,
+			Kind:      domain.QueuedInputKindQueued,
+			Delivery:  domain.QueuedInputDeliveryNextTurn,
+			Origin:    domain.QueuedInputOriginUser,
+			Text:      "third",
+			Source:    domain.UserMessageSourceUser,
+			Held:      true,
+			CreatedAt: time.Now().UTC(),
+		},
+	})
 
 	deadline := time.After(2 * time.Second)
 	for len(rt.Snapshot().QueuedInputs) < 2 {
@@ -676,17 +698,6 @@ func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	var thirdID id.ID
-	for _, item := range rt.Snapshot().QueuedInputs {
-		if item.Text == "third" {
-			thirdID = item.ID
-			break
-		}
-	}
-	if thirdID == "" {
-		t.Fatalf("third item not queued: %#v", rt.Snapshot().QueuedInputs)
-	}
-
 	rt.SendQueueItemNow(thirdID)
 	first <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(first)
@@ -716,6 +727,8 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	rt.ReplaceQueue([]domain.QueuedInput{{
 		ID:        queuedID,
 		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
 		Text:      "run now",
 		Source:    domain.UserMessageSourceUser,
 		Held:      true,
@@ -1037,8 +1050,8 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	rt := newTestChat(t, st, session, chat, runner)
 
 	rt.DispatchQueued(
-		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
-		[]domain.QueuedInput{{ID: "queue-1", Kind: domain.QueuedInputKindQueued, Text: "first", CreatedAt: time.Now().UTC()}},
+		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindQueued, Delivery: domain.QueuedInputDeliveryNextTurn, Origin: domain.QueuedInputOriginUser, Text: "selected", CreatedAt: time.Now().UTC()},
+		[]domain.QueuedInput{{ID: "queue-1", Kind: domain.QueuedInputKindQueued, Delivery: domain.QueuedInputDeliveryNextTurn, Origin: domain.QueuedInputOriginUser, Text: "first", CreatedAt: time.Now().UTC()}},
 	)
 
 	deadline := time.After(2 * time.Second)
@@ -1068,7 +1081,7 @@ func TestRuntimeDispatchQueuedTurnPromptDoesNotDuplicateUserMessage(t *testing.T
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
 	rt.DispatchQueued(
-		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
+		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindQueued, Delivery: domain.QueuedInputDeliveryNextTurn, Origin: domain.QueuedInputOriginUser, Text: "selected", CreatedAt: time.Now().UTC()},
 		nil,
 	)
 
@@ -1095,85 +1108,6 @@ func TestRuntimeDispatchQueuedTurnPromptDoesNotDuplicateUserMessage(t *testing.T
 			t.Fatalf("timed out waiting for dispatched turn prompt: %#v", snapshot)
 		default:
 			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
-	st := openTestStore(t)
-	session, chat, _ := createSessionWithPlan(t, st)
-	events := make(chan domain.Event)
-	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
-	rt := newTestChat(t, st, session, chat, runner)
-
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "active"})
-	deadline := time.After(2 * time.Second)
-	for runner.promptCallCount() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for prompt start")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "queued steer"})
-	deadline = time.After(2 * time.Second)
-	var queuedID id.ID
-	for queuedID == "" {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for queued input: %#v", rt.Snapshot().QueuedInputs)
-		default:
-			snapshot := rt.Snapshot()
-			if len(snapshot.QueuedInputs) == 1 {
-				queuedID = snapshot.QueuedInputs[0].ID
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	rt.SendQueueItemNow(queuedID)
-	deadline = time.After(2 * time.Second)
-	for {
-		snapshot := rt.Snapshot()
-		if len(snapshot.QueuedInputs) == 1 && snapshot.QueuedInputs[0].Kind == domain.QueuedInputKindSteer {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for steer promotion: %#v", snapshot.QueuedInputs)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-
-	updates, unsub := rt.Subscribe()
-	defer unsub()
-	if err := SetChatQueuedInputs(context.Background(), st, chat.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	events <- domain.Event{
-		Kind: domain.EventKindStatus,
-		Text: "Applying queued steer...",
-		Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
-	}
-
-	deadline = time.After(2 * time.Second)
-	for {
-		select {
-		case update := <-updates:
-			if update.QueueChanged {
-				if len(update.Queue) != 0 {
-					t.Fatalf("queue update = %#v", update.Queue)
-				}
-				if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
-					t.Fatalf("snapshot queued inputs = %#v", got)
-				}
-				events <- domain.Event{Kind: domain.EventKindMessageDone}
-				close(events)
-				return
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for queue refresh: %#v", rt.Snapshot().QueuedInputs)
 		}
 	}
 }
@@ -1678,7 +1612,9 @@ func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(chatRecord.QueuedInputs) != 1 || chatRecord.QueuedInputs[0].Kind != domain.QueuedInputKindContinue || chatRecord.QueuedInputs[0].Source != domain.UserMessageSourceAutoResume {
+	if len(chatRecord.QueuedInputs) != 1 ||
+		domain.DeliveryForQueuedInput(chatRecord.QueuedInputs[0]) != domain.QueuedInputDeliveryContinue ||
+		domain.UserMessageSourceForQueuedInput(chatRecord.QueuedInputs[0]) != domain.UserMessageSourceAutoResume {
 		t.Fatalf("expected persisted auto-resume continuation, got %#v", chatRecord.QueuedInputs)
 	}
 	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
@@ -1893,7 +1829,9 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 
 	rt.appendOptimisticUserMessage(domain.QueuedInput{
 		ID:        "queue-99",
-		Kind:      domain.QueuedInputKindSteer,
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
 		Text:      "persist me",
 		CreatedAt: time.Now().UTC(),
 	}, session, chatRecord)

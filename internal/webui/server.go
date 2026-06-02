@@ -457,9 +457,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		var in struct {
 			Text        string             `json:"text"`
 			Attachments []attachment.Draft `json:"attachments"`
+			Steer       bool               `json:"steer"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
+		}
+		if in.Steer {
+			return map[string]bool{"queued": true}, s.controller.SendSteerWithAttachments(in.Text, in.Attachments)
 		}
 		return map[string]bool{"queued": true}, s.controller.SendPromptWithAttachments(in.Text, in.Attachments)
 	case "continue":

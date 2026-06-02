@@ -1068,7 +1068,9 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 	}
 	if err := chatpkg.SetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
 		ID:        id.New(),
-		Kind:      domain.QueuedInputKindSteer,
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
 		Text:      "run the user request",
 		Source:    domain.UserMessageSourceUser,
 		CreatedAt: time.Now().UTC(),

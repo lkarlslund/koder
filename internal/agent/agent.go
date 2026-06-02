@@ -804,7 +804,7 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 	*chat = refreshed
 	idx := -1
 	for i, item := range chat.QueuedInputs {
-		if item.Held || item.Kind != domain.QueuedInputKindSteer {
+		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryTurnBoundary {
 			continue
 		}
 		idx = i
