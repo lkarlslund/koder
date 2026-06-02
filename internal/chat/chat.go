@@ -60,17 +60,20 @@ const (
 )
 
 type Snapshot struct {
-	Session          domain.Session
-	Chat             domain.Chat
-	Timeline         []domain.TimelineItem
-	Approvals        []Approval
-	QueuedInputs     []domain.QueuedInput
-	ExecProcesses    []domain.ExecProcess
-	PendingAssistant PendingAssistantTurn
-	Status           Status
-	StatusText       string
-	Context          domain.ContextUsage
-	Active           bool
+	Session           domain.Session
+	Chat              domain.Chat
+	Timeline          []domain.TimelineItem
+	TimelineHasMore   bool
+	TimelineLoadedAll bool
+	TimelineBefore    id.ID
+	Approvals         []Approval
+	QueuedInputs      []domain.QueuedInput
+	ExecProcesses     []domain.ExecProcess
+	PendingAssistant  PendingAssistantTurn
+	Status            Status
+	StatusText        string
+	Context           domain.ContextUsage
+	Active            bool
 }
 
 type Update struct {

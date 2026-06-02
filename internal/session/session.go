@@ -235,6 +235,23 @@ func (s *Session) Chat(ctx context.Context, chatID id.ID) (*chatpkg.Chat, error)
 	return rt, nil
 }
 
+// TimelinePage returns persisted transcript items for a chat owned by this session.
+func (s *Session) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (chatpkg.TimelinePage, error) {
+	if s == nil {
+		return chatpkg.TimelinePage{}, fmt.Errorf("session is required")
+	}
+	if chatID == "" {
+		return chatpkg.TimelinePage{}, fmt.Errorf("chat id is required")
+	}
+	s.mu.RLock()
+	_, ok := chatByID(s.chats, chatID)
+	s.mu.RUnlock()
+	if !ok {
+		return chatpkg.TimelinePage{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	return chatpkg.TimelinePageForChat(ctx, s.store, chatID, before, limit, all)
+}
+
 // NewChat creates a new orchestrator chat under parentChatID.
 func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string) (*chatpkg.Chat, error) {
 	if s == nil {

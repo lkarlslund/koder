@@ -591,7 +591,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1085,6 +1085,12 @@
         transcriptElement() {
           return this.$refs?.transcript || document.querySelector('.transcript');
         },
+        onTranscriptScroll() {
+          this.updateTranscriptStickiness();
+          const el = this.transcriptElement();
+          if (!el || el.scrollTop > 96) return;
+          this.loadOlderTimeline();
+        },
         updateTranscriptStickiness() {
           const el = this.transcriptElement();
           if (!el) {
@@ -1096,6 +1102,104 @@
           this.transcriptStickToBottom = distance <= 48;
           this.reportClientStateSoon();
           return this.transcriptStickToBottom;
+        },
+        timelineHasMore() {
+          const snapshot = this.activeSnapshot();
+          return !!(snapshot.TimelineHasMore || snapshot.timeline_has_more);
+        },
+        timelineLoadedAll() {
+          const snapshot = this.activeSnapshot();
+          return !!(snapshot.TimelineLoadedAll || snapshot.timeline_loaded_all);
+        },
+        timelineBefore() {
+          const snapshot = this.activeSnapshot();
+          const explicit = String(snapshot.TimelineBefore || snapshot.timeline_before || '').trim();
+          if (explicit) return explicit;
+          const timeline = this.timeline();
+          return timeline.length ? this.timelineItemID(timeline[0]) : '';
+        },
+        timelineLoadingActive() {
+          const id = this.activeChatID();
+          return !!(id && (this.timelineLoading[id] || this.timelineLoadingAll[id]));
+        },
+        loadOlderTimeline() {
+          const chatID = this.activeChatID();
+          if (!chatID || this.timelineLoading[chatID] || this.timelineLoadingAll[chatID] || !this.timelineHasMore()) return;
+          const before = this.timelineBefore();
+          if (!before) return;
+          const el = this.transcriptElement();
+          const scrollHeight = el ? el.scrollHeight : 0;
+          const scrollTop = el ? el.scrollTop : 0;
+          this.timelineLoading = {...this.timelineLoading, [chatID]: true};
+          this.rpc('load_timeline', {chat_id: chatID, before, limit: 80})
+            .then(page => this.mergeTimelinePage(page, {prepend: true, scrollHeight, scrollTop}))
+            .catch(err => this.showToast(err.message))
+            .finally(() => {
+              const next = {...this.timelineLoading};
+              delete next[chatID];
+              this.timelineLoading = next;
+            });
+        },
+        loadAllTimeline() {
+          const chatID = this.activeChatID();
+          if (!chatID || this.timelineLoadingAll[chatID] || this.timelineLoadedAll()) return;
+          this.timelineLoadingAll = {...this.timelineLoadingAll, [chatID]: true};
+          this.rpc('load_timeline', {chat_id: chatID, all: true})
+            .then(page => this.mergeTimelinePage(page, {replace: true, scrollTop: 0}))
+            .catch(err => this.showToast(err.message))
+            .finally(() => {
+              const next = {...this.timelineLoadingAll};
+              delete next[chatID];
+              this.timelineLoadingAll = next;
+            });
+        },
+        mergeTimelinePage(page, options = {}) {
+          if (!page) return;
+          const chatID = String(page.chat_id || page.ChatID || '').trim();
+          if (!chatID) return;
+          const items = page.items || page.Items || [];
+          const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
+          const current = snapshots[chatID] || snapshots[String(chatID)] || {};
+          const existing = current.Timeline || current.timeline || [];
+          let timeline = [];
+          if (options.replace) {
+            timeline = items.slice();
+          } else if (options.prepend) {
+            const seen = new Set(items.map(item => this.timelineItemID(item)).filter(Boolean));
+            timeline = items.concat(existing.filter(item => !seen.has(this.timelineItemID(item))));
+          } else {
+            timeline = existing.slice();
+            items.forEach(item => { timeline = this.patchTimelineItem(timeline, item); });
+          }
+          const next = {
+            ...current,
+            Timeline: timeline,
+            TimelineHasMore: !!(page.has_more || page.HasMore),
+            TimelineLoadedAll: !!(page.loaded_all || page.LoadedAll),
+            TimelineBefore: String(page.before || page.Before || (timeline[0] && this.timelineItemID(timeline[0])) || '').trim(),
+          };
+          snapshots[chatID] = next;
+          snapshots[String(chatID)] = next;
+          this.state.snapshots = snapshots;
+          this.state.Snapshots = snapshots;
+          if (chatID === String(this.activeChatID())) {
+            this.state.snapshot = next;
+            this.state.Snapshot = next;
+          }
+          this.afterTranscriptDOMUpdate(() => {
+            const el = this.transcriptElement();
+            if (!el) return;
+            if (options.replace) {
+              el.scrollTop = Number.isFinite(options.scrollTop) ? options.scrollTop : 0;
+              this.updateTranscriptStickiness();
+              return;
+            }
+            const previousHeight = Number(options.scrollHeight || 0);
+            if (previousHeight > 0) {
+              el.scrollTop = el.scrollHeight - previousHeight + Number(options.scrollTop || 0);
+              this.updateTranscriptStickiness();
+            }
+          });
         },
         transcriptScrollState() {
           const el = this.transcriptElement();

@@ -119,6 +119,52 @@ func TimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]doma
 	return items, nil
 }
 
+type TimelinePage struct {
+	Items     []domain.TimelineItem
+	HasMore   bool
+	Before    id.ID
+	LoadedAll bool
+	Total     int
+}
+
+func TimelinePageForChat(ctx context.Context, st *store.Store, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
+	items, err := TimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	total := len(items)
+	if all || limit <= 0 || total <= limit {
+		return timelinePage(items, false, true, total), nil
+	}
+	end := total
+	if before != "" {
+		idx := slices.IndexFunc(items, func(item domain.TimelineItem) bool {
+			return item.ID == before
+		})
+		if idx >= 0 {
+			end = idx
+		}
+	}
+	if end <= 0 {
+		return TimelinePage{LoadedAll: true, Total: total}, nil
+	}
+	start := max(0, end-limit)
+	return timelinePage(items[start:end], start > 0, false, total), nil
+}
+
+func timelinePage(items []domain.TimelineItem, hasMore, loadedAll bool, total int) TimelinePage {
+	page := TimelinePage{
+		Items:     slices.Clone(items),
+		HasMore:   hasMore,
+		LoadedAll: loadedAll,
+		Total:     total,
+	}
+	if len(page.Items) > 0 {
+		page.Before = page.Items[0].ID
+	}
+	return page
+}
+
 func SortTimeline(items []domain.TimelineItem) {
 	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
 		switch {

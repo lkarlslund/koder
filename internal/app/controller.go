@@ -367,6 +367,27 @@ func (c *Controller) State() State {
 	return c.stateLocked()
 }
 
+// TimelinePage returns a transcript page for a chat in the currently selected session.
+func (c *Controller) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (chat.TimelinePage, error) {
+	c.mu.RLock()
+	sessionID := c.session.ID
+	c.mu.RUnlock()
+	if sessionID == "" {
+		return chat.TimelinePage{}, fmt.Errorf("no active session")
+	}
+	if chatID == "" {
+		return chat.TimelinePage{}, fmt.Errorf("chat id is required")
+	}
+	if c.agent == nil {
+		return chat.TimelinePage{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return chat.TimelinePage{}, err
+	}
+	return owner.TimelinePage(ctx, chatID, before, limit, all)
+}
+
 func (c *Controller) populateStateSnapshotsLocked(state *State) {
 	for idx := range state.Chats {
 		if state.Chats[idx].ID == c.chat.ID {

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -877,6 +878,50 @@ func TestLoadDoesNotResumeWhenLatestAssistantHasNoPendingToolCalls(t *testing.T)
 	snapshot := rt.Snapshot()
 	if snapshot.Active || snapshot.Status != StatusIdle {
 		t.Fatalf("snapshot = %#v, want idle inactive", snapshot)
+	}
+}
+
+func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
+	st := openTestStore(t)
+	_, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	for i := 0; i < 6; i++ {
+		if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %d", i+1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tail, err := TimelinePageForChat(ctx, st, chatRecord.ID, "", 3, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(tail.Items), 3; got != want {
+		t.Fatalf("tail length = %d, want %d", got, want)
+	}
+	if tail.Items[0].Seq != 4 || !tail.HasMore || tail.LoadedAll || tail.Before != tail.Items[0].ID || tail.Total != 6 {
+		t.Fatalf("unexpected tail page: %#v", tail)
+	}
+
+	older, err := TimelinePageForChat(ctx, st, chatRecord.ID, tail.Before, 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(older.Items), 2; got != want {
+		t.Fatalf("older length = %d, want %d", got, want)
+	}
+	if older.Items[0].Seq != 2 || !older.HasMore || older.LoadedAll {
+		t.Fatalf("unexpected older page: %#v", older)
+	}
+
+	all, err := TimelinePageForChat(ctx, st, chatRecord.ID, "", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(all.Items), 6; got != want {
+		t.Fatalf("all length = %d, want %d", got, want)
+	}
+	if all.HasMore || !all.LoadedAll || all.Before != all.Items[0].ID {
+		t.Fatalf("unexpected all page: %#v", all)
 	}
 }
 

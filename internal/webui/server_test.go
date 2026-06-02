@@ -158,6 +158,47 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 }
 
+func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
+	chatID := id.ID("chat-1")
+	items := make([]domain.TimelineItem, 0, 5)
+	for i := 0; i < 5; i++ {
+		items = append(items, domain.TimelineItem{
+			ID:      id.ID(fmt.Sprintf("item-%d", i+1)),
+			ChatID:  chatID,
+			Seq:     int64(i + 1),
+			Content: domain.UserMessage{Text: fmt.Sprintf("message %d", i+1)},
+		})
+	}
+	state := app.State{
+		ActiveChatID: chatID,
+		Snapshot: chat.Snapshot{
+			Chat:     domain.Chat{ID: chatID},
+			Timeline: items,
+		},
+		Snapshots: map[id.ID]chat.Snapshot{
+			chatID: {
+				Chat:     domain.Chat{ID: chatID},
+				Timeline: items,
+			},
+		},
+	}
+
+	trimmed := trimStateTimelines(state, 2)
+	snapshot := trimmed.Snapshots[chatID]
+	if got, want := len(snapshot.Timeline), 2; got != want {
+		t.Fatalf("timeline length = %d, want %d", got, want)
+	}
+	if snapshot.Timeline[0].ID != "item-4" || !snapshot.TimelineHasMore || snapshot.TimelineLoadedAll || snapshot.TimelineBefore != "item-4" {
+		t.Fatalf("unexpected snapshot metadata: %#v", snapshot)
+	}
+	if trimmed.Snapshot.Timeline[0].ID != "item-4" {
+		t.Fatalf("active snapshot was not trimmed: %#v", trimmed.Snapshot.Timeline)
+	}
+	if len(state.Snapshots[chatID].Timeline) != 5 {
+		t.Fatalf("trim mutated source state")
+	}
+}
+
 func TestWebSocketHelloErrorsForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := ctrl.State().Session.ID
@@ -923,6 +964,13 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `transcriptStickToBottom`) || !strings.Contains(fullPage, `updateTranscriptStickiness()`) {
 		t.Fatalf("expected transcript sticky-bottom intent to be tracked from scroll events")
+	}
+	if !strings.Contains(fullPage, `@scroll.passive="onTranscriptScroll()"`) ||
+		!strings.Contains(fullPage, `@keydown.home.prevent="loadAllTimeline()"`) ||
+		!strings.Contains(fullPage, `load_timeline`) ||
+		!strings.Contains(fullPage, `mergeTimelinePage(page`) ||
+		!strings.Contains(fullPage, `timelineLoadingActive()`) {
+		t.Fatalf("expected transcript timeline to lazy-load older chunks and load all on Home")
 	}
 	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
 		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")

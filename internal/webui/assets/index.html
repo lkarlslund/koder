@@ -34,10 +34,14 @@
       </div>
     </nav>
 
-    <main class="transcript p-3" x-ref="transcript" @scroll.passive="updateTranscriptStickiness()">
+    <main class="transcript p-3" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
+      <div class="timeline-load-indicator" x-show="timelineLoadingActive()" style="display: none;">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span x-text="timelineLoadingAll[activeChatID()] ? 'Loading full chat' : 'Loading earlier messages'"></span>
+      </div>
       <template x-for="item in timeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,6 +38,7 @@ import (
 const defaultOpenDelay = 5 * time.Second
 const assetHashPlaceholder = "__KODER_ASSET_HASH__"
 const indexAssetPath = "assets/index.html"
+const defaultTimelinePageSize = 80
 
 //go:embed assets
 var webAssets embed.FS
@@ -73,6 +75,15 @@ type Server struct {
 type clientSelection struct {
 	SessionID id.ID
 	ChatID    id.ID
+}
+
+type timelinePageResponse struct {
+	ChatID    id.ID                 `json:"chat_id"`
+	Items     []domain.TimelineItem `json:"items"`
+	HasMore   bool                  `json:"has_more"`
+	Before    id.ID                 `json:"before"`
+	LoadedAll bool                  `json:"loaded_all"`
+	Total     int                   `json:"total"`
 }
 
 // Start starts the web UI server.
@@ -541,6 +552,32 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"started": true}, nil
+	case "load_timeline":
+		var in struct {
+			ChatID id.ID `json:"chat_id"`
+			Before id.ID `json:"before"`
+			Limit  int   `json:"limit"`
+			All    bool  `json:"all"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		limit := in.Limit
+		if limit <= 0 || limit > defaultTimelinePageSize*4 {
+			limit = defaultTimelinePageSize
+		}
+		page, err := s.controller.TimelinePage(ctx, in.ChatID, in.Before, limit, in.All)
+		if err != nil {
+			return nil, err
+		}
+		return timelinePageResponse{
+			ChatID:    in.ChatID,
+			Items:     page.Items,
+			HasMore:   page.HasMore,
+			Before:    page.Before,
+			LoadedAll: page.LoadedAll,
+			Total:     page.Total,
+		}, nil
 	case "switch_chat":
 		var in struct {
 			ChatID id.ID `json:"chat_id"`
@@ -551,7 +588,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SwitchChat(ctx, in.ChatID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "new_chat":
 		var in struct {
 			Title string `json:"title"`
@@ -560,7 +598,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.NewChat(ctx, in.Title); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
 	case "switch_session":
@@ -573,7 +612,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SwitchSession(ctx, in.SessionID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "new_session":
 		var in struct {
 			Title       string `json:"title"`
@@ -583,7 +623,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.NewSessionWithProjectRoot(ctx, in.Title, in.ProjectRoot); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "rename_session":
 		var in struct {
 			SessionID id.ID  `json:"session_id"`
@@ -595,7 +636,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.RenameSession(ctx, in.SessionID, in.Title); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		return s.stateForClient(ctx, clientID)
 	case "delete_session":
 		var in struct {
 			SessionID id.ID `json:"session_id"`
@@ -606,7 +647,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.DeleteSession(ctx, in.SessionID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "browse_project_folder":
 		path, err := browseProjectFolder()
 		if err != nil {
@@ -623,7 +665,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.DeleteChat(ctx, in.ChatID); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), nil
+		s.setClientSelectionFromState(clientID, s.controller.State())
+		return s.stateForClient(ctx, clientID)
 	case "reorder_chats":
 		var in struct {
 			ChatIDs []id.ID `json:"chat_ids"`
@@ -746,7 +789,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"providers": providers, "preferences": preferences, "state": s.controller.State()}, nil
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
 	case "delete_provider":
 		var in struct {
 			ProviderID string `json:"provider_id"`
@@ -758,7 +805,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"providers": providers, "state": s.controller.State()}, nil
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "state": state}, nil
 	case "set_access_settings":
 		var in accesssettings.Settings
 		if err := decodeParams(params, &in); err != nil {
@@ -843,7 +894,65 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 			}
 		}
 	}
-	return s.controller.State(), nil
+	return trimStateTimelines(s.controller.State(), defaultTimelinePageSize), nil
+}
+
+func (s *Server) setClientSelectionFromState(clientID string, state app.State) {
+	if clientID == "" {
+		return
+	}
+	if state.Session.ID == "" {
+		return
+	}
+	s.setClientSelection(clientID, clientSelection{
+		SessionID: state.Session.ID,
+		ChatID:    state.ActiveChatID,
+	})
+}
+
+func trimStateTimelines(state app.State, limit int) app.State {
+	if limit <= 0 {
+		return state
+	}
+	if len(state.Snapshots) > 0 {
+		snapshots := make(map[id.ID]chat.Snapshot, len(state.Snapshots))
+		for chatID, snapshot := range state.Snapshots {
+			snapshots[chatID] = trimSnapshotTimeline(snapshot, limit)
+		}
+		state.Snapshots = snapshots
+	}
+	if state.Snapshot.Chat.ID != "" || len(state.Snapshot.Timeline) > 0 {
+		state.Snapshot = trimSnapshotTimeline(state.Snapshot, limit)
+	}
+	if state.ActiveChatID != "" {
+		if snapshot, ok := state.Snapshots[state.ActiveChatID]; ok {
+			state.Snapshot = snapshot
+		}
+	}
+	return state
+}
+
+func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {
+	total := len(snapshot.Timeline)
+	if total == 0 {
+		snapshot.TimelineHasMore = false
+		snapshot.TimelineLoadedAll = true
+		snapshot.TimelineBefore = ""
+		return snapshot
+	}
+	if limit <= 0 || total <= limit {
+		snapshot.Timeline = slices.Clone(snapshot.Timeline)
+		snapshot.TimelineHasMore = false
+		snapshot.TimelineLoadedAll = true
+		snapshot.TimelineBefore = snapshot.Timeline[0].ID
+		return snapshot
+	}
+	start := total - limit
+	snapshot.Timeline = slices.Clone(snapshot.Timeline[start:])
+	snapshot.TimelineHasMore = true
+	snapshot.TimelineLoadedAll = false
+	snapshot.TimelineBefore = snapshot.Timeline[0].ID
+	return snapshot
 }
 
 func (s *Server) sessionExists(ctx context.Context, sessionID id.ID) (bool, error) {
@@ -863,7 +972,7 @@ func rpcUsesActiveSelection(method string) bool {
 	switch strings.TrimSpace(method) {
 	case "send_prompt", "continue", "stop", "stop_after_turn", "compact",
 		"reorder_queue", "delete_queue_item", "send_queue_item_now",
-		"switch_chat", "new_chat", "delete_chat", "reorder_chats",
+		"load_timeline", "switch_chat", "new_chat", "delete_chat", "reorder_chats",
 		"approve", "deny", "set_model", "set_access_settings":
 		return true
 	default:
