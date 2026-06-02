@@ -1124,9 +1124,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `visibleMilestones()`) ||
 		!strings.Contains(fullPage, `flattenedMilestones()`) ||
 		!strings.Contains(fullPage, `milestoneDependsOnRef`) ||
-		!strings.Contains(fullPage, `hideClosedMilestones`) ||
-		!strings.Contains(fullPage, `toggleClosedMilestones()`) {
-		t.Fatalf("expected sidebar to hide completed/cancelled milestones")
+		!strings.Contains(fullPage, `milestoneStatusFilterOptions()`) ||
+		!strings.Contains(fullPage, `toggleMilestoneStatusFilter(filter.status)`) ||
+		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
+		t.Fatalf("expected sidebar to filter milestones by status")
 	}
 	if !strings.Contains(fullPage, `todoItemsForMilestone(node.milestone)`) {
 		t.Fatalf("expected sidebar to render todos as milestone children")
@@ -1192,8 +1193,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}
-	if !strings.Contains(fullPage, `visibleChats()`) || !strings.Contains(fullPage, `showArchivedChats`) || !strings.Contains(fullPage, `Archive this chat?`) || !strings.Contains(fullPage, `bi-archive`) {
-		t.Fatalf("expected chat sidebar to archive chats and toggle archived visibility")
+	if !strings.Contains(fullPage, `visibleChats()`) ||
+		!strings.Contains(fullPage, `chatStatusFilterOptions()`) ||
+		!strings.Contains(fullPage, `toggleChatStatusFilter(filter.status)`) ||
+		!strings.Contains(fullPage, `hiddenChatStatuses`) ||
+		!strings.Contains(fullPage, `Archive this chat?`) ||
+		!strings.Contains(fullPage, `bi-archive`) {
+		t.Fatalf("expected chat sidebar to archive chats and filter by status")
 	}
 	if !strings.Contains(fullPage, `draggable="true"`) ||
 		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||

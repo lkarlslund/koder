@@ -253,9 +253,17 @@
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
           <div class="d-flex align-items-center gap-1">
-            <button class="btn btn-sm btn-outline-secondary" :class="{'active': showArchivedChats}" :disabled="archivedChatCount() === 0" title="Show archived chats" @click="showArchivedChats = !showArchivedChats"><i class="bi bi-archive"></i></button>
             <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
           </div>
+        </div>
+        <div class="status-filter-row" x-show="chatStatusFilterOptions().length > 0">
+          <template x-for="filter in chatStatusFilterOptions()" :key="filter.status">
+            <button type="button" class="status-filter-button" :class="{'active': chatStatusFilterEnabled(filter.status)}" :title="chatStatusFilterTitle(filter)" @click="toggleChatStatusFilter(filter.status)">
+              <i class="bi" :class="filter.icon"></i>
+              <span x-text="filter.label"></span>
+              <span class="status-filter-count" x-text="filter.count"></span>
+            </button>
+          </template>
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
@@ -292,7 +300,15 @@
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
-          <button class="btn btn-sm btn-outline-secondary ms-auto" :class="{'active': hideClosedMilestones}" :disabled="closedMilestoneCount() === 0" title="Hide completed and cancelled milestones" @click="toggleClosedMilestones()"><i class="bi bi-eye-slash"></i></button>
+        </div>
+        <div class="status-filter-row" x-show="milestoneStatusFilterOptions().length > 0">
+          <template x-for="filter in milestoneStatusFilterOptions()" :key="filter.status">
+            <button type="button" class="status-filter-button" :class="['status-filter-' + filter.status.replaceAll('_', '-'), {'active': milestoneStatusFilterEnabled(filter.status)}]" :title="milestoneStatusFilterTitle(filter)" @click="toggleMilestoneStatusFilter(filter.status)">
+              <i class="bi" :class="filter.icon"></i>
+              <span x-text="filter.label"></span>
+              <span class="status-filter-count" x-text="filter.count"></span>
+            </button>
+          </template>
         </div>
         <template x-if="milestoneSummary()">
           <div class="sidebar-note" x-text="milestoneSummary()"></div>

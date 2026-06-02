@@ -46,6 +46,13 @@
     .sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }
     .sidebar-list .chat-list-item.dragging { opacity: .55; }
     .chat-drag-handle { color: var(--bs-secondary-color); cursor: grab; }
+    .status-filter-row { display: flex; flex-wrap: wrap; gap: .25rem; margin: .2rem 0 .3rem; }
+    .status-filter-button { display: inline-flex; align-items: center; gap: .25rem; min-height: 1.35rem; max-width: 100%; padding: .08rem .38rem; border: 1px solid var(--bs-border-color); border-radius: .3rem; background: transparent; color: var(--bs-secondary-color); font-size: .72rem; line-height: 1.1; }
+    .status-filter-button:hover { border-color: var(--bs-primary); color: var(--bs-emphasis-color); background: var(--bs-secondary-bg); }
+    .status-filter-button.active { color: var(--bs-emphasis-color); background: var(--bs-tertiary-bg); border-color: var(--bs-primary-border-subtle); }
+    .status-filter-button:not(.active) { opacity: .48; text-decoration: line-through; }
+    .status-filter-count { min-width: 1rem; padding: 0 .22rem; border-radius: 999px; background: var(--bs-secondary-bg); color: var(--bs-secondary-color); text-align: center; font-size: .68rem; }
+    .status-filter-button.active .status-filter-count { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
     .sidebar-card { margin: .35rem 0; }
     .sidebar-compact-block { margin-top: .2rem; }
     .git-summary-row { gap: .35rem; }

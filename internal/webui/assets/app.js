@@ -591,7 +591,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1675,11 +1675,7 @@
         milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
         visibleMilestones() {
           const items = this.milestoneItems();
-          if (!this.hideClosedMilestones) return items;
-          return items.filter(milestone => {
-            const status = this.milestoneStatus(milestone);
-            return status !== 'completed' && status !== 'cancelled';
-          });
+          return items.filter(milestone => this.milestoneStatusFilterEnabled(this.milestoneStatus(milestone)));
         },
         visibleMilestoneTree() {
           const items = this.visibleMilestones();
@@ -1721,9 +1717,24 @@
             return status === 'completed' || status === 'cancelled';
           }).length;
         },
-        toggleClosedMilestones() {
-          this.hideClosedMilestones = !this.hideClosedMilestones;
-          writePreference('hideClosedMilestones', this.hideClosedMilestones ? 'true' : 'false');
+        milestoneStatusFilterOptions() {
+          return this.statusFilterOptions(this.milestoneItems().map(milestone => this.milestoneStatus(milestone)), status => ({
+            status,
+            label: this.statusLabel(status),
+            icon: this.milestoneIcon(status),
+            count: 0,
+          }));
+        },
+        milestoneStatusFilterEnabled(status) {
+          return !this.hiddenMilestoneStatuses[String(status || 'pending')];
+        },
+        toggleMilestoneStatusFilter(status) {
+          const key = String(status || 'pending');
+          this.hiddenMilestoneStatuses = {...this.hiddenMilestoneStatuses, [key]: !this.hiddenMilestoneStatuses[key]};
+          writeJSONPreference('hiddenMilestoneStatuses', this.hiddenMilestoneStatuses);
+        },
+        milestoneStatusFilterTitle(filter) {
+          return (this.milestoneStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' milestones';
         },
         milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },
         milestoneRef(m) { return m.Ref || m.ref || ''; },
@@ -1837,10 +1848,33 @@
         chatArchived(chat) { return !!(chat?.Archived || chat?.archived); },
         visibleChats() {
           const chats = this.state.chats || this.state.Chats || [];
-          return this.showArchivedChats ? chats : chats.filter(chat => !this.chatArchived(chat));
+          return chats.filter(chat => this.chatStatusFilterEnabled(this.chatFilterStatus(chat)));
         },
         archivedChatCount() {
           return (this.state.chats || this.state.Chats || []).filter(chat => this.chatArchived(chat)).length;
+        },
+        chatStatusFilterOptions() {
+          return this.statusFilterOptions((this.state.chats || this.state.Chats || []).map(chat => this.chatFilterStatus(chat)), status => ({
+            status,
+            label: status === 'archived' ? 'Archived' : this.statusLabel(status),
+            icon: status === 'archived' ? 'bi-archive' : this.chatStatusIconForValue(status),
+            count: 0,
+          }));
+        },
+        chatFilterStatus(chat) {
+          if (this.chatArchived(chat)) return 'archived';
+          return this.chatStatusValue(chat);
+        },
+        chatStatusFilterEnabled(status) {
+          return !this.hiddenChatStatuses[String(status || 'idle')];
+        },
+        toggleChatStatusFilter(status) {
+          const key = String(status || 'idle');
+          this.hiddenChatStatuses = {...this.hiddenChatStatuses, [key]: !this.hiddenChatStatuses[key]};
+          writeJSONPreference('hiddenChatStatuses', this.hiddenChatStatuses);
+        },
+        chatStatusFilterTitle(filter) {
+          return (this.chatStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' chats';
         },
         chatSnapshot(chat) {
           const id = this.chatID(chat);
@@ -1910,12 +1944,54 @@
           };
           return labels[value] || value.replaceAll('_', ' ');
         },
+        statusLabel(status) {
+          const value = String(status || '').trim();
+          const labels = {
+            idle: 'Idle',
+            waiting_llm: 'Waiting',
+            streaming_thoughts: 'Reasoning',
+            streaming_response: 'Streaming',
+            running_tools: 'Tools',
+            waiting_approval: 'Approval',
+            running: 'Running',
+            pending: 'Pending',
+            ready: 'Ready',
+            decomposing: 'Decomposing',
+            executing: 'Executing',
+            completed: 'Done',
+            failed: 'Failed',
+            blocked: 'Blocked',
+            cancelled: 'Cancelled',
+            error: 'Error',
+          };
+          return labels[value] || value.replaceAll('_', ' ');
+        },
+        statusFilterOptions(statuses, build) {
+          const counts = new Map();
+          for (const raw of statuses) {
+            const status = String(raw || '').trim();
+            if (!status) continue;
+            counts.set(status, (counts.get(status) || 0) + 1);
+          }
+          return Array.from(counts.keys()).sort((a, b) => this.statusSortIndex(a) - this.statusSortIndex(b) || a.localeCompare(b)).map(status => {
+            const option = build(status);
+            option.count = counts.get(status) || 0;
+            return option;
+          });
+        },
+        statusSortIndex(status) {
+          const order = ['running', 'waiting_llm', 'streaming_thoughts', 'streaming_response', 'running_tools', 'waiting_approval', 'executing', 'decomposing', 'ready', 'pending', 'idle', 'completed', 'failed', 'blocked', 'cancelled', 'error', 'archived'];
+          const idx = order.indexOf(String(status || ''));
+          return idx >= 0 ? idx : order.length;
+        },
         chatStatusClass(chat) {
           const value = this.chatStatusValue(chat).replaceAll('_', '-');
           return 'status-' + value;
         },
         chatStatusIcon(chat) {
-          const value = this.chatStatusValue(chat);
+          return this.chatStatusIconForValue(this.chatStatusValue(chat));
+        },
+        chatStatusIconForValue(value) {
           if (value === 'waiting_approval') return 'bi-pause-circle-fill';
           if (value === 'error' || value === 'failed') return 'bi-exclamation-triangle-fill';
           if (value === 'cancelled') return 'bi-x-circle-fill';
@@ -2995,4 +3071,15 @@
     }
     function writeJSONPreference(name, value) {
       try { localStorage.setItem(preferenceKey(name), JSON.stringify(value || {})); } catch (_) {}
+    }
+    function readHiddenMilestoneStatuses() {
+      const saved = readJSONPreference('hiddenMilestoneStatuses', null);
+      if (saved && typeof saved === 'object') return saved;
+      const hideClosed = readPreference('hideClosedMilestones', 'false') === 'true';
+      return hideClosed ? {completed: true, cancelled: true} : {};
+    }
+    function readHiddenChatStatuses() {
+      const saved = readJSONPreference('hiddenChatStatuses', null);
+      if (saved && typeof saved === 'object') return saved;
+      return {archived: true};
     }
