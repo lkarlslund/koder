@@ -105,6 +105,10 @@ func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
 }
 
 func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
+	return MilestoneStoredResultWithTodoSummaries(plan, nil)
+}
+
+func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[string]string) MilestonePlanStoredResult {
 	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
 	for _, item := range plan.Milestones {
 		ownerChatID := ""
@@ -117,6 +121,7 @@ func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
 			Status:      item.Status.String(),
 			Notes:       item.Notes,
 			OwnerChatID: ownerChatID,
+			TodoSummary: summaries[item.Ref],
 		})
 	}
 	return MilestonePlanStoredResult{
@@ -161,7 +166,11 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 }
 
 func MilestonePlanResult(plan planning.Plan) Result {
-	stored := MilestoneStoredResult(plan)
+	return MilestonePlanResultWithTodoSummaries(plan, nil)
+}
+
+func MilestonePlanResultWithTodoSummaries(plan planning.Plan, summaries map[string]string) Result {
+	stored := MilestoneStoredResultWithTodoSummaries(plan, summaries)
 	output := FormatMilestoneOutput(stored)
 	if strings.TrimSpace(output) == "" {
 		output = "No milestones defined."

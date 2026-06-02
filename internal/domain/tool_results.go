@@ -185,6 +185,7 @@ type MilestoneStoredItem struct {
 	Status      string `json:"status"`
 	Notes       string `json:"notes,omitempty"`
 	OwnerChatID string `json:"owner_chat_id,omitempty"`
+	TodoSummary string `json:"todo_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {

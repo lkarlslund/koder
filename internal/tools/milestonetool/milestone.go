@@ -147,7 +147,12 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 		return tools.Result{}, err
 	}
 	scoped := tools.ScopedMilestonePlan(runtime, plan)
-	result := tools.MilestonePlanResult(filterListedMilestones(scoped, req.Args["completed"] == "true"))
+	listed := filterListedMilestones(scoped, req.Args["completed"] == "true")
+	todoSummaries, err := milestoneTodoSummaries(ctx, control, runtime.SessionID, listed.Milestones)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	result := tools.MilestonePlanResultWithTodoSummaries(listed, todoSummaries)
 	if summary := milestoneSummary(scoped.Milestones); summary != "" {
 		result.Output = summary + "\n" + result.Output
 	}
@@ -185,6 +190,37 @@ func milestoneSummary(milestones []planning.Milestone) string {
 		parts = append(parts, fmt.Sprintf("%d %s", count, status.String()))
 	}
 	return "Milestones summary: " + strings.Join(parts, ", ")
+}
+
+func milestoneTodoSummaries(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) (map[string]string, error) {
+	summaries := make(map[string]string, len(milestones))
+	for _, milestone := range milestones {
+		todos, err := control.ListTodos(ctx, sessionID, milestone.Ref)
+		if err != nil {
+			return nil, err
+		}
+		summaries[milestone.Ref] = todoSummary(todos)
+	}
+	return summaries, nil
+}
+
+func todoSummary(todos []planning.TodoItem) string {
+	if len(todos) == 0 {
+		return "no todos added to milestone"
+	}
+	counts := make(map[planning.TodoStatus]int)
+	for _, todo := range todos {
+		counts[todo.Status]++
+	}
+	parts := make([]string, 0, len(counts))
+	for _, status := range planning.TodoStatusValues() {
+		count := counts[status]
+		if count == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", count, status.String()))
+	}
+	return "todos: " + strings.Join(parts, ", ")
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {

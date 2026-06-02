@@ -201,6 +201,7 @@ type MilestoneStoredItem struct {
 	Status      string `json:"status"`
 	Notes       string `json:"notes,omitempty"`
 	OwnerChatID string `json:"owner_chat_id,omitempty"`
+	TodoSummary string `json:"todo_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {
@@ -1038,6 +1039,9 @@ func formatMilestonePlanStoredResult(result MilestonePlanStoredResult) string {
 		line := "[" + strings.TrimSpace(item.Status) + "] " + strings.TrimSpace(item.Title)
 		if ref := strings.TrimSpace(item.Ref); ref != "" {
 			line += " (" + ref + ")"
+		}
+		if summary := strings.TrimSpace(item.TodoSummary); summary != "" {
+			line += " - " + summary
 		}
 		lines = append(lines, line)
 		if notes := strings.TrimSpace(item.Notes); notes != "" {
