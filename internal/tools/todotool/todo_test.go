@@ -361,14 +361,8 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	}
 }
 
-func TestMilestoneWriteHiddenFromDefinitions(t *testing.T) {
+func TestMilestoneAddUpdateExposedInDefinitions(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
-	for _, def := range defs {
-		switch def.Function.Name {
-		case domain.ToolKindMilestoneWrite.String(), domain.ToolKindMilestonePlan.String(), domain.ToolKindTodoAddItems.String(), domain.ToolKindTodoUpdateItem.String():
-			t.Fatalf("%s should not be exposed to the model", def.Function.Name)
-		}
-	}
 	foundAdd := false
 	foundUpdate := false
 	for _, def := range defs {

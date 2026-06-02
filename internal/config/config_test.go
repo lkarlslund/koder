@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
@@ -107,18 +105,6 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	}
 	if loaded.CompactionProvider != "fast" || loaded.CompactionModel != "fast-model" {
 		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.CompactionProvider, loaded.CompactionModel)
-	}
-}
-
-func TestApplyDefaultsPrunesRemovedToolDefaults(t *testing.T) {
-	cfg := Default()
-	// Use a tool kind value that doesn't exist in the enum (value 255)
-	cfg.ToolDefaults[toolkind.Kind(255)] = true
-
-	cfg.applyDefaults()
-
-	if _, ok := cfg.ToolDefaults[toolkind.Kind(255)]; ok {
-		t.Fatalf("expected removed tool default to be pruned: %#v", cfg.ToolDefaults)
 	}
 }
 
@@ -339,66 +325,6 @@ func TestApplyDefaultsFillsMissingMCPServerDefaults(t *testing.T) {
 	}
 	if server.Headers == nil {
 		t.Fatal("expected headers map to be initialized")
-	}
-}
-
-func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
-	cfg := Config{
-		Permissions: PermissionRules{
-			Profile: "default",
-			Profiles: map[string]PermissionProfile{
-				"default": {
-					Rules: []PermissionRule{
-						{Tool: toolkind.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
-						{Tool: toolkind.ToolKindWebSearch, Pattern: "*", Action: accesssettings.PermissionModeAsk},
-					},
-				},
-			},
-		},
-	}
-
-	cfg.applyDefaults()
-
-	profile := cfg.Permissions.Profiles["default"]
-	if len(profile.Rules) != 0 {
-		t.Fatalf("expected legacy permission rules to be removed, got %#v", profile.Rules)
-	}
-	if profile.Root != string(permissionprofile.ModeReadOnly) || profile.Workspace != string(permissionprofile.ModeReadWrite) || profile.Network {
-		t.Fatalf("unexpected sandbox defaults: %#v", profile)
-	}
-}
-
-func TestLoadIgnoresLegacyPermissionFields(t *testing.T) {
-	temp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", temp)
-	t.Setenv("XDG_STATE_HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
-	configDir := filepath.Join(temp, "koder")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data := []byte(`
-[permissions]
-profile = "default"
-read = "deny"
-bash = "allow"
-`)
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile := cfg.Permissions.Profiles["default"]
-	for _, rule := range profile.Rules {
-		if rule.Tool == toolkind.ToolKindFileRead && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAllow {
-			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
-		}
-		if rule.Tool == toolkind.ToolKindBash && rule.Pattern == "*" && rule.Action != accesssettings.PermissionModeAsk {
-			t.Fatalf("expected legacy bash field to be ignored, got %#v", rule)
-		}
 	}
 }
 

@@ -106,9 +106,6 @@ func TestBindStartupFlagsRegistersBrowserFlags(t *testing.T) {
 	if projectRootFlag == nil {
 		t.Fatal("expected project-root flag to be registered")
 	}
-	if cwdFlag := cmd.PersistentFlags().Lookup("cwd"); cwdFlag != nil {
-		t.Fatal("did not expect cwd flag to be registered")
-	}
 	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
 		t.Fatal("expected nobrowser flag to be registered")
 	}

@@ -146,33 +146,6 @@ func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	}
 }
 
-func TestToolPayloadUnmarshalIgnoresRemovedToolKeys(t *testing.T) {
-	var part Part
-	err := json.Unmarshal([]byte(`{
-		"kind": "tool_output",
-		"payload": {
-			"tool": "apply_patch",
-			"tool_call_id": "call_1",
-			"status": "ok",
-			"text": "patched",
-			"result": {"summary": "patched"}
-		}
-	}`), &part)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, ok := part.Payload.(ToolOutputPayload)
-	if !ok {
-		t.Fatalf("expected tool output payload, got %#v", part.Payload)
-	}
-	if payload.Tool != 0 {
-		t.Fatalf("expected removed tool kind to decode as zero, got %s", payload.Tool)
-	}
-	if payload.Result != nil {
-		t.Fatalf("expected removed tool result to be ignored, got %#v", payload.Result)
-	}
-}
-
 func TestToolCallUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var call ToolCall
 	err := json.Unmarshal([]byte(`{

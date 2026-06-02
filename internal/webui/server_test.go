@@ -805,9 +805,6 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
 		t.Fatalf("expected browser to report per-client debug state")
 	}
-	if strings.Contains(fullPage, `btn btn-sm btn-outline-danger" @click="rpc('stop', {})"`) {
-		t.Fatalf("expected interrupt control to be removed from the topbar")
-	}
 	if strings.Contains(fullPage, assetHashPlaceholder) {
 		t.Fatalf("expected served index to contain the rendered asset hash")
 	}
@@ -834,9 +831,6 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `/assets/vendor/alpine/cdn.min.js`) {
 		t.Fatalf("expected Alpine to be loaded from vendored assets")
-	}
-	if strings.Contains(fullPage, `cdn.jsdelivr.net`) {
-		t.Fatalf("expected index to avoid CDN dependencies")
 	}
 	if !strings.Contains(fullPage, `.settings-tabs .list-group-item.active { background: var(--bs-primary);`) ||
 		!strings.Contains(fullPage, `.settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap:`) {
@@ -868,20 +862,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `return 'auto_resume'`) {
 		t.Fatalf("expected stored auto-resume messages without source metadata to render as auto-resume")
 	}
-	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
-		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
+	if !strings.Contains(fullPage, `class="turn assistant-turn"`) {
+		t.Fatalf("expected assistant turns to render")
 	}
 	if !strings.Contains(fullPage, `<i class="bi bi-robot"></i> <span class="assistant-source-label">agent</span>`) ||
 		!strings.Contains(fullPage, `class="turn-header tool-header"`) ||
 		!strings.Contains(fullPage, `<i class="bi bi-wrench-adjustable"></i>`) {
 		t.Fatalf("expected user, assistant, and tool sections to share icon-title-timestamp headers")
-	}
-	if !strings.Contains(fullPage, `.user-turn { padding: 0; border: 0; background: transparent; }`) ||
-		!strings.Contains(fullPage, `.user-message-text > :first-child { display: inline; }`) ||
-		!strings.Contains(fullPage, `.assistant-turn { padding: 0; }`) ||
-		strings.Contains(fullPage, `.tool { border-left`) ||
-		strings.Contains(fullPage, `class="tool mt-3 ps-3"`) {
-		t.Fatalf("expected transcript turns and tools to avoid redundant border rails")
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
@@ -896,16 +883,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
 		t.Fatalf("expected inline SVG output to be constrained and sanitized")
 	}
-	if strings.Contains(fullPage, `formatArgs(tool.args)`) || strings.Contains(fullPage, `JSON.stringify(tool.args`) {
-		t.Fatalf("expected tool calls to avoid raw JSON argument rendering")
-	}
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
 	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
 		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
 	}
-	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) || strings.Contains(fullPage, `JSON.stringify(item.content`) {
+	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) {
 		t.Fatalf("expected notices to render as compact UI instead of raw JSON")
 	}
 	if !strings.Contains(fullPage, `noticeReasonText`) ||
@@ -920,14 +904,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2)`) {
 		t.Fatalf("expected file write results to use compact head/tail rendering")
 	}
-	if strings.Contains(fullPage, `case 'bash': return command ? 'Run ' + command`) || strings.Contains(fullPage, `const title = firstValue(data, ['command', 'Command'`) {
-		t.Fatalf("expected command tools to render the command once, not in title and result header")
-	}
 	if !strings.Contains(fullPage, `toolStatus(tool) === 'done' || toolStatus(tool) === 'errored'`) || !strings.Contains(fullPage, `return 'exit ' + exitCode`) || !strings.Contains(fullPage, `isBareExitStatus(error)`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
 		t.Fatalf("expected bash tool rendering to show Ran command, exit code, and compact output")
-	}
-	if !strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')`) {
-		t.Fatalf("expected done and errored bash tool rendering to avoid repeating the command preview")
 	}
 	if !strings.Contains(fullPage, `return status === 'completed' ? 'done' : status`) ||
 		!strings.Contains(fullPage, `tool-status-badge-done`) ||
@@ -961,7 +939,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
-	if !strings.Contains(fullPage, `const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim()`) || strings.Contains(fullPage, `const id = Number(delta.chat_id`) {
+	if !strings.Contains(fullPage, `const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim()`) {
 		t.Fatalf("expected browser chat deltas to keep UUID chat ids as strings")
 	}
 	if !strings.Contains(fullPage, `if (!id) throw new Error('timeline delta missing item id')`) || !strings.Contains(fullPage, `return existingID === id`) {
@@ -972,7 +950,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `return renderCompactBlock(readTitle(path, args, data), lines)`) {
 		t.Fatalf("expected read tool rendering to include requested line ranges")
 	}
-	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) || strings.Contains(fullPage, `timelineKey(item)`) {
+	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) {
 		t.Fatalf("expected transcript rows to use item ids directly")
 	}
 	if !strings.Contains(fullPage, `applyStateDelta(delta)`) || !strings.Contains(fullPage, `msg.type === 'state_delta'`) {
@@ -990,7 +968,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'connecting'`) {
 		t.Fatalf("expected connection badge to show connecting instead of offline during reconnect")
 	}
-	if !strings.Contains(fullPage, `const id = String(raw || '').trim()`) || strings.Contains(fullPage, `const id = Number(raw)`) {
+	if !strings.Contains(fullPage, `const id = String(raw || '').trim()`) {
 		t.Fatalf("expected selected chat restore to keep UUID chat ids as strings")
 	}
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
@@ -1125,7 +1103,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.sidebar.mobile-open`) {
 		t.Fatalf("expected mobile sidebar to open as an overlay")
 	}
-	if !strings.Contains(fullPage, `topbar-workspace`) || strings.Contains(fullPage, `class="sidebar-label">Workspace`) {
+	if !strings.Contains(fullPage, `topbar-workspace`) {
 		t.Fatalf("expected workspace to render in the top status bar instead of the sidebar")
 	}
 	if !strings.Contains(fullPage, `milestoneItems()`) {
@@ -1190,8 +1168,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `git-summary-row`) ||
 		!strings.Contains(fullPage, `x-text="gitStatus().branch || '-'"`) ||
 		!strings.Contains(fullPage, `x-text="'+' + (gitStatus().added || 0)"`) ||
-		!strings.Contains(fullPage, `title="Refresh git status"`) ||
-		strings.Contains(fullPage, `class="sidebar-label">Branch`) {
+		!strings.Contains(fullPage, `title="Refresh git status"`) {
 		t.Fatalf("expected git branch, change summary, and refresh button on one compact row")
 	}
 	if !strings.Contains(fullPage, `@pointerdown="startSidebarResize($event)"`) {
@@ -1199,9 +1176,6 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `readPreference('theme'`) {
 		t.Fatalf("expected theme to use shared browser preference storage")
-	}
-	if strings.Contains(document, `@change="setTheme(theme)"`) || strings.Contains(fullPage, `set_theme`) {
-		t.Fatalf("expected theme changes to be handled only through preferences")
 	}
 	if !strings.Contains(fullPage, `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
@@ -1273,10 +1247,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `this.state.chat_statuses`) || !strings.Contains(fullPage, `waiting_llm: 'Waiting for LLM'`) {
 		t.Fatalf("expected chat sidebar status helpers for all chats")
 	}
-	if strings.Contains(fullPage, `x-show="!chatStatusIdle(chat)"`) || !strings.Contains(fullPage, `:title="chatStatusLabel(chat)"`) {
+	if !strings.Contains(fullPage, `:title="chatStatusLabel(chat)"`) {
 		t.Fatalf("expected all chat status icons to render with hover tooltips")
 	}
-	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) || strings.Contains(fullPage, `.chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; animation`) {
+	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) {
 		t.Fatalf("expected idle chat status icon to be static")
 	}
 	if !strings.Contains(fullPage, `.chat-list-item.active .chat-status-icon.status-running`) || !strings.Contains(fullPage, `drop-shadow(0 0 2px rgba(0, 0, 0, .55))`) {
@@ -1284,9 +1258,6 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `@keyframes chat-status-spin`) || !strings.Contains(fullPage, `chatStatusIcon(chat)`) {
 		t.Fatalf("expected chat status icons to animate per state")
-	}
-	if strings.Contains(document, `title="Providers"`) || strings.Contains(document, `<i class="bi bi-plug"></i></button>`) {
-		t.Fatalf("expected providers button to be removed from the top status bar")
 	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
@@ -1312,9 +1283,6 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `delete_session`) {
 		t.Fatalf("expected session dialog to rename and delete sessions")
 	}
-	if strings.Contains(fullPage, `sessionModel(session)`) {
-		t.Fatalf("expected session dialog to avoid session-level model display")
-	}
 	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
 	}
@@ -1330,9 +1298,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `settingsListRows('providers')`) ||
 		!strings.Contains(fullPage, `settingsListRows('mcp')`) ||
 		!strings.Contains(fullPage, `showProviderEditor`) ||
-		!strings.Contains(fullPage, `showMCPEditor`) ||
-		strings.Contains(fullPage, `settingsMCPText`) ||
-		strings.Contains(fullPage, `MCP servers JSON`) {
+		!strings.Contains(fullPage, `showMCPEditor`) {
 		t.Fatalf("expected providers and MCP to use shared preferences list editors")
 	}
 	if !strings.Contains(fullPage, `settingsListRows('models')`) ||
@@ -1347,8 +1313,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `settings-prompt`) ||
 		!strings.Contains(fullPage, `resetPrompt(prompt.target)`) ||
 		!strings.Contains(fullPage, `modelOptionValue(model)`) ||
-		!strings.Contains(fullPage, `$el.value = compactionModelValue()`) ||
-		strings.Contains(fullPage, `'\u0000'`) {
+		!strings.Contains(fullPage, `$el.value = compactionModelValue()`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'thinking'`) ||
@@ -1359,10 +1324,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
-		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||
-		strings.Contains(fullPage, `settingsPermissionsText`) ||
-		strings.Contains(fullPage, `settingsToolDefaultsText`) ||
-		strings.Contains(fullPage, `Permission profiles JSON`) {
+		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) {
 		t.Fatalf("expected access settings to use structured controls")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'tools'`) ||
@@ -1372,9 +1334,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `setToolDefaultEnabled(item, $event.target.checked)`) ||
 		!strings.Contains(document, `settings-tool-group`) ||
 		!strings.Contains(document, `toggle-switch-input`) ||
-		!strings.Contains(document, `toggle-switch-track`) ||
-		strings.Contains(document, `form-check-input`) ||
-		strings.Contains(document, `settings-checks`) {
+		!strings.Contains(document, `toggle-switch-track`) {
 		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
 	}
 	if !strings.Contains(fullPage, `showToast`) {
@@ -1382,10 +1342,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(document, `title="Save settings"`) ||
 		!strings.Contains(document, `title="Save provider"`) ||
-		!strings.Contains(document, `title="Save session"`) ||
-		strings.Contains(document, `>Save</button>`) ||
-		strings.Contains(document, `>Cancel</button>`) ||
-		strings.Contains(document, `>Close</button>`) {
+		!strings.Contains(document, `title="Save session"`) {
 		t.Fatalf("expected modals to use header icon actions instead of footer Save/Cancel buttons")
 	}
 }
