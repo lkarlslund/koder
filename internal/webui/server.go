@@ -157,11 +157,7 @@ func (s *Server) AppURL() string {
 	if s == nil {
 		return ""
 	}
-	url := s.URL()
-	if state := s.controller.State(); state.Session.ID != "" {
-		url += "/s/" + string(state.Session.ID)
-	}
-	return url
+	return s.URL()
 }
 
 func (s *Server) openBrowserIfNeeded(ctx context.Context) {
@@ -198,27 +194,8 @@ func (s *Server) markConnected() {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
-	if r.URL.Path == "/" {
-		state := s.controller.State()
-		if state.Session.ID == "" {
-			http.Error(w, "no active session", http.StatusServiceUnavailable)
-			return
-		}
-		http.Redirect(w, r, "/s/"+string(state.Session.ID), http.StatusTemporaryRedirect)
-		return
-	}
-	sessionID := sessionIDFromPath(r.URL.Path)
-	if sessionID == "" {
+	if r.URL.Path != "/" && sessionIDFromPath(r.URL.Path) == "" {
 		http.NotFound(w, r)
-		return
-	}
-	exists, err := s.sessionExists(r.Context(), sessionID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !exists {
-		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -656,8 +633,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
+		selection := s.clientSelection(clientID)
 		if err := s.controller.DeleteSession(ctx, in.SessionID); err != nil {
 			return nil, err
+		}
+		if selection.SessionID == in.SessionID {
+			s.clearClientSelection(clientID)
+			return s.welcomeState(ctx, "Session deleted."), nil
 		}
 		s.setClientSelectionFromState(clientID, s.controller.State())
 		return s.stateForClient(ctx, clientID)
@@ -883,6 +865,9 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 
 func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State, error) {
 	selection := s.clientSelection(clientID)
+	if selection.SessionID == "" {
+		return s.welcomeState(ctx, ""), nil
+	}
 	if selection.SessionID != "" {
 		state := s.controller.State()
 		if state.Session.ID != selection.SessionID {
@@ -891,7 +876,8 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 				return app.State{}, err
 			}
 			if !exists {
-				return app.State{}, fmt.Errorf("session not found: %s", selection.SessionID)
+				s.clearClientSelection(clientID)
+				return s.welcomeState(ctx, fmt.Sprintf("Session not found: %s", selection.SessionID)), nil
 			}
 			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
 				return app.State{}, err
@@ -911,6 +897,30 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 		return app.State{}, err
 	}
 	return trimStateTimelines(state, defaultTimelinePageSize), nil
+}
+
+func (s *Server) welcomeState(ctx context.Context, message string) app.State {
+	sessionState, err := s.controller.Sessions(ctx)
+	if err != nil {
+		message = strings.TrimSpace(strings.Join([]string{message, err.Error()}, "\n"))
+	}
+	state := s.controller.State()
+	return app.State{
+		Sessions:      sessionState.Sessions,
+		Theme:         state.Theme,
+		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
+		RestartNeeded: state.RestartNeeded,
+		Error:         strings.TrimSpace(message),
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Server) setClientSelectionFromState(clientID string, state app.State) {
@@ -1040,6 +1050,15 @@ func (s *Server) setClientSelection(clientID string, selection clientSelection) 
 	}
 	s.clientSelectionMu.Lock()
 	s.clientSelections[clientID] = selection
+	s.clientSelectionMu.Unlock()
+}
+
+func (s *Server) clearClientSelection(clientID string) {
+	if clientID == "" {
+		return
+	}
+	s.clientSelectionMu.Lock()
+	delete(s.clientSelections, clientID)
 	s.clientSelectionMu.Unlock()
 }
 

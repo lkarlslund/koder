@@ -46,7 +46,7 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(ctrl.State().Session.ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	}
 }
 
-func TestServerServesCanonicalSessionRoutes(t *testing.T) {
+func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := ctrl.State().Session.ID
 	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
@@ -76,19 +76,13 @@ func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 
-	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	resp, err := client.Get(srv.URL() + "/")
+	resp, err := http.Get(srv.URL() + "/")
 	if err != nil {
 		t.Fatalf("get root: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusTemporaryRedirect {
-		t.Fatalf("expected root redirect, got %d", resp.StatusCode)
-	}
-	if got, want := resp.Header.Get("Location"), "/s/"+string(sessionID); got != want {
-		t.Fatalf("expected redirect to %s, got %s", want, got)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected root welcome app ok, got %d", resp.StatusCode)
 	}
 
 	resp, err = http.Get(srv.URL() + "/s/" + string(secondID))
@@ -105,8 +99,8 @@ func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 		t.Fatalf("get missing session url: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected missing session status 404, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected missing session to serve welcome app shell, got %d", resp.StatusCode)
 	}
 }
 
@@ -199,7 +193,7 @@ func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
 	}
 }
 
-func TestWebSocketHelloErrorsForStaleURLSessionSelection(t *testing.T) {
+func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := ctrl.State().Session.ID
 	staleID := id.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
@@ -223,14 +217,29 @@ func TestWebSocketHelloErrorsForStaleURLSessionSelection(t *testing.T) {
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
 	var resp struct {
-		OK    bool   `json:"ok"`
+		OK     bool `json:"ok"`
+		Result struct {
+			State struct {
+				Session struct {
+					ID id.ID
+				}
+				Sessions []domain.Session `json:"sessions"`
+				Error    string           `json:"error"`
+			} `json:"state"`
+		} `json:"result"`
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(msg, &resp); err != nil {
 		t.Fatalf("decode hello: %v", err)
 	}
-	if resp.OK || !strings.Contains(resp.Error, string(staleID)) {
-		t.Fatalf("expected stale session hello to fail for %s, got %#v", staleID, resp)
+	if !resp.OK {
+		t.Fatalf("expected stale session hello to return welcome state, got %s", resp.Error)
+	}
+	if resp.Result.State.Session.ID != "" {
+		t.Fatalf("expected welcome state without active session, got %s", resp.Result.State.Session.ID)
+	}
+	if len(resp.Result.State.Sessions) == 0 || !strings.Contains(resp.Result.State.Error, string(staleID)) {
+		t.Fatalf("expected welcome state with sessions and stale session message, got %#v", resp.Result.State)
 	}
 	if got := ctrl.State().Session.ID; got != activeID {
 		t.Fatalf("expected stale session hello not to switch active session from %s, got %s", activeID, got)
@@ -756,6 +765,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(document, `/assets/app.js`) {
 		t.Fatalf("expected app JS to be loaded from embedded assets")
+	}
+	if !strings.Contains(fullPage, `welcomeMode()`) ||
+		!strings.Contains(fullPage, `welcome-view`) ||
+		!strings.Contains(fullPage, `beginCreateSessionFromWelcome()`) ||
+		!strings.Contains(fullPage, `allowSessionURLSync`) {
+		t.Fatalf("expected app to include welcome screen and opt-in session URL sync")
 	}
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
@@ -1837,7 +1852,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(ctrl.State().Session.ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}

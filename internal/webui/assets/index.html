@@ -34,7 +34,45 @@
       </div>
     </nav>
 
-    <main class="transcript p-3" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
+    <main class="welcome-view p-3" x-show="welcomeMode()" style="display: none;">
+      <section class="welcome-panel">
+        <div class="welcome-header">
+          <div>
+            <div class="welcome-kicker"><i class="bi bi-terminal-fill text-primary"></i> koder</div>
+            <h1>Welcome</h1>
+          </div>
+          <button class="btn btn-primary" type="button" @click="beginCreateSessionFromWelcome()"><i class="bi bi-plus-lg"></i> New Session</button>
+        </div>
+        <template x-if="welcomeMessage()">
+          <div class="alert alert-warning" x-text="welcomeMessage()"></div>
+        </template>
+        <div class="welcome-section">
+          <div class="welcome-section-header">
+            <div>
+              <div class="fw-semibold">Sessions</div>
+              <div class="small text-secondary" x-text="state.project_root || ''"></div>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" type="button" @click="loadWelcomeSessions()"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
+          <template x-if="sessionRows().length === 0">
+            <div class="welcome-empty">No sessions in this workspace</div>
+          </template>
+          <div class="welcome-session-list">
+            <template x-for="session in sessionRows()" :key="sessionID(session)">
+              <button type="button" class="welcome-session-row" @click="switchSession(sessionID(session))">
+                <span>
+                  <span class="fw-semibold" x-text="sessionTitle(session)"></span>
+                  <span class="d-block small text-secondary text-truncate" x-text="sessionProjectRoot(session)"></span>
+                </span>
+                <i class="bi bi-arrow-right"></i>
+              </button>
+            </template>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <main class="transcript p-3" x-show="!welcomeMode()" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
@@ -144,11 +182,11 @@
       </template>
     </main>
 
-    <div class="sidebar-resizer" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
+    <div class="sidebar-resizer" x-show="!welcomeMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
-    <div class="mobile-sidebar-backdrop" x-show="mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
+    <div class="mobile-sidebar-backdrop" x-show="!welcomeMode() && mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
 
-    <aside class="sidebar p-3 bg-body-tertiary" :class="{'mobile-open': mobileSidebarOpen}">
+    <aside class="sidebar p-3 bg-body-tertiary" x-show="!welcomeMode()" :class="{'mobile-open': mobileSidebarOpen}">
       <div class="mobile-sidebar-header">
         <span class="fw-semibold">Sidebar</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" title="Close sidebar" @click="closeMobileSidebar()"><i class="bi bi-x-lg"></i></button>
@@ -338,7 +376,7 @@
       </div>
     </aside>
 
-    <form class="composer p-3 bg-body" @submit.prevent="send()">
+    <form class="composer p-3 bg-body" x-show="!welcomeMode()" @submit.prevent="send()">
       <div class="composer-queue mb-2" x-show="activeQueue().length > 0" style="display: none;">
         <template x-for="item in activeQueue()" :key="queueItemID(item)">
           <div class="composer-queue-item" draggable="true" :class="{'dragging': dragQueueID === queueItemID(item)}" @dragstart="startQueueDrag($event, queueItemID(item))" @dragover.prevent="overQueueDrag($event, queueItemID(item))" @drop.stop.prevent="dropQueue($event, queueItemID(item))" @dragend="endQueueDrag()">

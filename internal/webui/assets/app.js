@@ -591,7 +591,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hideClosedMilestones: readPreference('hideClosedMilestones', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1303,6 +1303,9 @@
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = s || {};
+          if (this.welcomeMode()) {
+            this.sessionState = {active_id: 0, project_root: this.state.project_root || this.state.ProjectRoot || '', sessions: this.state.sessions || this.state.Sessions || []};
+          }
           this.syncSessionURL();
           if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
           this.restoreMilestoneExpansion();
@@ -1320,10 +1323,22 @@
           return match ? decodeURIComponent(match[1]) : '';
         },
         currentSessionID() { return String(this.state.session?.id || this.state.session?.ID || '').trim(); },
+        welcomeMode() { return !this.currentSessionID(); },
+        welcomeMessage() { return this.state.error || this.state.Error || ''; },
         syncSessionURL() {
           const id = this.currentSessionID();
-          if (!id || location.pathname === '/s/' + encodeURIComponent(id)) return;
-          history.replaceState(null, '', '/s/' + encodeURIComponent(id));
+          if (!id) {
+            if (/^\/s\/[^/]+$/.test(location.pathname)) history.replaceState(null, '', '/');
+            this.allowSessionURLSync = false;
+            return;
+          }
+          const target = '/s/' + encodeURIComponent(id);
+          if (location.pathname === target) {
+            this.allowSessionURLSync = false;
+            return;
+          }
+          if (location.pathname === '/' || this.allowSessionURLSync) history.replaceState(null, '', target);
+          this.allowSessionURLSync = false;
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.currentSessionID()); },
         milestoneExpansionPreferenceName() {
@@ -1356,6 +1371,7 @@
         },
         focusComposerAfterInitialLoad() {
           if (this.composerInitialFocusDone) return;
+          if (this.welcomeMode()) return;
           this.composerInitialFocusDone = true;
           this.$nextTick(() => {
             const el = this.$refs.composerInput;
@@ -2415,14 +2431,31 @@
           this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, project_root: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
         },
         closeSessionDialog() { this.showSessions = false; this.closeSessionEditor(); this.reportClientStateSoon(); },
-        sessionRows() { return this.sessionState.sessions || this.state.sessions || []; },
-        activeSessionID() { return this.sessionState.active_id || this.state.session?.ID || this.state.session?.id || 0; },
+        loadWelcomeSessions() {
+          this.rpc('list_sessions', {}).then(result => {
+            this.sessionState = result || {active_id: 0, project_root: '', sessions: []};
+            this.state.sessions = this.sessionState.sessions || [];
+            this.state.Sessions = this.state.sessions;
+            this.state.project_root = this.sessionState.project_root || this.state.project_root || '';
+            this.state.ProjectRoot = this.state.project_root;
+          }).catch(err => this.showToast(err.message));
+        },
+        sessionRows() {
+          if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
+          return this.state.sessions || this.state.Sessions || this.sessionState.sessions || [];
+        },
+        activeSessionID() { return this.currentSessionID(); },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
         sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },
         switchSession(id) {
           if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
+          this.allowSessionURLSync = true;
           this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+        },
+        beginCreateSessionFromWelcome() {
+          this.sessionState = {active_id: 0, project_root: this.state.project_root || this.state.ProjectRoot || '', sessions: this.state.sessions || this.state.Sessions || []};
+          this.beginCreateSession();
         },
         beginCreateSession() {
           this.sessionEditorMode = 'create';
@@ -2458,6 +2491,7 @@
             return;
           }
           const projectRoot = String(this.sessionDraft.projectRoot || '').trim();
+          this.allowSessionURLSync = true;
           this.rpc('new_session', {title, project_root: projectRoot}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
         deleteSession(id) {
