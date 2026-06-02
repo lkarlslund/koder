@@ -794,6 +794,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
+	if !strings.Contains(fullPage, `composerSendMenuOpen`) ||
+		!strings.Contains(fullPage, `Send as steer`) ||
+		!strings.Contains(fullPage, `send({steer: true})`) ||
+		!strings.Contains(fullPage, `ev.altKey`) ||
+		!strings.Contains(fullPage, `steer: !!options.steer`) {
+		t.Fatalf("expected composer to expose explicit steer submission")
+	}
 	if !strings.Contains(fullPage, `activeTokenUsageLabel()`) ||
 		!strings.Contains(fullPage, `activeCachedTokenLabel()`) ||
 		!strings.Contains(fullPage, `Token burn since compact`) {

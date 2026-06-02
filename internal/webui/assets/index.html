@@ -432,12 +432,18 @@
           </span>
         </template>
       </div>
-      <div class="input-group">
+      <div class="input-group" @click.outside="closeComposerSendMenu()">
         <button class="btn btn-danger interrupt-button" type="button" :disabled="!chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
         </button>
         <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)" @paste.prevent="onComposerPaste($event)"></textarea>
-        <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
+        <div class="btn-group composer-send-group">
+          <button class="btn btn-primary" type="submit" title="Send"><i class="bi bi-send-fill"></i></button>
+          <button class="btn btn-primary dropdown-toggle dropdown-toggle-split" type="button" title="More send actions" :aria-expanded="composerSendMenuOpen ? 'true' : 'false'" @click="toggleComposerSendMenu()"><span class="visually-hidden">More send actions</span></button>
+          <div class="dropdown-menu dropdown-menu-end composer-send-menu" :class="{'show': composerSendMenuOpen}" x-show="composerSendMenuOpen" style="display: none;">
+            <button type="button" class="dropdown-item" title="Ctrl+Enter or Alt+Enter" @click="send({steer: true})"><i class="bi bi-signpost-split me-2"></i>Send as steer</button>
+          </div>
+        </div>
       </div>
     </form>
   </div>

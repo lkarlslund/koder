@@ -589,7 +589,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -2271,6 +2271,15 @@
             this.setActiveQueue(previous);
           });
         },
+        toggleComposerSendMenu() {
+          this.composerSendMenuOpen = !this.composerSendMenuOpen;
+          this.reportClientStateSoon();
+        },
+        closeComposerSendMenu() {
+          if (!this.composerSendMenuOpen) return;
+          this.composerSendMenuOpen = false;
+          this.reportClientStateSoon();
+        },
         startQueueDrag(ev, id) {
           if (!id) return;
           this.dragQueueID = id;
@@ -2309,7 +2318,7 @@
             if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); this.acceptCompletion(this.completion.selected); return; }
             if (ev.key === 'Escape') { ev.preventDefault(); this.clearCompletions(); return; }
           }
-          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); this.send({steer: true}); return; }
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey || ev.altKey)) { ev.preventDefault(); this.send({steer: true}); return; }
           if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); this.send(); }
         },
         onComposerKeyup(ev) {
@@ -2338,6 +2347,7 @@
           this.$nextTick(() => { const el = this.$refs.composerInput; if (el) { el.focus(); el.setSelectionRange(cursor, cursor); } this.resizeComposer(); });
         },
         send(options = {}) {
+          this.closeComposerSendMenu();
           const text = this.draft.trim();
           const attachments = this.composerAttachments.slice();
           if (!text && attachments.length === 0) return;
