@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -123,6 +124,39 @@ func TestJSONFSWritesInspectableCollectionFiles(t *testing.T) {
 	}
 }
 
+func TestPebbleOperationsAfterCloseReturnError(t *testing.T) {
+	st := openTestStore(t, BackendPebble)
+	notes := testNotes(st)
+	inserted, err := notes.Insert(context.Background(), testNote{ChatID: "chat-7", Body: "closed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNoPanic(t, func() {
+		_, err = notes.Get(context.Background(), inserted.ID)
+	})
+	if !errors.Is(err, pebble.ErrClosed) {
+		t.Fatalf("expected closed pebble get error, got %v", err)
+	}
+
+	assertNoPanic(t, func() {
+		_, err = notes.List(context.Background(), All[testNote]())
+	})
+	if !errors.Is(err, pebble.ErrClosed) {
+		t.Fatalf("expected closed pebble list error, got %v", err)
+	}
+
+	assertNoPanic(t, func() {
+		err = notes.Put(context.Background(), inserted)
+	})
+	if !errors.Is(err, pebble.ErrClosed) {
+		t.Fatalf("expected closed pebble put error, got %v", err)
+	}
+}
+
 func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
@@ -150,6 +184,16 @@ func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertNoPanic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("unexpected panic: %v", recovered)
+		}
+	}()
+	fn()
 }
 
 func TestCollectionListIsSortedByID(t *testing.T) {

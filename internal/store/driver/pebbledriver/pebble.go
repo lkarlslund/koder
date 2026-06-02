@@ -21,7 +21,7 @@ const Name = "pebble"
 
 type Backend struct {
 	db     *pebble.DB
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	closed bool
 }
 
@@ -113,6 +113,11 @@ func (b *Backend) Get(ctx context.Context, namespace string, id string) ([]byte,
 	if err := driver.EnsureContext(ctx); err != nil {
 		return nil, err
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return nil, pebble.ErrClosed
+	}
 	data, closer, err := b.db.Get([]byte(driver.RecordKey(namespace, id)))
 	if err != nil {
 		return nil, fmt.Errorf("get %s %s: %w", namespace, id, err)
@@ -127,6 +132,9 @@ func (b *Backend) Put(ctx context.Context, namespace string, id string, data []b
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return pebble.ErrClosed
+	}
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.deleteIndexEntries(batch, namespace, id); err != nil {
@@ -149,6 +157,9 @@ func (b *Backend) Delete(ctx context.Context, namespace string, id string) error
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return pebble.ErrClosed
+	}
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.deleteIndexEntries(batch, namespace, id); err != nil {
@@ -163,6 +174,11 @@ func (b *Backend) Delete(ctx context.Context, namespace string, id string) error
 func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.IndexLookup) ([][]byte, error) {
 	if err := driver.EnsureContext(ctx); err != nil {
 		return nil, err
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return nil, pebble.ErrClosed
 	}
 	if lookup != nil {
 		return b.listByIndex(namespace, lookup)

@@ -297,6 +297,7 @@ type Controller struct {
 	store *store.Store
 	agent *agent.Engine
 
+	shutdownMu                  sync.Mutex
 	mu                          sync.RWMutex
 	session                     domain.Session
 	sessions                    []domain.Session
@@ -617,6 +618,9 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 }
 
 func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.CancelReason) error {
+	c.shutdownMu.Lock()
+	defer c.shutdownMu.Unlock()
+
 	c.mu.RLock()
 	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
 	for _, rt := range c.runtimes {
