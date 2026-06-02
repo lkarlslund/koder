@@ -496,6 +496,9 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Ch
 		milestones[idx].Status = status
 		applyMilestoneOwner(&milestones[idx], status, actor)
 		if title := strings.TrimSpace(req.Args["title"]); title != "" {
+			if err := ensureMilestoneTitleAvailable(milestones, ref, title); err != nil {
+				return planning.Plan{}, err
+			}
 			milestones[idx].Title = title
 		}
 		if notes, ok := req.Args["notes"]; ok {
@@ -516,6 +519,22 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Ch
 		Summary:    plan.Summary,
 		Milestones: milestones,
 	}, nil
+}
+
+func ensureMilestoneTitleAvailable(existing []planning.Milestone, ref, title string) error {
+	title = normalizedMilestoneTitle(title)
+	if title == "" {
+		return nil
+	}
+	for _, item := range existing {
+		if item.Ref == ref {
+			continue
+		}
+		if normalizedMilestoneTitle(item.Title) == title {
+			return fmt.Errorf("duplicate milestone title %q", strings.TrimSpace(item.Title))
+		}
+	}
+	return nil
 }
 
 func validateMilestoneOwner(milestone planning.Milestone, next planning.MilestoneStatus, actor domain.Chat) error {

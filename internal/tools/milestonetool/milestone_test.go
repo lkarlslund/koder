@@ -123,8 +123,8 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending},
 		{Ref: "beta", Title: " alpha ", Status: planning.MilestoneStatusPending},
-	}); err == nil {
-		t.Fatal("expected duplicate title validation error")
+	}); err != nil {
+		t.Fatalf("expected duplicate titles to be allowed by progress validation, got %v", err)
 	}
 	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, DependsOnRef: "missing"},
@@ -191,6 +191,30 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, domain.Chat{}); err == nil {
 		t.Fatal("expected missing milestone error")
+	}
+}
+
+func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
+	plan := planning.Plan{
+		Summary: "Ship it",
+		Milestones: []planning.Milestone{
+			{Ref: "alpha", Title: "Shared", Status: planning.MilestoneStatusPending, Position: 0},
+			{Ref: "beta", Title: "Shared", Status: planning.MilestoneStatusPending, Position: 1},
+			{Ref: "gamma", Title: "Gamma", Status: planning.MilestoneStatusPending, Position: 2},
+		},
+	}
+
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "ready"}}, domain.Chat{})
+	if err != nil {
+		t.Fatalf("expected status update to ignore existing duplicate titles, got %v", err)
+	}
+	if updated.Milestones[0].Status != planning.MilestoneStatusReady {
+		t.Fatalf("expected alpha to be ready, got %#v", updated.Milestones[0])
+	}
+
+	_, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "gamma", "status": "pending", "title": " shared "}}, domain.Chat{})
+	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
+		t.Fatalf("expected title collision error, got %v", err)
 	}
 }
 
