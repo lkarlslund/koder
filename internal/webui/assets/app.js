@@ -1272,6 +1272,17 @@
           return status === 'streaming_response' || status === 'streaming_thoughts' || status === 'waiting_llm';
         },
         timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
+        itemTimestamp(item) {
+          return String(item?.created_at || item?.CreatedAt || item?.createdAt || item?.timestamp || '').trim();
+        },
+        formatItemTime(item) {
+          const raw = this.itemTimestamp(item);
+          if (!raw) return '';
+          const date = new Date(raw);
+          if (Number.isNaN(date.getTime())) return '';
+          const pad = value => String(value).padStart(2, '0');
+          return pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+        },
         timelineItemIsLatest(item) {
           const id = this.timelineItemID(item);
           if (!id) return false;

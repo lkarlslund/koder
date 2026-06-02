@@ -42,6 +42,12 @@
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
             <div class="turn user-turn">
+              <div class="turn-header">
+                <div class="turn-header-title">
+                  <span class="badge user-source-badge" :class="userMessageSourceClass(item)" x-text="userMessageSourceLabel(item)"></span>
+                </div>
+                <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+              </div>
               <template x-if="(item.content?.attachments || []).length > 0">
                 <div class="attachment-strip mb-2">
                   <template x-for="attachment in item.content.attachments || []" :key="attachment.id || attachment.ID || attachment.path || attachment.Path">
@@ -53,13 +59,16 @@
                 </div>
               </template>
               <div class="markdown-body user-markdown-body">
-                <span class="badge user-source-badge" :class="userMessageSourceClass(item)" x-text="userMessageSourceLabel(item)"></span>
                 <span class="user-message-text" x-html="markdownHTML(item.content?.text || '')"></span>
               </div>
             </div>
           </template>
           <template x-if="item.kind === 'assistant'">
             <div class="turn assistant-turn">
+              <div class="turn-header">
+                <div class="turn-header-title"><span class="assistant-source-label">koder</span></div>
+                <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+              </div>
               <template x-if="item.content?.reasoning?.text">
                 <details class="reasoning mb-2">
                   <summary x-text="thinkingLabel(item.content.reasoning)"></summary>
@@ -85,14 +94,22 @@
             <div>
               <template x-if="item.kind === 'notice'">
                 <div class="notice" :class="'notice-' + noticeLevel(item.content || {})">
-                  <i class="bi" :class="noticeIcon(item.content || {})"></i>
-                  <span x-text="noticeText(item.content || {})"></span>
-                  <span class="text-secondary" x-show="noticeDetail(item.content || {})" x-text="noticeDetail(item.content || {})"></span>
+                  <div class="turn-header">
+                    <div class="turn-header-title">
+                      <i class="bi" :class="noticeIcon(item.content || {})"></i>
+                      <span x-text="noticeText(item.content || {})"></span>
+                      <span class="text-secondary" x-show="noticeDetail(item.content || {})" x-text="noticeDetail(item.content || {})"></span>
+                    </div>
+                    <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                  </div>
                 </div>
               </template>
               <template x-if="item.kind === 'lint'">
                 <div class="lint-message">
-                  <div class="small fw-semibold"><i class="bi bi-bug"></i> lint <span class="text-secondary" x-show="lintFiles(item.content || {})" x-text="lintFiles(item.content || {})"></span></div>
+                  <div class="turn-header">
+                    <div class="turn-header-title small fw-semibold"><i class="bi bi-bug"></i> lint <span class="text-secondary" x-show="lintFiles(item.content || {})" x-text="lintFiles(item.content || {})"></span></div>
+                    <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                  </div>
                   <pre x-text="lintText(item.content || {})"></pre>
                 </div>
               </template>

@@ -765,7 +765,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `class="badge user-source-badge"`) ||
 		!strings.Contains(fullPage, `class="user-message-text" x-html="markdownHTML(item.content?.text || '')"`) ||
 		!strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
-		t.Fatalf("expected user turns to render source badges inline before the message text")
+		t.Fatalf("expected user turns to render source badges and message text")
+	}
+	if !strings.Contains(fullPage, `class="turn-header"`) ||
+		!strings.Contains(fullPage, `class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"`) ||
+		!strings.Contains(fullPage, `return pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())`) ||
+		!strings.Contains(fullPage, `.turn-header { display: flex; align-items: baseline; justify-content: space-between;`) {
+		t.Fatalf("expected transcript entries to render right-aligned HH:MM:SS timestamps in their header")
 	}
 	if !strings.Contains(fullPage, `A tool call was interrupted by the process restart and has been marked failed.`) ||
 		!strings.Contains(fullPage, `return 'auto_resume'`) {
