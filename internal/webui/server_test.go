@@ -861,7 +861,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `rpc('restart_process', {hard})`) ||
 		!strings.Contains(fullPage, `:disabled="restartRequestPending"`) ||
 		!strings.Contains(fullPage, `Restart acknowledged; press again for hard restart`) ||
-		!strings.Contains(fullPage, `restartHardRequested`) {
+		!strings.Contains(fullPage, `restartHardRequested`) ||
+		!strings.Contains(fullPage, `restartBuildAgeLabel()`) ||
+		!strings.Contains(fullPage, `commit + ' (' + age + ')'`) {
 		t.Fatalf("expected restart-needed control to acknowledge restart and allow hard restart escalation")
 	}
 	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {

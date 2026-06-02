@@ -611,7 +611,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -625,6 +625,7 @@
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
           document.addEventListener('click', event => this.handleMediaPreviewClick(event));
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
+          this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); });
         },
         handleGlobalKeydown(event) {
@@ -891,15 +892,33 @@
         restartBuildInfo() {
           return this.state.restart_build || this.state.RestartBuild || {};
         },
-        restartBuildLabel() {
+        restartBuildCommitLabel() {
           const build = this.restartBuildInfo();
-          const id = String(build.build_id || build.BuildID || '').trim();
-          if (id) return id;
           let commit = String(build.commit || build.Commit || '').trim();
+          const fromBuildID = !commit;
+          if (fromBuildID) commit = String(build.build_id || build.BuildID || '').trim().split(/\s+@\s+/)[0] || '';
           if (!commit) return '';
-          if (String(build.dirty || build.Dirty || '').trim() === 'true') commit += '-dirty';
-          const built = String(build.build_time || build.BuildTime || '').trim();
-          return built ? commit + ' @ ' + built : commit;
+          if (!fromBuildID && String(build.dirty || build.Dirty || '').trim() === 'true') commit += '-dirty';
+          return commit;
+        },
+        restartBuildAgeLabel() {
+          const build = this.restartBuildInfo();
+          const raw = String(build.build_time || build.BuildTime || '').trim();
+          if (!raw || raw === 'unknown') return '';
+          const built = Date.parse(raw);
+          if (!Number.isFinite(built)) return '';
+          const elapsed = Math.max(0, (this.restartAgeTick || Date.now()) - built);
+          const second = 1000, minute = 60 * second, hour = 60 * minute, day = 24 * hour;
+          if (elapsed < minute) return Math.max(1, Math.floor(elapsed / second)) + 's ago';
+          if (elapsed < hour) return Math.floor(elapsed / minute) + 'm ago';
+          if (elapsed < day) return Math.floor(elapsed / hour) + 'h ago';
+          return Math.floor(elapsed / day) + 'd ago';
+        },
+        restartBuildLabel() {
+          const commit = this.restartBuildCommitLabel();
+          if (!commit) return '';
+          const age = this.restartBuildAgeLabel();
+          return age ? commit + ' (' + age + ')' : commit;
         },
         restartButtonTitle() {
           const build = this.restartBuildLabel();
