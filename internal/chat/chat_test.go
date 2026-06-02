@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,16 +24,17 @@ import (
 var errTestProviderFailure = errors.New("provider failed")
 
 type runtimeFakeRunner struct {
-	mu            sync.Mutex
-	promptCalls   int
-	continueCalls int
-	approveCalls  int
-	denyCalls     int
-	prompts       []string
-	promptNotes   []string
-	continueNotes []string
-	turnTimelines []int
-	events        []<-chan domain.Event
+	mu             sync.Mutex
+	promptCalls    int
+	continueCalls  int
+	approveCalls   int
+	denyCalls      int
+	prompts        []string
+	promptNotes    []string
+	continueNotes  []string
+	turnTimelines  []int
+	promptTimeline [][]domain.TimelineItem
+	events         []<-chan domain.Event
 }
 
 type cancelAwareRunner struct {
@@ -179,6 +181,9 @@ func (f *runtimeFakeRunner) PreparePromptTurn(ctx context.Context, turn *TurnSta
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
+	f.promptTimeline = append(f.promptTimeline, turn.Timeline())
+	f.mu.Unlock()
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: item}
 	return nil, nil
 }
@@ -341,6 +346,12 @@ func (f *runtimeFakeRunner) turnTimelineLenAt(i int) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.turnTimelines[i]
+}
+
+func (f *runtimeFakeRunner) promptTimelineAt(i int) []domain.TimelineItem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.promptTimeline[i])
 }
 
 func openTestStore(t *testing.T) *store.Store {
@@ -673,6 +684,82 @@ dispatched:
 	}
 	if seenQueued != 1 {
 		t.Fatalf("expected one queued user timeline item, got %d in %#v", seenQueued, rt.Snapshot().Timeline)
+	}
+}
+
+func TestRuntimeMovesRenderedQueuedUserToActivePromptTail(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	firstEvents := make(chan domain.Event)
+	secondEvents := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{firstEvents, secondEvents}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "first prompt"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
+	deadline = time.After(2 * time.Second)
+	for {
+		timeline := rt.Snapshot().Timeline
+		if len(timeline) >= 2 {
+			if user, ok := timeline[1].Content.(domain.UserMessage); ok && user.Text == "queued while busy" {
+				break
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for rendered queued user: %#v", timeline)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	firstEvents <- domain.Event{
+		Kind: domain.EventKindMessageDelta,
+		Text: "assistant answer",
+		Item: domain.TimelineItem{
+			ID:        NewTimelineID(time.Now().UTC()),
+			ChatID:    chatRecord.ID,
+			Content:   domain.AssistantMessage{},
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	firstEvents <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(firstEvents)
+
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued prompt dispatch: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(secondEvents)
+
+	promptTimeline := runner.promptTimelineAt(1)
+	if len(promptTimeline) < 2 {
+		t.Fatalf("prompt timeline too short: %#v", promptTimeline)
+	}
+	last := promptTimeline[len(promptTimeline)-1]
+	user, ok := last.Content.(domain.UserMessage)
+	if !ok || user.Text != "queued while busy" {
+		t.Fatalf("active queued input should be last in prompt timeline, got %#v", last)
+	}
+	previous := promptTimeline[len(promptTimeline)-2]
+	if _, ok := previous.Content.(domain.AssistantMessage); !ok {
+		t.Fatalf("expected assistant before active queued input, got %#v", previous)
 	}
 }
 

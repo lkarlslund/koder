@@ -357,6 +357,19 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 	}
 	timeline := t.chat.state.SnapshotTimeline()
 	queued := queuedTimelineIDsLocked(t.chat.queue)
+	var currentInput domain.TimelineItem
+	if t.input.TimelineID != "" {
+		if queued == nil {
+			queued = map[id.ID]struct{}{}
+		}
+		queued[t.input.TimelineID] = struct{}{}
+		for _, item := range timeline {
+			if item.ID == t.input.TimelineID {
+				currentInput = item
+				break
+			}
+		}
+	}
 	if len(queued) == 0 {
 		return timeline
 	}
@@ -366,6 +379,9 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 			continue
 		}
 		out = append(out, item)
+	}
+	if currentInput.ID != "" {
+		out = append(out, currentInput)
 	}
 	return out
 }
