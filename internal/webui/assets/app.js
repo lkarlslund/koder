@@ -378,21 +378,19 @@
         default: return 'user';
       }
     }
-    function userMessageHeadingText(item) {
-      const content = userMessageContent(item);
-      const text = String(firstValue(content, ['text', 'Text']) || '').trim();
-      if (!text) return '';
-      return text.replace(/\s+/g, ' ').slice(0, 160);
+    function userMessageSourceQualifierText(item) {
+      const label = userMessageSourceLabelText(item);
+      return label === 'user' ? '' : label;
     }
-    function userMessageSourceBadgeClass(item) {
+    function userMessageIconClass(item) {
       switch (userMessageSourceValue(item)) {
-        case 'steer': return 'text-bg-primary';
-        case 'queued': return 'text-bg-secondary';
-        case 'rejected_steer': return 'text-bg-warning';
-        case 'auto_generated': return 'text-bg-info';
-        case 'auto_resume': return 'text-bg-warning';
-        case 'subchat': return 'text-bg-dark';
-        default: return 'text-bg-success';
+        case 'steer': return 'bi-emoji-smile';
+        case 'queued': return 'bi-person-lines-fill';
+        case 'rejected_steer': return 'bi-person-exclamation';
+        case 'auto_generated': return 'bi-stars';
+        case 'auto_resume': return 'bi-arrow-clockwise';
+        case 'subchat': return 'bi-diagram-3';
+        default: return 'bi-person-circle';
       }
     }
     function toolResultHeader(title) {
@@ -1462,9 +1460,8 @@
         },
         markdownHTML(text, options = {}) { return renderMarkdown(text, options); },
         renderMarkdownElement(el, text, options = {}) { renderMarkdownIntoElement(el, text, options); },
-        userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
-        userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
-        userMessageHeading(item) { return userMessageHeadingText(item); },
+        userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
+        userMessageIcon(item) { return userMessageIconClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {
           const snapshot = this.activeSnapshot();

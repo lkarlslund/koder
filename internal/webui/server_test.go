@@ -846,16 +846,17 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected user turns to use the full transcript width")
 	}
 	if !strings.Contains(fullPage, `class="markdown-body user-markdown-body"`) ||
-		!strings.Contains(fullPage, `class="badge user-source-badge"`) ||
-		!strings.Contains(fullPage, `class="user-message-heading" x-text="userMessageHeading(item)"`) ||
+		!strings.Contains(fullPage, `:class="userMessageIcon(item)"`) ||
+		!strings.Contains(fullPage, `<span class="turn-source-label">user</span>`) ||
+		!strings.Contains(fullPage, `class="turn-source-qualifier" x-show="userMessageSourceQualifier(item)"`) ||
 		!strings.Contains(fullPage, `class="user-message-text" x-html="markdownHTML(item.content?.text || '')"`) ||
 		!strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
-		t.Fatalf("expected user turns to render source badges and message text")
+		t.Fatalf("expected user turns to render icon/source headers and message text")
 	}
 	if !strings.Contains(fullPage, `class="turn-header"`) ||
 		!strings.Contains(fullPage, `class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"`) ||
 		!strings.Contains(fullPage, `return pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())`) ||
-		!strings.Contains(fullPage, `.turn-header { display: flex; align-items: baseline; justify-content: space-between;`) {
+		!strings.Contains(fullPage, `.turn-header { display: flex; align-items: center; justify-content: space-between;`) {
 		t.Fatalf("expected transcript entries to render right-aligned HH:MM:SS timestamps in their header")
 	}
 	if !strings.Contains(fullPage, `A tool call was interrupted by the process restart and has been marked failed.`) ||
@@ -865,9 +866,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `class="turn assistant-turn"`) {
 		t.Fatalf("expected assistant turns to render")
 	}
-	if !strings.Contains(fullPage, `<i class="bi bi-robot"></i> <span class="assistant-source-label">agent</span>`) ||
+	if !strings.Contains(fullPage, `<i class="bi bi-robot"></i><span class="turn-source-label">agent</span>`) ||
 		!strings.Contains(fullPage, `class="turn-header tool-header"`) ||
-		!strings.Contains(fullPage, `<i class="bi bi-wrench-adjustable"></i>`) {
+		!strings.Contains(fullPage, `<i class="bi bi-wrench-adjustable"></i>`) ||
+		!strings.Contains(fullPage, `class="turn-source-qualifier" x-show="lintFiles(item.content || {})"`) {
 		t.Fatalf("expected user, assistant, and tool sections to share icon-title-timestamp headers")
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
