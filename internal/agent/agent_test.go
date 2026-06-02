@@ -6126,6 +6126,38 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	}
 }
 
+func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
+	t.Parallel()
+
+	tracker := toolLoopTracker{}
+	for _, path := range []string{"one.txt", "two.txt", "three.txt"} {
+		if pause, ok := tracker.trackCalls([]tools.Request{{
+			Tool: domain.ToolKindFileRead,
+			Args: map[string]string{"path": path},
+		}}); ok {
+			t.Fatalf("did not expect pause for different arguments, got %#v", pause)
+		}
+	}
+
+	for idx := range repeatedToolLoopThreshold {
+		pause, ok := tracker.trackCalls([]tools.Request{{
+			Tool: domain.ToolKindFileRead,
+			Args: map[string]string{"path": "same.txt"},
+		}})
+		if idx < repeatedToolLoopThreshold-1 && ok {
+			t.Fatalf("did not expect pause before threshold, got %#v", pause)
+		}
+		if idx == repeatedToolLoopThreshold-1 {
+			if !ok {
+				t.Fatal("expected pause at identical-call threshold")
+			}
+			if pause.Reason != continuationPauseReasonRepeatedTool {
+				t.Fatalf("unexpected pause reason: %#v", pause)
+			}
+		}
+	}
+}
+
 func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	t.Parallel()
 
