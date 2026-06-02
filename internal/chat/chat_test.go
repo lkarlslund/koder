@@ -925,6 +925,36 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 	}
 }
 
+func TestLoadMetadataDefersTimelineUntilNeeded(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "loaded later"}); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := LoadMetadata(ctx, session, chatRecord, Deps{Store: st}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := rt.Snapshot()
+	if len(snapshot.Timeline) != 0 {
+		t.Fatalf("metadata load included timeline: %#v", snapshot.Timeline)
+	}
+	if !snapshot.TimelineHasMore || snapshot.TimelineLoadedAll {
+		t.Fatalf("metadata snapshot should mark timeline unloaded, got has_more=%v loaded_all=%v", snapshot.TimelineHasMore, snapshot.TimelineLoadedAll)
+	}
+	if err := rt.EnsureTimeline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = rt.Snapshot()
+	if len(snapshot.Timeline) != 1 || snapshot.Timeline[0].Content.(domain.UserMessage).Text != "loaded later" {
+		t.Fatalf("timeline was not loaded on demand: %#v", snapshot.Timeline)
+	}
+	if snapshot.TimelineHasMore || !snapshot.TimelineLoadedAll {
+		t.Fatalf("loaded snapshot metadata = has_more:%v loaded_all:%v", snapshot.TimelineHasMore, snapshot.TimelineLoadedAll)
+	}
+}
+
 func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

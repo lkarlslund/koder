@@ -57,7 +57,10 @@ func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.Time
 	}
 	s.timeline = nextTimeline
 	s.byItem = nextByItem
-	_ = approvals
+	if len(timeline) == 0 && len(approvals) > 0 {
+		s.approvals = slices.Clone(approvals)
+		return
+	}
 	s.approvals = deriveApprovals(chat, timeline)
 }
 

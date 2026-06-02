@@ -99,7 +99,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	return &Session{
+	owner := &Session{
 		store:      st,
 		chatLoader: chatLoader,
 		session:    session,
@@ -110,7 +110,17 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 		todosByRef: todosByRef,
 		tasks:      slices.Clone(tasks),
 		subs:       map[int]chan Event{},
-	}, nil
+	}
+	for _, chatRecord := range owner.chats {
+		rt, err := owner.chatLoader(ctx, owner.session, chatRecord)
+		if err != nil {
+			return nil, err
+		}
+		if rt != nil {
+			owner.trackRuntimeLocked(chatRecord.ID, rt)
+		}
+	}
+	return owner, nil
 }
 
 func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {

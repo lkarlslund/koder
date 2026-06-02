@@ -110,6 +110,7 @@ type Chat struct {
 	running          map[string]struct{}
 	draining         bool
 	closed           bool
+	timelineLoaded   bool
 
 	inbox   chan any
 	subsMu  sync.Mutex
@@ -210,6 +211,15 @@ type TurnErrorHandler interface {
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
 func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(id.ID)) (*Chat, error) {
+	return load(ctx, session, chatRecord, deps, onClose, true)
+}
+
+// LoadMetadata builds a live chat with chat metadata and pending approvals, but without transcript items.
+func LoadMetadata(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(id.ID)) (*Chat, error) {
+	return load(ctx, session, chatRecord, deps, onClose, false)
+}
+
+func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(id.ID), loadTimeline bool) (*Chat, error) {
 	if deps.Store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -223,19 +233,27 @@ func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		}
 		chatRecord = loaded
 	}
-	timeline, err := TimelineForChat(ctx, deps.Store, chatRecord.ID)
-	if err != nil {
-		return nil, err
+	var timeline []domain.TimelineItem
+	if loadTimeline {
+		var err error
+		timeline, err = TimelineForChat(ctx, deps.Store, chatRecord.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	approvals, err := PendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
-	return New(session, chatRecord, timeline, approvals, deps, onClose)
+	return newChat(session, chatRecord, timeline, approvals, deps, onClose, loadTimeline)
 }
 
 // New builds a live chat from hydrated persisted state.
 func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID)) (*Chat, error) {
+	return newChat(session, chatRecord, timeline, approvals, deps, onClose, true)
+}
+
+func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID), timelineLoaded bool) (*Chat, error) {
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
@@ -246,30 +264,40 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		statusText = "Waiting for approval"
 	}
 	c := &Chat{
-		deps:       deps,
-		onClose:    onClose,
-		session:    session,
-		chat:       chatRecord,
-		state:      NewTimelineState(chatRecord, timeline, approvals),
-		status:     status,
-		statusText: statusText,
-		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
-		queueNotes: map[id.ID]string{},
-		inbox:      make(chan any, 64),
-		subs:       map[int]chan Update{},
+		deps:           deps,
+		onClose:        onClose,
+		session:        session,
+		chat:           chatRecord,
+		state:          NewTimelineState(chatRecord, timeline, approvals),
+		status:         status,
+		statusText:     statusText,
+		queue:          cloneQueuedInputs(chatRecord.QueuedInputs),
+		queueNotes:     map[id.ID]string{},
+		timelineLoaded: timelineLoaded,
+		inbox:          make(chan any, 64),
+		subs:           map[int]chan Update{},
 	}
 	go c.loop()
-	if c.state.HasPendingExecutableToolCalls() {
+	resuming := false
+	if c.timelineLoaded && c.state.HasPendingExecutableToolCalls() {
 		c.inbox <- resumePendingToolsCmd{}
+		resuming = true
 	}
-	c.inbox <- struct{}{}
+	if !c.timelineLoaded && c.chat.AutoRestart {
+		c.inbox <- resumePendingToolsCmd{}
+		resuming = true
+	}
+	if !resuming {
+		c.inbox <- struct{}{}
+	}
 	return c, nil
 }
 
 // TurnState exposes the live chat state for an active model turn.
 type TurnState struct {
-	chat  *Chat
-	input domain.QueuedInput
+	chat       *Chat
+	input      domain.QueuedInput
+	skipQueued bool
 }
 
 func (r *Chat) turnState() *TurnState {
@@ -278,6 +306,10 @@ func (r *Chat) turnState() *TurnState {
 
 func (r *Chat) turnStateForInput(input domain.QueuedInput) *TurnState {
 	return &TurnState{chat: r, input: input}
+}
+
+func (r *Chat) turnStateWithoutQueued() *TurnState {
+	return &TurnState{chat: r, skipQueued: true}
 }
 
 // Session returns the live session metadata for the turn.
@@ -305,7 +337,9 @@ func (t *TurnState) Chat() domain.Chat {
 	}
 	t.chat.mu.RLock()
 	defer t.chat.mu.RUnlock()
-	return t.chat.chat
+	chat := t.chat.chat
+	chat.QueuedInputs = cloneQueuedInputs(t.chat.queue)
+	return chat
 }
 
 // Timeline returns the live transcript snapshot for the turn.
@@ -318,18 +352,34 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 	if t.chat.state == nil {
 		return nil
 	}
-	return t.chat.state.SnapshotTimeline()
+	timeline := t.chat.state.SnapshotTimeline()
+	queued := queuedTimelineIDsLocked(t.chat.queue)
+	if len(queued) == 0 {
+		return timeline
+	}
+	out := make([]domain.TimelineItem, 0, len(timeline))
+	for _, item := range timeline {
+		if _, ok := queued[item.ID]; ok {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // QueuedTimelineIDs returns timeline items that already render queued inputs.
 func (t *TurnState) QueuedTimelineIDs() map[id.ID]struct{} {
-	if t == nil || t.chat == nil {
+	if t == nil || t.chat == nil || t.skipQueued {
 		return nil
 	}
 	t.chat.mu.RLock()
 	defer t.chat.mu.RUnlock()
+	return queuedTimelineIDsLocked(t.chat.queue)
+}
+
+func queuedTimelineIDsLocked(queue []domain.QueuedInput) map[id.ID]struct{} {
 	out := map[id.ID]struct{}{}
-	for _, item := range t.chat.queue {
+	for _, item := range queue {
 		if item.TimelineID != "" {
 			out[item.TimelineID] = struct{}{}
 		}
@@ -473,7 +523,7 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 
 // ApplyNextSteer removes and records the next queued steer message.
 func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
-	if t == nil || t.chat == nil {
+	if t == nil || t.chat == nil || t.skipQueued {
 		return domain.TimelineItem{}, false, nil
 	}
 	r := t.chat
@@ -882,23 +932,64 @@ func (r *Chat) ContextSize() domain.ContextUsage {
 	return r.state.CurrentContextSize()
 }
 
+// EnsureTimeline loads persisted transcript items into memory once.
+func (r *Chat) EnsureTimeline(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	r.mu.RLock()
+	loaded := r.timelineLoaded
+	chatRecord := r.chat
+	session := r.session
+	st := r.deps.Store
+	r.mu.RUnlock()
+	if loaded {
+		return nil
+	}
+	if st == nil {
+		return fmt.Errorf("store is required")
+	}
+	timeline, err := TimelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		return r.markPersistError(err)
+	}
+	approvals, err := PendingApprovalsForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		return r.markPersistError(err)
+	}
+	r.mu.Lock()
+	r.session = session
+	r.chat = chatRecord
+	if r.state == nil {
+		r.state = NewTimelineState(chatRecord, timeline, approvals)
+	} else {
+		r.state.MergeTimelineLoaded(chatRecord, timeline, approvals)
+	}
+	r.timelineLoaded = true
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, true, true))
+	return nil
+}
+
 func (r *Chat) Snapshot() Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
-		return Snapshot{Session: r.session, Chat: r.chat, Status: r.status, StatusText: r.statusText, Active: r.active}
+		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Status: r.status, StatusText: r.statusText, Active: r.active}
 	}
 	return Snapshot{
-		Session:          r.session,
-		Chat:             r.state.Chat(),
-		Timeline:         r.state.SnapshotTimeline(),
-		Approvals:        r.state.Approvals(),
-		QueuedInputs:     visibleQueuedInputs(r.queue),
-		PendingAssistant: r.state.PendingAssistant(),
-		Status:           r.status,
-		StatusText:       r.statusText,
-		Context:          r.state.CurrentContextSize(),
-		Active:           r.active,
+		Session:           r.session,
+		Chat:              r.state.Chat(),
+		Timeline:          r.state.SnapshotTimeline(),
+		TimelineHasMore:   !r.timelineLoaded,
+		TimelineLoadedAll: r.timelineLoaded,
+		Approvals:         r.state.Approvals(),
+		QueuedInputs:      visibleQueuedInputs(r.queue),
+		PendingAssistant:  r.state.PendingAssistant(),
+		Status:            r.status,
+		StatusText:        r.statusText,
+		Context:           r.state.CurrentContextSize(),
+		Active:            r.active,
 	}
 }
 
@@ -988,6 +1079,9 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolCallID string, args map[string]string, result domain.ToolResult) (domain.TimelineItem, error) {
 	if r == nil {
 		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
 	}
 	var item domain.TimelineItem
 	var err error
@@ -1112,6 +1206,9 @@ func (r *Chat) handleEnqueue(item QueueItem) {
 }
 
 func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return
+	}
 	r.mu.Lock()
 	var timelineItem domain.TimelineItem
 	if r.shouldRenderQueuedUserInputLocked(queued) {
@@ -1398,6 +1495,9 @@ func (r *Chat) handleDeny(toolCallID string) {
 }
 
 func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *accesssettings.PermissionOverride) {
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return
+	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {
@@ -1434,6 +1534,9 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 }
 
 func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string) {
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return
+	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {
@@ -1498,6 +1601,9 @@ func (r *Chat) handleResumePendingTools() {
 }
 
 func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) {
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return
+	}
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval || r.draining {
 		r.mu.Unlock()
@@ -1523,19 +1629,20 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 
 	out := make(chan domain.Event, 32)
+	turn := r.turnStateWithoutQueued()
 	go func() {
 		defer close(out)
-		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, r.turnState(), out)
+		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, turn, out)
 		if err != nil {
-			r.handleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
 		if shouldContinue {
 			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop service is not configured"))
+				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
 				return
 			}
-			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
+			r.continueTurnLoop(ctx, r.deps.Turns, turn, nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -1838,6 +1945,25 @@ func (r *Chat) maybeDispatchNext() {
 		return
 	}
 	idx := nextDispatchableIndex(r.queue)
+	if idx < 0 {
+		r.mu.Unlock()
+		return
+	}
+	r.mu.Unlock()
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return
+	}
+	r.mu.Lock()
+	if r.draining || r.active || r.status == StatusWaitingApproval {
+		r.mu.Unlock()
+		return
+	}
+	if r.state.HasPendingExecutableToolCalls() && r.deps.Pending != nil {
+		r.mu.Unlock()
+		r.inbox <- resumePendingToolsCmd{}
+		return
+	}
+	idx = nextDispatchableIndex(r.queue)
 	if idx < 0 {
 		r.mu.Unlock()
 		return

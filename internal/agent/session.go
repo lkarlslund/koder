@@ -27,7 +27,7 @@ func (e *Engine) LoadSession(ctx context.Context, sessionID id.ID) (*sessionpkg.
 	}
 	e.sessionMu.RUnlock()
 
-	loaded, err := sessionpkg.Load(ctx, e.store, e.Chat, sessionID)
+	loaded, err := sessionpkg.Load(ctx, e.store, e.MetadataChat, sessionID)
 	if err != nil {
 		return nil, err
 	}

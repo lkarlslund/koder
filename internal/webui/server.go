@@ -894,7 +894,11 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State
 			}
 		}
 	}
-	return trimStateTimelines(s.controller.State(), defaultTimelinePageSize), nil
+	state, err := s.fillActiveTimelineForClient(ctx, s.controller.State())
+	if err != nil {
+		return app.State{}, err
+	}
+	return trimStateTimelines(state, defaultTimelinePageSize), nil
 }
 
 func (s *Server) setClientSelectionFromState(clientID string, state app.State) {
@@ -932,11 +936,35 @@ func trimStateTimelines(state app.State, limit int) app.State {
 	return state
 }
 
+func (s *Server) fillActiveTimelineForClient(ctx context.Context, state app.State) (app.State, error) {
+	chatID := state.ActiveChatID
+	if chatID == "" {
+		return state, nil
+	}
+	snapshot, ok := state.Snapshots[chatID]
+	if !ok {
+		return state, nil
+	}
+	if len(snapshot.Timeline) > 0 || snapshot.TimelineLoadedAll {
+		return state, nil
+	}
+	page, err := s.controller.TimelinePage(ctx, chatID, "", defaultTimelinePageSize, false)
+	if err != nil {
+		return app.State{}, err
+	}
+	snapshot.Timeline = page.Items
+	snapshot.TimelineHasMore = page.HasMore
+	snapshot.TimelineLoadedAll = page.LoadedAll
+	snapshot.TimelineBefore = page.Before
+	state.Snapshots[chatID] = snapshot
+	state.Snapshot = snapshot
+	return state, nil
+}
+
 func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {
 	total := len(snapshot.Timeline)
 	if total == 0 {
-		snapshot.TimelineHasMore = false
-		snapshot.TimelineLoadedAll = true
+		snapshot.TimelineHasMore = snapshot.Chat.ID != "" && !snapshot.TimelineLoadedAll
 		snapshot.TimelineBefore = ""
 		return snapshot
 	}

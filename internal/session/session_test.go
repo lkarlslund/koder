@@ -99,7 +99,7 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	}
 }
 
-func TestSessionChatLoadsOnlyRequestedRuntime(t *testing.T) {
+func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -135,13 +135,7 @@ func TestSessionChatLoadsOnlyRequestedRuntime(t *testing.T) {
 	if loads[first.ID] != 1 {
 		t.Fatalf("expected first chat to load once from memory cache, got loads=%#v", loads)
 	}
-	if loads[second.ID] != 0 {
-		t.Fatalf("expected unrelated second chat not to load, got loads=%#v", loads)
-	}
-	if _, err := owner.Chat(ctx, second.ID); err != nil {
-		t.Fatal(err)
-	}
 	if loads[second.ID] != 1 {
-		t.Fatalf("expected second chat to load only when requested, got loads=%#v", loads)
+		t.Fatalf("expected second chat to hydrate during session load, got loads=%#v", loads)
 	}
 }

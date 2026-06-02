@@ -1779,17 +1779,39 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 }
 
 func filterQueuedTimelineItems(timeline []domain.TimelineItem, queued map[id.ID]struct{}) []domain.TimelineItem {
-	if len(timeline) == 0 || len(queued) == 0 {
+	if len(timeline) == 0 {
 		return timeline
 	}
 	out := make([]domain.TimelineItem, 0, len(timeline))
+	waitingToolResult := false
 	for _, item := range timeline {
-		if _, ok := queued[item.ID]; ok {
+		if len(queued) > 0 {
+			if _, ok := queued[item.ID]; ok {
+				continue
+			}
+		}
+		if _, ok := item.Content.(domain.UserMessage); ok && waitingToolResult {
 			continue
 		}
 		out = append(out, item)
+		if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+			waitingToolResult = assistantHasUnfinishedToolCall(assistant)
+			continue
+		}
+		if _, ok := item.Content.(domain.ToolExecution); ok {
+			waitingToolResult = false
+		}
 	}
 	return out
+}
+
+func assistantHasUnfinishedToolCall(assistant domain.AssistantMessage) bool {
+	for _, call := range assistant.Tools {
+		if call.Result == nil && call.Error == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
