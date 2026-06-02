@@ -515,9 +515,6 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.requestProcessRestart(); err != nil {
-			return nil, err
-		}
 		reason := chat.CancelReasonRestartInterrupt
 		if in.Hard {
 			reason = chat.CancelReasonRestartInterruptHard
@@ -525,6 +522,10 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		go func() {
 			if err := s.controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
 				slog.Error("shutdown for process restart", "error", err, "hard", in.Hard)
+				return
+			}
+			if err := s.requestProcessRestart(); err != nil {
+				slog.Error("request process restart", "error", err, "hard", in.Hard)
 			}
 		}()
 		return map[string]bool{"restarting": true, "acknowledged": true, "hard": in.Hard}, nil
