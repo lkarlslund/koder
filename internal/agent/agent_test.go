@@ -117,7 +117,7 @@ func runLivePromptObserve(t *testing.T, engine *Engine, session domain.Session, 
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: text})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: text})
 	deadline := time.After(5 * time.Second)
 	var events []domain.Event
 	terminal := false
@@ -1924,7 +1924,7 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "summarize", Attachments: []attachment.Draft{draft}})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "summarize", Attachments: []attachment.Draft{draft}})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindError
 	})
@@ -2234,7 +2234,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "say hello"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "say hello"})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
@@ -2343,7 +2343,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "say hello"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "say hello"})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
@@ -3893,7 +3893,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "continue"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "continue"})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
@@ -4005,7 +4005,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "build it"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "build it"})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
@@ -4355,7 +4355,7 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 	defer unsubscribe()
 
 	appendUserTimelineItem(t, st, chatRecord.ID, "storage side channel")
-	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "new live prompt"})
+	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "new live prompt"})
 
 	var body string
 	select {
@@ -4413,7 +4413,7 @@ func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
 	updates, unsubscribe := runtime.Subscribe()
 	defer unsubscribe()
 
-	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "still show this"})
+	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "still show this"})
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -4518,7 +4518,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "continue"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "continue"})
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindApprovalAsk
 	})
@@ -5353,7 +5353,7 @@ func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello", Note: "Permission mode changed to ask."})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "hello", Note: "Permission mode changed to ask."})
 	_ = collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
 		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
 	})
@@ -5465,7 +5465,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	}
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "hello"})
 	select {
 	case <-requestStarted:
 	case <-time.After(2 * time.Second):
@@ -6661,7 +6661,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
-	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello"})
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "hello"})
 
 	var sawInterrupted bool
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {

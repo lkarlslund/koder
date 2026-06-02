@@ -531,6 +531,33 @@ func TestRuntimeUnarchiveStartsQueuedTurn(t *testing.T) {
 	close(events)
 }
 
+func TestRuntimeIdleSteerDispatchesAsTurn(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "run this steer"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for idle steer dispatch")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "run this steer" {
+		t.Fatalf("prompt = %q", got)
+	}
+	if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+		t.Fatalf("queued inputs = %#v", got)
+	}
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+}
+
 func TestRuntimeArchiveRequiresIdleChat(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
@@ -775,7 +802,7 @@ func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first prompt"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first prompt"})
 	select {
 	case <-runner.step0Started:
 	case <-time.After(2 * time.Second):
@@ -783,13 +810,19 @@ func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
 	}
 
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: "subchat is done"})
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: "also mention the summary"})
 	deadline := time.After(2 * time.Second)
-	for len(rt.Snapshot().QueuedInputs) != 1 {
+	for len(rt.Snapshot().QueuedInputs) != 2 {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for queued steer: %#v", rt.Snapshot().QueuedInputs)
 		default:
 			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	for _, item := range rt.Snapshot().Timeline {
+		if user, ok := item.Content.(domain.UserMessage); ok && strings.Contains(user.Text, "subchat is done") {
+			t.Fatalf("queued steer rendered before boundary: %#v", item)
 		}
 	}
 	close(runner.continueStep)
@@ -821,12 +854,13 @@ func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
 	if len(timeline) < 2 {
 		t.Fatalf("step 1 timeline too short: %#v", timeline)
 	}
-	user, ok := timeline[len(timeline)-1].Content.(domain.UserMessage)
+	item := timeline[len(timeline)-1]
+	user, ok := item.Content.(domain.UserMessage)
 	if !ok {
-		t.Fatalf("last timeline item = %#v", timeline[len(timeline)-1])
+		t.Fatalf("steer timeline item = %#v", item)
 	}
-	if user.Text != "subchat is done" {
-		t.Fatalf("queued steer text = %q", user.Text)
+	if want := "subchat is done\n\nalso mention the summary"; user.Text != want {
+		t.Fatalf("queued steer text = %q, want %q", user.Text, want)
 	}
 	if user.Source != domain.UserMessageSourceSubchat {
 		t.Fatalf("queued steer source = %q, want %q", user.Source, domain.UserMessageSourceSubchat)
@@ -878,7 +912,7 @@ func TestRuntimeSendQueueItemNowPromotesSelectedUserItem(t *testing.T) {
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{first, second}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
 	secondID := id.NewAt(time.Now().UTC())
 	thirdID := id.NewAt(time.Now().UTC())
 	rt.ReplaceQueue([]domain.QueuedInput{
@@ -980,7 +1014,7 @@ func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
 
 	deadline := time.After(2 * time.Second)
@@ -1487,7 +1521,7 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{promptEvents, continueEvents}}
 	rt := newTestChat(t, st, session, chat, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "prompt", Note: "prompt-note"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "prompt", Note: "prompt-note"})
 	rt.Enqueue(QueueItem{Kind: QueueKindContinue, Note: "continue-note"})
 
 	deadline := time.After(2 * time.Second)
@@ -1705,7 +1739,7 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 	}
 	rt := newTestChat(t, st, session, chat, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
 
 	var runCtx context.Context
 	select {
@@ -1742,7 +1776,7 @@ func TestRuntimeInterruptAndCloseDoesNotPersistNoticeForStreamingInterrupt(t *te
 	}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
 
 	var runCtx context.Context
 	select {
@@ -1793,7 +1827,7 @@ func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testi
 	}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
 
 	var runCtx context.Context
 	select {
@@ -1853,7 +1887,7 @@ func TestRuntimeRestartShutdownMarksAutoRestart(t *testing.T) {
 	}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
 
 	select {
 	case <-runner.ctxSeen:
@@ -1904,7 +1938,7 @@ func TestRuntimeStopAfterCurrentTurnDoesNotCancelStreamingContext(t *testing.T) 
 	}
 	rt := newTestChat(t, st, session, chat, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "stream"})
 
 	var runCtx context.Context
 	select {

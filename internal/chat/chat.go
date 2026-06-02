@@ -540,7 +540,7 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 	return item, nil
 }
 
-// ApplyNextSteer removes and records the next queued turn-boundary message.
+// ApplyNextSteer removes and records queued turn-boundary messages.
 func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
 	if t == nil || t.chat == nil || t.skipQueued {
 		return domain.TimelineItem{}, false, nil
@@ -548,49 +548,22 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	r := t.chat
 	now := time.Now().UTC()
 	r.mu.Lock()
-	idx := -1
-	for i, item := range r.queue {
+	var steers []domain.QueuedInput
+	remaining := make([]domain.QueuedInput, 0, len(r.queue))
+	for _, item := range r.queue {
 		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryTurnBoundary {
+			remaining = append(remaining, item)
 			continue
 		}
-		idx = i
-		break
+		steers = append(steers, item)
 	}
-	if idx < 0 {
+	if len(steers) == 0 {
 		r.mu.Unlock()
 		return domain.TimelineItem{}, false, nil
 	}
-	queued := r.queue[idx]
-	r.queue = append(slices.Clone(r.queue[:idx]), slices.Clone(r.queue[idx+1:])...)
+	r.queue = remaining
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
-	if queued.TimelineID != "" && r.state != nil {
-		for _, existing := range r.state.SnapshotTimeline() {
-			if existing.ID != queued.TimelineID {
-				continue
-			}
-			if r.state != nil {
-				r.state.UpdateChat(func(chat *domain.Chat) {
-					chat.QueuedInputs = cloneQueuedInputs(r.queue)
-				})
-			}
-			chatID := r.chat.ID
-			queue := cloneQueuedInputs(r.queue)
-			r.mu.Unlock()
-			if r.deps.Store != nil {
-				if err := SetChatQueuedInputs(ctx, r.deps.Store, chatID, queue); err != nil {
-					return domain.TimelineItem{}, false, err
-				}
-			}
-			return existing, true, nil
-		}
-	}
-	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text), Source: domain.UserMessageSourceForQueuedInput(queued)}
-	for _, draft := range queued.Attachments {
-		user.Attachments = append(user.Attachments, domain.Attachment(draft))
-	}
-	for _, ref := range queued.References {
-		user.References = append(user.References, domain.Reference(ref))
-	}
+	user := userMessageForSteers(steers)
 	seq := int64(1)
 	if r.state != nil {
 		seq = int64(len(r.state.Timeline()) + 1)
@@ -606,13 +579,20 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	}
 	if r.state != nil {
 		r.state.AppendTimelineItem(item)
+		if strings.TrimSpace(user.Text) != "" {
+			r.chat.LastMessage = user.Text
+		}
 		r.state.UpdateChat(func(chat *domain.Chat) {
 			chat.QueuedInputs = cloneQueuedInputs(r.queue)
-			chat.LastMessage = user.Text
+			if strings.TrimSpace(user.Text) != "" {
+				chat.LastMessage = user.Text
+			}
 		})
+	} else if strings.TrimSpace(user.Text) != "" {
+		r.chat.LastMessage = user.Text
 	}
-	r.chat.LastMessage = user.Text
 	chatRecord := r.chat
+	chatID := r.chat.ID
 	queue := cloneQueuedInputs(r.queue)
 	r.mu.Unlock()
 
@@ -620,14 +600,39 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
-		if err := SetChatQueuedInputs(ctx, r.deps.Store, r.chat.ID, queue); err != nil {
+		if err := SetChatQueuedInputs(ctx, r.deps.Store, chatID, queue); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
 		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
 	}
+	t.input.TimelineID = ""
 	return item, true, nil
+}
+
+func userMessageForSteers(steers []domain.QueuedInput) domain.UserMessage {
+	texts := make([]string, 0, len(steers))
+	var user domain.UserMessage
+	for idx, queued := range steers {
+		if text := strings.TrimSpace(queued.Text); text != "" {
+			texts = append(texts, text)
+		}
+		source := domain.UserMessageSourceForQueuedInput(queued)
+		if idx == 0 {
+			user.Source = source
+		} else if user.Source != source {
+			user.Source = domain.UserMessageSourceUser
+		}
+		for _, draft := range queued.Attachments {
+			user.Attachments = append(user.Attachments, domain.Attachment(draft))
+		}
+		for _, ref := range queued.References {
+			user.References = append(user.References, domain.Reference(ref))
+		}
+	}
+	user.Text = strings.Join(texts, "\n\n")
+	return user
 }
 
 // SetContextUsage records the latest context-token usage on the live chat.
