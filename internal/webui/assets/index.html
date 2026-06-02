@@ -294,7 +294,7 @@
           </template>
         </div>
       </div>
-      <div class="sidebar-section">
+      <div class="sidebar-section" x-show="approvals().length > 0" style="display: none;">
         <div class="sidebar-heading">Approvals</div>
         <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
           <div class="border rounded p-2 sidebar-card">
@@ -307,7 +307,7 @@
           </div>
         </template>
       </div>
-      <div class="sidebar-section">
+      <div class="sidebar-section" x-show="milestoneItems().length > 0" style="display: none;">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
         </div>
@@ -322,9 +322,6 @@
         </div>
         <template x-if="milestoneSummary()">
           <div class="sidebar-note" x-text="milestoneSummary()"></div>
-        </template>
-        <template x-if="milestoneItems().length === 0">
-          <div class="text-secondary">None</div>
         </template>
         <template x-if="milestoneItems().length > 0 && visibleMilestones().length === 0">
           <div class="text-secondary">All hidden</div>

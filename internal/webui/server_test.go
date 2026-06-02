@@ -1221,6 +1221,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
+	if !strings.Contains(fullPage, `x-show="milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
+	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
 		t.Fatalf("expected colorful milestone status badge classes")
 	}
@@ -1317,6 +1320,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
 	}
+	if !strings.Contains(fullPage, `x-show="approvals().length > 0"`) {
+		t.Fatalf("expected approvals sidebar section to hide when there are no approvals")
+	}
 	if !strings.Contains(fullPage, `toolStatus(tool) === 'awaiting_approval'`) {
 		t.Fatalf("expected approval actions to hide once the pushed tool turn is no longer pending")
 	}
@@ -1325,6 +1331,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `:title="chatStatusLabel(chat)"`) {
 		t.Fatalf("expected all chat status icons to render with hover tooltips")
+	}
+	if !strings.Contains(fullPage, `chatPendingApprovals(chat)`) || !strings.Contains(fullPage, `bi-exclamation-triangle-fill`) {
+		t.Fatalf("expected chats with pending approvals to render a warning triangle status")
 	}
 	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) {
 		t.Fatalf("expected idle chat status icon to be static")

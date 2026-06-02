@@ -1969,11 +1969,19 @@
           const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];
           return statuses.find(status => (status.chat_id || status.ChatID) === id) || {chat_id: id, status: 'idle', status_text: 'Idle'};
         },
+        chatPendingApprovals(chat) {
+          const status = this.chatStatus(chat);
+          const value = status.pending_approvals ?? status.PendingApprovals ?? 0;
+          return Number(value) || 0;
+        },
         chatStatusValue(chat) {
+          if (this.chatPendingApprovals(chat) > 0) return 'waiting_approval';
           const status = this.chatStatus(chat);
           return String(status.status || status.Status || 'idle');
         },
         chatStatusLabel(chat) {
+          const pending = this.chatPendingApprovals(chat);
+          if (pending > 0) return pending === 1 ? 'Waiting for approval' : 'Waiting for ' + pending + ' approvals';
           const status = this.chatStatus(chat);
           const text = status.status_text || status.StatusText || '';
           if (text) return text;
@@ -2041,7 +2049,7 @@
           return this.chatStatusIconForValue(this.chatStatusValue(chat));
         },
         chatStatusIconForValue(value) {
-          if (value === 'waiting_approval') return 'bi-pause-circle-fill';
+          if (value === 'waiting_approval') return 'bi-exclamation-triangle-fill';
           if (value === 'error' || value === 'failed') return 'bi-exclamation-triangle-fill';
           if (value === 'cancelled') return 'bi-x-circle-fill';
           if (value === 'completed') return 'bi-check-circle-fill';
