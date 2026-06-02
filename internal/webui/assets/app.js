@@ -602,7 +602,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
+        ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
@@ -626,6 +626,7 @@
           document.addEventListener('click', event => this.handleMediaPreviewClick(event));
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
+          this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); });
         },
         handleGlobalKeydown(event) {
@@ -811,7 +812,17 @@
             this.rejectPending('connection closed');
             this.scheduleReconnect();
           };
-          ws.onmessage = ev => { if (this.ws === ws) this.onMessage(JSON.parse(ev.data)); };
+          ws.onmessage = ev => {
+            if (this.ws !== ws) return;
+            this.lastWSMessageAt = Date.now();
+            try {
+              this.onMessage(JSON.parse(ev.data));
+            } catch (err) {
+              console.error('websocket message failed', err, ev.data);
+              this.error = (err && err.message) || 'websocket message failed';
+              this.reconnectStaleSocket(ws, 'websocket message failed');
+            }
+          };
           queueMicrotask(() => {
             if (this.ws === ws && ws.readyState === WebSocket.OPEN && !this.connected) this.handleSocketOpen(ws);
           });
@@ -824,10 +835,29 @@
           }
           this.connecting = false;
           this.connected = true;
+          this.lastWSMessageAt = Date.now();
           this.reconnectDelay = 150;
           this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(err => {
             this.error = (err && err.message) || 'failed to load session';
           });
+        },
+        checkWebsocketHealth() {
+          if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.connected) return;
+          if (!this.lastWSMessageAt) {
+            this.lastWSMessageAt = Date.now();
+            return;
+          }
+          if (Date.now() - this.lastWSMessageAt <= 45000) return;
+          this.reconnectStaleSocket(this.ws, 'connection stale');
+        },
+        reconnectStaleSocket(ws, reason) {
+          if (!ws || this.ws !== ws) return;
+          this.ws = null;
+          this.connecting = true;
+          this.connected = false;
+          this.rejectPending(reason || 'connection stale');
+          try { ws.close(); } catch (_) {}
+          this.connectWhenReady();
         },
         connectNow() {
           if (this.reconnectTimer) {
@@ -964,6 +994,7 @@
           msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error || 'rpc failed'));
         },
         onPush(msg) {
+          if (msg.type === 'heartbeat') return;
           if (msg.type === 'snapshot') this.applyState(msg.payload);
           if (msg.type === 'state_delta') this.applyStateDelta(msg.payload);
           if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);

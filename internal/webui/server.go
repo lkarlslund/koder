@@ -396,19 +396,38 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	baselineEstablished := false
 	go func() {
 		defer close(done)
-		for event := range events {
-			baselineMu.RLock()
-			ready := baselineEstablished
-			baselineMu.RUnlock()
-			if !ready {
-				continue
-			}
-			webEvent, ok := webEventFromControllerEvent(event)
-			if !ok {
-				continue
-			}
-			s.updateDebugChats()
-			if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
+		heartbeat := time.NewTicker(websocketHeartbeatInterval)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case event, ok := <-events:
+				if !ok {
+					return
+				}
+				baselineMu.RLock()
+				ready := baselineEstablished
+				baselineMu.RUnlock()
+				if !ready {
+					continue
+				}
+				webEvent, ok := webEventFromControllerEvent(event)
+				if !ok {
+					continue
+				}
+				s.updateDebugChats()
+				if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
+					return
+				}
+			case <-heartbeat.C:
+				if err := writeJSON(ctx, conn, &writeMu, map[string]any{
+					"type": "heartbeat",
+					"payload": map[string]string{
+						"server_time": time.Now().UTC().Format(time.RFC3339Nano),
+					},
+				}); err != nil {
+					return
+				}
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -1375,6 +1394,11 @@ type rpcResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
+const (
+	websocketHeartbeatInterval = 15 * time.Second
+	websocketWriteTimeout      = 5 * time.Second
+)
+
 func decodeParams(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
@@ -1387,9 +1411,11 @@ func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value 
 	if err != nil {
 		return err
 	}
+	writeCtx, cancel := context.WithTimeout(ctx, websocketWriteTimeout)
+	defer cancel()
 	mu.Lock()
 	defer mu.Unlock()
-	return conn.Write(ctx, websocket.MessageText, data)
+	return conn.Write(writeCtx, websocket.MessageText, data)
 }
 
 func renderIndexHTML() string {

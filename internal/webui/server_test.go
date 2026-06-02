@@ -1045,6 +1045,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
 		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
 	}
+	if !strings.Contains(fullPage, `msg.type === 'heartbeat'`) ||
+		!strings.Contains(fullPage, `checkWebsocketHealth()`) ||
+		!strings.Contains(fullPage, `lastWSMessageAt`) ||
+		!strings.Contains(fullPage, `reconnectStaleSocket`) ||
+		!strings.Contains(fullPage, `websocket message failed`) {
+		t.Fatalf("expected websocket heartbeat/watchdog handling for stale live-update sockets")
+	}
 	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(2000`) || !strings.Contains(fullPage, `reconnectDelay: 150`) {
 		t.Fatalf("expected reconnect timing to back off without spamming")
 	}
