@@ -336,7 +336,8 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	}
 	_ = readRPCResponse(t, ctx, conn, 1)
 
-	resp, err := http.Post(srv.URL()+"/api/restart-needed", "application/json", nil)
+	body := strings.NewReader(`{"version":"0.1.0","commit":"abc123","dirty":"true","build_time":"2026-06-02T12:00:00Z"}`)
+	resp, err := http.Post(srv.URL()+"/api/restart-needed", "application/json", body)
 	if err != nil {
 		t.Fatalf("post restart-needed: %v", err)
 	}
@@ -348,12 +349,19 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	if !ctrl.State().RestartNeeded {
 		t.Fatal("expected controller state to mark restart needed")
 	}
+	if got := ctrl.State().RestartBuild.BuildID; got != "abc123-dirty @ 2026-06-02T12:00:00Z" {
+		t.Fatalf("expected restart build id, got %q", got)
+	}
 
 	msg := readMessage(t, ctx, conn)
 	var event struct {
 		Type    string `json:"type"`
 		Payload struct {
 			RestartNeeded bool `json:"restart_needed"`
+			RestartBuild  struct {
+				Commit  string `json:"commit"`
+				BuildID string `json:"build_id"`
+			} `json:"restart_build"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(msg, &event); err != nil {
@@ -361,6 +369,9 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	}
 	if event.Type != "restart_delta" || !event.Payload.RestartNeeded {
 		t.Fatalf("expected restart_delta with restart_needed=true, got %s", string(msg))
+	}
+	if event.Payload.RestartBuild.Commit != "abc123" || event.Payload.RestartBuild.BuildID == "" {
+		t.Fatalf("expected restart build metadata, got %s", string(msg))
 	}
 }
 

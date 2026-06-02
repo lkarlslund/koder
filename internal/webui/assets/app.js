@@ -866,11 +866,26 @@
           if (this.restartAcknowledged) return 'bi-check-circle-fill';
           return 'bi-arrow-clockwise';
         },
+        restartBuildInfo() {
+          return this.state.restart_build || this.state.RestartBuild || {};
+        },
+        restartBuildLabel() {
+          const build = this.restartBuildInfo();
+          const id = String(build.build_id || build.BuildID || '').trim();
+          if (id) return id;
+          let commit = String(build.commit || build.Commit || '').trim();
+          if (!commit) return '';
+          if (String(build.dirty || build.Dirty || '').trim() === 'true') commit += '-dirty';
+          const built = String(build.build_time || build.BuildTime || '').trim();
+          return built ? commit + ' @ ' + built : commit;
+        },
         restartButtonTitle() {
-          if (this.restartRequestPending) return this.restartAcknowledged ? 'Requesting hard restart' : 'Requesting restart';
-          if (this.restartHardRequested) return 'Hard restart acknowledged';
-          if (this.restartAcknowledged) return 'Restart acknowledged; press again for hard restart';
-          return 'New koder build is ready; restart koder';
+          const build = this.restartBuildLabel();
+          const suffix = build ? '\nAvailable build: ' + build : '';
+          if (this.restartRequestPending) return (this.restartAcknowledged ? 'Requesting hard restart' : 'Requesting restart') + suffix;
+          if (this.restartHardRequested) return 'Hard restart acknowledged' + suffix;
+          if (this.restartAcknowledged) return 'Restart acknowledged; press again for hard restart' + suffix;
+          return 'New koder build is ready; restart koder' + suffix;
         },
         requestRestart() {
           if (this.restartRequestPending || this.restartHardRequested) return;
@@ -960,10 +975,17 @@
           const needed = !!(delta.restart_needed || delta.RestartNeeded);
           this.state.restart_needed = needed;
           this.state.RestartNeeded = needed;
+          if (delta.restart_build !== undefined || delta.RestartBuild !== undefined) {
+            const build = delta.restart_build || delta.RestartBuild || {};
+            this.state.restart_build = build;
+            this.state.RestartBuild = build;
+          }
           if (!needed) {
             this.restartRequestPending = false;
             this.restartAcknowledged = false;
             this.restartHardRequested = false;
+            this.state.restart_build = {};
+            this.state.RestartBuild = {};
           }
           this.reportClientStateSoon();
         },
@@ -1301,6 +1323,11 @@
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = s || {};
+          if (!this.restartNeeded()) {
+            this.restartRequestPending = false;
+            this.restartAcknowledged = false;
+            this.restartHardRequested = false;
+          }
           if (this.welcomeMode()) {
             this.sessionState = {active_id: 0, project_root: this.state.project_root || this.state.ProjectRoot || '', sessions: this.state.sessions || this.state.Sessions || []};
           }

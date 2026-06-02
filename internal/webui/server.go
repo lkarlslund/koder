@@ -245,13 +245,38 @@ func (s *Server) handleRestartNeeded(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.controller.MarkRestartNeeded()
+	var build app.RestartBuildInfo
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&build); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, fmt.Sprintf("decode restart build info: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	if build.BuildID == "" {
+		build.BuildID = restartBuildID(build)
+	}
+	s.controller.MarkRestartNeeded(build)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":             true,
 		"restart_needed": true,
+		"restart_build":  build,
 	})
+}
+
+func restartBuildID(build app.RestartBuildInfo) string {
+	commit := strings.TrimSpace(build.Commit)
+	if commit == "" {
+		return ""
+	}
+	if strings.TrimSpace(build.Dirty) == "true" {
+		commit += "-dirty"
+	}
+	if built := strings.TrimSpace(build.BuildTime); built != "" {
+		return commit + " @ " + built
+	}
+	return commit
 }
 
 func assetHandler() http.Handler {
@@ -915,6 +940,7 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 		Theme:         state.Theme,
 		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
 		RestartNeeded: state.RestartNeeded,
+		RestartBuild:  state.RestartBuild,
 		Error:         strings.TrimSpace(message),
 	}
 }
@@ -1095,6 +1121,7 @@ type stateDelta struct {
 	Theme         string `json:"theme,omitempty"`
 	ProjectRoot   string `json:"project_root,omitempty"`
 	RestartNeeded bool   `json:"restart_needed,omitempty"`
+	RestartBuild  any    `json:"restart_build,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 
@@ -1216,6 +1243,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		Theme:         state.Theme,
 		ProjectRoot:   state.ProjectRoot,
 		RestartNeeded: state.RestartNeeded,
+		RestartBuild:  state.RestartBuild,
 		Error:         state.Error,
 	}
 }

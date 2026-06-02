@@ -61,7 +61,17 @@ type State struct {
 	Theme         string                         `json:"theme"`
 	ProjectRoot   string                         `json:"project_root"`
 	RestartNeeded bool                           `json:"restart_needed"`
+	RestartBuild  RestartBuildInfo               `json:"restart_build,omitempty"`
 	Error         string                         `json:"error,omitempty"`
+}
+
+// RestartBuildInfo describes the already-built binary waiting for a process restart.
+type RestartBuildInfo struct {
+	Version   string `json:"version,omitempty"`
+	Commit    string `json:"commit,omitempty"`
+	Dirty     string `json:"dirty,omitempty"`
+	BuildTime string `json:"build_time,omitempty"`
+	BuildID   string `json:"build_id,omitempty"`
 }
 
 // ChatSidebarStatus is the browser app run state for one chat in the sidebar.
@@ -322,6 +332,7 @@ type Controller struct {
 	theme                       string
 	lastErr                     string
 	restartNeeded               bool
+	restartBuild                RestartBuildInfo
 	clearedStartupRunningTools  bool
 
 	subMu   sync.Mutex
@@ -444,14 +455,15 @@ func (c *Controller) populateStateSnapshotsLocked(state *State) {
 }
 
 // MarkRestartNeeded tells web clients that a newer binary is ready but not running.
-func (c *Controller) MarkRestartNeeded() {
+func (c *Controller) MarkRestartNeeded(build RestartBuildInfo) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	c.restartNeeded = true
+	c.restartBuild = build
 	c.mu.Unlock()
-	c.broadcast("restart_delta", map[string]bool{"restart_needed": true})
+	c.broadcast("restart_delta", map[string]any{"restart_needed": true, "restart_build": build})
 }
 
 func (c *Controller) stateLocked() State {
@@ -472,6 +484,7 @@ func (c *Controller) stateLocked() State {
 		Theme:         c.theme,
 		ProjectRoot:   c.session.ProjectRoot,
 		RestartNeeded: c.restartNeeded,
+		RestartBuild:  c.restartBuild,
 		Error:         c.lastErr,
 	}
 	c.populateStateSnapshotsLocked(&state)

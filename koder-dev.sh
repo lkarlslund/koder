@@ -215,17 +215,74 @@ notify_restart_needed() {
   shift || true
   local url
   local output
+  local payload
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 0
   fi
   url="$(restart_needed_url "$@")"
-  log "new koder build is ready; notifying $url"
-  if output="$(curl --fail --silent --show-error --max-time 2 -X POST "$url" 2>&1)"; then
+  payload="$(restart_needed_payload)"
+  log "new koder build is ready; notifying $url with $(restart_needed_log_label "$payload")"
+  if output="$(curl --fail --silent --show-error --max-time 2 -X POST -H 'Content-Type: application/json' --data "$payload" "$url" 2>&1)"; then
     log "restart-needed notification acknowledged"
     return 0
   fi
   log "restart-needed notification failed: $output"
   return 1
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/ }"
+  value="${value//$'\r'/ }"
+  printf '%s' "$value"
+}
+
+version_field() {
+  local text="$1"
+  local key="$2"
+  awk -F': ' -v key="$key" '$1 == key {print $2; exit}' <<<"$text"
+}
+
+restart_needed_payload() {
+  local version_text=""
+  local first_line=""
+  local version=""
+  local commit=""
+  local dirty=""
+  local build_time=""
+  local build_id=""
+  version_text="$("$BIN" version 2>/dev/null || true)"
+  first_line="$(sed -n '1p' <<<"$version_text")"
+  version="${first_line##* }"
+  commit="$(version_field "$version_text" commit)"
+  dirty="$(version_field "$version_text" dirty)"
+  build_time="$(version_field "$version_text" build_time)"
+  build_id="$commit"
+  if [[ "$dirty" == "true" && -n "$build_id" ]]; then
+    build_id="${build_id}-dirty"
+  fi
+  if [[ -n "$build_time" && -n "$build_id" ]]; then
+    build_id="${build_id} @ ${build_time}"
+  fi
+  printf '{"version":"%s","commit":"%s","dirty":"%s","build_time":"%s","build_id":"%s"}' \
+    "$(json_escape "$version")" \
+    "$(json_escape "$commit")" \
+    "$(json_escape "$dirty")" \
+    "$(json_escape "$build_time")" \
+    "$(json_escape "$build_id")"
+}
+
+restart_needed_log_label() {
+  local payload="$1"
+  local label
+  label="$(sed -n 's/.*"build_id":"\([^"]*\)".*/\1/p' <<<"$payload")"
+  if [[ -n "$label" ]]; then
+    printf 'build %s' "$label"
+  else
+    printf 'build metadata'
+  fi
 }
 
 report_stopped_status() {
