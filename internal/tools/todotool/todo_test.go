@@ -224,6 +224,42 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	}
 }
 
+func TestTodoAddRejectsClosedMilestones(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{
+		{Ref: "done", Title: "Done", Status: planning.MilestoneStatusCompleted},
+		{Ref: "cancelled", Title: "Cancelled", Status: planning.MilestoneStatusCancelled},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+
+	for _, ref := range []string{"done", "cancelled"} {
+		req := tools.Request{
+			Tool: domain.ToolKindTodosAdd,
+			Args: map[string]string{
+				"milestone_ref": ref,
+				"items":         `[{"content":"Reopen work"}]`,
+			},
+		}
+		_, err := tools.Execute(ctx, runtime, req)
+		if err == nil {
+			t.Fatalf("expected closed milestone error for %s", ref)
+		}
+		if !strings.Contains(err.Error(), "cannot add todos") || !strings.Contains(err.Error(), "milestone_update with status=ready") {
+			t.Fatalf("expected reopen guidance for %s, got %v", ref, err)
+		}
+		if _, err := tools.PersistResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add todos") {
+			t.Fatalf("expected persist closed milestone error for %s, got %v", ref, err)
+		}
+	}
+}
+
 func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)

@@ -162,6 +162,9 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if err := ensureMilestoneAcceptsTodos(plan, ref); err != nil {
+		return tools.Result{}, err
+	}
 	existing, err := control.ListTodos(ctx, runtime.SessionID, ref)
 	if err != nil {
 		return tools.Result{}, err
@@ -299,6 +302,13 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 	if err != nil {
 		return nil, err
 	}
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureMilestoneAcceptsTodos(plan, req.Args["milestone_ref"]); err != nil {
+		return nil, err
+	}
 	existing, err := control.ListTodos(ctx, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
 		return nil, err
@@ -307,10 +317,6 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 		return nil, err
 	}
 	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_ref"], items)
-	if err != nil {
-		return nil, err
-	}
-	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +395,21 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	message = "All todo items for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into todo items and start working on them."
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, message)
 	return tools.PersistStandardResult(ctx, runtime, req, result)
+}
+
+func ensureMilestoneAcceptsTodos(plan planning.Plan, ref string) error {
+	ref = strings.TrimSpace(ref)
+	for _, milestone := range plan.Milestones {
+		if milestone.Ref != ref {
+			continue
+		}
+		switch milestone.Status {
+		case planning.MilestoneStatusCompleted, planning.MilestoneStatusCancelled:
+			return fmt.Errorf("milestone %q is %s; cannot add todos. To reopen this milestone, first call milestone_update with status=ready, then add todos", milestone.Ref, milestone.Status.String())
+		}
+		return nil
+	}
+	return nil
 }
 
 func persistedTodoBucket(ctx context.Context, control tools.SessionControl, sessionID id.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
