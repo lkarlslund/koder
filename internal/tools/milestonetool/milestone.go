@@ -25,7 +25,7 @@ func init() {
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestone",
 		Description: "Create one blank pending milestone.",
-		Usage:       "Create one blank pending milestone with no todo items. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref already exists.",
+		Usage:       "Create one blank pending milestone with no todo items. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref or title already exists.",
 		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Stable milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"}},"required":["ref","title"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -374,16 +374,32 @@ func appendMilestones(existing, added []planning.Milestone) []planning.Milestone
 
 func ensureMilestoneRefsAvailable(existing, added []planning.Milestone) error {
 	seenRefs := make(map[string]struct{}, len(existing)+len(added))
+	seenTitles := make(map[string]struct{}, len(existing)+len(added))
 	for _, item := range existing {
-		seenRefs[item.Ref] = struct{}{}
+		if ref := strings.TrimSpace(item.Ref); ref != "" {
+			seenRefs[ref] = struct{}{}
+		}
+		if title := normalizedMilestoneTitle(item.Title); title != "" {
+			seenTitles[title] = struct{}{}
+		}
 	}
 	for _, item := range added {
-		if _, exists := seenRefs[item.Ref]; exists {
+		ref := strings.TrimSpace(item.Ref)
+		if _, exists := seenRefs[ref]; exists {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
 		}
-		seenRefs[item.Ref] = struct{}{}
+		seenRefs[ref] = struct{}{}
+		title := normalizedMilestoneTitle(item.Title)
+		if _, exists := seenTitles[title]; exists {
+			return fmt.Errorf("duplicate milestone title %q", item.Title)
+		}
+		seenTitles[title] = struct{}{}
 	}
 	return nil
+}
+
+func normalizedMilestoneTitle(title string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(title))), " ")
 }
 
 func upsertMilestone(existing []planning.Milestone, next planning.Milestone) []planning.Milestone {

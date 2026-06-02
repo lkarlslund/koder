@@ -275,9 +275,13 @@ func ValidateTodoProgress(items []TodoItem) error {
 
 func ValidateMilestoneProgress(items []Milestone) error {
 	seenRefs := make(map[string]struct{}, len(items))
+	seenTitles := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if item.Ref == "" {
 			return errors.New("milestone ref is empty")
+		}
+		if strings.TrimSpace(item.Title) == "" {
+			return errors.New("milestone title is empty")
 		}
 		if !ValidMilestoneStatus(item.Status) {
 			return fmt.Errorf("invalid milestone status %q", item.Status.String())
@@ -286,6 +290,11 @@ func ValidateMilestoneProgress(items []Milestone) error {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
 		}
 		seenRefs[item.Ref] = struct{}{}
+		title := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(item.Title))), " ")
+		if _, exists := seenTitles[title]; exists {
+			return fmt.Errorf("duplicate milestone title %q", item.Title)
+		}
+		seenTitles[title] = struct{}{}
 	}
 	return nil
 }

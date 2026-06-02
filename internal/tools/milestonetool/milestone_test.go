@@ -111,11 +111,33 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err := ensureMilestoneRefsAvailable(existing, []planning.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
 		t.Fatal("expected duplicate ref error")
 	}
+	if err := ensureMilestoneRefsAvailable(existing, []planning.Milestone{{Ref: "beta", Title: "  alpha  "}}); err == nil {
+		t.Fatal("expected duplicate title error")
+	}
 	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusExecuting},
 	}); err != nil {
 		t.Fatalf("expected multiple active milestones to be allowed, got %v", err)
+	}
+	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending},
+		{Ref: "beta", Title: " alpha ", Status: planning.MilestoneStatusPending},
+	}); err == nil {
+		t.Fatal("expected duplicate title validation error")
+	}
+}
+
+func TestMilestoneAddRejectsDuplicateTitle(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+	req := tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"ref": "beta", "title": "  alpha  "},
+	}
+	_, err := tools.Execute(context.Background(), runtime, req)
+	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
+		t.Fatalf("expected duplicate milestone title error, got %v", err)
 	}
 }
 
