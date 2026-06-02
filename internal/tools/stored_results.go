@@ -196,12 +196,13 @@ type UpdatePlanStoredResult struct {
 }
 
 type MilestoneStoredItem struct {
-	Ref         string `json:"ref"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes,omitempty"`
-	OwnerChatID string `json:"owner_chat_id,omitempty"`
-	TodoSummary string `json:"todo_summary,omitempty"`
+	Ref          string `json:"ref"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Notes        string `json:"notes,omitempty"`
+	DependsOnRef string `json:"depends_on_ref,omitempty"`
+	OwnerChatID  string `json:"owner_chat_id,omitempty"`
+	TodoSummary  string `json:"todo_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {
@@ -1032,23 +1033,72 @@ func formatMilestonePlanStoredResult(result MilestonePlanStoredResult) string {
 	if summary := strings.TrimSpace(result.Summary); summary != "" {
 		lines = append(lines, summary)
 	}
-	for _, item := range result.Milestones {
+	lines = append(lines, formatMilestoneTree(result.Milestones)...)
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatMilestoneTree(items []MilestoneStoredItem) []string {
+	byRef := make(map[string]MilestoneStoredItem, len(items))
+	children := make(map[string][]MilestoneStoredItem, len(items))
+	for _, item := range items {
+		ref := strings.TrimSpace(item.Ref)
+		if ref == "" {
+			continue
+		}
+		byRef[ref] = item
+	}
+	roots := make([]MilestoneStoredItem, 0, len(items))
+	for _, item := range items {
 		if strings.TrimSpace(item.Title) == "" {
 			continue
 		}
-		line := "[" + strings.TrimSpace(item.Status) + "] " + strings.TrimSpace(item.Title)
-		if ref := strings.TrimSpace(item.Ref); ref != "" {
-			line += " (" + ref + ")"
+		parentRef := strings.TrimSpace(item.DependsOnRef)
+		if parentRef != "" {
+			if _, ok := byRef[parentRef]; ok {
+				children[parentRef] = append(children[parentRef], item)
+				continue
+			}
 		}
-		if summary := strings.TrimSpace(item.TodoSummary); summary != "" {
-			line += " - " + summary
-		}
-		lines = append(lines, line)
-		if notes := strings.TrimSpace(item.Notes); notes != "" {
-			lines = append(lines, notes)
-		}
+		roots = append(roots, item)
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	lines := make([]string, 0, len(items)*2)
+	visited := make(map[string]struct{}, len(items))
+	for _, item := range roots {
+		lines = append(lines, formatMilestoneTreeItem(item, children, visited, 0, byRef)...)
+	}
+	return lines
+}
+
+func formatMilestoneTreeItem(item MilestoneStoredItem, children map[string][]MilestoneStoredItem, visited map[string]struct{}, depth int, byRef map[string]MilestoneStoredItem) []string {
+	ref := strings.TrimSpace(item.Ref)
+	if ref != "" {
+		if _, ok := visited[ref]; ok {
+			return nil
+		}
+		visited[ref] = struct{}{}
+	}
+	indent := strings.Repeat("  ", depth)
+	line := indent + "- [" + strings.TrimSpace(item.Status) + "] " + strings.TrimSpace(item.Title)
+	if ref != "" {
+		line += " (" + ref
+		if parentRef := strings.TrimSpace(item.DependsOnRef); parentRef != "" && depth == 0 {
+			if _, ok := byRef[parentRef]; !ok {
+				line += "; depends_on_ref=" + parentRef
+			}
+		}
+		line += ")"
+	}
+	if summary := strings.TrimSpace(item.TodoSummary); summary != "" {
+		line += " - " + summary
+	}
+	lines := []string{line}
+	if notes := strings.TrimSpace(item.Notes); notes != "" {
+		lines = append(lines, indent+"  notes: "+notes)
+	}
+	for _, child := range children[ref] {
+		lines = append(lines, formatMilestoneTreeItem(child, children, visited, depth+1, byRef)...)
+	}
+	return lines
 }
 
 func formatTodoListStoredResult(result TodoListStoredResult) string {

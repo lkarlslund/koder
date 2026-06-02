@@ -1128,19 +1128,21 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected images and diagrams to support expandable pan/zoom lightbox")
 	}
 	if !strings.Contains(fullPage, `visibleMilestones()`) ||
+		!strings.Contains(fullPage, `flattenedMilestones()`) ||
+		!strings.Contains(fullPage, `milestoneDependsOnRef`) ||
 		!strings.Contains(fullPage, `hideClosedMilestones`) ||
 		!strings.Contains(fullPage, `toggleClosedMilestones()`) {
 		t.Fatalf("expected sidebar to hide completed/cancelled milestones")
 	}
-	if !strings.Contains(fullPage, `todoItemsForMilestone(milestone)`) {
+	if !strings.Contains(fullPage, `todoItemsForMilestone(node.milestone)`) {
 		t.Fatalf("expected sidebar to render todos as milestone children")
 	}
-	if !strings.Contains(fullPage, `milestoneTodoSummary(milestone)`) {
+	if !strings.Contains(fullPage, `milestoneTodoSummary(node.milestone)`) {
 		t.Fatalf("expected collapsed milestones to show todo counts")
 	}
 	if !strings.Contains(fullPage, `milestone-progress`) ||
-		!strings.Contains(fullPage, `milestoneProgressStyle(milestone, 'failed')`) ||
-		!strings.Contains(fullPage, `milestoneProgressStyle(milestone, 'cancelled')`) ||
+		!strings.Contains(fullPage, `milestoneProgressStyle(node.milestone, 'failed')`) ||
+		!strings.Contains(fullPage, `milestoneProgressStyle(node.milestone, 'cancelled')`) ||
 		!strings.Contains(fullPage, `.milestone-progress-failed`) {
 		t.Fatalf("expected milestone progress bars with failed/cancelled segments")
 	}
@@ -1152,7 +1154,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `writeJSONPreference(this.milestoneExpansionPreferenceName(), this.expandedMilestones || {})`) {
 		t.Fatalf("expected milestone expansion state to persist in browser storage")
 	}
-	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
+	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {

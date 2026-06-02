@@ -1665,6 +1665,40 @@
             return status !== 'completed' && status !== 'cancelled';
           });
         },
+        visibleMilestoneTree() {
+          const items = this.visibleMilestones();
+          const byRef = new Map();
+          const nodes = items.map(milestone => ({milestone, children: [], depth: 0, orphan: false}));
+          for (const node of nodes) {
+            const ref = this.milestoneRef(node.milestone);
+            if (ref) byRef.set(ref, node);
+          }
+          const roots = [];
+          for (const node of nodes) {
+            const parentRef = this.milestoneDependsOnRef(node.milestone);
+            const parent = parentRef ? byRef.get(parentRef) : null;
+            if (parent && parent !== node) {
+              parent.children.push(node);
+              continue;
+            }
+            node.orphan = !!parentRef && !parent;
+            roots.push(node);
+          }
+          return roots;
+        },
+        flattenedMilestones() {
+          const out = [];
+          const visit = (node, depth, seen) => {
+            const ref = this.milestoneRef(node.milestone);
+            if (ref && seen.has(ref)) return;
+            const nextSeen = new Set(seen);
+            if (ref) nextSeen.add(ref);
+            out.push({...node, depth});
+            for (const child of node.children) visit(child, depth + 1, nextSeen);
+          };
+          for (const node of this.visibleMilestoneTree()) visit(node, 0, new Set());
+          return out;
+        },
         closedMilestoneCount() {
           return this.milestoneItems().filter(milestone => {
             const status = this.milestoneStatus(milestone);
@@ -1680,6 +1714,13 @@
         milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
         milestoneStatus(m) { return m.Status || m.status || 'pending'; },
         milestoneNotes(m) { return m.Notes || m.notes || ''; },
+        milestoneDependsOnRef(m) { return m.DependsOnRef || m.depends_on_ref || ''; },
+        milestoneTreeTitle(node) {
+          const notes = this.milestoneNotes(node.milestone);
+          if (!node.orphan) return notes;
+          const parentRef = this.milestoneDependsOnRef(node.milestone);
+          return (notes ? notes + '\n' : '') + 'Depends on hidden or missing milestone ' + parentRef;
+        },
         milestoneExpanded(ref) { return !!this.expandedMilestones[ref]; },
         toggleMilestone(ref) {
           if (!ref) return;

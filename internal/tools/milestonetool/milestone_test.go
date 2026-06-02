@@ -55,11 +55,11 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "sometimes"}); err == nil {
 		t.Fatal("expected invalid completed boolean error")
 	}
-	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "title": "Alpha"})
+	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "title": "Alpha", "depends_on_ref": "root"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if added["ref"] != "alpha" || added["title"] != "Alpha" {
+	if added["ref"] != "alpha" || added["title"] != "Alpha" || added["depends_on_ref"] != "root" {
 		t.Fatalf("unexpected add args: %#v", added)
 	}
 	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
@@ -74,11 +74,11 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected plan definition to be disabled in execution chats")
 	}
-	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled"})
+	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled", "depends_on_ref": ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated["status"] != planning.MilestoneStatusCancelled.String() {
+	if updated["status"] != planning.MilestoneStatusCancelled.String() || updated["depends_on_ref"] != "" {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
@@ -126,6 +126,17 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected duplicate title validation error")
 	}
+	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, DependsOnRef: "missing"},
+	}); err == nil || !strings.Contains(err.Error(), "unknown milestone") {
+		t.Fatalf("expected unknown dependency validation error, got %v", err)
+	}
+	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, DependsOnRef: "beta"},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, DependsOnRef: "alpha"},
+	}); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("expected cycle validation error, got %v", err)
+	}
 }
 
 func TestMilestoneAddRejectsDuplicateTitle(t *testing.T) {
@@ -159,13 +170,24 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 		Summary: "Ship it",
 		Milestones: []planning.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
+			{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
 		},
-	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}}, domain.Chat{})
+	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done", "depends_on_ref": "beta"}}, domain.Chat{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" {
+	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" || plan.Milestones[0].DependsOnRef != "beta" {
 		t.Fatalf("unexpected updated plan: %#v", plan)
+	}
+	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": ""}}, domain.Chat{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Milestones[0].DependsOnRef != "" {
+		t.Fatalf("expected dependency to be cleared, got %#v", plan.Milestones[0])
+	}
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": "alpha"}}, domain.Chat{}); err == nil {
+		t.Fatal("expected self dependency error")
 	}
 	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, domain.Chat{}); err == nil {
 		t.Fatal("expected missing milestone error")
@@ -340,7 +362,7 @@ func TestListAndAddExecute(t *testing.T) {
 	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusCompleted, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady, Position: 1},
-		{Ref: "gamma", Title: "Gamma", Status: planning.MilestoneStatusExecuting, Position: 2},
+		{Ref: "gamma", Title: "Gamma", Status: planning.MilestoneStatusExecuting, DependsOnRef: "beta", Position: 2},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -362,11 +384,11 @@ func TestListAndAddExecute(t *testing.T) {
 	if !strings.Contains(result.Output, "Milestones summary: 1 ready, 1 executing, 1 completed") {
 		t.Fatalf("expected milestone status summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "[ready] Beta (beta) - todos: 1 pending, 1 completed") {
+	if !strings.Contains(result.Output, "- [ready] Beta (beta) - todos: 1 pending, 1 completed") {
 		t.Fatalf("expected beta todo summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "[executing] Gamma (gamma) - no todos added to milestone") {
-		t.Fatalf("expected empty gamma todo summary, got %q", result.Output)
+	if !strings.Contains(result.Output, "  - [executing] Gamma (gamma) - no todos added to milestone") {
+		t.Fatalf("expected indented gamma todo summary, got %q", result.Output)
 	}
 
 	result, err = (listTool{}).Execute(context.Background(), runtime, tools.Request{
@@ -382,13 +404,19 @@ func TestListAndAddExecute(t *testing.T) {
 
 	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "delta", "title": "Delta"},
+		Args: map[string]string{"ref": "delta", "title": "Delta", "depends_on_ref": "beta"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Delta") {
+	if !strings.Contains(result.Output, "Delta") || !strings.Contains(result.Output, "  - [pending] Delta") {
 		t.Fatalf("expected add output to contain new milestone, got %q", result.Output)
+	}
+	if _, err := (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"ref": "epsilon", "title": "Epsilon", "depends_on_ref": "missing"},
+	}); err == nil || !strings.Contains(err.Error(), "unknown milestone") {
+		t.Fatalf("expected unknown dependency error, got %v", err)
 	}
 }
 
@@ -398,7 +426,7 @@ func TestAddAndWritePersist(t *testing.T) {
 
 	if _, err := (addItemsTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "beta", "title": "Beta"},
+		Args: map[string]string{"ref": "beta", "title": "Beta", "depends_on_ref": "alpha"},
 	}, tools.Result{Output: "added"}); err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +434,7 @@ func TestAddAndWritePersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Milestones) != 2 || plan.Milestones[1].Ref != "beta" || plan.Milestones[1].Status != planning.MilestoneStatusPending {
+	if len(plan.Milestones) != 2 || plan.Milestones[1].Ref != "beta" || plan.Milestones[1].Status != planning.MilestoneStatusPending || plan.Milestones[1].DependsOnRef != "alpha" {
 		t.Fatalf("expected blank pending milestone to be created, got %#v", plan)
 	}
 

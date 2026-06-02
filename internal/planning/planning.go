@@ -19,12 +19,13 @@ type Plan struct {
 }
 
 type Milestone struct {
-	Ref         string
-	Title       string
-	Status      MilestoneStatus
-	Notes       string
-	Position    int
-	OwnerChatID *id.ID
+	Ref          string
+	Title        string
+	Status       MilestoneStatus
+	Notes        string
+	DependsOnRef string
+	Position     int
+	OwnerChatID  *id.ID
 }
 
 type TodoItem struct {
@@ -69,16 +70,18 @@ func SortTodos(items []TodoItem) {
 }
 
 type MilestoneInput struct {
-	Ref    string `json:"ref"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Notes  string `json:"notes,omitempty"`
+	Ref          string `json:"ref"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Notes        string `json:"notes,omitempty"`
+	DependsOnRef string `json:"depends_on_ref,omitempty"`
 }
 
 type MilestoneAddInput struct {
-	Ref   string `json:"ref"`
-	Title string `json:"title"`
-	Notes string `json:"notes,omitempty"`
+	Ref          string `json:"ref"`
+	Title        string `json:"title"`
+	Notes        string `json:"notes,omitempty"`
+	DependsOnRef string `json:"depends_on_ref,omitempty"`
 }
 
 type TodoAddInput struct {
@@ -100,6 +103,7 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
 		notes := strings.TrimSpace(item.Notes)
+		dependsOnRef := strings.TrimSpace(item.DependsOnRef)
 		if ref == "" || title == "" {
 			return nil, errors.New("each milestone requires ref and title")
 		}
@@ -108,15 +112,19 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 		}
 		seenRefs[ref] = struct{}{}
 		out = append(out, Milestone{
-			Ref:      ref,
-			Title:    title,
-			Status:   status,
-			Notes:    notes,
-			Position: idx,
+			Ref:          ref,
+			Title:        title,
+			Status:       status,
+			Notes:        notes,
+			DependsOnRef: dependsOnRef,
+			Position:     idx,
 		})
 	}
 	if len(out) == 0 {
 		return nil, errors.New("milestones list is empty")
+	}
+	if err := ValidateMilestoneProgress(out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -132,6 +140,7 @@ func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
 		ref := strings.TrimSpace(item.Ref)
 		title := strings.TrimSpace(item.Title)
 		notes := strings.TrimSpace(item.Notes)
+		dependsOnRef := strings.TrimSpace(item.DependsOnRef)
 		if ref == "" || title == "" {
 			return nil, errors.New("each milestone requires ref and title")
 		}
@@ -140,10 +149,11 @@ func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
 		}
 		seenRefs[ref] = struct{}{}
 		out = append(out, Milestone{
-			Ref:    ref,
-			Title:  title,
-			Status: MilestoneStatusPending,
-			Notes:  notes,
+			Ref:          ref,
+			Title:        title,
+			Status:       MilestoneStatusPending,
+			Notes:        notes,
+			DependsOnRef: dependsOnRef,
 		})
 	}
 	if len(out) == 0 {
@@ -295,6 +305,38 @@ func ValidateMilestoneProgress(items []Milestone) error {
 			return fmt.Errorf("duplicate milestone title %q", item.Title)
 		}
 		seenTitles[title] = struct{}{}
+	}
+	for _, item := range items {
+		dependsOnRef := strings.TrimSpace(item.DependsOnRef)
+		if dependsOnRef == "" {
+			continue
+		}
+		if dependsOnRef == item.Ref {
+			return fmt.Errorf("milestone %q cannot depend on itself", item.Ref)
+		}
+		if _, exists := seenRefs[dependsOnRef]; !exists {
+			return fmt.Errorf("milestone %q depends on unknown milestone %q", item.Ref, dependsOnRef)
+		}
+	}
+	if err := validateMilestoneDependencyCycles(items); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateMilestoneDependencyCycles(items []Milestone) error {
+	depends := make(map[string]string, len(items))
+	for _, item := range items {
+		depends[item.Ref] = strings.TrimSpace(item.DependsOnRef)
+	}
+	for _, item := range items {
+		seen := map[string]struct{}{}
+		for ref := item.Ref; ref != ""; ref = depends[ref] {
+			if _, exists := seen[ref]; exists {
+				return fmt.Errorf("milestone dependency cycle includes %q", ref)
+			}
+			seen[ref] = struct{}{}
+		}
 	}
 	return nil
 }

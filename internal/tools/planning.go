@@ -116,12 +116,13 @@ func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[st
 			ownerChatID = *item.OwnerChatID
 		}
 		items = append(items, MilestoneStoredItem{
-			Ref:         item.Ref,
-			Title:       item.Title,
-			Status:      item.Status.String(),
-			Notes:       item.Notes,
-			OwnerChatID: ownerChatID,
-			TodoSummary: summaries[item.Ref],
+			Ref:          item.Ref,
+			Title:        item.Title,
+			Status:       item.Status.String(),
+			Notes:        item.Notes,
+			DependsOnRef: item.DependsOnRef,
+			OwnerChatID:  ownerChatID,
+			TodoSummary:  summaries[item.Ref],
 		})
 	}
 	return MilestonePlanStoredResult{

@@ -25,15 +25,15 @@ func init() {
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestone",
 		Description: "Create one blank pending milestone.",
-		Usage:       "Create one blank pending milestone with no todo items. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref or title already exists.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Stable milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"}},"required":["ref","title"],"additionalProperties":false}`,
+		Usage:       "Create one blank pending milestone with no todo items. Use depends_on_ref to make it a child of another milestone. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref or title already exists, if depends_on_ref is unknown, or if the dependency would create a cycle.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Stable milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"depends_on_ref":{"type":"string","description":"Optional parent milestone ref for tree/dependency structure"}},"required":["ref","title"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, and optionally its title or notes. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
+		Usage:       "Update one milestone's status, title, notes, or dependency parent. Use depends_on_ref to move it under another milestone; pass an empty depends_on_ref to make it a root milestone. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"},"depends_on_ref":{"type":"string","description":"Optional parent milestone ref. Pass an empty string to make this a root milestone."}},"required":["ref","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
@@ -92,6 +92,9 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 	if notes, ok := args["notes"]; ok {
 		out["notes"] = strings.TrimSpace(notes)
 	}
+	if dependsOnRef, ok := args["depends_on_ref"]; ok {
+		out["depends_on_ref"] = strings.TrimSpace(dependsOnRef)
+	}
 	return out, nil
 }
 
@@ -113,6 +116,9 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	}
 	if notes, ok := args["notes"]; ok {
 		out["notes"] = strings.TrimSpace(notes)
+	}
+	if dependsOnRef, ok := args["depends_on_ref"]; ok {
+		out["depends_on_ref"] = strings.TrimSpace(dependsOnRef)
 	}
 	return out, nil
 }
@@ -236,17 +242,22 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 		return tools.Result{}, err
 	}
 	item := planning.Milestone{
-		Ref:    req.Args["ref"],
-		Title:  strings.TrimSpace(req.Args["title"]),
-		Status: planning.MilestoneStatusPending,
-		Notes:  strings.TrimSpace(req.Args["notes"]),
+		Ref:          req.Args["ref"],
+		Title:        strings.TrimSpace(req.Args["title"]),
+		Status:       planning.MilestoneStatusPending,
+		Notes:        strings.TrimSpace(req.Args["notes"]),
+		DependsOnRef: strings.TrimSpace(req.Args["depends_on_ref"]),
 	}
 	if err := ensureMilestoneRefsAvailable(plan.Milestones, []planning.Milestone{item}); err != nil {
 		return tools.Result{}, err
 	}
+	nextMilestones := appendMilestones(plan.Milestones, []planning.Milestone{item})
+	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
+		return tools.Result{}, err
+	}
 	return tools.MilestonePlanResult(planning.Plan{
 		Summary:    plan.Summary,
-		Milestones: appendMilestones(plan.Milestones, []planning.Milestone{item}),
+		Milestones: nextMilestones,
 	}), nil
 }
 
@@ -333,15 +344,20 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 		return nil, err
 	}
 	item := planning.Milestone{
-		Ref:    req.Args["ref"],
-		Title:  strings.TrimSpace(req.Args["title"]),
-		Status: planning.MilestoneStatusPending,
-		Notes:  strings.TrimSpace(req.Args["notes"]),
+		Ref:          req.Args["ref"],
+		Title:        strings.TrimSpace(req.Args["title"]),
+		Status:       planning.MilestoneStatusPending,
+		Notes:        strings.TrimSpace(req.Args["notes"]),
+		DependsOnRef: strings.TrimSpace(req.Args["depends_on_ref"]),
 	}
 	if err := ensureMilestoneRefsAvailable(plan.Milestones, []planning.Milestone{item}); err != nil {
 		return nil, err
 	}
-	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, appendMilestones(plan.Milestones, []planning.Milestone{item}))
+	nextMilestones := appendMilestones(plan.Milestones, []planning.Milestone{item})
+	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
+		return nil, err
+	}
+	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, nextMilestones)
 	if err != nil {
 		return nil, err
 	}
@@ -484,6 +500,9 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Ch
 		}
 		if notes, ok := req.Args["notes"]; ok {
 			milestones[idx].Notes = strings.TrimSpace(notes)
+		}
+		if dependsOnRef, ok := req.Args["depends_on_ref"]; ok {
+			milestones[idx].DependsOnRef = strings.TrimSpace(dependsOnRef)
 		}
 		break
 	}

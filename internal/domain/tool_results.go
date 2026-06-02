@@ -180,12 +180,13 @@ type UpdatePlanStoredResult struct {
 }
 
 type MilestoneStoredItem struct {
-	Ref         string `json:"ref"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes,omitempty"`
-	OwnerChatID string `json:"owner_chat_id,omitempty"`
-	TodoSummary string `json:"todo_summary,omitempty"`
+	Ref          string `json:"ref"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Notes        string `json:"notes,omitempty"`
+	DependsOnRef string `json:"depends_on_ref,omitempty"`
+	OwnerChatID  string `json:"owner_chat_id,omitempty"`
+	TodoSummary  string `json:"todo_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {

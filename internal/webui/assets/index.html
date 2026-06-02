@@ -266,28 +266,28 @@
           <div class="text-secondary">All hidden</div>
         </template>
         <div class="planning-tree" x-show="visibleMilestones().length > 0">
-          <template x-for="milestone in visibleMilestones()" :key="milestoneRef(milestone)">
-            <div class="planning-node">
-              <button type="button" class="planning-row" :title="milestoneNotes(milestone)" @click="toggleMilestone(milestoneRef(milestone))">
-                <i class="bi planning-expander" :class="milestoneExpanded(milestoneRef(milestone)) ? 'bi-dash-square' : 'bi-plus-square'"></i>
-                <i class="bi planning-status" :class="milestoneIcon(milestoneStatus(milestone))"></i>
-                <span class="planning-title text-truncate" x-text="milestoneTitle(milestone)"></span>
-                <span class="planning-ref" x-text="milestoneRef(milestone)"></span>
-                <span class="planning-counts" x-text="milestoneTodoSummary(milestone)"></span>
-                <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
+          <template x-for="node in flattenedMilestones()" :key="milestoneRef(node.milestone)">
+            <div class="planning-node" :class="{'planning-node-orphan': node.orphan}" :style="'--milestone-depth:' + node.depth">
+              <button type="button" class="planning-row" :title="milestoneTreeTitle(node)" @click="toggleMilestone(milestoneRef(node.milestone))">
+                <i class="bi planning-expander" :class="milestoneExpanded(milestoneRef(node.milestone)) ? 'bi-dash-square' : 'bi-plus-square'"></i>
+                <i class="bi planning-status" :class="milestoneIcon(milestoneStatus(node.milestone))"></i>
+                <span class="planning-title text-truncate" x-text="milestoneTitle(node.milestone)"></span>
+                <span class="planning-ref" x-text="milestoneRef(node.milestone)"></span>
+                <span class="planning-counts" x-text="node.orphan ? 'depends on ' + milestoneDependsOnRef(node.milestone) : milestoneTodoSummary(node.milestone)"></span>
+                <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(node.milestone))" x-text="milestoneStatus(node.milestone)"></span>
               </button>
-              <div class="milestone-progress" :title="milestoneProgressTitle(milestone)">
-                <span class="milestone-progress-segment milestone-progress-done" :style="milestoneProgressStyle(milestone, 'completed')"></span>
-                <span class="milestone-progress-segment milestone-progress-active" :style="milestoneProgressStyle(milestone, 'active')"></span>
-                <span class="milestone-progress-segment milestone-progress-failed" :style="milestoneProgressStyle(milestone, 'failed')"></span>
-                <span class="milestone-progress-segment milestone-progress-cancelled" :style="milestoneProgressStyle(milestone, 'cancelled')"></span>
-                <span class="milestone-progress-segment milestone-progress-pending" :style="milestoneProgressStyle(milestone, 'pending')"></span>
+              <div class="milestone-progress" :title="milestoneProgressTitle(node.milestone)">
+                <span class="milestone-progress-segment milestone-progress-done" :style="milestoneProgressStyle(node.milestone, 'completed')"></span>
+                <span class="milestone-progress-segment milestone-progress-active" :style="milestoneProgressStyle(node.milestone, 'active')"></span>
+                <span class="milestone-progress-segment milestone-progress-failed" :style="milestoneProgressStyle(node.milestone, 'failed')"></span>
+                <span class="milestone-progress-segment milestone-progress-cancelled" :style="milestoneProgressStyle(node.milestone, 'cancelled')"></span>
+                <span class="milestone-progress-segment milestone-progress-pending" :style="milestoneProgressStyle(node.milestone, 'pending')"></span>
               </div>
-              <div class="planning-children" x-show="milestoneExpanded(milestoneRef(milestone))" x-transition>
-                <template x-if="todoItemsForMilestone(milestone).length === 0">
+              <div class="planning-children" x-show="milestoneExpanded(milestoneRef(node.milestone))" x-transition>
+                <template x-if="todoItemsForMilestone(node.milestone).length === 0">
                   <div class="planning-empty">No todos</div>
                 </template>
-                <template x-for="todo in todoItemsForMilestone(milestone)" :key="todo.ID || todo.id">
+                <template x-for="todo in todoItemsForMilestone(node.milestone)" :key="todo.ID || todo.id">
                   <div class="planning-todo" :title="todoTitle(todo)">
                     <i class="bi" :class="todoIcon(todoStatus(todo))"></i>
                     <span class="text-truncate" x-text="todo.Content || todo.content"></span>
