@@ -235,10 +235,10 @@ func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 }
 
 func appendPollGuidance(output string, status tools.ChatStatus) string {
-	if !status.Busy && status.State != tools.ChatRunStateRunning && status.State != tools.ChatRunStateWaitingApproval {
-		return output
+	if status.Busy || status.State == tools.ChatRunStateRunning || status.State == tools.ChatRunStateWaitingApproval {
+		return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle, including todo or milestone progress.")
 	}
-	return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle, including todo or milestone progress.")
+	return strings.TrimSpace(output + "\nDo not poll this chat again unless new work is queued or the user explicitly asks. This poll result is current.")
 }
 
 func (updateTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {

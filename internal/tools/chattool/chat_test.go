@@ -190,8 +190,8 @@ func TestPollExecuteReturnsStatus(t *testing.T) {
 	if !strings.Contains(result.Output, "Completed") {
 		t.Fatalf("expected poll output to include status, got %q", result.Output)
 	}
-	if strings.Contains(result.Output, "Do not repeatedly poll") {
-		t.Fatalf("expected completed poll output not to include busy polling guidance, got %q", result.Output)
+	if !strings.Contains(result.Output, "Do not poll this chat again") || !strings.Contains(result.Output, "This poll result is current") {
+		t.Fatalf("expected completed poll output to include final poll guidance, got %q", result.Output)
 	}
 }
 
