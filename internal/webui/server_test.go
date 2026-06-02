@@ -692,6 +692,50 @@ func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
 	}
 }
 
+func TestChatDeltaOmitsExecProcessesWhenSnapshotIsNotAuthoritative(t *testing.T) {
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat:   domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+			Status: chat.StatusWaitingLLM,
+			Active: true,
+		},
+		StatusChanged: true,
+	}
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 10, Type: "chat_delta", Payload: update})
+	if !ok {
+		t.Fatal("expected chat delta event")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if strings.Contains(string(data), "exec_processes") {
+		t.Fatalf("non-authoritative chat delta should not clear exec process list, got %s", string(data))
+	}
+}
+
+func TestChatDeltaIncludesEmptyExecProcessesWhenAuthoritative(t *testing.T) {
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat:          domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+			ExecProcesses: []domain.ExecProcess{},
+			Status:        chat.StatusIdle,
+		},
+		StatusChanged: true,
+	}
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 11, Type: "chat_delta", Payload: update})
+	if !ok {
+		t.Fatal("expected chat delta event")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if !strings.Contains(string(data), `"exec_processes":[]`) {
+		t.Fatalf("authoritative empty exec process list should clear UI state, got %s", string(data))
+	}
+}
+
 func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	state := app.State{
 		Session:       domain.Session{ID: "session-1", Title: "Session"},

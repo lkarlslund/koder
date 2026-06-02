@@ -1173,7 +1173,6 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		Chat:              snapshot.Chat,
 		Approvals:         snapshot.Approvals,
 		Queue:             snapshot.QueuedInputs,
-		ExecProcesses:     snapshot.ExecProcesses,
 		Context:           snapshot.Context,
 		TokenUsage:        snapshot.TokenUsage,
 		Status:            string(snapshot.Status),
@@ -1184,6 +1183,9 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		StatusChanged:     update.StatusChanged,
 		ContextChanged:    update.ContextChanged,
 		ApprovalsChanged:  update.ApprovalsChanged,
+	}
+	if snapshot.ExecProcesses != nil {
+		delta.ExecProcesses = snapshot.ExecProcesses
 	}
 	if delta.Status == "" && update.Status != "" {
 		delta.Status = string(update.Status)
