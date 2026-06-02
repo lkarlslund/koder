@@ -184,6 +184,7 @@ type Chat struct {
 	ContextTokensKnown     bool
 	Position               int
 	Archived               bool
+	AutoRestart            bool
 	QueuedInputs           []QueuedInput
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

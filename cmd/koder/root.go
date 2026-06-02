@@ -187,11 +187,11 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 			}
 			return ctx.Err()
 		case signal := <-sig:
-			reason := domain.NoticeReasonProcessTerminating
+			reason := chatpkg.CancelReasonShutdownInterrupt
 			if signal == syscall.SIGUSR1 {
-				reason = domain.NoticeReasonProcessRestart
+				reason = chatpkg.CancelReasonRestartInterrupt
 			}
-			if err := controller.ShutdownWithInterruptReason(context.Background(), reason); err != nil {
+			if err := controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
 				return err
 			}
 			if signal == syscall.SIGUSR1 {

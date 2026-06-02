@@ -698,6 +698,14 @@ func (s *Session) PollChat(ctx context.Context, chatID id.ID) (tools.ChatStatus,
 
 // Close closes all chat runtimes currently owned by this session.
 func (s *Session) Close(ctx context.Context) error {
+	return s.shutdownRuntimes(ctx, "")
+}
+
+func (s *Session) Shutdown(ctx context.Context, reason chatpkg.CancelReason) error {
+	return s.shutdownRuntimes(ctx, reason)
+}
+
+func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelReason) error {
 	if s == nil {
 		return nil
 	}
@@ -732,7 +740,13 @@ func (s *Session) Close(ctx context.Context) error {
 		unsub()
 	}
 	for _, rt := range runtimes {
-		if err := rt.DrainAndClose(ctx); err != nil {
+		var err error
+		if reason == "" {
+			err = rt.DrainAndClose(ctx)
+		} else {
+			err = rt.Shutdown(ctx, reason)
+		}
+		if err != nil {
 			return err
 		}
 	}

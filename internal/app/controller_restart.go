@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
@@ -11,10 +10,8 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
-const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
 const processRestartToolFailure = "Tool execution failed because koder restarted before the tool completed."
 const processStartupRunningToolFailure = "Tool execution failed because koder restarted while the tool was running."
-const processRestartToolFailureInstruction = "A tool call was interrupted by the process restart and has been marked failed. Continue from the persisted transcript and pending tool state without rerunning failed tools unless the user explicitly asks."
 
 func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Session, bool, error) {
 	sessions, err := c.workspaceSessions(ctx)
@@ -28,9 +25,7 @@ func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Sess
 			return domain.Session{}, false, err
 		}
 		for _, chatRecord := range chats {
-			if ok, err := c.chatEndsWithRestartInterrupt(ctx, chatRecord.ID); err != nil {
-				return domain.Session{}, false, err
-			} else if ok {
+			if chatRecord.AutoRestart {
 				matches = append(matches, session)
 				break
 			}
@@ -40,32 +35,22 @@ func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Sess
 	return session, session.ID != "", nil
 }
 
-func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID id.ID) (bool, error) {
-	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
-	if err != nil {
-		return false, err
-	}
-	if len(timeline) == 0 {
-		return false, nil
-	}
-	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
-	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart, nil
-}
-
 func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[id.ID]*chat.Chat, snapshots map[id.ID]chat.Snapshot) {
 	for id, snapshot := range snapshots {
-		if !shouldAutoResumeRestartInterrupted(snapshot) {
+		if !snapshot.Chat.AutoRestart {
 			continue
 		}
 		rt := runtimes[id]
 		if rt == nil {
 			continue
 		}
-		note := processRestartResumeNote
-		if hasErroredRestartTool(snapshot) {
-			note = processRestartToolFailureInstruction
+		_ = rt.ClearAutoRestart(context.Background())
+		if !shouldAutoResumeRestartInterrupted(snapshot) {
+			continue
 		}
-		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Source: domain.UserMessageSourceAutoResume, Text: note})
+		if !hasContinueQueued(snapshot) {
+			rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Source: domain.UserMessageSourceAutoResume})
+		}
 	}
 }
 
@@ -87,9 +72,7 @@ func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats 
 
 func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats []domain.Chat) error {
 	for _, chatRecord := range chats {
-		if ok, err := c.chatEndsWithProcessInterrupt(ctx, chatRecord.ID); err != nil {
-			return err
-		} else if ok {
+		if chatRecord.AutoRestart {
 			if _, err := chatpkg.FailInterruptedToolCalls(ctx, c.store, chatRecord.ID, processRestartToolFailure); err != nil {
 				return err
 			}
@@ -98,43 +81,16 @@ func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats 
 	return nil
 }
 
-func (c *Controller) chatEndsWithProcessInterrupt(ctx context.Context, chatID id.ID) (bool, error) {
-	timeline, err := chatpkg.TimelineForChat(ctx, c.store, chatID)
-	if err != nil {
-		return false, err
-	}
-	if len(timeline) == 0 {
-		return false, nil
-	}
-	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
-	if !ok || notice.Kind != domain.NoticeKindInterrupted {
-		return false, nil
-	}
-	return notice.Reason == domain.NoticeReasonProcessRestart || notice.Reason == domain.NoticeReasonProcessTerminating, nil
-}
-
 func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 	if snapshot.Active || snapshot.Status == chat.StatusWaitingApproval {
 		return false
 	}
-	if hasUserQueuedInput(snapshot) {
-		return false
-	}
-	for _, item := range allSnapshotQueuedInputs(snapshot) {
-		if item.Kind == domain.QueuedInputKindContinue || isAutoResumeRestartMessage(item.Text) {
-			return false
-		}
-	}
-	if len(snapshot.Timeline) == 0 {
-		return false
-	}
-	notice, ok := snapshot.Timeline[len(snapshot.Timeline)-1].Content.(domain.Notice)
-	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart
+	return snapshot.Chat.AutoRestart
 }
 
-func hasUserQueuedInput(snapshot chat.Snapshot) bool {
+func hasContinueQueued(snapshot chat.Snapshot) bool {
 	for _, item := range allSnapshotQueuedInputs(snapshot) {
-		if strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+		if item.Kind == domain.QueuedInputKindContinue {
 			return true
 		}
 	}
@@ -159,24 +115,4 @@ func allSnapshotQueuedInputs(snapshot chat.Snapshot) []domain.QueuedInput {
 		out = append(out, item)
 	}
 	return out
-}
-
-func isAutoResumeRestartMessage(text string) bool {
-	text = strings.TrimSpace(text)
-	return text == processRestartResumeNote || text == processRestartToolFailureInstruction
-}
-
-func hasErroredRestartTool(snapshot chat.Snapshot) bool {
-	for _, item := range snapshot.Timeline {
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		for _, tool := range assistant.Tools {
-			if tool.Status == domain.ToolStatusErrored && tool.Error != nil && tool.Error.Code == domain.NoticeReasonProcessRestart {
-				return true
-			}
-		}
-	}
-	return false
 }

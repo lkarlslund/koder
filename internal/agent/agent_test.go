@@ -5439,7 +5439,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for provider request; snapshot=%#v", rt.Snapshot())
 	}
-	rt.Cancel()
+	rt.Cancel(chatpkg.CancelReasonUserInterruptHard)
 	closeRelease()
 
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
@@ -6579,7 +6579,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 	var rt *chatpkg.Chat
 	engine.retryPause = func(ctx context.Context, _ time.Duration, _ func(time.Duration)) error {
 		if rt != nil {
-			rt.Cancel()
+			rt.Cancel(chatpkg.CancelReasonUserInterruptHard)
 		}
 		<-ctx.Done()
 		return ctx.Err()

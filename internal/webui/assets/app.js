@@ -378,6 +378,12 @@
         default: return 'user';
       }
     }
+    function userMessageHeadingText(item) {
+      const content = userMessageContent(item);
+      const text = String(firstValue(content, ['text', 'Text']) || '').trim();
+      if (!text) return '';
+      return text.replace(/\s+/g, ' ').slice(0, 160);
+    }
     function userMessageSourceBadgeClass(item) {
       switch (userMessageSourceValue(item)) {
         case 'steer': return 'text-bg-primary';
@@ -1308,6 +1314,7 @@
         renderMarkdownElement(el, text, options = {}) { renderMarkdownIntoElement(el, text, options); },
         userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
         userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
+        userMessageHeading(item) { return userMessageHeadingText(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {
           const snapshot = this.activeSnapshot();

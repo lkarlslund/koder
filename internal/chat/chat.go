@@ -149,7 +149,9 @@ type dispatchQueuedCmd struct {
 	remaining []domain.QueuedInput
 }
 
-type interruptCmd struct{}
+type interruptCmd struct {
+	reason CancelReason
+}
 type resumePendingToolsCmd struct{}
 type approveCmd struct {
 	toolCallID string
@@ -671,34 +673,26 @@ func (r *Chat) DispatchQueued(item domain.QueuedInput, remaining []domain.Queued
 	r.inbox <- dispatchQueuedCmd{item: cloned, remaining: cloneQueuedInputs(remaining)}
 }
 
-func (r *Chat) Cancel() {
+func (r *Chat) Cancel(reason CancelReason) {
 	r.mu.RLock()
 	cancel := r.cancel
-	stagedToolCancel := r.status == StatusRunningTools && len(r.running) > 0 && r.cancelState != CancelStateCancelling
+	hard := reason.Hard()
 	r.mu.RUnlock()
-	if cancel != nil && !stagedToolCancel {
+	if cancel != nil && hard {
 		cancel()
 	}
 	select {
-	case r.inbox <- interruptCmd{}:
+	case r.inbox <- interruptCmd{reason: reason}:
 	default:
 	}
 }
 
 func (r *Chat) StopAfterCurrentTurn() {
-	r.mu.Lock()
-	if r.closed || !r.active {
-		r.mu.Unlock()
-		return
-	}
-	r.draining = true
-	r.statusText = "Stopping after current turn"
-	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	r.Cancel(CancelReasonUserInterrupt)
 }
 
 func (r *Chat) Interrupt() {
-	r.Cancel()
+	r.Cancel(CancelReasonUserInterruptHard)
 }
 
 func (r *Chat) ApproveTool(toolCallID string) {
@@ -720,7 +714,7 @@ func (r *Chat) Compact(instructions string) error {
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
@@ -761,11 +755,24 @@ func (r *Chat) InterruptAndClose(ctx context.Context, reason string) error {
 	return r.closeAfterDrain(ctx, strings.TrimSpace(reason), true)
 }
 
+func (r *Chat) Shutdown(ctx context.Context, reason CancelReason) error {
+	return r.closeAfterCancel(ctx, reason)
+}
+
+func (r *Chat) closeAfterCancel(ctx context.Context, reason CancelReason) error {
+	noticeReason := reason.NoticeReason()
+	if noticeReason == "" {
+		return r.closeAfterDrain(ctx, "")
+	}
+	return r.closeAfterDrain(ctx, noticeReason, reason.Hard(), reason.Restart())
+}
+
 func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, cancelActive ...bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	shouldCancelActive := len(cancelActive) > 0 && cancelActive[0]
+	autoRestart := len(cancelActive) > 1 && cancelActive[1]
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -773,6 +780,16 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 	}
 	wasActive := r.active
 	wasRunningTool := r.status == StatusRunningTools && len(r.running) > 0
+	var autoRestartChat domain.Chat
+	if wasActive && autoRestart {
+		r.chat.AutoRestart = true
+		if r.state != nil {
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.AutoRestart = true
+			})
+		}
+		autoRestartChat = r.chat
+	}
 	r.draining = true
 	if r.active {
 		if interruptReason == "" || !shouldCancelActive {
@@ -784,6 +801,11 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 	}
 	cancel := r.cancel
 	r.mu.Unlock()
+	if autoRestartChat.ID != "" && r.deps.Store != nil {
+		if err := UpdateChat(context.Background(), r.deps.Store, autoRestartChat); err != nil {
+			return err
+		}
+	}
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 	if shouldCancelActive && interruptReason != "" && cancel != nil {
 		cancel()
@@ -823,7 +845,7 @@ func (r *Chat) queueShutdownContinuation() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, item := range r.queue {
-		if item.Kind == domain.QueuedInputKindContinue || strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+		if item.Kind == domain.QueuedInputKindContinue {
 			return
 		}
 	}
@@ -894,6 +916,34 @@ func (r *Chat) SetChat(chat domain.Chat) {
 	}
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+}
+
+func (r *Chat) ClearAutoRestart(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	r.mu.Lock()
+	if !r.chat.AutoRestart {
+		r.mu.Unlock()
+		return nil
+	}
+	r.chat.AutoRestart = false
+	r.chat.UpdatedAt = time.Now().UTC()
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.AutoRestart = false
+			chat.UpdatedAt = r.chat.UpdatedAt
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	return nil
 }
 
 // UpdateMetadata updates chat metadata owned by this chat runtime.
@@ -1028,7 +1078,7 @@ func (r *Chat) loop() {
 		case dispatchQueuedCmd:
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
-			r.handleInterrupt()
+			r.handleInterrupt(typed.reason)
 		case resumePendingToolsCmd:
 			r.handleResumePendingTools()
 		case approveCmd:
@@ -1274,7 +1324,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
@@ -1294,23 +1344,34 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.runItem(ctx, item)
 }
 
-func (r *Chat) handleInterrupt() {
+func (r *Chat) handleInterrupt(reason CancelReason) {
 	r.mu.Lock()
-	if r.status == StatusRunningTools && len(r.running) > 0 {
-		if r.cancelState != CancelStateCancelling {
-			r.cancelState = CancelStateCancelling
-			r.appendRuntimeNoticeLocked("Cancelling. Tool calls running, waiting for completion. Press ESC again to cancel tool calls.", "interrupt_pending", "warning")
-			r.statusText = "Cancelling..."
-			r.mu.Unlock()
-			r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, false))
-			return
+	if r.closed || !r.active {
+		r.mu.Unlock()
+		return
+	}
+	r.draining = true
+	if reason.Restart() {
+		r.chat.AutoRestart = true
+		if r.state != nil {
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.AutoRestart = true
+			})
 		}
 	}
 	cancel := r.cancel
+	if reason.Hard() {
+		r.cancelState = CancelStateCancelling
+		r.statusText = "Interrupting..."
+	} else {
+		r.statusText = "Stopping after current turn"
+	}
 	r.mu.Unlock()
-	if cancel != nil {
+	if cancel != nil && reason.Hard() {
 		cancel()
 	}
+	_ = r.Persist(context.Background(), nil)
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionOverride) {
@@ -1339,7 +1400,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.active = true
@@ -1375,7 +1436,7 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.active = true
@@ -1447,7 +1508,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
@@ -1792,7 +1853,7 @@ func (r *Chat) maybeDispatchNext() {
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
+		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
@@ -2113,9 +2174,9 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {
 	priority := []domain.QueuedInputKind{
+		domain.QueuedInputKindContinue,
 		domain.QueuedInputKindSteer,
 		domain.QueuedInputKindRejectedSteer,
-		domain.QueuedInputKindContinue,
 		domain.QueuedInputKindQueued,
 	}
 	for _, kind := range priority {

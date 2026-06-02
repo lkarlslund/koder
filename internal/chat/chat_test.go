@@ -1434,7 +1434,7 @@ func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	}
 }
 
-func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
+func TestRuntimeCancelReasonControlsHardOrSoftStop(t *testing.T) {
 	session := domain.Session{ID: "session-1"}
 	chat := domain.Chat{ID: "chat-2", SessionID: "session-1"}
 	cancelled := false
@@ -1448,31 +1448,27 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 		running: map[string]struct{}{"call_1": {}},
 	}
 
-	rt.handleInterrupt()
+	rt.handleInterrupt(CancelReasonUserInterrupt)
 	if cancelled {
-		t.Fatal("expected first cancel to wait for tool completion")
+		t.Fatal("expected soft cancel to let running tool finish")
+	}
+	if rt.cancelState != CancelStateNone {
+		t.Fatalf("cancel state = %q", rt.cancelState)
+	}
+	if rt.statusText != "Stopping after current turn" {
+		t.Fatalf("status text = %q", rt.statusText)
+	}
+
+	rt.draining = false
+	rt.handleInterrupt(CancelReasonUserInterruptHard)
+	if !cancelled {
+		t.Fatal("expected hard cancel to cancel active work")
 	}
 	if rt.cancelState != CancelStateCancelling {
 		t.Fatalf("cancel state = %q", rt.cancelState)
 	}
-	if rt.statusText != "Cancelling..." {
+	if rt.statusText != "Interrupting..." {
 		t.Fatalf("status text = %q", rt.statusText)
-	}
-	snapshot := rt.Snapshot()
-	if len(snapshot.Timeline) != 1 {
-		t.Fatalf("expected cancellation notice item, got %#v", snapshot.Timeline)
-	}
-	notice, ok := snapshot.Timeline[0].Content.(domain.Notice)
-	if !ok {
-		t.Fatalf("unexpected cancellation notice item: %#v", snapshot.Timeline[0])
-	}
-	if got := notice.Text; got != "Cancelling. Tool calls running, waiting for completion. Press ESC again to cancel tool calls." {
-		t.Fatalf("unexpected notice body: %q", got)
-	}
-
-	rt.handleInterrupt()
-	if !cancelled {
-		t.Fatal("expected second cancel to force tool cancellation")
 	}
 }
 
@@ -1494,7 +1490,7 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 		t.Fatal("timed out waiting for prompt context")
 	}
 
-	rt.Cancel()
+	rt.Cancel(CancelReasonUserInterruptHard)
 
 	select {
 	case <-runCtx.Done():
@@ -1502,6 +1498,15 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 		t.Fatal("expected cancel to cancel streaming context immediately")
 	}
 	close(runner.events)
+	deadline := time.After(2 * time.Second)
+	for rt.Snapshot().Active {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for runtime to stop")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 func TestRuntimeInterruptAndCloseDoesNotPersistNoticeForStreamingInterrupt(t *testing.T) {
@@ -1610,6 +1615,57 @@ func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testi
 		if ok && notice.Kind == domain.NoticeKindInterrupted {
 			t.Fatalf("did not expect interruption notice for graceful restart drain, got %#v", notice)
 		}
+	}
+}
+
+func TestRuntimeRestartShutdownMarksAutoRestart(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+
+	select {
+	case <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.Shutdown(context.Background(), CancelReasonRestartInterrupt)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for !rt.Snapshot().Chat.AutoRestart {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for auto-restart marker")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(runner.events)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
+	}
+
+	chatRecord, err := GetChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !chatRecord.AutoRestart {
+		t.Fatalf("expected chat to be marked auto-restart, got %#v", chatRecord)
 	}
 }
 

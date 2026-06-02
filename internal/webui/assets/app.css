@@ -80,6 +80,7 @@
     .user-markdown-body { display: block; }
     .assistant-source-label { color: var(--bs-secondary-color); font-size: .82rem; font-weight: 600; }
     .user-source-badge { letter-spacing: 0; font-weight: 600; vertical-align: .08em; }
+    .user-message-heading { margin-left: .35rem; color: var(--bs-body-color); }
     .user-message-text > :first-child { display: inline; }
     .markdown-body { overflow-wrap: anywhere; }
     .markdown-body > :first-child { margin-top: 0; }

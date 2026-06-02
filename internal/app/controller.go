@@ -562,7 +562,7 @@ func (c *Controller) Stop() error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Cancel()
+	rt.Cancel(chat.CancelReasonUserInterruptHard)
 	return nil
 }
 
@@ -572,17 +572,30 @@ func (c *Controller) StopAfterCurrentTurn() error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.StopAfterCurrentTurn()
+	rt.Cancel(chat.CancelReasonUserInterrupt)
 	return nil
 }
 
 // Shutdown gracefully drains the active runtime and releases subscriptions.
 func (c *Controller) Shutdown(ctx context.Context) error {
-	return c.ShutdownWithInterruptReason(ctx, "")
+	return c.ShutdownWithCancelReason(ctx, "")
 }
 
 // ShutdownWithInterruptReason closes runtimes and records an interrupt reason for active chats.
 func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason string) error {
+	switch strings.TrimSpace(reason) {
+	case domain.NoticeReasonProcessRestart:
+		return c.ShutdownWithCancelReason(ctx, chat.CancelReasonRestartInterrupt)
+	case domain.NoticeReasonProcessTerminating:
+		return c.ShutdownWithCancelReason(ctx, chat.CancelReasonShutdownInterrupt)
+	case domain.NoticeReasonUserInterrupted:
+		return c.ShutdownWithCancelReason(ctx, chat.CancelReasonUserInterrupt)
+	default:
+		return c.ShutdownWithCancelReason(ctx, "")
+	}
+}
+
+func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.CancelReason) error {
 	c.mu.RLock()
 	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
 	for _, rt := range c.runtimes {
@@ -612,14 +625,16 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 	for _, unsub := range unsubs {
 		unsub()
 	}
-	reason = strings.TrimSpace(reason)
+	if c.agent != nil {
+		return c.agent.Shutdown(ctx, reason)
+	}
 	var firstErr error
 	for _, rt := range runtimes {
 		var err error
 		if reason == "" {
 			err = rt.DrainAndClose(ctx)
 		} else {
-			err = rt.DrainAndCloseWithInterruptReason(ctx, reason)
+			err = rt.Shutdown(ctx, reason)
 		}
 		if err != nil && firstErr == nil {
 			firstErr = err
@@ -1605,6 +1620,16 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		return err
 	}
 	runtimes := map[id.ID]*chat.Chat{chatRecord.ID: rt}
+	for _, item := range chats {
+		if !item.AutoRestart || item.ID == chatRecord.ID {
+			continue
+		}
+		loaded, err := owner.Chat(ctx, item.ID)
+		if err != nil {
+			return err
+		}
+		runtimes[item.ID] = loaded
+	}
 	ownerSnapshot = owner.Snapshot()
 	milestone := ownerSnapshot.Plan
 	todos := ownerSnapshot.Todos

@@ -961,6 +961,10 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
+	chatRecord.AutoRestart = true
+	if err := chatpkg.UpdateChat(ctx, st, chatRecord); err != nil {
+		t.Fatalf("mark auto restart: %v", err)
+	}
 	if _, err := chatpkg.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindBash,
@@ -969,20 +973,6 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}}, "", domain.Usage{}); err != nil {
 		t.Fatalf("append pending tool call: %v", err)
 	}
-	notice, err := chatpkg.AppendTimeline(ctx, st, chatRecord.ID, domain.Notice{
-		Level:  "warning",
-		Text:   "Interrupted",
-		Kind:   domain.NoticeKindInterrupted,
-		Reason: domain.NoticeReasonProcessRestart,
-	})
-	if err != nil {
-		t.Fatalf("append notice: %v", err)
-	}
-	notice.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(ctx, st, notice); err != nil {
-		t.Fatalf("put notice: %v", err)
-	}
-
 	engine := agent.New(cfg, st, nil, nil)
 	ctrl := New(cfg, st, engine)
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
@@ -1016,37 +1006,19 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if len(bodies) == 0 {
 		t.Fatal("expected captured provider request")
 	}
-	if strings.Contains(bodies[0], "Session update:") {
-		t.Fatalf("expected auto-resume note outside system session update, got %s", bodies[0])
+	if strings.Contains(bodies[0], "Session update:") || strings.Contains(bodies[0], "process was restarting") {
+		t.Fatalf("expected restart continuation without interruption note, got %s", bodies[0])
 	}
-	if !strings.Contains(bodies[0], processRestartToolFailureInstruction) {
-		t.Fatalf("expected visible auto-resume message in provider request, got %s", bodies[0])
+	chatRecord, err = chatpkg.GetChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	deadline = time.After(2 * time.Second)
-	for {
-		timeline, err = chatpkg.TimelineForChat(ctx, st, chatRecord.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, item := range timeline {
-			user, ok := item.Content.(domain.UserMessage)
-			if ok && user.Text == processRestartToolFailureInstruction {
-				if user.Source != domain.UserMessageSourceAutoResume {
-					t.Fatalf("auto-resume source = %q, want %q", user.Source, domain.UserMessageSourceAutoResume)
-				}
-				return
-			}
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for visible auto-resume user message, timeline=%#v", timeline)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	if chatRecord.AutoRestart {
+		t.Fatalf("expected auto-restart marker to be cleared, got %#v", chatRecord)
 	}
 }
 
-func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueue(t *testing.T) {
+func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(t *testing.T) {
 	var requestBodies atomic.Value
 	requestBodies.Store([]string(nil))
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1090,6 +1062,10 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
+	chatRecord.AutoRestart = true
+	if err := chatpkg.UpdateChat(ctx, st, chatRecord); err != nil {
+		t.Fatalf("mark auto restart: %v", err)
+	}
 	if err := chatpkg.SetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
 		ID:        id.New(),
 		Kind:      domain.QueuedInputKindSteer,
@@ -1099,20 +1075,6 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 	}}); err != nil {
 		t.Fatalf("queue user input: %v", err)
 	}
-	notice, err := chatpkg.AppendTimeline(ctx, st, chatRecord.ID, domain.Notice{
-		Level:  "warning",
-		Text:   "Interrupted",
-		Kind:   domain.NoticeKindInterrupted,
-		Reason: domain.NoticeReasonProcessRestart,
-	})
-	if err != nil {
-		t.Fatalf("append notice: %v", err)
-	}
-	notice.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(ctx, st, notice); err != nil {
-		t.Fatalf("put notice: %v", err)
-	}
-
 	engine := agent.New(cfg, st, nil, nil)
 	ctrl := New(cfg, st, engine)
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
@@ -1120,18 +1082,19 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 	}
 
 	deadline := time.After(2 * time.Second)
-	for len(requestBodies.Load().([]string)) == 0 {
+	for len(requestBodies.Load().([]string)) < 2 {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for queued user provider request")
+			t.Fatal("timed out waiting for restart continuation and queued user provider requests")
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	body := requestBodies.Load().([]string)[0]
-	if strings.Contains(body, processRestartResumeNote) || strings.Contains(body, processRestartToolFailureInstruction) {
-		t.Fatalf("did not expect restart auto-resume note in provider request, got %s", body)
+	bodies := requestBodies.Load().([]string)
+	if strings.Contains(bodies[0], "process was restarting") {
+		t.Fatalf("did not expect restart auto-resume note in provider request, got %s", bodies[0])
 	}
+	body := bodies[len(bodies)-1]
 	if !strings.Contains(body, "run the user request") {
 		t.Fatalf("expected queued user request in provider request, got %s", body)
 	}
@@ -1143,6 +1106,13 @@ func TestControllerStartupNewDoesNotAutoResumeRestartInterruptedChatWithUserQueu
 		if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceAutoResume {
 			t.Fatalf("did not expect auto-resume user message, got %#v", user)
 		}
+	}
+	chatRecord, err = chatpkg.GetChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chatRecord.AutoRestart {
+		t.Fatalf("expected auto-restart marker to be cleared, got %#v", chatRecord)
 	}
 }
 

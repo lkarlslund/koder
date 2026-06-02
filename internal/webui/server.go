@@ -508,7 +508,22 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"stopped": true}, s.controller.Stop()
 	case "stop_after_turn":
 		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurn()
+	case "shutdown":
+		var in struct {
+			Reason string `json:"reason"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		reason, ok := chat.ParseCancelReason(in.Reason)
+		if !ok {
+			return nil, fmt.Errorf("unknown shutdown reason %q", in.Reason)
+		}
+		return map[string]bool{"stopping": true}, s.controller.ShutdownWithCancelReason(ctx, reason)
 	case "restart_process":
+		if err := s.controller.ShutdownWithCancelReason(ctx, chat.CancelReasonRestartInterrupt); err != nil {
+			return nil, err
+		}
 		if err := s.requestProcessRestart(); err != nil {
 			return nil, err
 		}

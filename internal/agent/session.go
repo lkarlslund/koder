@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -108,4 +109,25 @@ func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 		}
 	}
 	return sessionpkg.DeleteSession(ctx, e.store, sessionID)
+}
+
+func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
+	if e == nil {
+		return nil
+	}
+	e.sessionMu.RLock()
+	sessions := make([]*sessionpkg.Session, 0, len(e.sessions))
+	for _, owner := range e.sessions {
+		if owner != nil {
+			sessions = append(sessions, owner)
+		}
+	}
+	e.sessionMu.RUnlock()
+	var firstErr error
+	for _, owner := range sessions {
+		if err := owner.Shutdown(ctx, reason); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

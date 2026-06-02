@@ -763,6 +763,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `class="markdown-body user-markdown-body"`) ||
 		!strings.Contains(fullPage, `class="badge user-source-badge"`) ||
+		!strings.Contains(fullPage, `class="user-message-heading" x-text="userMessageHeading(item)"`) ||
 		!strings.Contains(fullPage, `class="user-message-text" x-html="markdownHTML(item.content?.text || '')"`) ||
 		!strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
 		t.Fatalf("expected user turns to render source badges and message text")
@@ -779,6 +780,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
 		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
+	}
+	if !strings.Contains(fullPage, `<i class="bi bi-robot"></i> <span class="assistant-source-label">agent</span>`) ||
+		!strings.Contains(fullPage, `class="turn-header tool-header"`) ||
+		!strings.Contains(fullPage, `<i class="bi bi-wrench-adjustable"></i>`) {
+		t.Fatalf("expected user, assistant, and tool sections to share icon-title-timestamp headers")
 	}
 	if !strings.Contains(fullPage, `.user-turn { padding: 0; border: 0; background: transparent; }`) ||
 		!strings.Contains(fullPage, `.user-message-text > :first-child { display: inline; }`) ||
