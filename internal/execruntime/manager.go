@@ -205,22 +205,19 @@ func (m *Manager) Subscribe(chatID id.ID) (<-chan Event, func()) {
 	}
 	m.subscribers[chatID][ch] = struct{}{}
 	m.mu.Unlock()
-	closed := false
+	var once sync.Once
 	cancel := func() {
-		m.mu.Lock()
-		if closed {
-			m.mu.Unlock()
-			return
-		}
-		closed = true
-		if set := m.subscribers[chatID]; set != nil {
-			delete(set, ch)
-			if len(set) == 0 {
-				delete(m.subscribers, chatID)
+		once.Do(func() {
+			m.mu.Lock()
+			if set := m.subscribers[chatID]; set != nil {
+				delete(set, ch)
+				if len(set) == 0 {
+					delete(m.subscribers, chatID)
+				}
 			}
-		}
-		close(ch)
-		m.mu.Unlock()
+			close(ch)
+			m.mu.Unlock()
+		})
 	}
 	return ch, cancel
 }

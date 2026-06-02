@@ -3,6 +3,7 @@ package execruntime
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -106,4 +107,28 @@ func TestManagerSubscribeReceivesOutput(t *testing.T) {
 			t.Fatal("timed out waiting for output event")
 		}
 	}
+}
+
+func TestManagerSubscribeCancelIsIdempotent(t *testing.T) {
+	mgr := NewManager()
+	events, cancel := mgr.Subscribe("chat-2")
+	cancel()
+	cancel()
+	if _, ok := <-events; ok {
+		t.Fatal("expected subscription channel to close")
+	}
+}
+
+func TestManagerSubscribeCancelIsConcurrentSafe(t *testing.T) {
+	mgr := NewManager()
+	_, cancel := mgr.Subscribe("chat-2")
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cancel()
+		}()
+	}
+	wg.Wait()
 }
