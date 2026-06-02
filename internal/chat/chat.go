@@ -1103,6 +1103,11 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 	}
 	title := strings.TrimSpace(update.Title)
 	r.mu.Lock()
+	if update.Archived != nil && *update.Archived && !r.chat.Archived && !r.canArchiveLocked() {
+		r.mu.Unlock()
+		return domain.Chat{}, fmt.Errorf("cannot archive chat %s while it is not idle", r.chat.ID)
+	}
+	shouldDispatchAfterUpdate := update.Archived != nil && !*update.Archived && r.chat.Archived
 	if update.Archived != nil {
 		r.chat.Archived = *update.Archived
 	}
@@ -1129,7 +1134,18 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 		}
 	}
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+	if shouldDispatchAfterUpdate {
+		r.maybeDispatchNext()
+	}
 	return chatRecord, nil
+}
+
+func (r *Chat) canArchiveLocked() bool {
+	return !r.draining &&
+		!r.active &&
+		r.status == StatusIdle &&
+		len(r.queue) == 0 &&
+		len(r.running) == 0
 }
 
 func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolCallID string, args map[string]string, result domain.ToolResult) (domain.TimelineItem, error) {
@@ -1305,7 +1321,7 @@ func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 }
 
 func (r *Chat) shouldRenderQueuedUserInputLocked(queued domain.QueuedInput) bool {
-	if r.state == nil || queued.TimelineID != "" {
+	if r.state == nil || r.chat.Archived || queued.TimelineID != "" {
 		return false
 	}
 	if domain.UserMessageSourceForQueuedInput(queued) != domain.UserMessageSourceUser {
@@ -1442,7 +1458,7 @@ func (r *Chat) handleSendQueueItemNow(id id.ID) {
 
 func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
 	r.mu.Lock()
-	if r.draining {
+	if r.chat.Archived || r.draining {
 		r.queue = append([]domain.QueuedInput{item}, cloneQueuedInputs(remaining)...)
 		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
 		if r.state != nil {
@@ -2036,7 +2052,7 @@ func (r *Chat) handleClose() {
 
 func (r *Chat) maybeDispatchNext() {
 	r.mu.Lock()
-	if r.draining || r.active || r.status == StatusWaitingApproval {
+	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval {
 		r.mu.Unlock()
 		return
 	}
@@ -2050,7 +2066,7 @@ func (r *Chat) maybeDispatchNext() {
 		return
 	}
 	r.mu.Lock()
-	if r.draining || r.active || r.status == StatusWaitingApproval {
+	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval {
 		r.mu.Unlock()
 		return
 	}

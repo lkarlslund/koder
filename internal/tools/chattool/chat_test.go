@@ -2,6 +2,7 @@ package chattool
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ type fakeChatControl struct {
 	lastSessionID    id.ID
 	lastParentChatID id.ID
 	lastChatID       id.ID
+	updateErr        error
 }
 
 func (f *fakeChatControl) ListChats(context.Context, id.ID) ([]tools.ChatStatus, error) {
@@ -36,6 +38,9 @@ func (f *fakeChatControl) PollChat(_ context.Context, _ id.ID, chatID id.ID) (to
 }
 
 func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+	if f.updateErr != nil {
+		return tools.ChatStatus{}, f.updateErr
+	}
 	f.lastSessionID = sessionID
 	f.lastChatID = chatID
 	status := f.statuses[0]
@@ -232,5 +237,16 @@ func TestUpdateExecuteUpdatesCurrentChatByDefault(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Restored") {
 		t.Fatalf("expected update output to include chat, got %q", result.Output)
+	}
+}
+
+func TestUpdateExecuteSurfacesArchiveRuleErrors(t *testing.T) {
+	control := &fakeChatControl{updateErr: errors.New("cannot archive chat chat-20 while it is not idle")}
+	_, err := (updateTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatUpdate,
+		Args: map[string]string{"archived": "true"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not idle") {
+		t.Fatalf("expected archive rule error, got %v", err)
 	}
 }

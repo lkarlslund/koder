@@ -81,6 +81,9 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 	if !ok {
 		return tools.ChatStatus{}, fmt.Errorf("parent chat %s not found", parentChatID)
 	}
+	if parentChat.Archived {
+		return tools.ChatStatus{}, fmt.Errorf("cannot start a child chat from archived chat %s", parentChatID)
+	}
 	role := domain.WorkflowRole(strings.TrimSpace(string(req.Profile)))
 	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
 		return tools.ChatStatus{}, fmt.Errorf("profile %q is not registered", role)

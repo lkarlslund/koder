@@ -990,6 +990,34 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	}
 }
 
+func TestStartChatRejectsArchivedParent(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parent.Archived = true
+	if err := chatpkg.UpdateChat(context.Background(), st, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, nil)
+	_, err = engine.StartChat(context.Background(), session.ID, parent.ID, tools.ChatStartRequest{
+		Profile:   chatrole.General,
+		Objective: "do work",
+	})
+	if err == nil || !strings.Contains(err.Error(), "archived chat") {
+		t.Fatalf("expected archived parent error, got %v", err)
+	}
+}
+
 func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

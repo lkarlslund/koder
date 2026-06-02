@@ -447,6 +447,134 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	}
 }
 
+func TestRuntimeArchivedChatDoesNotStartQueuedTurn(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	chatRecord.Archived = true
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "should stay queued"})
+	deadline := time.After(2 * time.Second)
+	var snapshot Snapshot
+	for {
+		snapshot = rt.Snapshot()
+		if len(snapshot.QueuedInputs) == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for archived queue: %#v", snapshot.QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := runner.promptCallCount(); got != 0 {
+		t.Fatalf("prompt calls = %d, want 0", got)
+	}
+	if snapshot.Active {
+		t.Fatalf("archived chat became active: %#v", snapshot)
+	}
+	if len(snapshot.QueuedInputs) != 1 || snapshot.QueuedInputs[0].Text != "should stay queued" {
+		t.Fatalf("queued inputs = %#v", snapshot.QueuedInputs)
+	}
+	close(events)
+}
+
+func TestRuntimeUnarchiveStartsQueuedTurn(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	chatRecord.Archived = true
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "run after restore"})
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for archived queue")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	archived := false
+	if _, err := rt.UpdateMetadata(context.Background(), MetadataUpdate{Archived: &archived}); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for restored chat to start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "run after restore" {
+		t.Fatalf("prompt = %q", got)
+	}
+	close(events)
+}
+
+func TestRuntimeArchiveRequiresIdleChat(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "busy"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	archived := true
+	if _, err := rt.UpdateMetadata(context.Background(), MetadataUpdate{Archived: &archived}); err == nil || !strings.Contains(err.Error(), "not idle") {
+		t.Fatalf("expected non-idle archive error, got %v", err)
+	}
+	close(events)
+}
+
+func TestRuntimeArchiveRequiresEmptyQueue(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &runtimeFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	rt.ReplaceQueue([]domain.QueuedInput{{
+		ID:        id.New(),
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
+		Text:      "later",
+		Source:    domain.UserMessageSourceUser,
+		Held:      true,
+		CreatedAt: time.Now().UTC(),
+	}})
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for queued input")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	archived := true
+	if _, err := rt.UpdateMetadata(context.Background(), MetadataUpdate{Archived: &archived}); err == nil || !strings.Contains(err.Error(), "not idle") {
+		t.Fatalf("expected queued archive error, got %v", err)
+	}
+}
+
 func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
@@ -628,7 +756,7 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{first, second}}
 	rt := newTestChat(t, st, session, chat, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
 
 	time.Sleep(100 * time.Millisecond)
