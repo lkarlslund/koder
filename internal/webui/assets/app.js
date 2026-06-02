@@ -589,7 +589,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1444,7 +1444,32 @@
         },
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
-        execProcesses() { const snapshot = this.activeSnapshot(); return snapshot.ExecProcesses || snapshot.exec_processes || []; },
+        allExecProcesses() {
+          const snapshot = this.activeSnapshot();
+          const processes = snapshot.ExecProcesses || snapshot.exec_processes || [];
+          return Array.isArray(processes) ? processes : [];
+        },
+        execProcesses() {
+          const processes = this.allExecProcesses();
+          if (this.showAllExecProcesses) return processes;
+          return processes.filter(process => this.execProcessState(process) === 'running');
+        },
+        execProcessCount() { return this.allExecProcesses().length; },
+        runningExecProcessCount() { return this.allExecProcesses().filter(process => this.execProcessState(process) === 'running').length; },
+        execProcessCountLabel() {
+          const running = this.runningExecProcessCount();
+          const total = this.execProcessCount();
+          return this.showAllExecProcesses ? String(total) : String(running);
+        },
+        execProcessFilterTooltip() {
+          const running = this.runningExecProcessCount();
+          const total = this.execProcessCount();
+          return this.showAllExecProcesses ? 'Showing all processes for this chat (' + running + ' running of ' + total + ')' : 'Showing running processes for this chat (' + running + ' of ' + total + ')';
+        },
+        toggleExecProcessFilter() {
+          this.showAllExecProcesses = !this.showAllExecProcesses;
+          writePreference('showAllExecProcesses', this.showAllExecProcesses ? 'true' : 'false');
+        },
         activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         snapshotStatus(snapshot) { return String(snapshot?.Status || snapshot?.status || '').trim(); },

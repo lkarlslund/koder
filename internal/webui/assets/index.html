@@ -237,8 +237,14 @@
           </div>
         </div>
       </div>
-      <div class="sidebar-section" x-show="execProcesses().length > 0" style="display: none;">
-        <div class="sidebar-heading">Processes</div>
+      <div class="sidebar-section" x-show="execProcessCount() > 0" style="display: none;">
+        <div class="sidebar-heading-row">
+          <span class="sidebar-heading">Processes</span>
+          <button type="button" class="status-filter-button" :class="{active: showAllExecProcesses}" :title="execProcessFilterTooltip()" @click="toggleExecProcessFilter()">
+            <span x-text="showAllExecProcesses ? 'All' : 'Running'"></span>
+            <span class="status-filter-count" x-text="execProcessCountLabel()"></span>
+          </button>
+        </div>
         <div class="exec-process-list">
           <template x-for="process in execProcesses()" :key="execProcessID(process)">
             <div class="exec-process-row">

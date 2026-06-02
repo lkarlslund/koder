@@ -28,6 +28,7 @@
     .sidebar-info-row { display: flex; align-items: center; gap: .45rem; min-width: 0; min-height: 1.55rem; }
     .sidebar-label, .sidebar-heading { color: var(--bs-secondary-color); font-size: .82rem; line-height: 1.2; flex: 0 0 auto; }
     .sidebar-heading { font-weight: 600; }
+    .sidebar-heading-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
     .sidebar-value { min-width: 0; flex: 1 1 auto; }
     .sidebar-note { color: var(--bs-secondary-color); font-size: .82rem; line-height: 1.25; margin: .15rem 0 .25rem; }
     .context-meter { display: grid; gap: .18rem; margin-top: .12rem; }

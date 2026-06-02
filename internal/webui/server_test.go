@@ -991,8 +991,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.tool-image-thumb`) {
 		t.Fatalf("expected view_image results to render clickable image thumbnails with a lightbox")
 	}
-	if !strings.Contains(fullPage, `execProcesses()`) || !strings.Contains(fullPage, `exec-process-tooltip`) || !strings.Contains(fullPage, `execProcessOutput(process)`) {
-		t.Fatalf("expected current chat exec processes to render with console-output hover tooltips")
+	if !strings.Contains(fullPage, `execProcesses()`) ||
+		!strings.Contains(fullPage, `allExecProcesses()`) ||
+		!strings.Contains(fullPage, `showAllExecProcesses`) ||
+		!strings.Contains(fullPage, `execProcessState(process) === 'running'`) ||
+		!strings.Contains(fullPage, `exec-process-tooltip`) ||
+		!strings.Contains(fullPage, `execProcessOutput(process)`) {
+		t.Fatalf("expected current chat exec processes to render with running/default filtering and console-output hover tooltips")
 	}
 	if !strings.Contains(fullPage, `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(fullPage, `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
