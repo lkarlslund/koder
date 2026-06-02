@@ -48,6 +48,75 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 }
 
+func TestManagerWriteStdinEmptyWaitsAndDrainsNewOutput(t *testing.T) {
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "printf first; sleep 0.2; printf second; sleep 0.2",
+		YieldTime: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !strings.Contains(snap.Output, "first") {
+		t.Fatalf("expected initial drain to contain first output, got %q", snap.Output)
+	}
+	if strings.Contains(snap.Output, "second") {
+		t.Fatalf("expected initial drain to omit later output, got %q", snap.Output)
+	}
+
+	waited, err := mgr.WriteStdin(context.Background(), WriteStdinRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		ProcessID: snap.ProcessID,
+		YieldTime: time.Second,
+		MaxBytes:  1024,
+	})
+	if err != nil {
+		t.Fatalf("wait stdin: %v", err)
+	}
+	if !waited.Drained {
+		t.Fatal("expected write stdin wait to return drained output")
+	}
+	if !strings.Contains(waited.Output, "second") {
+		t.Fatalf("expected wait drain to contain second output, got %q", waited.Output)
+	}
+	if strings.Contains(waited.Output, "first") {
+		t.Fatalf("expected wait drain not to repeat first output, got %q", waited.Output)
+	}
+
+	again, err := mgr.WriteStdin(context.Background(), WriteStdinRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		ProcessID: snap.ProcessID,
+		YieldTime: 50 * time.Millisecond,
+		MaxBytes:  1024,
+	})
+	if err != nil {
+		t.Fatalf("second wait stdin: %v", err)
+	}
+	if strings.Contains(again.Output, "first") || strings.Contains(again.Output, "second") {
+		t.Fatalf("expected second wait not to repeat drained output, got %q", again.Output)
+	}
+
+	status, err := mgr.Status(context.Background(), StatusRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		ProcessID: snap.ProcessID,
+		MaxBytes:  1024,
+	})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(status.Output, "first") || !strings.Contains(status.Output, "second") {
+		t.Fatalf("expected status tail to retain full output, got %q", status.Output)
+	}
+	if status.Drained {
+		t.Fatal("expected status snapshot not to be marked drained")
+	}
+}
+
 func TestManagerListAndTerminate(t *testing.T) {
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{

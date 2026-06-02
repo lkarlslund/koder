@@ -1428,6 +1428,9 @@ func (t *toolLoopTracker) trackCalls(calls []tools.Request) (continuationPause, 
 }
 
 func toolLoopSignature(req tools.Request) string {
+	if req.Tool == domain.ToolKindExecWriteStdin && strings.TrimSpace(req.Args["chars"]) == "" && strings.TrimSpace(req.Args["close_stdin"]) == "" {
+		return ""
+	}
 	return req.Tool.String() + "\x00" + req.ArgumentsJSON()
 }
 

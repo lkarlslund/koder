@@ -85,6 +85,7 @@ type ExecStoredResult struct {
 	ExitCode    *int   `json:"exit_code,omitempty"`
 	TimeoutMS   int64  `json:"timeout_ms,omitempty"`
 	Output      string `json:"output,omitempty"`
+	OutputMode  string `json:"output_mode,omitempty"`
 	OutputBytes int    `json:"output_bytes,omitempty"`
 	StdinClosed bool   `json:"stdin_closed,omitempty"`
 	Message     string `json:"message,omitempty"`
@@ -923,6 +924,9 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	}
 	if result.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
+	}
+	if mode := strings.TrimSpace(result.OutputMode); mode != "" {
+		lines = append(lines, "output_mode: "+mode)
 	}
 	if output := strings.TrimSpace(result.Output); output != "" {
 		lines = append(lines, output)

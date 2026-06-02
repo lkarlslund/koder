@@ -30,6 +30,9 @@ const (
 	defaultTailBytes     = 64 * 1024
 	defaultPreviewBytes  = 4 * 1024
 	defaultSubscriberCap = 32
+	defaultStdinWait     = 250 * time.Millisecond
+	postExitDrainGrace   = 50 * time.Millisecond
+	maxStdinWait         = 5 * time.Minute
 )
 
 type State string
@@ -97,6 +100,7 @@ type WriteStdinRequest struct {
 	Chars      string
 	CloseStdin bool
 	MaxBytes   int
+	YieldTime  time.Duration
 }
 
 type ResizeRequest struct {
@@ -137,6 +141,7 @@ type Snapshot struct {
 	TimeoutMS   int64
 	Output      string
 	OutputBytes int
+	Drained     bool
 	StdinClosed bool
 	Lost        bool
 }
@@ -182,6 +187,7 @@ type process struct {
 	stdinClosed bool
 	lost        bool
 	output      string
+	drainOutput string
 	outputBytes int
 	proc        *exec.Cmd
 	ptyHandle   *os.File
@@ -303,14 +309,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		go m.enforceTimeout(p, req.Timeout)
 	}
 	if wait := normalizeWait(req.YieldTime); wait > 0 {
-		select {
-		case <-ctx.Done():
-			return Snapshot{}, ctx.Err()
-		case <-p.done:
-		case <-time.After(wait):
+		if err := p.waitForOutput(ctx, wait); err != nil {
+			return Snapshot{}, err
 		}
 	}
-	snap := p.snapshot(req.PreviewBytes)
+	snap := p.drainSnapshot(req.PreviewBytes)
 	m.publish(Event{Kind: EventKindState, Snapshot: snap})
 	return snap, nil
 }
@@ -346,17 +349,21 @@ func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
 	return snaps, nil
 }
 
-func (m *Manager) WriteStdin(_ context.Context, req WriteStdinRequest) (Snapshot, error) {
+func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapshot, error) {
 	p, err := m.lookup(req.SessionID, req.ChatID, req.ProcessID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	p.mu.Lock()
 	if p.state != StateRunning {
+		if req.Chars == "" && !req.CloseStdin {
+			p.mu.Unlock()
+			return p.drainSnapshot(req.MaxBytes), nil
+		}
 		p.mu.Unlock()
 		return Snapshot{}, errors.New("process is not running")
 	}
-	if p.stdin == nil {
+	if p.stdin == nil && (req.Chars != "" || req.CloseStdin) {
 		p.mu.Unlock()
 		return Snapshot{}, errors.New("stdin is not available for this process")
 	}
@@ -374,7 +381,10 @@ func (m *Manager) WriteStdin(_ context.Context, req WriteStdinRequest) (Snapshot
 		}
 	}
 	p.mu.Unlock()
-	return p.snapshot(req.MaxBytes), nil
+	if err := p.waitForOutput(ctx, normalizeStdinWait(req.YieldTime)); err != nil {
+		return Snapshot{}, err
+	}
+	return p.drainSnapshot(req.MaxBytes), nil
 }
 
 func (m *Manager) Resize(_ context.Context, req ResizeRequest) (Snapshot, error) {
@@ -518,9 +528,13 @@ func (p *process) appendOutput(delta string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.output += delta
+	p.drainOutput += delta
 	p.outputBytes += len(delta)
 	if len(p.output) > defaultTailBytes {
 		p.output = p.output[len(p.output)-defaultTailBytes:]
+	}
+	if len(p.drainOutput) > defaultTailBytes {
+		p.drainOutput = p.drainOutput[len(p.drainOutput)-defaultTailBytes:]
 	}
 }
 
@@ -552,6 +566,78 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 		OutputBytes: p.outputBytes,
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
+	}
+}
+
+func (p *process) drainSnapshot(maxBytes int) Snapshot {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	output := p.drainOutput
+	p.drainOutput = ""
+	if maxBytes <= 0 {
+		maxBytes = defaultPreviewBytes
+	}
+	if len(output) > maxBytes {
+		output = output[len(output)-maxBytes:]
+	}
+	return Snapshot{
+		ProcessID:   p.processID,
+		SessionID:   p.sessionID,
+		ChatID:      p.chatID,
+		ToolCallID:  p.toolCallID,
+		Command:     p.command,
+		Workdir:     p.workdir,
+		Shell:       p.shell,
+		TTY:         p.tty,
+		State:       p.state,
+		ExitCode:    cloneIntPtr(p.exitCode),
+		StartedAt:   p.startedAt,
+		EndedAt:     p.endedAt,
+		TimeoutMS:   p.timeout.Milliseconds(),
+		Output:      output,
+		OutputBytes: p.outputBytes,
+		Drained:     true,
+		StdinClosed: p.stdinClosed,
+		Lost:        p.lost,
+	}
+}
+
+func (p *process) waitForOutput(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(wait)
+	tick := 25 * time.Millisecond
+	for {
+		p.mu.RLock()
+		hasOutput := p.drainOutput != ""
+		exited := p.state != StateRunning
+		p.mu.RUnlock()
+		if hasOutput {
+			return nil
+		}
+		if exited {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(postExitDrainGrace):
+			}
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		if remaining < tick {
+			tick = remaining
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p.done:
+			return nil
+		case <-time.After(tick):
+		}
 	}
 }
 
@@ -630,6 +716,19 @@ func normalizeWait(delay time.Duration) time.Duration {
 	}
 	if delay > 30*time.Second {
 		return 30 * time.Second
+	}
+	return delay
+}
+
+func normalizeStdinWait(delay time.Duration) time.Duration {
+	if delay < 0 {
+		return 0
+	}
+	if delay == 0 {
+		return defaultStdinWait
+	}
+	if delay > maxStdinWait {
+		return maxStdinWait
 	}
 	return delay
 }

@@ -28,7 +28,7 @@ func init() {
 	tools.Register(statusTool{}, tools.ToolSpec{
 		Title:       "Exec status",
 		Description: "Get state and recent output for a persistent exec session.",
-		Usage:       "Get the latest state and recent output for one persistent exec session.",
+		Usage:       "Inspect the latest state and accumulated output tail for one persistent exec session. This is a non-consuming status snapshot; do not repeatedly poll it for long-running commands. Use exec_write_stdin with empty chars and yield_time_ms to wait for new output.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -41,9 +41,9 @@ func init() {
 	})
 	tools.Register(writeStdinTool{}, tools.ToolSpec{
 		Title:       "Write exec stdin",
-		Description: "Write stdin text to a running persistent exec session.",
-		Usage:       "Write stdin text to a running persistent exec session and optionally close stdin.",
-		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin"},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
+		Description: "Write stdin text to, or wait for output from, a running persistent exec session.",
+		Usage:       "Write stdin text to a persistent exec session. Pass empty chars to wait for new output or process completion without writing input. Prefer this over repeated exec_status polling for long-running commands; returned output is newly drained output since the previous consuming exec result.",
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin. Use an empty string to wait/poll for new output without writing input."},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"yield_time_ms":{"type":"integer","description":"Optional wait in milliseconds for new output before returning. Defaults to a short wait; empty chars may use longer waits."},"max_output_bytes":{"type":"integer","description":"Optional output size to return"}},"required":["process_id"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(resizeTool{}, tools.ToolSpec{
@@ -156,11 +156,15 @@ func (writeStdinTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	if chars, ok := args["chars"]; ok {
 		out["chars"] = chars
 	}
+	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
+		ms, err := tools.ParseFlexibleInt(yield)
+		if err != nil || ms < 0 {
+			return nil, errors.New("yield_time_ms must be a non-negative integer")
+		}
+		out["yield_time_ms"] = strconv.Itoa(ms)
+	}
 	if closeStdin := parseBoolArg(args, "close_stdin"); closeStdin != "" {
 		out["close_stdin"] = closeStdin
-	}
-	if out["chars"] == "" && out["close_stdin"] == "" {
-		return nil, errors.New("chars or close_stdin is required")
 	}
 	return out, nil
 }
@@ -195,6 +199,9 @@ func (commandTool) Preview(req tools.Request) string { return req.Args["cmd"] }
 func (statusTool) Preview(req tools.Request) string  { return "Inspect " + req.Args["process_id"] }
 func (listTool) Preview(req tools.Request) string    { return "List exec sessions" }
 func (writeStdinTool) Preview(req tools.Request) string {
+	if req.Args["chars"] == "" && req.Args["close_stdin"] == "" {
+		return "Wait for output from " + req.Args["process_id"]
+	}
 	return "Write stdin to " + req.Args["process_id"]
 }
 func (resizeTool) Preview(req tools.Request) string    { return "Resize " + req.Args["process_id"] }
@@ -305,11 +312,16 @@ func (writeStdinTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 		Chars:      req.Args["chars"],
 		CloseStdin: firstBool(req.Args["close_stdin"], false),
 		MaxBytes:   firstInt(req.Args["max_output_bytes"]),
+		YieldTime:  durationOrDefault(req.Args["yield_time_ms"], 0),
 	})
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := storedFromSnapshot(snap, "Updated exec session stdin")
+	message := "Updated exec session stdin"
+	if req.Args["chars"] == "" && !firstBool(req.Args["close_stdin"], false) {
+		message = "Waited for exec session output"
+	}
+	stored := storedFromSnapshot(snap, message)
 	return execResult(stored), nil
 }
 
@@ -384,6 +396,9 @@ func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string,
 	return "Listed exec sessions", result.Output
 }
 func (writeStdinTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	if req.Args["chars"] == "" && req.Args["close_stdin"] == "" {
+		return "Waited for exec output", tools.DisplayTextForStored(req.Tool, result.Stored)
+	}
 	return "Updated exec stdin", tools.DisplayTextForStored(req.Tool, result.Stored)
 }
 func (resizeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
@@ -425,6 +440,7 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 		TimeoutMS:   snap.TimeoutMS,
 		Output:      snap.Output,
 		OutputBytes: snap.OutputBytes,
+		OutputMode:  outputMode(snap),
 		StdinClosed: snap.StdinClosed,
 		Message:     message,
 	}
@@ -432,9 +448,16 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 
 func execStartMessage(snap execruntime.Snapshot) string {
 	if snap.State == execruntime.StateRunning {
-		return "Exec session is still running. Use exec_status to inspect output, exec_write_stdin to interact with stdin, or exec_terminate to stop it."
+		return "Exec session is still running. Use exec_write_stdin with empty chars to wait for new output, exec_write_stdin with chars to interact with stdin, exec_status for one-off inspection, or exec_terminate to stop it."
 	}
 	return "Exec session completed during startup grace period."
+}
+
+func outputMode(snap execruntime.Snapshot) string {
+	if snap.Drained {
+		return "incremental"
+	}
+	return "tail"
 }
 
 func storedListFromSnapshots(snaps []execruntime.Snapshot, scope, message string) tools.ExecListStoredResult {

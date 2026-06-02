@@ -6190,6 +6190,33 @@ func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
 	}
 }
 
+func TestToolLoopTrackerAllowsRepeatedExecWriteStdinWaits(t *testing.T) {
+	t.Parallel()
+
+	tracker := toolLoopTracker{}
+	for range repeatedToolLoopThreshold + 1 {
+		if pause, ok := tracker.trackCalls([]tools.Request{{
+			Tool: domain.ToolKindExecWriteStdin,
+			Args: map[string]string{"process_id": "exec_1", "chars": ""},
+		}}); ok {
+			t.Fatalf("did not expect pause for empty exec_write_stdin wait, got %#v", pause)
+		}
+	}
+
+	for idx := range repeatedToolLoopThreshold {
+		pause, ok := tracker.trackCalls([]tools.Request{{
+			Tool: domain.ToolKindExecStatus,
+			Args: map[string]string{"process_id": "exec_1"},
+		}})
+		if idx < repeatedToolLoopThreshold-1 && ok {
+			t.Fatalf("did not expect exec_status pause before threshold, got %#v", pause)
+		}
+		if idx == repeatedToolLoopThreshold-1 && !ok {
+			t.Fatal("expected repeated exec_status to pause")
+		}
+	}
+}
+
 func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	t.Parallel()
 
