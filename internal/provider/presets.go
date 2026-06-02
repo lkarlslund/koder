@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"hash/fnv"
 	"net/url"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/id"
 )
 
 const (
@@ -95,6 +97,34 @@ func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]
 		return nil
 	}
 	return body
+}
+
+func WithLlamaCacheAffinity(body map[string]any, cfg config.Provider, sessionID, chatID id.ID) map[string]any {
+	if cfg.LlamaSlots <= 0 || !looksLikeLlamaProvider(cfg) {
+		return body
+	}
+	key := strings.TrimSpace(string(chatID))
+	if config.NormalizeLlamaSlotScope(cfg.LlamaSlotScope) == "session" {
+		key = strings.TrimSpace(string(sessionID))
+	}
+	if key == "" {
+		return body
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["cache_prompt"] = true
+	body["id_slot"] = stableSlot(key, cfg.LlamaSlots)
+	return body
+}
+
+func stableSlot(key string, slots int) int {
+	if slots <= 0 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32() % uint32(slots))
 }
 
 func applyModelRequestOptions(body map[string]any, cfg config.Provider, model config.ModelConfig) {
@@ -205,4 +235,22 @@ func isDashScopeBaseURL(raw string) bool {
 	}
 	host := strings.ToLower(parsed.Hostname())
 	return strings.Contains(host, "dashscope.aliyuncs.com") || strings.Contains(host, "dashscope-intl.aliyuncs.com")
+}
+
+func looksLikeLlamaProvider(cfg config.Provider) bool {
+	for _, value := range []string{cfg.Kind, cfg.TemplateID, cfg.Name} {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "llama") {
+			return true
+		}
+	}
+	parsed, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

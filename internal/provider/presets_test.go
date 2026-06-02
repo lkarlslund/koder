@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/id"
 )
 
 func TestAutoMatchPresetIDMatchesQwen36(t *testing.T) {
@@ -96,5 +97,55 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected explicit options body: %#v", got)
+	}
+}
+
+func TestWithLlamaCacheAffinityPinsLocalChatSlot(t *testing.T) {
+	chatID := id.ID("019e8888-0000-7000-8000-000000000001")
+	got := WithLlamaCacheAffinity(nil, config.Provider{
+		BaseURL:        "http://127.0.0.1:8000/v1",
+		LlamaSlots:     8,
+		LlamaSlotScope: "chat",
+	}, "session-a", chatID)
+	if got["cache_prompt"] != true {
+		t.Fatalf("expected cache_prompt=true, got %#v", got)
+	}
+	slot, ok := got["id_slot"].(int)
+	if !ok || slot < 0 || slot >= 8 {
+		t.Fatalf("expected bounded integer id_slot, got %#v", got["id_slot"])
+	}
+	again := WithLlamaCacheAffinity(nil, config.Provider{
+		BaseURL:        "http://127.0.0.1:8000/v1",
+		LlamaSlots:     8,
+		LlamaSlotScope: "chat",
+	}, "session-a", chatID)
+	if again["id_slot"] != slot {
+		t.Fatalf("expected stable slot, got %v then %v", slot, again["id_slot"])
+	}
+}
+
+func TestWithLlamaCacheAffinityUsesSessionScope(t *testing.T) {
+	cfg := config.Provider{
+		BaseURL:        "http://localhost:8000/v1",
+		LlamaSlots:     16,
+		LlamaSlotScope: "session",
+	}
+	first := WithLlamaCacheAffinity(nil, cfg, "session-a", "chat-a")
+	second := WithLlamaCacheAffinity(nil, cfg, "session-a", "chat-b")
+	if first["id_slot"] != second["id_slot"] {
+		t.Fatalf("expected session scoped chats to share a slot, got %v and %v", first["id_slot"], second["id_slot"])
+	}
+}
+
+func TestWithLlamaCacheAffinitySkipsRemoteCompatibleProvider(t *testing.T) {
+	got := WithLlamaCacheAffinity(map[string]any{"return_progress": true}, config.Provider{
+		BaseURL:    "https://api.example.com/v1",
+		LlamaSlots: 8,
+	}, "session-a", "chat-a")
+	if _, ok := got["id_slot"]; ok {
+		t.Fatalf("did not expect remote provider id_slot, got %#v", got)
+	}
+	if got["return_progress"] != true {
+		t.Fatalf("expected existing body fields to remain, got %#v", got)
 	}
 }

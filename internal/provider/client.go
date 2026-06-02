@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
@@ -185,6 +186,8 @@ type ToolCallError struct {
 }
 
 type ChatRequest struct {
+	SessionID          id.ID            `json:"-"`
+	ChatID             id.ID            `json:"-"`
 	Model              string           `json:"model"`
 	Messages           []Message        `json:"messages"`
 	Tools              []ToolDefinition `json:"tools,omitempty"`
@@ -192,6 +195,13 @@ type ChatRequest struct {
 	Stream             bool             `json:"stream"`
 	ExtraBody          map[string]any   `json:"-"`
 	ToolArgumentLimits map[string]int   `json:"-"`
+}
+
+type requestDebugContextKey struct{}
+
+type requestDebugContext struct {
+	SessionID id.ID
+	ChatID    id.ID
 }
 
 func (r ChatRequest) MarshalJSON() ([]byte, error) {
@@ -560,6 +570,7 @@ func (c *Client) Health(ctx context.Context) error {
 }
 
 func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatResponse, error) {
+	ctx = context.WithValue(ctx, requestDebugContextKey{}, requestDebugContext{SessionID: input.SessionID, ChatID: input.ChatID})
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
@@ -675,6 +686,7 @@ func isImageSupportProbeUnsupported(err error) bool {
 
 func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (ChatResponse, error) {
 	input.Stream = true
+	ctx = context.WithValue(ctx, requestDebugContextKey{}, requestDebugContext{SessionID: input.SessionID, ChatID: input.ChatID})
 	start := time.Now()
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
@@ -737,6 +749,8 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		}
 		trace := debugsrv.HTTPTrace{
 			ProviderID:   c.provider,
+			SessionID:    input.SessionID,
+			ChatID:       input.ChatID,
 			Method:       http.MethodPost,
 			Path:         req.URL.Path,
 			Status:       resp.StatusCode,
@@ -787,10 +801,12 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				if onEvent != nil {
 					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
 				}
-				recordTrace("", map[string]string{
+				meta := map[string]string{
 					"phase":       "stream_complete",
 					"chunk_count": strconv.Itoa(chunkCount),
-				})
+				}
+				aggregated.addPromptProgressMeta(meta)
+				recordTrace("", meta)
 				return aggregated.Response(), nil
 			}
 			var chunk chatChunk
@@ -828,10 +844,12 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		}
 
 		if errors.Is(err, io.EOF) {
-			recordTrace("", map[string]string{
+			meta := map[string]string{
 				"phase":       "stream_eof",
 				"chunk_count": strconv.Itoa(chunkCount),
-			})
+			}
+			aggregated.addPromptProgressMeta(meta)
+			recordTrace("", meta)
 			return aggregated.Response(), nil
 		}
 	}
@@ -846,11 +864,15 @@ func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.
 	}
 	meta["phase"] = phase
 	var requestHeaders map[string]string
+	var debugMeta requestDebugContext
 	if resp.Request != nil {
 		requestHeaders = redactHeaders(resp.Request.Header)
+		debugMeta, _ = resp.Request.Context().Value(requestDebugContextKey{}).(requestDebugContext)
 	}
 	trace := debugsrv.HTTPTrace{
 		ProviderID:   c.provider,
+		SessionID:    debugMeta.SessionID,
+		ChatID:       debugMeta.ChatID,
 		Method:       method,
 		Path:         path,
 		Status:       resp.StatusCode,
@@ -972,6 +994,12 @@ type streamedChatResponse struct {
 	usage              domain.Usage
 	toolCalls          []ToolCall
 	promptProgressSeen bool
+	promptProgress     struct {
+		total     int
+		cache     int
+		processed int
+		timeMS    int64
+	}
 }
 
 func (r *streamedChatResponse) Apply(chunk chatChunk) {
@@ -1001,7 +1029,21 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 	}
 	if chunk.PromptProgress.Total > 0 || chunk.PromptProgress.Processed > 0 || chunk.PromptProgress.Cache > 0 {
 		r.promptProgressSeen = true
+		r.promptProgress.total = chunk.PromptProgress.Total
+		r.promptProgress.cache = chunk.PromptProgress.Cache
+		r.promptProgress.processed = chunk.PromptProgress.Processed
+		r.promptProgress.timeMS = chunk.PromptProgress.TimeMS
 	}
+}
+
+func (r streamedChatResponse) addPromptProgressMeta(meta map[string]string) {
+	if !r.promptProgressSeen || meta == nil {
+		return
+	}
+	meta["prompt_progress_total"] = strconv.Itoa(r.promptProgress.total)
+	meta["prompt_progress_cache"] = strconv.Itoa(r.promptProgress.cache)
+	meta["prompt_progress_processed"] = strconv.Itoa(r.promptProgress.processed)
+	meta["prompt_progress_time_ms"] = strconv.FormatInt(r.promptProgress.timeMS, 10)
 }
 
 func cachedTokensFromUsage(values ...int) int {
@@ -1133,6 +1175,7 @@ type tracingTransport struct {
 
 func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	start := time.Now()
+	meta, _ := req.Context().Value(requestDebugContextKey{}).(requestDebugContext)
 	var requestBody string
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
@@ -1142,6 +1185,8 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	resp, err := t.base.RoundTrip(req)
 	trace := debugsrv.HTTPTrace{
 		ProviderID:  t.providerID,
+		SessionID:   meta.SessionID,
+		ChatID:      meta.ChatID,
 		Method:      req.Method,
 		Path:        req.URL.Path,
 		DurationMS:  time.Since(start).Milliseconds(),

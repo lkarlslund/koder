@@ -893,11 +893,16 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
 	_, modelID, _ := chatModel(chat)
+	providerCfg := e.providerConfigForChat(chat)
+	extraBody := provider.RequestExtraBody(providerCfg, e.modelConfigForChat(chat))
+	extraBody = provider.WithLlamaCacheAffinity(extraBody, providerCfg, session.ID, chat.ID)
 	req := provider.ChatRequest{
+		SessionID:          session.ID,
+		ChatID:             chat.ID,
 		Model:              modelID,
 		Messages:           messages,
 		Stream:             stream,
-		ExtraBody:          provider.RequestExtraBody(e.providerConfigForChat(chat), e.modelConfigForChat(chat)),
+		ExtraBody:          extraBody,
 		ToolArgumentLimits: tools.ArgumentByteLimits(),
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {

@@ -55,6 +55,33 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	}
 }
 
+func TestRecorderAddsHTTPRequestDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	rec := NewRecorder()
+	bodyA := `{"messages":[{"role":"system","content":"base"},{"role":"user","content":"hello"}],"model":"m","stream":true,"tools":[{"type":"function","function":{"name":"file_read"}}]}`
+	bodyB := `{"messages":[{"role":"system","content":"base"},{"role":"user","content":"hello again"}],"model":"m","stream":true,"tools":[{"type":"function","function":{"name":"file_read"}}]}`
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: "session-a", ChatID: "chat-a", Method: http.MethodPost, Path: "/v1/chat/completions", RequestBody: bodyA})
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: "session-a", ChatID: "chat-a", Method: http.MethodPost, Path: "/v1/chat/completions", RequestBody: bodyB})
+
+	traces := rec.HTTPTraces()
+	if len(traces) != 2 {
+		t.Fatalf("expected two traces, got %#v", traces)
+	}
+	first := traces[0].Meta
+	for _, key := range []string{"request_bytes", "request_sha256", "messages_sha256", "system_sha256", "tools_sha256"} {
+		if first[key] == "" {
+			t.Fatalf("expected first trace meta %q, got %#v", key, first)
+		}
+	}
+	if traces[1].Meta["previous_lcp_bytes"] == "" {
+		t.Fatalf("expected second trace previous_lcp_bytes, got %#v", traces[1].Meta)
+	}
+	if traces[1].ChatID != "chat-a" || traces[1].SessionID != "session-a" {
+		t.Fatalf("expected trace ids to be retained, got %#v", traces[1])
+	}
+}
+
 func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	t.Parallel()
 

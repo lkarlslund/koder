@@ -2,11 +2,13 @@ package debugsrv
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +52,8 @@ type RecordedEvent struct {
 type HTTPTrace struct {
 	Timestamp    time.Time         `json:"timestamp"`
 	ProviderID   string            `json:"provider_id"`
+	SessionID    id.ID             `json:"session_id,omitempty"`
+	ChatID       id.ID             `json:"chat_id,omitempty"`
 	Method       string            `json:"method"`
 	Path         string            `json:"path"`
 	Status       int               `json:"status"`
@@ -202,6 +206,7 @@ type Recorder struct {
 	events        []RecordedEvent
 	sessionEvents map[id.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
+	lastHTTPBody  map[string]string
 }
 
 func NewRecorder() *Recorder {
@@ -211,6 +216,7 @@ func NewRecorder() *Recorder {
 		clients:       map[string]ClientDebug{},
 		chats:         map[id.ID]ChatDebug{},
 		sessionEvents: map[id.ID][]RecordedEvent{},
+		lastHTTPBody:  map[string]string{},
 	}
 }
 
@@ -303,13 +309,90 @@ func (r *Recorder) RecordHTTP(trace HTTPTrace) {
 		return
 	}
 	trace.Timestamp = time.Now().UTC()
+	fullRequestBody := trace.RequestBody
+	trace.Meta = requestDiagnostics(trace, trace.Meta)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if key := previousRequestKey(trace); key != "" {
+		if previous := r.lastHTTPBody[key]; previous != "" {
+			if trace.Meta == nil {
+				trace.Meta = map[string]string{}
+			}
+			trace.Meta["previous_lcp_bytes"] = strconv.Itoa(commonPrefixLen(previous, fullRequestBody))
+		}
+		r.lastHTTPBody[key] = fullRequestBody
+	}
 	trace.RequestBody = truncate(trace.RequestBody, 8192)
 	trace.ResponseBody = truncate(trace.ResponseBody, 8192)
 	trace.RequestHdrs = cloneMeta(trace.RequestHdrs)
 	trace.ResponseHdrs = cloneMeta(trace.ResponseHdrs)
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.httpTraces = appendHTTPTrace(r.httpTraces, trace, r.maxHTTP)
+}
+
+func requestDiagnostics(trace HTTPTrace, meta map[string]string) map[string]string {
+	body := strings.TrimSpace(trace.RequestBody)
+	if body == "" {
+		return cloneMeta(meta)
+	}
+	out := cloneMeta(meta)
+	if out == nil {
+		out = map[string]string{}
+	}
+	out["request_bytes"] = strconv.Itoa(len(body))
+	out["request_sha256"] = shortSHA256(body)
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+		return out
+	}
+	if raw := decoded["messages"]; len(raw) > 0 {
+		out["messages_sha256"] = shortSHA256(string(raw))
+		out["system_sha256"] = systemMessageHash(raw)
+	}
+	if raw := decoded["tools"]; len(raw) > 0 {
+		out["tools_sha256"] = shortSHA256(string(raw))
+	}
+	return out
+}
+
+func systemMessageHash(raw json.RawMessage) string {
+	var messages []struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return ""
+	}
+	for _, msg := range messages {
+		if strings.TrimSpace(strings.ToLower(msg.Role)) == "system" {
+			return shortSHA256(string(msg.Content))
+		}
+	}
+	return ""
+}
+
+func shortSHA256(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func previousRequestKey(trace HTTPTrace) string {
+	if trace.ChatID != "" {
+		return string(trace.ChatID)
+	}
+	if trace.SessionID != "" {
+		return string(trace.SessionID)
+	}
+	return ""
+}
+
+func commonPrefixLen(a, b string) int {
+	n := min(len(a), len(b))
+	for idx := 0; idx < n; idx++ {
+		if a[idx] != b[idx] {
+			return idx
+		}
+	}
+	return n
 }
 
 func (r *Recorder) UpdateProcess(process ProcessDebug) {

@@ -159,6 +159,47 @@ func TestChatRequestMarshalJSONIncludesExtraBody(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONOmitsInternalIDs(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		SessionID: "session-a",
+		ChatID:    "chat-a",
+		Model:     "test-model",
+		Messages:  []Message{{Role: RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "session-a") || strings.Contains(got, "chat-a") {
+		t.Fatalf("internal ids leaked into provider request: %s", got)
+	}
+}
+
+func TestChatRequestMarshalJSONStable(t *testing.T) {
+	req := ChatRequest{
+		Model:    "test-model",
+		Messages: []Message{{Role: RoleUser, Content: "hello"}},
+		ExtraBody: map[string]any{
+			"return_progress": true,
+			"id_slot":         2,
+			"cache_prompt":    true,
+		},
+	}
+	first, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		next, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(next) != string(first) {
+			t.Fatalf("request JSON changed between marshals:\nfirst=%s\nnext=%s", first, next)
+		}
+	}
+}
+
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {
@@ -872,6 +913,48 @@ func TestStreamChatWithRecorderDoesNotBufferEventStream(t *testing.T) {
 	}
 	if !strings.Contains(traces[0].ResponseBody, "[DONE]") {
 		t.Fatalf("expected done marker in response body, got %q", traces[0].ResponseBody)
+	}
+}
+
+func TestStreamChatTraceIncludesPromptProgressMeta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"prompt_progress\":{\"total\":100,\"cache\":80,\"processed\":90,\"time_ms\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	recorder := debugsrv.NewRecorder()
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{
+		SessionID: "session-a",
+		ChatID:    "chat-a",
+		Model:     "test",
+		Messages:  []Message{{Role: RoleUser, Content: "hello"}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.PromptProgressSeen {
+		t.Fatalf("expected prompt progress in response, got %#v", resp)
+	}
+	traces := recorder.HTTPTraces()
+	if len(traces) != 1 {
+		t.Fatalf("expected one trace, got %#v", traces)
+	}
+	meta := traces[0].Meta
+	if meta["prompt_progress_total"] != "100" || meta["prompt_progress_cache"] != "80" || meta["prompt_progress_processed"] != "90" || meta["prompt_progress_time_ms"] != "7" {
+		t.Fatalf("expected prompt progress trace meta, got %#v", meta)
+	}
+	if traces[0].SessionID != "session-a" || traces[0].ChatID != "chat-a" {
+		t.Fatalf("expected request ids in trace, got %#v", traces[0])
 	}
 }
 

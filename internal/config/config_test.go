@@ -84,6 +84,45 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProviderLlamaSlotSettingsNormalizeAndRoundTrip(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Providers["local"] = Provider{
+		BaseURL:        "http://127.0.0.1:8000/v1",
+		LlamaSlots:     4,
+		LlamaSlotScope: "SESSION",
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := loaded.Providers["local"]
+	if provider.LlamaSlots != 4 || provider.LlamaSlotScope != "session" {
+		t.Fatalf("expected normalized llama slot settings, got %#v", provider)
+	}
+}
+
+func TestNormalizeLlamaSlotScopeDefaultsToChat(t *testing.T) {
+	for _, value := range []string{"", "invalid", "CHAT"} {
+		if got := NormalizeLlamaSlotScope(value); got != "chat" {
+			t.Fatalf("expected %q to normalize to chat, got %q", value, got)
+		}
+	}
+	if got := NormalizeLlamaSlotScope("SESSION"); got != "session" {
+		t.Fatalf("expected session scope, got %q", got)
+	}
+}
+
 func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)
