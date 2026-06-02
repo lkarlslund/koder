@@ -1585,6 +1585,12 @@
           return parts.join(' · ');
         },
         todoStatus(todo) { return todo.Status || todo.status || 'pending'; },
+        todoNote(todo) { return String(todo?.Note || todo?.note || '').trim(); },
+        todoTitle(todo) {
+          const content = String(todo?.Content || todo?.content || '').trim();
+          const note = this.todoNote(todo);
+          return note ? content + '\n' + note : content;
+        },
         todoIcon(status) {
           if (status === 'completed') return 'bi-check-circle-fill text-success';
           if (status === 'in_progress') return 'bi-arrow-repeat text-primary';

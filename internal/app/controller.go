@@ -865,13 +865,13 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID id.ID, mileston
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
+func (c *Controller) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	c.mu.RLock()
 	sessionID := c.session.ID
 	c.mu.RUnlock()
 	if c.agent != nil && sessionID != "" {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			updated, err := owner.UpdateTodoItem(ctx, todoID, status, content)
+			updated, err := owner.UpdateTodoItem(ctx, todoID, status, content, note)
 			if err != nil {
 				return planning.TodoItem{}, err
 			}

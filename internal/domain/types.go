@@ -70,6 +70,8 @@ const (
 	ToolKindTodoAddItems           = toolkind.ToolKindTodoAddItems
 	ToolKindTodoUpdateItem         = toolkind.ToolKindTodoUpdateItem
 	ToolKindTodoFetchNext          = toolkind.ToolKindTodoFetchNext
+	ToolKindTodosAdd               = toolkind.ToolKindTodosAdd
+	ToolKindTodosUpdate            = toolkind.ToolKindTodosUpdate
 	ToolKindChatList               = toolkind.ToolKindChatList
 	ToolKindChatStart              = toolkind.ToolKindChatStart
 	ToolKindChatPoll               = toolkind.ToolKindChatPoll

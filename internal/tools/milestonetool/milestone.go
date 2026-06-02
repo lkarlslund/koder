@@ -23,10 +23,10 @@ func init() {
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
-		Title:       "Add milestones",
-		Description: "Append new pending milestones to the current plan.",
-		Usage:       "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately. If a milestone is later found to be accidental or unwanted, cancel it with milestone_update_item.",
-		Parameters:  `{"type":"object","properties":{"items":{"type":"array","description":"New milestones to append as pending","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"notes":{"type":"string"}},"required":["ref","title"]}}},"required":["items"],"additionalProperties":false}`,
+		Title:       "Add milestone",
+		Description: "Create one blank pending milestone.",
+		Usage:       "Create one blank pending milestone with no todo items. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref already exists.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Stable milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"}},"required":["ref","title"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
@@ -34,13 +34,6 @@ func init() {
 		Description: "Update one milestone's status or details.",
 		Usage:       "Update one milestone's status, and optionally its title or notes. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
 		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
-		ExposeToLLM: true,
-	})
-	tools.Register(planTool{}, tools.ToolSpec{
-		Title:       "Plan milestone",
-		Description: "Create or update a milestone and append todo items.",
-		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use ready when this creates an executable todo bucket. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
@@ -52,19 +45,16 @@ func init() {
 type listTool struct{}
 type addItemsTool struct{}
 type updateItemTool struct{}
-type planTool struct{}
 type writeTool struct{}
 
 func (listTool) Kind() domain.ToolKind       { return domain.ToolKindMilestoneList }
 func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindMilestoneAdd }
 func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindMilestoneUpdate }
-func (planTool) Kind() domain.ToolKind       { return domain.ToolKindMilestonePlan }
 func (writeTool) Kind() domain.ToolKind      { return domain.ToolKindMilestoneWrite }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
-func (planTool) BypassesPermission() bool       { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
@@ -75,10 +65,6 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 		return tools.ToolSpec{}, false
 	}
 	return spec, true
-}
-
-func (planTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return addItemsTool{}.Definition(runtime, spec)
 }
 
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -94,14 +80,19 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	raw := strings.TrimSpace(tools.FirstArg(args, "items"))
-	if raw == "" {
-		return nil, errors.New("items is empty")
-	}
-	if _, err := planning.ParseMilestoneAddItems(raw); err != nil {
+	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"items": raw}, nil
+	title := strings.TrimSpace(tools.FirstArg(args, "title"))
+	if title == "" {
+		return nil, errors.New("title is empty")
+	}
+	out := map[string]string{"ref": ref, "title": title}
+	if notes, ok := args["notes"]; ok {
+		out["notes"] = strings.TrimSpace(notes)
+	}
+	return out, nil
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -126,40 +117,6 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	return out, nil
 }
 
-func (planTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
-	if err != nil {
-		return nil, err
-	}
-	title := strings.TrimSpace(tools.FirstArg(args, "title"))
-	if title == "" {
-		return nil, errors.New("title is empty")
-	}
-	rawItems := strings.TrimSpace(tools.FirstArg(args, "items"))
-	if rawItems == "" {
-		return nil, errors.New("items is empty")
-	}
-	if _, err := planning.ParseTodoAddItems(rawItems); err != nil {
-		return nil, err
-	}
-	out := map[string]string{
-		"ref":   ref,
-		"title": title,
-		"items": rawItems,
-	}
-	if notes, ok := args["notes"]; ok {
-		out["notes"] = strings.TrimSpace(notes)
-	}
-	if status := strings.TrimSpace(tools.FirstArg(args, "status")); status != "" {
-		parsed, err := planning.ParseMilestoneStatus(status)
-		if err != nil {
-			return nil, err
-		}
-		out["status"] = parsed.String()
-	}
-	return out, nil
-}
-
 func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	raw := strings.TrimSpace(tools.FirstArg(args, "milestones", "plan"))
 	if raw == "" {
@@ -176,12 +133,9 @@ func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error
 }
 
 func (listTool) Preview(req tools.Request) string       { return "Read milestones" }
-func (addItemsTool) Preview(req tools.Request) string   { return "Add milestones" }
+func (addItemsTool) Preview(req tools.Request) string   { return "Add milestone " + req.Args["ref"] }
 func (updateItemTool) Preview(req tools.Request) string { return "Update milestone " + req.Args["ref"] }
-func (planTool) Preview(req tools.Request) string {
-	return "Plan and decompose milestone " + req.Args["ref"]
-}
-func (writeTool) Preview(req tools.Request) string { return "Replace milestones" }
+func (writeTool) Preview(req tools.Request) string      { return "Replace milestones" }
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
@@ -237,10 +191,6 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if tools.AssignedMilestoneRef(runtime) != "" {
 		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneRef(runtime))
 	}
-	items, err := planning.ParseMilestoneAddItems(req.Args["items"])
-	if err != nil {
-		return tools.Result{}, err
-	}
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -249,12 +199,18 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := ensureMilestoneRefsAvailable(plan.Milestones, items); err != nil {
+	item := planning.Milestone{
+		Ref:    req.Args["ref"],
+		Title:  strings.TrimSpace(req.Args["title"]),
+		Status: planning.MilestoneStatusPending,
+		Notes:  strings.TrimSpace(req.Args["notes"]),
+	}
+	if err := ensureMilestoneRefsAvailable(plan.Milestones, []planning.Milestone{item}); err != nil {
 		return tools.Result{}, err
 	}
 	return tools.MilestonePlanResult(planning.Plan{
 		Summary:    plan.Summary,
-		Milestones: appendMilestones(plan.Milestones, items),
+		Milestones: appendMilestones(plan.Milestones, []planning.Milestone{item}),
 	}), nil
 }
 
@@ -282,46 +238,6 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated)), nil
 }
 
-func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	control, err := tools.RequireSessionControl(runtime)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["ref"])
-	if err != nil {
-		return tools.Result{}, err
-	}
-	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	status, err := planning.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
-	if err != nil {
-		status = planning.MilestoneStatusReady
-	}
-	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:    ref,
-		Title:  strings.TrimSpace(req.Args["title"]),
-		Status: status,
-		Notes:  strings.TrimSpace(req.Args["notes"]),
-	})
-	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
-		return tools.Result{}, err
-	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, nextMilestones); err != nil {
-		return tools.Result{}, err
-	}
-	items, err := planning.ParseTodoAddItems(req.Args["items"])
-	if err != nil {
-		return tools.Result{}, err
-	}
-	todos := make([]planning.TodoItem, 0, len(items))
-	for _, item := range items {
-		todos = append(todos, planning.TodoItem{Content: item, Status: planning.TodoStatusPending})
-	}
-	return tools.TodoBucketResultWithTitle(ref, strings.TrimSpace(req.Args["title"]), todos, "Updated milestone and appended todo items"), nil
-}
-
 func (writeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	milestones, err := planning.ParseMilestones(req.Args["milestones"])
 	if err != nil {
@@ -345,15 +261,11 @@ func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string,
 }
 
 func (addItemsTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Added milestones", result.Output
+	return "Added milestone", result.Output
 }
 
 func (updateItemTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Updated milestone", result.Output
-}
-
-func (planTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Planned and decomposed milestone", result.Output
 }
 
 func (writeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
@@ -380,18 +292,20 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 	if err != nil {
 		return nil, err
 	}
-	items, err := planning.ParseMilestoneAddItems(req.Args["items"])
-	if err != nil {
-		return nil, err
-	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureMilestoneRefsAvailable(plan.Milestones, items); err != nil {
+	item := planning.Milestone{
+		Ref:    req.Args["ref"],
+		Title:  strings.TrimSpace(req.Args["title"]),
+		Status: planning.MilestoneStatusPending,
+		Notes:  strings.TrimSpace(req.Args["notes"]),
+	}
+	if err := ensureMilestoneRefsAvailable(plan.Milestones, []planning.Milestone{item}); err != nil {
 		return nil, err
 	}
-	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, appendMilestones(plan.Milestones, items))
+	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, appendMilestones(plan.Milestones, []planning.Milestone{item}))
 	if err != nil {
 		return nil, err
 	}
@@ -422,51 +336,6 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 	stored := tools.MilestoneStoredResult(tools.MilestonePlanForRef(plan, req.Args["ref"]))
 	result.Stored = stored
 	result.Output = tools.FormatMilestoneOutput(stored)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
-}
-
-func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	control, err := tools.RequireSessionControl(runtime)
-	if err != nil {
-		return nil, err
-	}
-	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	status, err := planning.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
-	if err != nil {
-		status = planning.MilestoneStatusReady
-	}
-	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:    req.Args["ref"],
-		Title:  strings.TrimSpace(req.Args["title"]),
-		Status: status,
-		Notes:  strings.TrimSpace(req.Args["notes"]),
-	})
-	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
-		return nil, err
-	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, nextMilestones); err != nil {
-		return nil, err
-	}
-	if _, err := control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, nextMilestones); err != nil {
-		return nil, err
-	}
-	items, err := planning.ParseTodoAddItems(req.Args["items"])
-	if err != nil {
-		return nil, err
-	}
-	if _, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["ref"], items); err != nil {
-		return nil, err
-	}
-	todos, err := control.ListTodos(ctx, runtime.SessionID, req.Args["ref"])
-	if err != nil {
-		return nil, err
-	}
-	stored := tools.TodoStoredResult(planning.Plan{Summary: plan.Summary, Milestones: nextMilestones}, req.Args["ref"], todos, "Updated milestone and appended todo items")
-	result.Stored = stored
-	result.Output = tools.FormatTodoOutput(stored)
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 

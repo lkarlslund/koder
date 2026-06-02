@@ -53,7 +53,7 @@ func (c SessionControl) AddTodoItems(ctx context.Context, sessionID id.ID, ref s
 	return out, nil
 }
 
-func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
+func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	item, err := modeltest.GetTodo(ctx, c.Store, id)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -61,6 +61,9 @@ func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status pla
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
 		item.Content = strings.TrimSpace(content)
+	}
+	if strings.TrimSpace(note) != "" {
+		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = time.Now().UTC()
 	if err := modeltest.PutTodo(ctx, c.Store, item); err != nil {

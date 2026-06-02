@@ -230,7 +230,7 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[MilestonePlanStoredResult](raw)
 	case ToolKindChatList, ToolKindChatStart, ToolKindChatStartDecomposition, ToolKindChatStartExecution, ToolKindChatPoll, ToolKindChatUpdate:
 		return decodeToolResult[ChatListStoredResult](raw)
-	case ToolKindTodoList, ToolKindTodoAddItems, ToolKindTodoUpdateItem, ToolKindTodoFetchNext:
+	case ToolKindTodoList, ToolKindTodoAddItems, ToolKindTodoUpdateItem, ToolKindTodoFetchNext, ToolKindTodosAdd, ToolKindTodosUpdate:
 		return decodeToolResult[TodoListStoredResult](raw)
 	case ToolKindMCP:
 		return decodeToolResult[MCPStoredResult](raw)

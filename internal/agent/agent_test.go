@@ -855,7 +855,7 @@ func TestConsumeChatUpdatesSummarizesPartialMilestoneProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessionpkg.UpdateTodo(context.Background(), st, todos[0].ID, planning.TodoStatusCompleted, ""); err != nil {
+	if _, err := sessionpkg.UpdateTodo(context.Background(), st, todos[0].ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
@@ -910,7 +910,7 @@ func TestConsumeChatUpdatesSummarizesCompletedMilestoneTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, todo := range todos {
-		if _, err := sessionpkg.UpdateTodo(context.Background(), st, todo.ID, planning.TodoStatusCompleted, ""); err != nil {
+		if _, err := sessionpkg.UpdateTodo(context.Background(), st, todo.ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3139,7 +3139,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 		switch len(requests) {
 		case 1:
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the todo.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"todo_update_item\",\"arguments\":\"{\\\"id\\\":\\\"019aa000-0000-7000-8000-000000000001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the todo.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"todos_update\",\"arguments\":\"{\\\"id\\\":\\\"019aa000-0000-7000-8000-000000000001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"I saw the tool error."}}],"usage":{"total_tokens":1}}`))
@@ -3199,13 +3199,13 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 			continue
 		}
 		for _, tool := range assistant.Tools {
-			if tool.Tool == domain.ToolKindTodoUpdateItem && tool.Status == domain.ToolStatusErrored && tool.Error != nil && strings.Contains(tool.Error.Message, "invalid todo status") {
+			if tool.Tool == domain.ToolKindTodosUpdate && tool.Status == domain.ToolStatusErrored && tool.Error != nil && strings.Contains(tool.Error.Message, "invalid todo status") {
 				sawErroredTool = true
 			}
 		}
 	}
 	if !sawErroredTool {
-		t.Fatalf("expected transcript to contain errored todo_update_item call, got %#v", timeline)
+		t.Fatalf("expected transcript to contain errored todos_update call, got %#v", timeline)
 	}
 }
 

@@ -59,7 +59,7 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if _, err := control.ListTodos(ctx, sessionRecord.ID, "beta"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
 		t.Fatalf("expected beta scope error, got %v", err)
 	}
-	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, ""); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
+	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, "", "starting work"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
 		t.Fatalf("expected beta update scope error, got %v", err)
 	}
 }

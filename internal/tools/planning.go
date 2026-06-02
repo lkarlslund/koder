@@ -19,7 +19,7 @@ type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
 	AddTodoItems(context.Context, id.ID, string, []string) ([]planning.TodoItem, error)
-	UpdateTodoItem(context.Context, id.ID, planning.TodoStatus, string) (planning.TodoItem, error)
+	UpdateTodoItem(context.Context, id.ID, planning.TodoStatus, string, string) (planning.TodoItem, error)
 	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
 }
 
@@ -131,6 +131,7 @@ func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem,
 		items = append(items, TodoStoredItem{
 			ID:      item.ID,
 			Content: item.Content,
+			Note:    item.Note,
 			Status:  item.Status.String(),
 		})
 	}

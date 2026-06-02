@@ -266,7 +266,7 @@
                   <div class="planning-empty">No todos</div>
                 </template>
                 <template x-for="todo in todoItemsForMilestone(milestone)" :key="todo.ID || todo.id">
-                  <div class="planning-todo">
+                  <div class="planning-todo" :title="todoTitle(todo)">
                     <i class="bi" :class="todoIcon(todoStatus(todo))"></i>
                     <span class="text-truncate" x-text="todo.Content || todo.content"></span>
                     <span class="badge planning-badge planning-todo-status" :class="todoBadge(todoStatus(todo))" x-text="todoStatus(todo)"></span>

@@ -273,7 +273,7 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milesto
 	return items, nil
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
+func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	item, err := todoCollection(st).Get(ctx, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -281,6 +281,9 @@ func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status plann
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
 		item.Content = strings.TrimSpace(content)
+	}
+	if strings.TrimSpace(note) != "" {
+		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = time.Now().UTC()
 	if err := PutTodo(ctx, st, item); err != nil {

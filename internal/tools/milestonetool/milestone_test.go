@@ -55,34 +55,18 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "sometimes"}); err == nil {
 		t.Fatal("expected invalid completed boolean error")
 	}
+	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "title": "Alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added["ref"] != "alpha" || added["title"] != "Alpha" {
+		t.Fatalf("unexpected add args: %#v", added)
+	}
 	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("expected empty items error")
+		t.Fatal("expected missing ref error")
 	}
 	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha"}); err == nil {
 		t.Fatal("expected missing status error")
-	}
-	args, err := (planTool{}).NormalizeArgs(map[string]string{
-		"ref":   "alpha",
-		"title": "Alpha",
-		"items": `[{"content":"one"},{"content":"two"}]`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if args["ref"] != "alpha" || args["title"] != "Alpha" {
-		t.Fatalf("unexpected normalized args: %#v", args)
-	}
-	planned, err := (planTool{}).NormalizeArgs(map[string]string{
-		"ref":    "alpha",
-		"title":  "Alpha",
-		"status": "ready",
-		"items":  `[{"content":"one"}]`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if planned["status"] != planning.MilestoneStatusReady.String() {
-		t.Fatalf("expected ready status string, got %#v", planned)
 	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
@@ -313,7 +297,7 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.UpdateTodo(context.Background(), st, items[0].ID, planning.TodoStatusCompleted, items[0].Content); err != nil {
+	if _, err := modeltest.UpdateTodo(context.Background(), st, items[0].ID, planning.TodoStatusCompleted, items[0].Content, "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -363,7 +347,7 @@ func TestListAndAddExecute(t *testing.T) {
 
 	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"items": `[{"ref":"delta","title":"Delta"}]`},
+		Args: map[string]string{"ref": "delta", "title": "Delta"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -373,26 +357,22 @@ func TestListAndAddExecute(t *testing.T) {
 	}
 }
 
-func TestPlanAndWritePersist(t *testing.T) {
+func TestAddAndWritePersist(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
 
-	if _, err := (planTool{}).PersistResult(context.Background(), runtime, tools.Request{
-		Tool: domain.ToolKindMilestonePlan,
-		Args: map[string]string{
-			"ref":   "alpha",
-			"title": "Alpha",
-			"items": `[{"content":"one"},{"content":"two"}]`,
-		},
-	}, tools.Result{Output: "planned"}); err != nil {
+	if _, err := (addItemsTool{}).PersistResult(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"ref": "beta", "title": "Beta"},
+	}, tools.Result{Output: "added"}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := modeltest.ListTodos(context.Background(), st, session.ID, "alpha")
+	plan, err := modeltest.GetPlan(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(todos) != 2 {
-		t.Fatalf("expected todo items to be created, got %#v", todos)
+	if len(plan.Milestones) != 2 || plan.Milestones[1].Ref != "beta" || plan.Milestones[1].Status != planning.MilestoneStatusPending {
+		t.Fatalf("expected blank pending milestone to be created, got %#v", plan)
 	}
 
 	if _, err := (writeTool{}).PersistResult(context.Background(), runtime, tools.Request{
@@ -404,67 +384,11 @@ func TestPlanAndWritePersist(t *testing.T) {
 	}, tools.Result{Output: "rewritten"}); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := modeltest.GetPlan(context.Background(), st, session.ID)
+	plan, err = modeltest.GetPlan(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Summary != "New plan" || len(plan.Milestones) != 1 || plan.Milestones[0].Ref != "gamma" {
 		t.Fatalf("unexpected persisted plan: %#v", plan)
-	}
-}
-
-func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
-	runtime, st, session := newMilestoneRuntime(t)
-	seedPlan(t, st, session.ID)
-
-	result, err := (planTool{}).Execute(context.Background(), runtime, tools.Request{
-		Tool: domain.ToolKindMilestonePlan,
-		Args: map[string]string{
-			"ref":   "alpha",
-			"title": "Alpha",
-			"items": `[{"content":"one"},{"content":"two"}]`,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result.Output, "# one") {
-		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
-	}
-
-	events, err := (planTool{}).PersistResult(context.Background(), runtime, tools.Request{
-		Tool: domain.ToolKindMilestonePlan,
-		Args: map[string]string{
-			"ref":   "alpha",
-			"title": "Alpha",
-			"items": `[{"content":"one"},{"content":"two"}]`,
-		},
-	}, result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := <-events
-	if !strings.Contains(event.Text, " one") || !strings.Contains(event.Text, " two") {
-		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
-	}
-
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected one tool item, got %d", len(items))
-	}
-	exec, ok := items[0].Content.(domain.ToolExecution)
-	if !ok || exec.Result == nil {
-		t.Fatalf("expected tool execution, got %#v", items[0])
-	}
-	body := exec.Result.Text
-	if !strings.Contains(body, " one") || !strings.Contains(body, " two") {
-		t.Fatalf("expected persisted body to contain real todo ids, got %q", body)
 	}
 }

@@ -33,6 +33,8 @@ const (
 	ToolKindTodoAddItems
 	ToolKindTodoUpdateItem
 	ToolKindTodoFetchNext
+	ToolKindTodosAdd
+	ToolKindTodosUpdate
 	ToolKindChatList
 	ToolKindChatStart
 	ToolKindChatPoll

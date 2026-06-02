@@ -22,15 +22,15 @@ func init() {
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add todo items",
 		Description: "Append new pending todo items to a milestone.",
-		Usage:       "Append new pending todo items to a milestone's todo bucket. Use this to break down the current milestone into concrete execution steps.",
+		Usage:       "Append new pending todo items to a milestone's todo bucket. Use this to break down the current milestone into concrete execution steps. This rejects duplicate todo content already present in the milestone; update existing todos instead of adding duplicates.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these todo items"},"items":{"type":"array","description":"New todo items to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update todo item",
-		Description: "Update one todo item's status or content.",
-		Usage:       "Update one todo item's status, and optionally its content. Use the exact UUID id returned by todo_list, todo_fetch_next, or todo_add_items. Do not invent numeric ids. Keep at most one todo item in_progress in a milestone bucket.",
-		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todo_add_items"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
+		Description: "Update one todo item's status, note, or content.",
+		Usage:       "Update one todo item's status and add a short note explaining what changed or why. Use the exact UUID id returned by todo_list, todo_fetch_next, or todos_add. Do not invent numeric ids. Keep at most one todo item in_progress in a milestone bucket. When marking completed, note what was completed in one concise sentence.",
+		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todos_add"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status","note"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
@@ -48,8 +48,8 @@ type updateItemTool struct{}
 type fetchNextTool struct{}
 
 func (listTool) Kind() domain.ToolKind       { return domain.ToolKindTodoList }
-func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindTodoAddItems }
-func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindTodoUpdateItem }
+func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindTodosAdd }
+func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindTodosUpdate }
 func (fetchNextTool) Kind() domain.ToolKind  { return domain.ToolKindTodoFetchNext }
 
 func (listTool) BypassesPermission() bool       { return true }
@@ -100,6 +100,11 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		"id":     tools.FormatTodoID(id),
 		"status": status.String(),
 	}
+	note := strings.TrimSpace(tools.FirstArg(args, "note"))
+	if note == "" {
+		return nil, fmt.Errorf("note is required")
+	}
+	out["note"] = note
 	if content := strings.TrimSpace(tools.FirstArg(args, "content")); content != "" {
 		out["content"] = content
 	}
@@ -157,6 +162,13 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
+	existing, err := control.ListTodos(ctx, runtime.SessionID, ref)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if err := planning.ValidateNoDuplicateTodoContent(existing, items); err != nil {
+		return tools.Result{}, err
+	}
 	title := planning.MilestoneTitle(plan, ref)
 	todos := make([]planning.TodoItem, 0, len(items))
 	for _, content := range items {
@@ -208,7 +220,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
 				return tools.Result{}, err
 			}
 			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
@@ -287,6 +299,13 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 	if err != nil {
 		return nil, err
 	}
+	existing, err := control.ListTodos(ctx, runtime.SessionID, req.Args["milestone_ref"])
+	if err != nil {
+		return nil, err
+	}
+	if err := planning.ValidateNoDuplicateTodoContent(existing, items); err != nil {
+		return nil, err
+	}
 	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_ref"], items)
 	if err != nil {
 		return nil, err
@@ -331,7 +350,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return nil, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
 				return nil, err
 			}
 			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)

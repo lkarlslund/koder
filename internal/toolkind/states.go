@@ -17,6 +17,8 @@ var stateKeyAliases = map[string]Kind{
 	"milestoneplananddecompose": ToolKindMilestonePlan,
 	"milestoneupdateitem":       ToolKindMilestoneUpdate,
 	"read":                      ToolKindFileRead,
+	"todoadditems":              ToolKindTodosAdd,
+	"todoupdateitem":            ToolKindTodosUpdate,
 	"write":                     ToolKindFileWrite,
 }
 

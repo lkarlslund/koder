@@ -777,8 +777,12 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	now := time.Now().UTC()
 	s.mu.RLock()
-	position := len(s.todosByRef[milestoneRef])
+	existing := slices.Clone(s.todosByRef[milestoneRef])
+	position := len(existing)
 	s.mu.RUnlock()
+	if err := planning.ValidateNoDuplicateTodoContent(existing, contents); err != nil {
+		return nil, err
+	}
 	items := make([]planning.TodoItem, 0, len(contents))
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
@@ -814,7 +818,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
+func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	if s == nil {
 		return planning.TodoItem{}, fmt.Errorf("session is required")
 	}
@@ -843,6 +847,9 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
 		item.Content = content
+	}
+	if strings.TrimSpace(note) != "" {
+		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = now
 	if err := PutTodo(ctx, s.store, item); err != nil {
@@ -958,7 +965,7 @@ func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, miles
 	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
 }
 
-func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content string) (planning.TodoItem, error) {
+func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
 		return planning.TodoItem{}, fmt.Errorf("chat is scoped to todo %q", assigned)
 	}
@@ -978,7 +985,7 @@ func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status
 			return planning.TodoItem{}, fmt.Errorf("chat is scoped to milestone %q", ref)
 		}
 	}
-	updated, err := p.session.UpdateTodoItem(ctx, todoID, status, content)
+	updated, err := p.session.UpdateTodoItem(ctx, todoID, status, content, note)
 	if err != nil {
 		return planning.TodoItem{}, err
 	}

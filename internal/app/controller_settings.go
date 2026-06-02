@@ -985,6 +985,9 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 	kinds := toolkind.KindValues()
 	out := make([]ToolDefaultPreference, 0, len(kinds))
 	for _, kind := range kinds {
+		if hideToolDefault(kind) {
+			continue
+		}
 		enabled := true
 		if value, ok := src[kind]; ok {
 			enabled = value
@@ -1001,6 +1004,15 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 	return out
 }
 
+func hideToolDefault(kind domain.ToolKind) bool {
+	switch kind {
+	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+		return true
+	default:
+		return false
+	}
+}
+
 func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 	switch kind {
 	case domain.ToolKindFileRead, domain.ToolKindFileWrite, domain.ToolKindFileEdit, domain.ToolKindFileGrep, domain.ToolKindFileGlob:
@@ -1013,7 +1025,7 @@ func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 		return "chat", "Chat"
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
 		return "milestone", "Milestone"
-	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
+	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext, domain.ToolKindTodosAdd, domain.ToolKindTodosUpdate:
 		return "todo", "Todo"
 	case domain.ToolKindViewImage, domain.ToolKindShowImage:
 		return "image", "Image"

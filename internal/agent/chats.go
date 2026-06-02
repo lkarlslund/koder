@@ -155,7 +155,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		milestone, _ = milestoneByRef(plan, milestoneRef)
 	}
 	if todoRef != "" && role == chatrole.Execution && scopedTodo != nil && scopedTodo.Status == planning.TodoStatusPending {
-		todo, err := owner.UpdateTodoItem(ctx, todoRef, planning.TodoStatusInProgress, scopedTodo.Content)
+		todo, err := owner.UpdateTodoItem(ctx, todoRef, planning.TodoStatusInProgress, scopedTodo.Content, "Started execution chat.")
 		if err != nil {
 			return tools.ChatStatus{}, err
 		}

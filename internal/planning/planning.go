@@ -32,6 +32,7 @@ type TodoItem struct {
 	SessionID    id.ID
 	MilestoneRef string
 	Content      string
+	Note         string
 	Status       TodoStatus
 	Position     int
 	CreatedAt    time.Time
@@ -209,6 +210,31 @@ func ParseTodoStatus(raw string) (TodoStatus, error) {
 		return 0, fmt.Errorf("invalid todo status %q", raw)
 	}
 	return status, nil
+}
+
+func NormalizeTodoContent(content string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(content))), " ")
+}
+
+func ValidateNoDuplicateTodoContent(existing []TodoItem, added []string) error {
+	seen := make(map[string]struct{}, len(existing)+len(added))
+	for _, item := range existing {
+		content := NormalizeTodoContent(item.Content)
+		if content != "" {
+			seen[content] = struct{}{}
+		}
+	}
+	for _, item := range added {
+		content := NormalizeTodoContent(item)
+		if content == "" {
+			continue
+		}
+		if _, ok := seen[content]; ok {
+			return fmt.Errorf("duplicate todo content %q", item)
+		}
+		seen[content] = struct{}{}
+	}
+	return nil
 }
 
 func ActiveMilestone(plan Plan) (Milestone, bool) {

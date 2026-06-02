@@ -209,6 +209,7 @@ type ChatListStoredResult struct {
 type TodoStoredItem struct {
 	ID      ID     `json:"id"`
 	Content string `json:"content"`
+	Note    string `json:"note,omitempty"`
 	Status  string `json:"status"`
 }
 

@@ -226,6 +226,7 @@ type ChatListStoredResult struct {
 type TodoStoredItem struct {
 	ID      id.ID  `json:"id"`
 	Content string `json:"content"`
+	Note    string `json:"note,omitempty"`
 	Status  string `json:"status"`
 }
 
@@ -820,7 +821,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution, domain.ToolKindChatPoll, domain.ToolKindChatUpdate:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
-	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
+	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext, domain.ToolKindTodosAdd, domain.ToolKindTodosUpdate:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
 	default:
 		return "", false
@@ -1059,6 +1060,9 @@ func formatTodoListStoredResult(result TodoListStoredResult) string {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("[%s] #%s %s", strings.TrimSpace(item.Status), item.ID, strings.TrimSpace(item.Content)))
+		if note := strings.TrimSpace(item.Note); note != "" {
+			lines = append(lines, "note: "+note)
+		}
 	}
 	if message := strings.TrimSpace(result.Message); message != "" {
 		lines = append(lines, message)
