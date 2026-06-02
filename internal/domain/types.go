@@ -182,6 +182,7 @@ type Chat struct {
 	AssignedTodoRef        ID
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
+	TokenUsage             Usage
 	Position               int
 	Archived               bool
 	AutoRestart            bool

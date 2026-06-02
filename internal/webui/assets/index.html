@@ -185,6 +185,14 @@
           <div class="context-meter-track">
             <span class="context-meter-fill" :class="activeContextClass()" :style="activeContextStyle()"></span>
           </div>
+          <div class="context-meter-row token-usage-row">
+            <span>Tokens</span>
+            <span x-text="activeTokenUsageLabel()"></span>
+          </div>
+          <div class="context-meter-row token-usage-row text-secondary">
+            <span>Cached</span>
+            <span x-text="activeCachedTokenLabel()"></span>
+          </div>
         </div>
       </div>
       <div class="sidebar-section" x-show="execProcesses().length > 0" style="display: none;">

@@ -1082,6 +1082,7 @@ type chatDelta struct {
 	Queue             any                  `json:"queue,omitempty"`
 	ExecProcesses     any                  `json:"exec_processes,omitempty"`
 	Context           any                  `json:"context,omitempty"`
+	TokenUsage        any                  `json:"token_usage,omitempty"`
 	Status            string               `json:"status,omitempty"`
 	StatusText        string               `json:"status_text,omitempty"`
 	Active            bool                 `json:"active"`
@@ -1123,6 +1124,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		Queue:             snapshot.QueuedInputs,
 		ExecProcesses:     snapshot.ExecProcesses,
 		Context:           snapshot.Context,
+		TokenUsage:        snapshot.TokenUsage,
 		Status:            string(snapshot.Status),
 		StatusText:        snapshot.StatusText,
 		Active:            snapshot.Active,

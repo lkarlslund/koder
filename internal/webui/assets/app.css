@@ -21,6 +21,7 @@
     .sidebar-note { color: var(--bs-secondary-color); font-size: .82rem; line-height: 1.25; margin: .15rem 0 .25rem; }
     .context-meter { display: grid; gap: .18rem; margin-top: .12rem; }
     .context-meter-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; color: var(--bs-secondary-color); font-size: .78rem; line-height: 1.2; }
+    .context-meter-row.token-usage-row { font-size: .75rem; }
     .context-meter-track { height: 4px; overflow: hidden; border-radius: 999px; background: var(--bs-secondary-bg); }
     .context-meter-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--bs-success); transition: width .18s ease, background-color .18s ease; }
     .context-meter-fill.context-warn { background: var(--bs-warning); }

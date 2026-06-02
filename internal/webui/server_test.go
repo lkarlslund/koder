@@ -768,6 +768,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
+	if !strings.Contains(fullPage, `activeTokenUsageLabel()`) ||
+		!strings.Contains(fullPage, `activeCachedTokenLabel()`) ||
+		!strings.Contains(fullPage, `Token burn since compact`) {
+		t.Fatalf("expected sidebar to render chat token usage counters")
+	}
 	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) ||
 		!strings.Contains(fullPage, `:disabled="!chatInterruptible()"`) ||
 		!strings.Contains(fullPage, `rpc('stop_after_turn', {})`) ||

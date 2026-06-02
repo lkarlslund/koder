@@ -73,6 +73,7 @@ type Snapshot struct {
 	Status            Status
 	StatusText        string
 	Context           domain.ContextUsage
+	TokenUsage        domain.Usage
 	Active            bool
 }
 
@@ -83,6 +84,7 @@ type Update struct {
 	StatusText        string
 	Queue             []domain.QueuedInput
 	Context           domain.ContextUsage
+	TokenUsage        domain.Usage
 	Active            bool
 	TranscriptChanged bool
 	QueueChanged      bool
@@ -640,7 +642,56 @@ func (r *Chat) SetContextUsage(ctx context.Context, usage domain.Usage) error {
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if _, err := updateStoredChatUsage(ctx, r.deps.Store, chatRecord.ID, chatRecord); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AddTokenUsage records provider token usage accumulated since the latest completed compaction.
+func (r *Chat) AddTokenUsage(ctx context.Context, usage domain.Usage) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	usage = usage.Normalized()
+	if !usage.HasAnyTokens() {
+		return nil
+	}
+	r.mu.Lock()
+	r.chat.TokenUsage = r.chat.TokenUsage.Add(usage)
+	if r.state != nil {
+		total := r.chat.TokenUsage
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.TokenUsage = total
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if _, err := updateStoredChatUsage(ctx, r.deps.Store, chatRecord.ID, chatRecord); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetTokenUsage clears provider token usage after a completed compaction starts a new burn window.
+func (r *Chat) ResetTokenUsage(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	r.mu.Lock()
+	r.chat.TokenUsage = domain.Usage{}
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.TokenUsage = domain.Usage{}
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if _, err := updateStoredChatUsage(ctx, r.deps.Store, chatRecord.ID, chatRecord); err != nil {
 			return err
 		}
 	}
@@ -975,11 +1026,12 @@ func (r *Chat) Snapshot() Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
-		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Status: r.status, StatusText: r.statusText, Active: r.active}
+		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
+	chatRecord := r.state.Chat()
 	return Snapshot{
 		Session:           r.session,
-		Chat:              r.state.Chat(),
+		Chat:              chatRecord,
 		Timeline:          r.state.SnapshotTimeline(),
 		TimelineHasMore:   !r.timelineLoaded,
 		TimelineLoadedAll: r.timelineLoaded,
@@ -989,6 +1041,7 @@ func (r *Chat) Snapshot() Snapshot {
 		Status:            r.status,
 		StatusText:        r.statusText,
 		Context:           r.state.CurrentContextSize(),
+		TokenUsage:        chatRecord.TokenUsage.Normalized(),
 		Active:            r.active,
 	}
 }
@@ -1653,6 +1706,8 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.mu.Lock()
 	transcriptChanged := false
 	contextChanged := false
+	tokenUsageChanged := false
+	metadataChanged := false
 	if queueErr != nil {
 		r.status = StatusErrored
 		r.statusText = queueErr.Error()
@@ -1708,6 +1763,17 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		transcriptChanged = true
 		contextChanged = true
 	case domain.EventKindUsage:
+		usage := evt.Usage.Normalized()
+		if usage.HasAnyTokens() {
+			r.chat.TokenUsage = r.chat.TokenUsage.Add(usage)
+			if r.state != nil {
+				total := r.chat.TokenUsage
+				r.state.UpdateChat(func(chat *domain.Chat) {
+					chat.TokenUsage = total
+				})
+			}
+			tokenUsageChanged = true
+		}
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
 			r.chat.LastKnownContextTokens = contextTokens
 			r.chat.ContextTokensKnown = true
@@ -1743,6 +1809,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		title := strings.TrimSpace(evt.Text)
 		if title != "" {
 			r.chat.Title = title
+			metadataChanged = true
 			if r.state != nil {
 				r.state.UpdateChat(func(chat *domain.Chat) {
 					chat.Title = title
@@ -1790,21 +1857,46 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		if afterTokens, ok := completedCompactionContext(evt.Item, evt.Meta); ok {
 			r.chat.LastKnownContextTokens = afterTokens
 			r.chat.ContextTokensKnown = false
+			r.chat.TokenUsage = domain.Usage{}
 			if r.state != nil {
 				r.state.UpdateChat(func(chat *domain.Chat) {
 					chat.LastKnownContextTokens = afterTokens
 					chat.ContextTokensKnown = false
+					chat.TokenUsage = domain.Usage{}
 				})
 			}
+			tokenUsageChanged = true
 			contextChanged = true
 		}
 	}
+	chatRecord := r.chat
 	r.mu.Unlock()
+	if metadataChanged && r.deps.Store != nil {
+		_ = UpdateChat(context.Background(), r.deps.Store, chatRecord)
+	}
+	if tokenUsageChanged && r.deps.Store != nil {
+		_, _ = updateStoredChatUsage(context.Background(), r.deps.Store, chatRecord.ID, chatRecord)
+	}
 	copyEvt := evt
 	if queueErr != nil {
 		copyEvt = domain.Event{Kind: domain.EventKindError, Err: queueErr}
 	}
 	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, queueChanged, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+}
+
+func updateStoredChatUsage(ctx context.Context, st *store.Store, chatID id.ID, update domain.Chat) (domain.Chat, error) {
+	stored, err := GetChat(ctx, st, chatID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	stored.LastKnownContextTokens = update.LastKnownContextTokens
+	stored.ContextTokensKnown = update.ContextTokensKnown
+	stored.TokenUsage = update.TokenUsage.Normalized()
+	stored.UpdatedAt = time.Now().UTC()
+	if err := PutChat(ctx, st, stored); err != nil {
+		return domain.Chat{}, err
+	}
+	return stored, nil
 }
 
 func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, bool, error) {
@@ -2190,6 +2282,7 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 		StatusText:        snapshot.StatusText,
 		Queue:             visibleQueuedInputs(snapshot.QueuedInputs),
 		Context:           snapshot.Context,
+		TokenUsage:        snapshot.TokenUsage,
 		Active:            snapshot.Active,
 		TranscriptChanged: transcriptChanged,
 		QueueChanged:      queueChanged,

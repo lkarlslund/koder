@@ -1586,6 +1586,30 @@
           const chat = this.activeChat();
           return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
         },
+        usageField(usage, pascal, snake) {
+          return Number((usage && (usage[pascal] ?? usage[snake])) || 0);
+        },
+        activeTokenUsage() {
+          const snapshot = this.activeSnapshot();
+          const chat = this.activeChat();
+          return snapshot.TokenUsage || snapshot.token_usage || chat.TokenUsage || chat.token_usage || {};
+        },
+        activeTokenUsageLabel() {
+          const usage = this.activeTokenUsage();
+          const total = this.usageField(usage, 'TotalTokens', 'total_tokens');
+          const prompt = this.usageField(usage, 'PromptTokens', 'prompt_tokens');
+          const completion = this.usageField(usage, 'CompletionTokens', 'completion_tokens');
+          if (!total && !prompt && !completion) return '0 used since compact';
+          const parts = [];
+          if (total) parts.push(this.formatContextTokens(total) + ' total');
+          if (prompt) parts.push(this.formatContextTokens(prompt) + ' in');
+          if (completion) parts.push(this.formatContextTokens(completion) + ' out');
+          return parts.join(' · ');
+        },
+        activeCachedTokenLabel() {
+          const cached = this.usageField(this.activeTokenUsage(), 'CachedTokens', 'cached_tokens');
+          return cached ? this.formatContextTokens(cached) + ' cached' : '0 cached';
+        },
         activeContextWindow() {
           const info = this.activeModelInfo();
           return info.context_window || info.ContextWindow || this.state.context_window || this.state.ContextWindow || 0;
@@ -1614,6 +1638,12 @@
           const snapshot = this.activeSnapshot();
           const context = snapshot.Context || snapshot.context || {};
           if (context.Estimated || context.estimated) lines.push('Estimate includes pending or unanchored transcript content');
+          const usage = this.activeTokenUsage();
+          const total = this.usageField(usage, 'TotalTokens', 'total_tokens');
+          const prompt = this.usageField(usage, 'PromptTokens', 'prompt_tokens');
+          const completion = this.usageField(usage, 'CompletionTokens', 'completion_tokens');
+          const cached = this.usageField(usage, 'CachedTokens', 'cached_tokens');
+          lines.push('Token burn since compact: ' + this.formatContextTokens(total) + ' total, ' + this.formatContextTokens(prompt) + ' input, ' + this.formatContextTokens(completion) + ' output, ' + this.formatContextTokens(cached) + ' cached');
           return lines.join('\n');
         },
         activeContextStyle() {

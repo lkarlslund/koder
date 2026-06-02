@@ -2607,6 +2607,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if chat, err := chatpkg.GetChat(ctx, e.store, chatID); err == nil {
 		chat.LastKnownContextTokens = afterContextTokens
 		chat.ContextTokensKnown = false
+		chat.TokenUsage = domain.Usage{}
 		if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {
 			return err
 		}

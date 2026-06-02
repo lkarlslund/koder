@@ -1780,6 +1780,7 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 	session, chat, _ := createSessionWithPlan(t, st)
 	chat.LastKnownContextTokens = 1200
 	chat.ContextTokensKnown = true
+	chat.TokenUsage = domain.Usage{PromptTokens: 900, CompletionTokens: 100, CachedTokens: 500, TotalTokens: 1000}
 	runner := &runtimeFakeRunner{}
 	rt := newTestChat(t, st, session, chat, runner)
 	updates, unsub := rt.Subscribe()
@@ -1826,6 +1827,9 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 			if got := update.Snapshot.Chat.LastKnownContextTokens; got != 400 {
 				t.Fatalf("chat last known context = %d", got)
 			}
+			if update.Snapshot.TokenUsage.HasAnyTokens() || update.Snapshot.Chat.TokenUsage.HasAnyTokens() {
+				t.Fatalf("expected token usage reset after compaction, got snapshot=%#v chat=%#v", update.Snapshot.TokenUsage, update.Snapshot.Chat.TokenUsage)
+			}
 			if !update.Snapshot.Context.Estimated {
 				t.Fatal("expected compacted context to be marked estimated")
 			}
@@ -1835,6 +1839,48 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatal("timed out waiting for compaction completion update")
+		}
+	}
+}
+
+func TestRuntimeAccumulatesTokenUsageSinceCompaction(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &runtimeFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{event: domain.Event{
+		Kind:  domain.EventKindUsage,
+		Usage: domain.Usage{PromptTokens: 100, CompletionTokens: 25, CachedTokens: 60, TotalTokens: 125},
+	}}
+	rt.inbox <- streamEventCmd{event: domain.Event{
+		Kind:  domain.EventKindUsage,
+		Usage: domain.Usage{PromptTokens: 80, CompletionTokens: 20, CachedTokens: 40, TotalTokens: 100},
+	}}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Snapshot.TokenUsage.TotalTokens < 225 {
+				continue
+			}
+			got := update.Snapshot.TokenUsage
+			if got.PromptTokens != 180 || got.CompletionTokens != 45 || got.CachedTokens != 100 || got.TotalTokens != 225 {
+				t.Fatalf("unexpected token usage: %#v", got)
+			}
+			stored, err := GetChat(context.Background(), st, chatRecord.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.TokenUsage != got {
+				t.Fatalf("expected persisted usage %#v, got %#v", got, stored.TokenUsage)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for token usage accumulation")
 		}
 	}
 }
