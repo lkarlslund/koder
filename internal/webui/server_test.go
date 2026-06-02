@@ -1180,9 +1180,11 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected sidebar to render milestones")
 	}
 	if !strings.Contains(fullPage, `theme: 'base'`) ||
-		!strings.Contains(fullPage, `themeVariables: dark ?`) ||
+		!strings.Contains(fullPage, `themeVariables: koderMermaidThemeVariables(dark)`) ||
+		!strings.Contains(fullPage, `fontSize: '16px'`) ||
+		!strings.Contains(fullPage, `.mermaid-diagram svg text { font-size: 16px; }`) ||
 		!strings.Contains(fullPage, `markMermaidThemeDirty`) {
-		t.Fatalf("expected mermaid rendering to use theme-specific variables and rerender on theme changes")
+		t.Fatalf("expected mermaid rendering to use owned readable theme variables and rerender on theme changes")
 	}
 	if !strings.Contains(fullPage, `media-expand-button`) ||
 		!strings.Contains(fullPage, `openSVGLightbox`) ||
