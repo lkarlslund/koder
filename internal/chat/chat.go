@@ -116,6 +116,7 @@ type Chat struct {
 	timelineLoaded   bool
 
 	inbox   chan any
+	done    chan struct{}
 	subsMu  sync.Mutex
 	subs    map[int]chan Update
 	nextSub int
@@ -311,6 +312,7 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		queueNotes:     map[id.ID]string{},
 		timelineLoaded: timelineLoaded,
 		inbox:          make(chan any, 64),
+		done:           make(chan struct{}),
 		subs:           map[int]chan Update{},
 	}
 	go c.loop()
@@ -856,7 +858,19 @@ func (r *Chat) Compact(instructions string) error {
 }
 
 func (r *Chat) Close() {
-	r.inbox <- closeCmd{}
+	if r == nil {
+		return
+	}
+	done := r.done
+	if done == nil {
+		r.handleClose()
+		return
+	}
+	select {
+	case r.inbox <- closeCmd{}:
+	case <-done:
+	}
+	<-done
 }
 
 // DrainAndClose waits for the active turn to reach a persisted boundary, then closes the chat.
@@ -1331,6 +1345,7 @@ func (r *Chat) Subscribe() (<-chan Update, func()) {
 }
 
 func (r *Chat) loop() {
+	defer close(r.done)
 	for cmd := range r.inbox {
 		switch typed := cmd.(type) {
 		case enqueueCmd:
