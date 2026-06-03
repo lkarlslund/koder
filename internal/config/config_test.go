@@ -90,6 +90,29 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestOldDefaultCavemanPromptUpgrades(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Thinking.CavemanPrompt = oldDefaultCavemanThinkingPrompt
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Thinking.CavemanPrompt != DefaultCavemanThinkingPrompt {
+		t.Fatalf("expected old default caveman prompt to upgrade, got %q", loaded.Thinking.CavemanPrompt)
+	}
+}
+
 func TestProviderLlamaSlotSettingsNormalizeAndRoundTrip(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)

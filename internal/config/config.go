@@ -129,7 +129,19 @@ const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
 const maxCompactionKeepToolCalls = 10
-const DefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
+const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
+const DefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
+
+Rules:
+- Output only the rewritten notes.
+- Do not explain the task.
+- Do not analyze the request.
+- Do not include "Thinking Process", numbered steps, markdown headings, or filler.
+- Keep useful intent, constraints, decisions, and next action only.
+- Use short blunt phrases. Max 6 lines.
+
+MODEL_THINKING:
+{{thinking}}`
 
 func Load() (Config, error) {
 	cfg := Default()
@@ -282,8 +294,11 @@ func (c *Config) applyDefaults() {
 	}
 	c.Thinking.CavemanProvider = strings.TrimSpace(c.Thinking.CavemanProvider)
 	c.Thinking.CavemanModel = strings.TrimSpace(c.Thinking.CavemanModel)
-	if strings.TrimSpace(c.Thinking.CavemanPrompt) == "" {
+	switch strings.TrimSpace(c.Thinking.CavemanPrompt) {
+	case "":
 		c.Thinking.CavemanPrompt = def.Thinking.CavemanPrompt
+	case oldDefaultCavemanThinkingPrompt:
+		c.Thinking.CavemanPrompt = DefaultCavemanThinkingPrompt
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

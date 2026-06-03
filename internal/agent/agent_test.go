@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
@@ -3692,6 +3693,17 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 			if !strings.Contains(string(body), `"stream":true`) {
 				t.Fatalf("expected caveman rewrite request to stream, got %s", string(body))
 			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode caveman request: %v", err)
+			}
+			if payload["max_tokens"] != float64(256) {
+				t.Fatalf("expected caveman max_tokens cap, got %s", string(body))
+			}
+			kwargs, ok := payload["chat_template_kwargs"].(map[string]any)
+			if !ok || kwargs["enable_thinking"] != false || kwargs["preserve_thinking"] != false {
+				t.Fatalf("expected caveman request to disable thinking, got %s", string(body))
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"me inspect files.\"}}]}\n\n"))
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\" me edit small.\"}}],\"usage\":{\"total_tokens\":4}}\n\n"))
@@ -3718,7 +3730,8 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, nil)
+	recorder := debugsrv.NewRecorder()
+	engine := New(cfg, st, recorder)
 	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -3743,6 +3756,14 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	if !hasStatusEvent(events, "Streaming caveman thinking") {
 		t.Fatalf("expected caveman streaming status event, got %#v", events)
 	}
+	traces := recorder.HTTPTraces(debugsrv.HTTPTraceFilter{SessionID: session.ID})
+	if len(traces) != 2 {
+		t.Fatalf("expected attributed chat traces, got %#v", traces)
+	}
+	cavemanTrace := traces[1]
+	if cavemanTrace.SessionID != session.ID || cavemanTrace.ChatID != done.Item.ChatID || !strings.Contains(cavemanTrace.RequestBody, "Caveman rewrite only") {
+		t.Fatalf("expected caveman trace to be attributed to originating chat, got %#v", cavemanTrace)
+	}
 
 	next, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
 	if err != nil {
@@ -3757,6 +3778,64 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	if !strings.Contains(assistantReplay, "me inspect files. me edit small.") || strings.Contains(assistantReplay, "inspect the files carefully") {
 		raw, _ := json.Marshal(next.Messages)
 		t.Fatalf("expected next request to replay caveman reasoning only, assistant=%q messages=%s", assistantReplay, raw)
+	}
+}
+
+func TestCavemanReasoningStopsOversizedThinkingStream(t *testing.T) {
+	t.Parallel()
+
+	requestCanceled := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		for range 12 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"" + strings.Repeat("x", 512) + "\"}}]}\n\n"))
+			flusher.Flush()
+			select {
+			case <-r.Context().Done():
+				requestCanceled <- struct{}{}
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL, Timeout: time.Second}}
+	engine := New(cfg, nil, nil)
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan domain.Event, 32)
+	resp, err := engine.completeCavemanThinking(context.Background(), "test", client, provider.ChatRequest{
+		Model:    "test",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "rewrite"}},
+		Stream:   true,
+	}, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reasoning != "" {
+		t.Fatalf("expected oversized reasoning-only caveman stream to be discarded, got %.80q", resp.Reasoning)
+	}
+	select {
+	case <-requestCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("expected oversized caveman stream to cancel provider request")
+	}
+	close(events)
+	var gotEvents []domain.Event
+	for evt := range events {
+		gotEvents = append(gotEvents, evt)
+	}
+	if !hasStatusEvent(gotEvents, "Caveman thinking exceeded") {
+		t.Fatalf("expected over-limit caveman status, got %#v", gotEvents)
 	}
 }
 

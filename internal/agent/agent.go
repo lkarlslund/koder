@@ -64,6 +64,8 @@ const (
 	maxTransientChatRetries   = 3
 	defaultRateLimitRetryWait = 5 * time.Second
 	defaultTransientRetryWait = 250 * time.Millisecond
+	cavemanThinkingMaxBytes   = 4 * 1024
+	cavemanThinkingMaxTokens  = 256
 )
 
 func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
@@ -1003,51 +1005,69 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 	prompt := cavemanThinkingPrompt(e.cfg.Thinking.CavemanPrompt, reasoning)
 	providerCfg, _ := e.cfg.Provider(providerID)
 	req := provider.ChatRequest{
+		SessionID: chat.SessionID,
+		ChatID:    chat.ID,
 		Model:     modelID,
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
 		Stream:    true,
-		ExtraBody: provider.RequestExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
+		ExtraBody: cavemanThinkingExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
 	}
 	resp, err := e.completeCavemanThinking(ctx, providerID, client, req, events)
 	if err != nil {
 		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
 	}
 	caveman := strings.TrimSpace(resp.Text)
-	if caveman == "" {
-		caveman = strings.TrimSpace(resp.Reasoning)
-	}
 	result.Caveman = caveman
 	return result, nil
 }
 
 func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
-	streamedBytes := 0
-	onEvent := func(evt domain.Event) {
-		if out == nil {
-			return
+	stream := func(req provider.ChatRequest) (provider.ChatResponse, error) {
+		streamCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		streamedBytes := 0
+		limited := false
+		onEvent := func(evt domain.Event) {
+			switch evt.Kind {
+			case domain.EventKindMessageDelta, domain.EventKindReasoning:
+				streamedBytes += len(evt.Text)
+				if streamedBytes > cavemanThinkingMaxBytes && !limited {
+					limited = true
+					if out != nil {
+						out <- domain.Event{
+							Kind: domain.EventKindStatus,
+							Text: fmt.Sprintf("Caveman thinking exceeded %s; stopping rewrite", formatCompactionBytes(cavemanThinkingMaxBytes)),
+							Meta: map[string]string{"caveman": "streaming"},
+						}
+					}
+					cancel()
+					return
+				}
+				if out != nil && streamedBytes > 0 {
+					out <- domain.Event{
+						Kind: domain.EventKindStatus,
+						Text: fmt.Sprintf("Streaming caveman thinking (%s)", formatCompactionBytes(streamedBytes)),
+						Meta: map[string]string{"caveman": "streaming"},
+					}
+				}
+			case domain.EventKindStatus:
+				if out == nil || evt.Meta[domain.EventMetaPromptProgress] != "true" {
+					return
+				}
+				if evt.Meta == nil {
+					evt.Meta = map[string]string{}
+				}
+				evt.Meta["caveman"] = "progress"
+				out <- evt
+			}
 		}
-		switch evt.Kind {
-		case domain.EventKindMessageDelta, domain.EventKindReasoning:
-			streamedBytes += len(evt.Text)
-			if streamedBytes <= 0 {
-				return
-			}
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: fmt.Sprintf("Streaming caveman thinking (%s)", formatCompactionBytes(streamedBytes)),
-				Meta: map[string]string{"caveman": "streaming"},
-			}
-		case domain.EventKindStatus:
-			if evt.Meta[domain.EventMetaPromptProgress] != "true" {
-				return
-			}
-			if evt.Meta == nil {
-				evt.Meta = map[string]string{}
-			}
-			evt.Meta["caveman"] = "progress"
-			out <- evt
+		resp, err := client.StreamChatResponse(streamCtx, req, onEvent)
+		if limited && errors.Is(err, context.Canceled) {
+			resp.Reasoning = ""
+			return resp, nil
 		}
+		return resp, err
 	}
 	if out != nil {
 		out <- domain.Event{
@@ -1056,7 +1076,7 @@ func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, 
 			Meta: map[string]string{"caveman": "started"},
 		}
 	}
-	resp, err := client.StreamChatResponse(ctx, req, onEvent)
+	resp, err := stream(req)
 	if err == nil {
 		if promptProgressPending {
 			e.setPromptProgressSupport(providerID, true)
@@ -1065,9 +1085,30 @@ func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, 
 	}
 	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
 		e.setPromptProgressSupport(providerID, false)
-		return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), onEvent)
+		return stream(provider.WithoutPromptProgress(req))
 	}
 	return resp, err
+}
+
+func cavemanThinkingExtraBody(cfg config.Provider, model config.ModelConfig) map[string]any {
+	body := provider.RequestExtraBody(cfg, model)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["max_tokens"] = cavemanThinkingMaxTokens
+	if strings.Contains(strings.ToLower(cfg.BaseURL), "dashscope") {
+		body["enable_thinking"] = false
+		body["preserve_thinking"] = false
+		return body
+	}
+	kwargs, ok := body["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		kwargs = map[string]any{}
+		body["chat_template_kwargs"] = kwargs
+	}
+	kwargs["enable_thinking"] = false
+	kwargs["preserve_thinking"] = false
+	return body
 }
 
 func cavemanThinkingPrompt(prompt, reasoning string) string {
