@@ -173,6 +173,15 @@ func runLivePromptDefault(t *testing.T, engine *Engine, st *store.Store, session
 	return runLivePrompt(t, engine, session, defaultChatForSession(t, st, session.ID), text)
 }
 
+func hasStatusEvent(events []domain.Event, text string) bool {
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, text) {
+			return true
+		}
+	}
+	return false
+}
+
 func collectLiveUpdates(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, terminal func(domain.Event) bool) []domain.Event {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -3680,7 +3689,13 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 		case 1:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done","reasoning":"I should inspect the files carefully and then edit the smallest surface."}}],"usage":{"total_tokens":10}}`))
 		case 2:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"me inspect files. me edit small."}}],"usage":{"total_tokens":4}}`))
+			if !strings.Contains(string(body), `"stream":true`) {
+				t.Fatalf("expected caveman rewrite request to stream, got %s", string(body))
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"me inspect files.\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\" me edit small.\"}}],\"usage\":{\"total_tokens\":4}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		default:
 			t.Fatalf("unexpected provider request %d: %s", len(requests), string(body))
 		}
@@ -3724,6 +3739,9 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	}
 	if len(requests) != 2 || !strings.Contains(requests[1], "Caveman rewrite only") {
 		t.Fatalf("expected caveman rewrite request, got %#v", requests)
+	}
+	if !hasStatusEvent(events, "Streaming caveman thinking") {
+		t.Fatalf("expected caveman streaming status event, got %#v", events)
 	}
 
 	next, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")

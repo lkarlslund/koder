@@ -1729,6 +1729,80 @@ func TestRuntimeShowsCompactionStreamingStatus(t *testing.T) {
 	}
 }
 
+func TestRuntimeShowsCavemanPromptProgressStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{
+		event: domain.Event{
+			Kind: domain.EventKindStatus,
+			Meta: map[string]string{
+				domain.EventMetaPromptProgress: "true",
+				"caveman":                      "progress",
+				"processed":                    "4",
+				"total":                        "100",
+			},
+		},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Meta["caveman"] != "progress" {
+				continue
+			}
+			if update.Status != StatusWaitingLLM {
+				t.Fatalf("status = %q", update.Status)
+			}
+			if update.StatusText != "Caveman pre-processing 4%" {
+				t.Fatalf("status text = %q", update.StatusText)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for caveman prompt progress status: %#v", rt.Snapshot())
+		}
+	}
+}
+
+func TestRuntimeShowsCavemanStreamingStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{
+		event: domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Streaming caveman thinking (1.5 KB)",
+			Meta: map[string]string{"caveman": "streaming"},
+		},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Meta["caveman"] != "streaming" {
+				continue
+			}
+			if update.Status != StatusWaitingLLM {
+				t.Fatalf("status = %q", update.Status)
+			}
+			if update.StatusText != "Streaming caveman thinking (1.5 KB)" {
+				t.Fatalf("status text = %q", update.StatusText)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for caveman streaming status: %#v", rt.Snapshot())
+		}
+	}
+}
+
 func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

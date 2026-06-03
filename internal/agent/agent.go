@@ -474,7 +474,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	}
 
 	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
-	reasoningContent, reasoningErr := e.reasoningContentForResponse(ctx, chat, client, reasoning)
+	reasoningContent, reasoningErr := e.reasoningContentForResponse(ctx, chat, client, reasoning, out)
 	if reasoningErr != nil {
 		return chatpkg.TurnStepResult{}, reasoningErr
 	}
@@ -974,10 +974,10 @@ func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
 	return modelConfigForRequest(e.cfg, chat.ProviderID, chat.ModelID)
 }
 
-func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string) (domain.ReasoningContent, error) {
-	out := domain.ReasoningContent{Text: reasoning}
+func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, events chan<- domain.Event) (domain.ReasoningContent, error) {
+	result := domain.ReasoningContent{Text: reasoning}
 	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
-		return out, nil
+		return result, nil
 	}
 	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProvider)
 	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModel)
@@ -1005,10 +1005,10 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 	req := provider.ChatRequest{
 		Model:     modelID,
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
-		Stream:    false,
+		Stream:    true,
 		ExtraBody: provider.RequestExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
 	}
-	resp, err := client.CompleteChat(ctx, req)
+	resp, err := e.completeCavemanThinking(ctx, providerID, client, req, events)
 	if err != nil {
 		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
 	}
@@ -1016,8 +1016,58 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 	if caveman == "" {
 		caveman = strings.TrimSpace(resp.Reasoning)
 	}
-	out.Caveman = caveman
-	return out, nil
+	result.Caveman = caveman
+	return result, nil
+}
+
+func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
+	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
+	streamedBytes := 0
+	onEvent := func(evt domain.Event) {
+		if out == nil {
+			return
+		}
+		switch evt.Kind {
+		case domain.EventKindMessageDelta, domain.EventKindReasoning:
+			streamedBytes += len(evt.Text)
+			if streamedBytes <= 0 {
+				return
+			}
+			out <- domain.Event{
+				Kind: domain.EventKindStatus,
+				Text: fmt.Sprintf("Streaming caveman thinking (%s)", formatCompactionBytes(streamedBytes)),
+				Meta: map[string]string{"caveman": "streaming"},
+			}
+		case domain.EventKindStatus:
+			if evt.Meta[domain.EventMetaPromptProgress] != "true" {
+				return
+			}
+			if evt.Meta == nil {
+				evt.Meta = map[string]string{}
+			}
+			evt.Meta["caveman"] = "progress"
+			out <- evt
+		}
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Converting thinking to caveman...",
+			Meta: map[string]string{"caveman": "started"},
+		}
+	}
+	resp, err := client.StreamChatResponse(ctx, req, onEvent)
+	if err == nil {
+		if promptProgressPending {
+			e.setPromptProgressSupport(providerID, true)
+		}
+		return resp, nil
+	}
+	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
+		e.setPromptProgressSupport(providerID, false)
+		return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), onEvent)
+	}
+	return resp, err
 }
 
 func cavemanThinkingPrompt(prompt, reasoning string) string {

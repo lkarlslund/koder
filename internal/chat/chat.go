@@ -1993,6 +1993,9 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		} else if text, ok := compactionStatusText(evt); ok {
 			r.status = StatusWaitingLLM
 			r.statusText = text
+		} else if text, ok := cavemanStatusText(evt); ok {
+			r.status = StatusWaitingLLM
+			r.statusText = text
 		}
 		if completedCompaction(evt.Item, evt.Meta) {
 			r.chat.LastKnownContextTokens = 0
@@ -2070,6 +2073,8 @@ func promptProgressStatusText(meta map[string]string) (string, bool) {
 	prefix := "LLM preprocessing"
 	if meta["compaction"] == "progress" {
 		prefix = "Compaction pre-processing"
+	} else if meta["caveman"] == "progress" {
+		prefix = "Caveman pre-processing"
 	}
 	total, totalErr := strconv.Atoi(strings.TrimSpace(meta["total"]))
 	processed, processedErr := strconv.Atoi(strings.TrimSpace(meta["processed"]))
@@ -2093,6 +2098,19 @@ func compactionStatusText(evt domain.Event) (string, bool) {
 	text := strings.TrimSpace(evt.Text)
 	if text == "" {
 		return "Streaming compacted results", true
+	}
+	return text, true
+}
+
+func cavemanStatusText(evt domain.Event) (string, bool) {
+	switch evt.Meta["caveman"] {
+	case "started", "streaming":
+	default:
+		return "", false
+	}
+	text := strings.TrimSpace(evt.Text)
+	if text == "" {
+		return "Converting thinking to caveman", true
 	}
 	return text, true
 }
