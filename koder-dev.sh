@@ -99,6 +99,7 @@ launch_koder() {
 stop_koder() {
   local pid="$1"
   local reason="${2:-restart}"
+  shift 2 || true
   local waited=0
   local stat=""
   local exit_status=0
@@ -112,7 +113,7 @@ stop_koder() {
     log "stopping koder pid=$pid for $reason"
   fi
   if [[ "$reason" == "restart" ]]; then
-    kill -USR1 "$pid" 2>/dev/null || true
+    request_koder_restart "$@" || kill -USR1 "$pid" 2>/dev/null || true
   else
     kill -TERM "$pid" 2>/dev/null || true
   fi
@@ -208,6 +209,41 @@ restart_needed_url() {
       ;;
   esac
   printf 'http://%s:%s/api/restart-needed\n' "$host" "$port"
+}
+
+restart_rpc_url() {
+  local bind
+  local addr
+  local host
+  local port
+  bind="$(web_bind_arg "$@")"
+  addr="${bind#http://}"
+  addr="${addr#https://}"
+  host="${addr%:*}"
+  port="${addr##*:}"
+  if [[ "$host" == "$addr" ]]; then
+    host="127.0.0.1"
+    port="$addr"
+  fi
+  case "$host" in
+    ""|"0.0.0.0"|"::"|"[::]")
+      host="127.0.0.1"
+      ;;
+  esac
+  printf 'http://%s:%s/api/rpc/restart_process\n' "$host" "$port"
+}
+
+request_koder_restart() {
+  local url
+  local output
+  url="$(restart_rpc_url "$@")"
+  log "requesting koder restart through $url"
+  if output="$(curl --fail --silent --show-error --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"hard":true}' "$url" 2>&1)"; then
+    log "restart request acknowledged"
+    return 0
+  fi
+  log "restart request failed: $output"
+  return 1
 }
 
 notify_restart_needed() {
