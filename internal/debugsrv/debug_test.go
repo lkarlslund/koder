@@ -149,6 +149,81 @@ func TestRecorderFiltersHTTPTraces(t *testing.T) {
 	}
 }
 
+func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	activeCtx, requestID, finish := rec.StartHTTP(ctx, HTTPTrace{
+		ProviderID:  "llamacpp",
+		SessionID:   session.ID,
+		ChatID:      chat.ID,
+		Method:      http.MethodPost,
+		Path:        "/v1/chat/completions",
+		RequestBody: `{"messages":[{"role":"user","content":"hello"}]}`,
+	})
+	defer finish()
+	rec.UpdateActiveHTTP(requestID, HTTPTrace{
+		Status:       http.StatusOK,
+		ResponseBody: `data: {"choices":[{"delta":{"reasoning_content":"me think"}}]}`,
+		Meta:         map[string]string{"phase": "streaming", "chunk_count": "1"},
+	})
+
+	srv := httptest.NewServer(Handler(st, rec))
+	defer srv.Close()
+
+	url := srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(chat.ID) + "/http/active"
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var active struct {
+		Active []ActiveHTTPTrace `json:"active"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&active); err != nil {
+		t.Fatal(err)
+	}
+	if len(active.Active) != 1 || active.Active[0].ID != requestID || !strings.Contains(active.Active[0].ResponseBody, "me think") {
+		t.Fatalf("expected active partial HTTP trace, got %#v", active.Active)
+	}
+
+	resp, err = http.Post(url, "application/json", strings.NewReader(fmt.Sprintf(`{"request_id":%q}`, requestID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var canceled struct {
+		Canceled int               `json:"canceled"`
+		Active   []ActiveHTTPTrace `json:"active"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&canceled); err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Canceled != 1 || len(canceled.Active) != 1 || !canceled.Active[0].Canceling {
+		t.Fatalf("expected active request canceling response, got %#v", canceled)
+	}
+	if err := activeCtx.Err(); err != context.Canceled {
+		t.Fatalf("expected active request context canceled, got %v", err)
+	}
+}
+
 func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	t.Parallel()
 

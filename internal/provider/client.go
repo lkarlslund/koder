@@ -576,6 +576,8 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
 	requestBody := body.String()
+	ctx, activeRequestID, finishActive := c.startActiveHTTP(ctx, input, http.MethodPost, c.apiPath("/chat/completions"), requestBody, nil)
+	defer finishActive()
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/chat/completions"), &body)
 	if err != nil {
 		return ChatResponse{}, err
@@ -585,6 +587,10 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 		return ChatResponse{}, fmt.Errorf("complete chat: %w", err)
 	}
 	defer resp.Body.Close()
+	c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
+		Status:       resp.StatusCode,
+		ResponseHdrs: redactHeaders(resp.Header),
+	})
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return ChatResponse{}, &APIError{
@@ -599,6 +605,9 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil, "")
 		return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
+	}
+	if data, err := json.Marshal(payload); err == nil {
+		c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{ResponseBody: redactBody(string(data))})
 	}
 	if len(payload.Choices) == 0 {
 		return ChatResponse{}, nil
@@ -693,6 +702,8 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
 	requestBody := body.String()
+	ctx, activeRequestID, finishActive := c.startActiveHTTP(ctx, input, http.MethodPost, c.apiPath("/chat/completions"), requestBody, nil)
+	defer finishActive()
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/chat/completions"), &body)
 	if err != nil {
 		return ChatResponse{}, err
@@ -702,6 +713,10 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		return ChatResponse{}, fmt.Errorf("stream chat: %w", err)
 	}
 	defer resp.Body.Close()
+	c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
+		Status:       resp.StatusCode,
+		ResponseHdrs: redactHeaders(resp.Header),
+	})
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return ChatResponse{}, &APIError{
@@ -739,6 +754,14 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	chunkCount := 0
 	lastPayload := ""
 	capture := newDebugStreamCapture(8192)
+	updateActiveStream := func(meta map[string]string) {
+		c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
+			Status:       resp.StatusCode,
+			ResponseHdrs: redactHeaders(resp.Header),
+			ResponseBody: capture.String(),
+			Meta:         meta,
+		})
+	}
 	recordTrace := func(errText string, meta map[string]string) {
 		if c == nil || c.recorder == nil {
 			return
@@ -762,6 +785,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			Meta:         meta,
 			Error:        errText,
 		}
+		c.updateActiveHTTP(activeRequestID, trace)
 		c.recorder.RecordHTTP(trace)
 	}
 	for {
@@ -793,6 +817,10 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		}
 
 		capture.Append(line)
+		updateActiveStream(map[string]string{
+			"phase":       "streaming",
+			"chunk_count": strconv.Itoa(chunkCount),
+		})
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "data:") {
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -890,6 +918,28 @@ func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.
 		trace.ResponseBody = "[body read failed after headers]"
 	}
 	c.recorder.RecordHTTP(trace)
+}
+
+func (c *Client) startActiveHTTP(ctx context.Context, input ChatRequest, method, path, requestBody string, requestHeaders map[string]string) (context.Context, id.ID, func()) {
+	if c == nil || c.recorder == nil {
+		return ctx, "", func() {}
+	}
+	return c.recorder.StartHTTP(ctx, debugsrv.HTTPTrace{
+		ProviderID:  c.provider,
+		SessionID:   input.SessionID,
+		ChatID:      input.ChatID,
+		Method:      method,
+		Path:        path,
+		RequestBody: redactBody(requestBody),
+		RequestHdrs: requestHeaders,
+	})
+}
+
+func (c *Client) updateActiveHTTP(requestID id.ID, trace debugsrv.HTTPTrace) {
+	if c == nil || c.recorder == nil || requestID == "" {
+		return
+	}
+	c.recorder.UpdateActiveHTTP(requestID, trace)
 }
 
 func debugTruncate(value string, max int) string {

@@ -916,6 +916,78 @@ func TestStreamChatWithRecorderDoesNotBufferEventStream(t *testing.T) {
 	}
 }
 
+func TestStreamChatRecorderExposesAndCancelsActiveStream(t *testing.T) {
+	firstChunkSent := make(chan struct{}, 1)
+	requestCanceled := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"me think\"}}]}\n\n"))
+		flusher.Flush()
+		firstChunkSent <- struct{}{}
+		<-r.Context().Done()
+		requestCanceled <- struct{}{}
+	}))
+	defer server.Close()
+
+	recorder := debugsrv.NewRecorder()
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.StreamChatResponse(context.Background(), ChatRequest{
+			SessionID: "session-a",
+			ChatID:    "chat-a",
+			Model:     "test",
+			Messages:  []Message{{Role: RoleUser, Content: "hello"}},
+		}, nil)
+		done <- err
+	}()
+
+	select {
+	case <-firstChunkSent:
+	case <-time.After(time.Second):
+		t.Fatal("expected server to flush first chunk")
+	}
+	var active []debugsrv.ActiveHTTPTrace
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		active = recorder.ActiveHTTPTraces(debugsrv.HTTPTraceFilter{SessionID: "session-a", ChatID: "chat-a"})
+		if len(active) == 1 && strings.Contains(active[0].ResponseBody, "me think") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(active) != 1 || !strings.Contains(active[0].ResponseBody, "me think") {
+		t.Fatalf("expected active stream partial data, got %#v", active)
+	}
+	if !recorder.CancelActiveHTTP(active[0].ID) {
+		t.Fatalf("expected active stream cancel to succeed")
+	}
+
+	select {
+	case <-requestCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("expected server request context to be canceled")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled stream error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected stream call to return after debug cancel")
+	}
+}
+
 func TestStreamChatTraceIncludesPromptProgressMeta(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

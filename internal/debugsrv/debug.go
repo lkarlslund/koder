@@ -70,6 +70,27 @@ type HTTPTrace struct {
 	Error         string            `json:"error,omitempty"`
 }
 
+type ActiveHTTPTrace struct {
+	ID            id.ID             `json:"id"`
+	Timestamp     time.Time         `json:"timestamp"`
+	ProviderID    string            `json:"provider_id"`
+	SessionID     id.ID             `json:"session_id,omitempty"`
+	ChatID        id.ID             `json:"chat_id,omitempty"`
+	Method        string            `json:"method"`
+	Path          string            `json:"path"`
+	Status        int               `json:"status,omitempty"`
+	DurationMS    int64             `json:"duration_ms"`
+	RequestBytes  int               `json:"request_bytes,omitempty"`
+	ResponseBytes int               `json:"response_bytes,omitempty"`
+	RequestBody   string            `json:"request_body,omitempty"`
+	ResponseBody  string            `json:"response_body,omitempty"`
+	RequestHdrs   map[string]string `json:"request_headers,omitempty"`
+	ResponseHdrs  map[string]string `json:"response_headers,omitempty"`
+	Meta          map[string]string `json:"meta,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Canceling     bool              `json:"canceling,omitempty"`
+}
+
 type HTTPTraceFilter struct {
 	SessionID  id.ID
 	ChatID     id.ID
@@ -218,6 +239,13 @@ type Recorder struct {
 	sessionEvents map[id.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
 	lastHTTPBody  map[string]string
+	activeHTTP    map[id.ID]activeHTTPTrace
+}
+
+type activeHTTPTrace struct {
+	trace  ActiveHTTPTrace
+	cancel context.CancelFunc
+	start  time.Time
 }
 
 func NewRecorder() *Recorder {
@@ -228,6 +256,7 @@ func NewRecorder() *Recorder {
 		chats:         map[id.ID]ChatDebug{},
 		sessionEvents: map[id.ID][]RecordedEvent{},
 		lastHTTPBody:  map[string]string{},
+		activeHTTP:    map[id.ID]activeHTTPTrace{},
 	}
 }
 
@@ -340,6 +369,133 @@ func (r *Recorder) RecordHTTP(trace HTTPTrace) {
 	trace.RequestHdrs = cloneMeta(trace.RequestHdrs)
 	trace.ResponseHdrs = cloneMeta(trace.ResponseHdrs)
 	r.httpTraces = appendHTTPTrace(r.httpTraces, trace, r.maxHTTP)
+}
+
+func (r *Recorder) StartHTTP(ctx context.Context, trace HTTPTrace) (context.Context, id.ID, func()) {
+	if r == nil {
+		return ctx, "", func() {}
+	}
+	child, cancel := context.WithCancel(ctx)
+	requestID := id.New()
+	now := time.Now().UTC()
+	trace.Meta = requestDiagnostics(trace, trace.Meta)
+	active := activeHTTPTrace{
+		trace: ActiveHTTPTrace{
+			ID:           requestID,
+			Timestamp:    now,
+			ProviderID:   trace.ProviderID,
+			SessionID:    trace.SessionID,
+			ChatID:       trace.ChatID,
+			Method:       trace.Method,
+			Path:         trace.Path,
+			RequestBytes: len(trace.RequestBody),
+			RequestBody:  trace.RequestBody,
+			RequestHdrs:  cloneMeta(trace.RequestHdrs),
+			Meta:         cloneMeta(trace.Meta),
+		},
+		cancel: cancel,
+		start:  now,
+	}
+	r.mu.Lock()
+	r.activeHTTP[requestID] = active
+	r.mu.Unlock()
+	return child, requestID, func() {
+		r.mu.Lock()
+		delete(r.activeHTTP, requestID)
+		r.mu.Unlock()
+		cancel()
+	}
+}
+
+func (r *Recorder) UpdateActiveHTTP(requestID id.ID, trace HTTPTrace) {
+	if r == nil || requestID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	active, ok := r.activeHTTP[requestID]
+	if !ok {
+		return
+	}
+	if trace.Status != 0 {
+		active.trace.Status = trace.Status
+	}
+	if trace.ResponseBody != "" {
+		active.trace.ResponseBody = truncate(trace.ResponseBody, 8192)
+		active.trace.ResponseBytes = len(trace.ResponseBody)
+	}
+	if trace.ResponseHdrs != nil {
+		active.trace.ResponseHdrs = cloneMeta(trace.ResponseHdrs)
+	}
+	if trace.Meta != nil {
+		active.trace.Meta = mergeMeta(active.trace.Meta, trace.Meta)
+	}
+	if trace.Error != "" {
+		active.trace.Error = trace.Error
+	}
+	active.trace.DurationMS = time.Since(active.start).Milliseconds()
+	r.activeHTTP[requestID] = active
+}
+
+func (r *Recorder) ActiveHTTPTraces(filters ...HTTPTraceFilter) []ActiveHTTPTrace {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	filter := HTTPTraceFilter{}
+	if len(filters) > 0 {
+		filter = filters[0]
+	}
+	out := make([]ActiveHTTPTrace, 0, len(r.activeHTTP))
+	for _, active := range r.activeHTTP {
+		trace := active.trace
+		trace.DurationMS = time.Since(active.start).Milliseconds()
+		if !activeHTTPTraceMatches(trace, filter) {
+			continue
+		}
+		out = append(out, cloneActiveHTTPTrace(trace))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Timestamp.Before(out[j].Timestamp)
+	})
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[len(out)-filter.Limit:]
+	}
+	return out
+}
+
+func (r *Recorder) CancelActiveHTTP(requestID id.ID) bool {
+	if r == nil || requestID == "" {
+		return false
+	}
+	r.mu.Lock()
+	active, ok := r.activeHTTP[requestID]
+	if ok {
+		active.trace.Canceling = true
+		active.trace.DurationMS = time.Since(active.start).Milliseconds()
+		r.activeHTTP[requestID] = active
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	active.cancel()
+	return true
+}
+
+func (r *Recorder) CancelActiveHTTPTraces(filter HTTPTraceFilter) int {
+	if r == nil {
+		return 0
+	}
+	active := r.ActiveHTTPTraces(filter)
+	count := 0
+	for _, trace := range active {
+		if r.CancelActiveHTTP(trace.ID) {
+			count++
+		}
+	}
+	return count
 }
 
 func requestDiagnostics(trace HTTPTrace, meta map[string]string) map[string]string {
@@ -1223,6 +1379,7 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	filter := httpTraceFilterFromQuery(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"debug_api": s.recorder.Runtime().Process.DebugAPI,
+		"active":    s.recorder.ActiveHTTPTraces(filter),
 		"traces":    s.recorder.HTTPTraces(filter),
 	})
 }
@@ -1304,7 +1461,7 @@ func (s *Server) handleSessionChatRoutes(w http.ResponseWriter, r *http.Request,
 		s.handleSessionChat(w, r, sessionID, id.ID(strings.TrimSpace(parts[0])))
 		return
 	}
-	if len(parts) != 2 {
+	if len(parts) != 2 && len(parts) != 3 {
 		http.NotFound(w, r)
 		return
 	}
@@ -1315,10 +1472,26 @@ func (s *Server) handleSessionChatRoutes(w http.ResponseWriter, r *http.Request,
 	}
 	switch parts[1] {
 	case "http":
-		s.handleSessionChatHTTP(w, r, sessionID, chatID)
+		if len(parts) == 3 && parts[2] == "active" {
+			s.handleSessionChatActiveHTTP(w, r, sessionID, chatID)
+			return
+		}
+		if len(parts) == 2 {
+			s.handleSessionChatHTTP(w, r, sessionID, chatID)
+			return
+		}
+		http.NotFound(w, r)
 	case "transcript":
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
 		s.handleChatTranscript(w, r, sessionID, chatID)
 	case "rewind":
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
 		s.handleSessionChatRewind(w, r, sessionID, chatID)
 	default:
 		http.NotFound(w, r)
@@ -1374,8 +1547,10 @@ func (s *Server) handleSessionHTTP(w http.ResponseWriter, r *http.Request, sessi
 		return
 	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
+	filter := HTTPTraceFilter{SessionID: sessionID, Limit: limit}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
+		"active":     s.recorder.ActiveHTTPTraces(filter),
 		"traces":     s.recorder.SessionHTTPTraces(sessionID, limit),
 	})
 }
@@ -1391,11 +1566,66 @@ func (s *Server) handleSessionChatHTTP(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
+	filter := HTTPTraceFilter{SessionID: sessionID, ChatID: chatID, Limit: limit}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"chat_id":    chatID,
+		"active":     s.recorder.ActiveHTTPTraces(filter),
 		"traces":     s.recorder.ChatHTTPTraces(sessionID, chatID, limit),
 	})
+}
+
+func (s *Server) handleSessionChatActiveHTTP(w http.ResponseWriter, r *http.Request, sessionID, chatID id.ID) {
+	if _, err := s.debugChatForSession(r.Context(), sessionID, chatID); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	filter := HTTPTraceFilter{SessionID: sessionID, ChatID: chatID}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"session_id": sessionID,
+			"chat_id":    chatID,
+			"active":     s.recorder.ActiveHTTPTraces(filter),
+		})
+	case http.MethodPost:
+		var req struct {
+			RequestID id.ID  `json:"request_id"`
+			Action    string `json:"action"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+		}
+		if action := strings.TrimSpace(req.Action); action != "" && action != "cancel" {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported action %q", action))
+			return
+		}
+		canceled := 0
+		if req.RequestID != "" {
+			active := s.recorder.ActiveHTTPTraces(filter)
+			if !slices.ContainsFunc(active, func(trace ActiveHTTPTrace) bool { return trace.ID == req.RequestID }) {
+				writeError(w, http.StatusNotFound, fmt.Errorf("active request %s not found for chat %s", req.RequestID, chatID))
+				return
+			}
+			if s.recorder.CancelActiveHTTP(req.RequestID) {
+				canceled = 1
+			}
+		} else {
+			canceled = s.recorder.CancelActiveHTTPTraces(filter)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"session_id": sessionID,
+			"chat_id":    chatID,
+			"canceled":   canceled,
+			"active":     s.recorder.ActiveHTTPTraces(filter),
+		})
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+	}
 }
 
 func (s *Server) handleSessionChat(w http.ResponseWriter, r *http.Request, sessionID, chatID id.ID) {
@@ -1698,6 +1928,19 @@ func filterHTTPTraces(items []HTTPTrace, filter HTTPTraceFilter) []HTTPTrace {
 	return out
 }
 
+func activeHTTPTraceMatches(item ActiveHTTPTrace, filter HTTPTraceFilter) bool {
+	if filter.SessionID != "" && item.SessionID != filter.SessionID {
+		return false
+	}
+	if filter.ChatID != "" && item.ChatID != filter.ChatID {
+		return false
+	}
+	if strings.TrimSpace(filter.ProviderID) != "" && item.ProviderID != strings.TrimSpace(filter.ProviderID) {
+		return false
+	}
+	return true
+}
+
 func normalizeHTTPTraceLimit(limit int) int {
 	if limit <= 0 || limit > defaultMaxHTTP {
 		return defaultMaxHTTP
@@ -1714,6 +1957,20 @@ func cloneMeta(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
+}
+
+func mergeMeta(dst, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return cloneMeta(dst)
+	}
+	out := cloneMeta(dst)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }
 
 func cloneEvents(src []RecordedEvent) []RecordedEvent {
@@ -1737,6 +1994,13 @@ func cloneHTTPTraces(src []HTTPTrace) []HTTPTrace {
 		dst[i].Meta = cloneMeta(item.Meta)
 	}
 	return dst
+}
+
+func cloneActiveHTTPTrace(item ActiveHTTPTrace) ActiveHTTPTrace {
+	item.RequestHdrs = cloneMeta(item.RequestHdrs)
+	item.ResponseHdrs = cloneMeta(item.ResponseHdrs)
+	item.Meta = cloneMeta(item.Meta)
+	return item
 }
 
 func cloneClients(src map[string]ClientDebug) []ClientDebug {
