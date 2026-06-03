@@ -37,6 +37,20 @@ func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID
 	})
 }
 
+func controllerSelection(ctrl *Controller) Selection {
+	state := ctrl.State()
+	return Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID}
+}
+
+func newSelectedChat(t *testing.T, ctrl *Controller, selection Selection, title string) domain.Chat {
+	t.Helper()
+	chatRecord, err := ctrl.NewChatForSelection(context.Background(), selection, title)
+	if err != nil {
+		t.Fatalf("new selected chat: %v", err)
+	}
+	return chatRecord
+}
+
 func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	events, unsub := ctrl.Subscribe()
@@ -91,44 +105,44 @@ func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	}
 }
 
-func TestControllerNewChatAndSwitchChat(t *testing.T) {
+func TestControllerSelectedStateCanCreateAndSelectChats(t *testing.T) {
 	ctrl, _ := newTestController(t)
-	first := ctrl.State().ActiveChatID
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	first := selection.ChatID
 	if first == "" {
 		t.Fatal("expected first chat")
 	}
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
-		t.Fatalf("new chat: %v", err)
-	}
-	second := ctrl.State().ActiveChatID
+	second := newSelectedChat(t, ctrl, selection, "side chat").ID
 	if second == "" || second == first {
 		t.Fatalf("expected new active chat, first=%s second=%s", first, second)
 	}
-	if err := ctrl.SwitchChat(context.Background(), first); err != nil {
-		t.Fatalf("switch chat: %v", err)
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: selection.SessionID, ChatID: first})
+	if err != nil {
+		t.Fatalf("state for first chat: %v", err)
 	}
-	if got := ctrl.State().ActiveChatID; got != first {
+	if got := state.ActiveChatID; got != first {
 		t.Fatalf("expected active chat %s, got %s", first, got)
 	}
 }
 
 func TestControllerDeleteInactiveChat(t *testing.T) {
 	ctrl, st := newTestController(t)
-	active := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
-		t.Fatalf("new chat: %v", err)
-	}
-	side := ctrl.State().ActiveChatID
-	if err := ctrl.SwitchChat(context.Background(), active); err != nil {
-		t.Fatalf("switch chat: %v", err)
-	}
-	if err := ctrl.DeleteChat(context.Background(), side); err != nil {
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	active := selection.ChatID
+	side := newSelectedChat(t, ctrl, selection, "side chat").ID
+	if err := ctrl.DeleteChatForSelection(ctx, selection, side); err != nil {
 		t.Fatalf("delete chat: %v", err)
 	}
-	if got := ctrl.State().ActiveChatID; got != active {
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	if got := state.ActiveChatID; got != active {
 		t.Fatalf("expected active chat to stay %s, got %s", active, got)
 	}
-	archived, err := chatpkg.GetChat(context.Background(), st, side)
+	archived, err := chatpkg.GetChat(ctx, st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,18 +153,21 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 
 func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	ctrl, st := newTestController(t)
-	first := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
-		t.Fatalf("new chat: %v", err)
-	}
-	side := ctrl.State().ActiveChatID
-	if err := ctrl.DeleteChat(context.Background(), side); err != nil {
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	first := selection.ChatID
+	side := newSelectedChat(t, ctrl, selection, "side chat").ID
+	if err := ctrl.DeleteChatForSelection(ctx, Selection{SessionID: selection.SessionID, ChatID: side}, side); err != nil {
 		t.Fatalf("delete active chat: %v", err)
 	}
-	if got := ctrl.State().ActiveChatID; got != first {
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: selection.SessionID})
+	if err != nil {
+		t.Fatalf("state for session: %v", err)
+	}
+	if got := state.ActiveChatID; got != first {
 		t.Fatalf("expected active chat to switch to %s, got %s", first, got)
 	}
-	archived, err := chatpkg.GetChat(context.Background(), st, side)
+	archived, err := chatpkg.GetChat(ctx, st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,19 +225,14 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 
 func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	ctrl, _ := newTestController(t)
-	first := ctrl.State().ActiveChatID
+	selection := controllerSelection(ctrl)
+	first := selection.ChatID
 	if first == "" {
 		t.Fatal("expected first chat")
 	}
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
-		t.Fatalf("new chat: %v", err)
-	}
-	side := ctrl.State().ActiveChatID
+	side := newSelectedChat(t, ctrl, selection, "side chat").ID
 	if side == "" || side == first {
 		t.Fatalf("expected side chat, first=%s side=%s", first, side)
-	}
-	if err := ctrl.SwitchChat(context.Background(), first); err != nil {
-		t.Fatalf("switch chat: %v", err)
 	}
 
 	updated := ctrl.State().Snapshots[side]
@@ -669,11 +681,16 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 		}
 		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "next-model", ContextWindow: 12345})
 	})
-	if err := ctrl.SetModel(context.Background(), "test", "next-model"); err != nil {
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	if err := ctrl.SetModelForSelection(ctx, selection, "test", "next-model"); err != nil {
 		t.Fatalf("set model: %v", err)
 	}
 
-	state := ctrl.State()
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if state.Snapshot.Chat.ProviderID != "test" || state.Snapshot.Chat.ModelID != "next-model" {
 		t.Fatalf("expected state chat model test/next-model, got %s/%s", state.Snapshot.Chat.ProviderID, state.Snapshot.Chat.ModelID)
 	}
@@ -683,7 +700,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if state.ModelInfo.ProviderID != "test" || state.ModelInfo.ModelID != "next-model" || state.ModelInfo.ContextWindow != 12345 || !state.ModelInfo.SupportsTools {
 		t.Fatalf("unexpected model info: %#v", state.ModelInfo)
 	}
-	chatRecord, err := chatpkg.GetChat(context.Background(), st, state.Snapshot.Chat.ID)
+	chatRecord, err := chatpkg.GetChat(ctx, st, state.Snapshot.Chat.ID)
 	if err != nil {
 		t.Fatalf("get chat: %v", err)
 	}
@@ -720,19 +737,25 @@ func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 
 func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
-	sessionID := ctrl.State().Session.ID
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	sessionID := selection.SessionID
 	settings := accesssettings.AllowAll()
-	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+	if err := ctrl.SetAccessSettingsForSelection(ctx, selection, settings); err != nil {
 		t.Fatalf("set access settings: %v", err)
 	}
-	session, err := sessionpkg.GetSession(context.Background(), st, sessionID)
+	session, err := sessionpkg.GetSession(ctx, st, sessionID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
 	if session.AccessSettings.Root != accesssettings.ModeReadWrite || !session.AccessSettings.Network {
 		t.Fatalf("expected allow-all access settings, got %#v", session.AccessSettings)
 	}
-	if got := ctrl.State().Access.Settings.Root; got != accesssettings.ModeReadWrite {
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	if got := state.Access.Settings.Root; got != accesssettings.ModeReadWrite {
 		t.Fatalf("expected root readwrite, got %q", got)
 	}
 }
@@ -765,10 +788,11 @@ func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	settings := accesssettings.LockedDown()
-	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+	selection := controllerSelection(ctrl)
+	if err := ctrl.SetAccessSettingsForSelection(context.Background(), selection, settings); err != nil {
 		t.Fatalf("set access settings: %v", err)
 	}
-	sessionID := ctrl.State().Session.ID
+	sessionID := selection.SessionID
 	if err := ctrl.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
@@ -785,17 +809,27 @@ func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 
 func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 	ctrl, _ := newTestController(t)
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
 	settings := accesssettings.LockedDown()
-	if err := ctrl.SetAccessSettings(context.Background(), settings); err != nil {
+	if err := ctrl.SetAccessSettingsForSelection(ctx, selection, settings); err != nil {
 		t.Fatalf("set access settings: %v", err)
 	}
-	rt := ctrl.currentRuntime()
-	if rt == nil {
-		t.Fatal("expected runtime")
+	owner, err := ctrl.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	rt, err := owner.Chat(ctx, selection.ChatID)
+	if err != nil {
+		t.Fatalf("load chat: %v", err)
 	}
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
-	rt.SetSession(ctrl.State().Session)
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	rt.SetSession(state.Session)
 
 	deadline := time.After(time.Second)
 	for {
@@ -804,7 +838,11 @@ func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 			if event.Type != "snapshot" && event.Type != "chat_delta" && event.Type != "session_delta" {
 				continue
 			}
-			if got := ctrl.State().Access.Settings.Network; got {
+			state, err := ctrl.StateForSelection(ctx, selection)
+			if err != nil {
+				t.Fatalf("state for selection: %v", err)
+			}
+			if got := state.Access.Settings.Network; got {
 				t.Fatalf("expected runtime update to preserve network disabled")
 			}
 			return
@@ -818,7 +856,7 @@ func TestControllerSetAccessSettingsRejectsRelativeMount(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	settings := accesssettings.Default()
 	settings.Mounts = []accesssettings.Mount{{Path: "relative", Mode: accesssettings.ModeReadOnly}}
-	if err := ctrl.SetAccessSettings(context.Background(), settings); err == nil {
+	if err := ctrl.SetAccessSettingsForSelection(context.Background(), controllerSelection(ctrl), settings); err == nil {
 		t.Fatal("expected relative mount error")
 	}
 }
@@ -866,14 +904,12 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	if len(sessionState.Sessions) != 2 {
 		t.Fatalf("expected both project-root sessions, got %#v", sessionState.Sessions)
 	}
-	if err := ctrl.SwitchSession(ctx, sessionA.ID); err != nil {
-		t.Fatalf("switch to other project root session: %v", err)
+	created, err := ctrl.CreateSession(ctx, "Second A", workspaceA)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
 	}
-	if err := ctrl.NewSession(ctx, "Second A"); err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	if got := ctrl.State().Session.ProjectRoot; got != workspaceA {
-		t.Fatalf("expected new session to inherit active project root %q, got %q", workspaceA, got)
+	if got := created.ProjectRoot; got != workspaceA {
+		t.Fatalf("expected new session project root %q, got %q", workspaceA, got)
 	}
 	sessionState, err = ctrl.Sessions(ctx)
 	if err != nil {
@@ -1229,7 +1265,7 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 	}
 }
 
-func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
+func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
@@ -1245,12 +1281,11 @@ func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	first := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(ctx, "Side"); err != nil {
-		t.Fatalf("new chat: %v", err)
-	}
-	if err := ctrl.SwitchChat(ctx, first); err != nil {
-		t.Fatalf("switch back to first chat: %v", err)
+	selection := controllerSelection(ctrl)
+	first := selection.ChatID
+	_ = newSelectedChat(t, ctrl, selection, "Side")
+	if _, err := ctrl.StateForSelection(ctx, selection); err != nil {
+		t.Fatalf("touch first chat: %v", err)
 	}
 
 	next := New(cfg, st, agent.New(cfg, st, nil, nil))
@@ -1262,7 +1297,7 @@ func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
 	}
 }
 
-func TestControllerSwitchSessionPersistsLastUsedSession(t *testing.T) {
+func TestControllerSelectedSessionPersistsLastUsedSession(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
@@ -1279,11 +1314,11 @@ func TestControllerSwitchSessionPersistsLastUsedSession(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	first := ctrl.State().Session.ID
-	if err := ctrl.NewSession(ctx, "Second"); err != nil {
-		t.Fatalf("new session: %v", err)
+	if _, err := ctrl.CreateSession(ctx, "Second", workdir); err != nil {
+		t.Fatalf("create session: %v", err)
 	}
-	if err := ctrl.SwitchSession(ctx, first); err != nil {
-		t.Fatalf("switch back to first session: %v", err)
+	if _, err := ctrl.StateForSelection(ctx, Selection{SessionID: first}); err != nil {
+		t.Fatalf("touch first session: %v", err)
 	}
 
 	next := New(cfg, st, agent.New(cfg, st, nil, nil))

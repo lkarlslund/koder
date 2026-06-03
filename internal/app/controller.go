@@ -643,37 +643,6 @@ func (c *Controller) Subscribe() (<-chan Event, func()) {
 	}
 }
 
-// SendPrompt appends a user prompt to the active chat queue.
-func (c *Controller) SendPrompt(text string) error {
-	return c.SendPromptWithAttachments(text, nil)
-}
-
-// SendPromptWithAttachments appends a user prompt and uploaded attachment drafts to the active chat queue.
-func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.Draft) error {
-	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindUser, drafts)
-}
-
-// SendPromptWithSelection appends a user prompt to the selected chat queue.
-func (c *Controller) SendPromptWithSelection(ctx context.Context, selection Selection, text string, drafts []attachment.Draft) error {
-	return c.SendPromptWithKindSelection(ctx, selection, chat.QueueKindUser, text, drafts)
-}
-
-// SendSteerWithAttachments appends an explicit turn-boundary steer to the active chat queue.
-func (c *Controller) SendSteerWithAttachments(text string, drafts []attachment.Draft) error {
-	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindSteer, drafts)
-}
-
-// SendSteerWithSelection appends an explicit turn-boundary steer to the selected chat queue.
-func (c *Controller) SendSteerWithSelection(ctx context.Context, selection Selection, text string, drafts []attachment.Draft) error {
-	return c.SendPromptWithKindSelection(ctx, selection, chat.QueueKindSteer, text, drafts)
-}
-
-// SendPromptWithKindAndAttachments enqueues a prompt with the given delivery kind.
-func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.QueueKind, drafts []attachment.Draft) error {
-	rt := c.currentRuntime()
-	return c.enqueuePrompt(rt, text, kind, drafts)
-}
-
 // SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
 func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection Selection, kind chat.QueueKind, text string, drafts []attachment.Draft) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -705,12 +674,6 @@ func (c *Controller) enqueuePrompt(rt *chat.Chat, text string, kind chat.QueueKi
 	return nil
 }
 
-// ReorderQueue reorders the queued inputs in the active chat by their IDs.
-func (c *Controller) ReorderQueue(ids []id.ID) error {
-	rt := c.currentRuntime()
-	return reorderRuntimeQueue(rt, ids)
-}
-
 // ReorderQueueForSelection reorders the selected chat queued inputs by ID.
 func (c *Controller) ReorderQueueForSelection(ctx context.Context, selection Selection, ids []id.ID) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -728,12 +691,6 @@ func reorderRuntimeQueue(rt *chat.Chat, ids []id.ID) error {
 	return nil
 }
 
-// DeleteQueueItem removes a queued input from the active chat by ID.
-func (c *Controller) DeleteQueueItem(id id.ID) error {
-	rt := c.currentRuntime()
-	return deleteRuntimeQueueItem(rt, id)
-}
-
 // DeleteQueueItemForSelection removes a queued input from the selected chat.
 func (c *Controller) DeleteQueueItemForSelection(ctx context.Context, selection Selection, id id.ID) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -749,12 +706,6 @@ func deleteRuntimeQueueItem(rt *chat.Chat, id id.ID) error {
 	}
 	rt.DeleteQueueItem(id)
 	return nil
-}
-
-// SendQueueItemNow promotes a held queued input for immediate next-turn delivery.
-func (c *Controller) SendQueueItemNow(id id.ID) error {
-	rt := c.currentRuntime()
-	return sendRuntimeQueueItemNow(rt, id)
 }
 
 // SendQueueItemNowForSelection promotes a held queued input for the selected chat.
@@ -779,12 +730,6 @@ func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType str
 	return attachment.NewManager(c.cfg.StateDir()).ImportClipboardImageData(data, name, mimeType)
 }
 
-// Continue asks the active chat to continue.
-func (c *Controller) Continue(note string) error {
-	rt := c.currentRuntime()
-	return continueRuntime(rt, note)
-}
-
 // ContinueForSelection asks the selected chat to continue.
 func (c *Controller) ContinueForSelection(ctx context.Context, selection Selection, note string) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -802,12 +747,6 @@ func continueRuntime(rt *chat.Chat, note string) error {
 	return nil
 }
 
-// Stop cancels the active chat turn.
-func (c *Controller) Stop() error {
-	rt := c.currentRuntime()
-	return stopRuntime(rt, chat.CancelReasonUserInterruptHard)
-}
-
 // StopForSelection cancels the selected chat turn.
 func (c *Controller) StopForSelection(ctx context.Context, selection Selection) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -823,12 +762,6 @@ func stopRuntime(rt *chat.Chat, reason chat.CancelReason) error {
 	}
 	rt.Cancel(reason)
 	return nil
-}
-
-// StopAfterCurrentTurn asks the active chat to stop at the next persisted turn boundary.
-func (c *Controller) StopAfterCurrentTurn() error {
-	rt := c.currentRuntime()
-	return stopRuntime(rt, chat.CancelReasonUserInterrupt)
 }
 
 // StopAfterCurrentTurnForSelection asks the selected chat to stop at the next turn boundary.
@@ -926,21 +859,6 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	return firstErr
 }
 
-// Compact starts compaction on the active chat.
-func (c *Controller) Compact(instructions string) error {
-	rt := c.currentRuntime()
-	if rt == nil {
-		return fmt.Errorf("no active chat")
-	}
-	return rt.Compact(instructions)
-}
-
-// Approve approves a pending tool call in the active chat.
-func (c *Controller) Approve(toolCallID string) error {
-	rt := c.currentRuntime()
-	return approveRuntimeTool(rt, toolCallID)
-}
-
 // ApproveForSelection approves a pending tool call in the selected chat.
 func (c *Controller) ApproveForSelection(ctx context.Context, selection Selection, toolCallID string) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -958,12 +876,6 @@ func approveRuntimeTool(rt *chat.Chat, toolCallID string) error {
 	return nil
 }
 
-// Deny denies a pending tool call in the active chat.
-func (c *Controller) Deny(toolCallID string) error {
-	rt := c.currentRuntime()
-	return denyRuntimeTool(rt, toolCallID)
-}
-
 // DenyForSelection denies a pending tool call in the selected chat.
 func (c *Controller) DenyForSelection(ctx context.Context, selection Selection, toolCallID string) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -978,139 +890,6 @@ func denyRuntimeTool(rt *chat.Chat, toolCallID string) error {
 		return fmt.Errorf("no active chat")
 	}
 	rt.DenyTool(toolCallID)
-	return nil
-}
-
-// SwitchChat switches the active chat within the current session.
-func (c *Controller) SwitchChat(ctx context.Context, chatID id.ID) error {
-	c.mu.RLock()
-	sessionID := c.session.ID
-	currentChatID := c.chat.ID
-	c.mu.RUnlock()
-	if sessionID == "" {
-		return fmt.Errorf("no active session")
-	}
-	if chatID == "" {
-		return fmt.Errorf("chat id is required")
-	}
-	if chatID == currentChatID {
-		return nil
-	}
-	return c.switchChatInCurrentSession(ctx, sessionID, chatID)
-}
-
-func (c *Controller) switchChatInCurrentSession(ctx context.Context, sessionID, chatID id.ID) error {
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	chatRecord, err := owner.EnsureChatModel(ctx, chatID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
-	if err != nil {
-		return err
-	}
-	session, chatRecord, chats, err := owner.TouchSelection(ctx, chatRecord.ID)
-	if err != nil {
-		return err
-	}
-	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
-	rt, err := owner.Chat(ctx, chatRecord.ID)
-	if err != nil {
-		return err
-	}
-	snapshot := rt.Snapshot()
-	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
-	status := sidebarStatusFromSnapshot(snapshot)
-
-	c.mu.Lock()
-	if c.session.ID != sessionID {
-		c.mu.Unlock()
-		return fmt.Errorf("session %s is no longer active", sessionID)
-	}
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.session = session
-	c.chat = chatRecord
-	c.runtime = rt
-	c.chats = chats
-	c.runtimes[chatRecord.ID] = rt
-	c.snapshots[chatRecord.ID] = snapshot
-	c.statuses[chatRecord.ID] = status
-	c.lastErr = ""
-	c.mu.Unlock()
-
-	c.broadcast("chat_delta", chat.Update{
-		Snapshot:   snapshot,
-		Status:     snapshot.Status,
-		StatusText: snapshot.StatusText,
-		Context:    snapshot.Context,
-		Active:     snapshot.Active,
-	})
-	c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": snapshot.Chat.ID})
-	return nil
-}
-
-// NewChat creates and switches to a chat in the current session.
-func (c *Controller) NewChat(ctx context.Context, title string) error {
-	c.mu.RLock()
-	session := c.session
-	parent := c.chat
-	c.mu.RUnlock()
-	if session.ID == "" {
-		return fmt.Errorf("no active session")
-	}
-	if parent.ID == "" {
-		return fmt.Errorf("no active chat")
-	}
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, session.ID)
-	if err != nil {
-		return err
-	}
-	rt, err := owner.NewChat(ctx, parent.ID, title)
-	if err != nil {
-		return err
-	}
-	snapshot := rt.Snapshot()
-	if snapshot.Chat.ID == "" {
-		return fmt.Errorf("created chat has no id")
-	}
-	c.mu.Lock()
-	upsertChat(&c.chats, snapshot.Chat)
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.chat = snapshot.Chat
-	c.runtime = rt
-	c.runtimes[snapshot.Chat.ID] = rt
-	c.snapshots[snapshot.Chat.ID] = snapshot
-	c.statuses[snapshot.Chat.ID] = sidebarStatusFromSnapshot(snapshot)
-	c.mu.Unlock()
-	c.broadcast("chat_delta", chat.Update{
-		Snapshot:   snapshot,
-		Status:     snapshot.Status,
-		StatusText: snapshot.StatusText,
-		Context:    snapshot.Context,
-		Active:     snapshot.Active,
-	})
-	c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": snapshot.Chat.ID})
 	return nil
 }
 
@@ -1296,13 +1075,6 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
-// DeleteChat archives a chat and switches away first when it is active.
-func (c *Controller) DeleteChat(ctx context.Context, chatID id.ID) error {
-	archived := true
-	_, err := c.UpdateChat(ctx, "", chatID, tools.ChatUpdateRequest{Archived: &archived})
-	return err
-}
-
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
@@ -1361,41 +1133,6 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.
 	return status, nil
 }
 
-// ReorderChats persists the sidebar chat order for the active session.
-func (c *Controller) ReorderChats(ctx context.Context, chatIDs []id.ID) error {
-	c.mu.RLock()
-	sessionID := c.session.ID
-	activeChatID := c.chat.ID
-	c.mu.RUnlock()
-	if sessionID == "" {
-		return fmt.Errorf("no active session")
-	}
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	ordered, err := owner.ReorderChats(ctx, chatIDs)
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	c.chats = ordered
-	for _, item := range ordered {
-		if item.ID == activeChatID {
-			c.chat = item
-		}
-		if snapshot, ok := c.snapshots[item.ID]; ok {
-			snapshot.Chat = item
-			c.snapshots[item.ID] = snapshot
-		}
-	}
-	c.mu.Unlock()
-	return nil
-}
-
 // ReorderChatsForSelection persists sidebar chat order for the selected session.
 func (c *Controller) ReorderChatsForSelection(ctx context.Context, selection Selection, chatIDs []id.ID) error {
 	if selection.SessionID == "" {
@@ -1435,32 +1172,6 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	projectRoot := c.session.ProjectRoot
 	c.mu.RUnlock()
 	return SessionState{ActiveID: activeID, ProjectRoot: projectRoot, Sessions: sessions}, nil
-}
-
-// SwitchSession switches the active session within the current workspace.
-func (c *Controller) SwitchSession(ctx context.Context, sessionID id.ID) error {
-	if sessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	session, err := sessionpkg.GetSession(ctx, c.store, sessionID)
-	if err != nil {
-		return err
-	}
-	if !c.sessionInWorkspace(session) {
-		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
-	}
-	return c.loadSession(ctx, sessionID, "")
-}
-
-// NewSession creates and switches to a new session in the current workspace.
-func (c *Controller) NewSession(ctx context.Context, title string) error {
-	return c.NewSessionWithProjectRoot(ctx, title, "")
-}
-
-// NewSessionWithProjectRoot creates and switches to a new session with an explicit project root.
-func (c *Controller) NewSessionWithProjectRoot(ctx context.Context, title string, projectRoot string) error {
-	_, err := c.CreateSession(ctx, title, projectRoot)
-	return err
 }
 
 // CreateSession creates a new session without changing controller selection.
@@ -2330,12 +2041,6 @@ func chatSidebarStatusText(status string) string {
 	default:
 		return "Idle"
 	}
-}
-
-func (c *Controller) currentRuntime() *chat.Chat {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.runtime
 }
 
 func (c *Controller) resolveSelectedRuntime(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {

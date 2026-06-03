@@ -243,14 +243,11 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 
 func TestHTTPRPCMethodPathUsesExplicitSelection(t *testing.T) {
 	ctrl := newTestController(t)
-	firstID := ctrl.State().Session.ID
-	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
-	secondID := ctrl.State().Session.ID
-	if err := ctrl.SwitchSession(context.Background(), firstID); err != nil {
-		t.Fatalf("switch back to first session: %v", err)
-	}
+	secondID := second.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -1711,10 +1708,11 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := ctrl.State().Session.ID
 	firstID := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+	second, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "side chat")
+	if err != nil {
 		t.Fatalf("new chat: %v", err)
 	}
-	secondID := ctrl.State().ActiveChatID
+	secondID := second.ID
 	if firstID == "" || secondID == "" || firstID == secondID {
 		t.Fatalf("expected two distinct chats, first=%s second=%s", firstID, secondID)
 	}
@@ -1764,14 +1762,16 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := ctrl.State().Session.ID
 	firstID := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(context.Background(), "second"); err != nil {
+	second, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "second")
+	if err != nil {
 		t.Fatalf("new second chat: %v", err)
 	}
-	secondID := ctrl.State().ActiveChatID
-	if err := ctrl.NewChat(context.Background(), "third"); err != nil {
+	secondID := second.ID
+	third, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: secondID}, "third")
+	if err != nil {
 		t.Fatalf("new third chat: %v", err)
 	}
-	thirdID := ctrl.State().ActiveChatID
+	thirdID := third.ID
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1826,10 +1826,12 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := ctrl.State().Session.ID
-	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+	firstID := ctrl.State().ActiveChatID
+	deleted, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "side chat")
+	if err != nil {
 		t.Fatalf("new chat: %v", err)
 	}
-	deletedID := ctrl.State().ActiveChatID
+	deletedID := deleted.ID
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

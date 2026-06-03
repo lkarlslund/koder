@@ -538,9 +538,9 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		selection := s.appSelection(clientID)
 		if in.Steer {
-			return map[string]bool{"queued": true}, s.controller.SendSteerWithSelection(ctx, selection, in.Text, in.Attachments)
+			return map[string]bool{"queued": true}, s.controller.SendPromptWithKindSelection(ctx, selection, chat.QueueKindSteer, in.Text, in.Attachments)
 		}
-		return map[string]bool{"queued": true}, s.controller.SendPromptWithSelection(ctx, selection, in.Text, in.Attachments)
+		return map[string]bool{"queued": true}, s.controller.SendPromptWithKindSelection(ctx, selection, chat.QueueKindUser, in.Text, in.Attachments)
 	case "continue":
 		var in struct {
 			Note string `json:"note"`
@@ -972,19 +972,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (s *Server) setClientSelectionFromState(clientID string, state app.State) {
-	if clientID == "" {
-		return
-	}
-	if state.Session.ID == "" {
-		return
-	}
-	s.setClientSelection(clientID, clientSelection{
-		SessionID: state.Session.ID,
-		ChatID:    state.ActiveChatID,
-	})
-}
-
 func trimStateTimelines(state app.State, limit int) app.State {
 	if limit <= 0 {
 		return state
@@ -1065,10 +1052,6 @@ func (s *Server) sessionExists(ctx context.Context, sessionID id.ID) (bool, erro
 		}
 	}
 	return false, nil
-}
-
-func rpcUsesActiveSelection(method string) bool {
-	return false
 }
 
 func (s *Server) updateClientSelectionFromResult(clientID string, result any) {

@@ -437,66 +437,6 @@ func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPrefer
 	return saved, nil
 }
 
-// SetModel persists the active chat model and updates the live chat runtime.
-func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) error {
-	providerID = strings.TrimSpace(providerID)
-	modelID = strings.TrimSpace(modelID)
-	if providerID == "" {
-		return fmt.Errorf("provider id is required")
-	}
-	if modelID == "" {
-		return fmt.Errorf("model id is required")
-	}
-	if !c.cfg.HasUsableProvider(providerID) {
-		return fmt.Errorf("provider %q is not configured", providerID)
-	}
-	c.ensureModelConfig(ctx, providerID, modelID)
-	c.mu.RLock()
-	sessionID := c.session.ID
-	chatID := c.chat.ID
-	c.mu.RUnlock()
-	if sessionID == "" {
-		return fmt.Errorf("no active session")
-	}
-	if chatID == "" {
-		return fmt.Errorf("no active chat")
-	}
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	chatRecord, err := owner.SetChatModel(ctx, chatID, providerID, modelID)
-	if err != nil {
-		return err
-	}
-	session := owner.Snapshot().Session
-	c.mu.Lock()
-	c.session = session
-	c.chat = chatRecord
-	for idx := range c.sessions {
-		if c.sessions[idx].ID == session.ID {
-			c.sessions[idx] = session
-		}
-	}
-	for idx := range c.chats {
-		if c.chats[idx].ID == chatRecord.ID {
-			c.chats[idx] = chatRecord
-		}
-	}
-	for id, snapshot := range c.snapshots {
-		if id == chatRecord.ID {
-			snapshot.Chat = chatRecord
-			snapshot.Session = session
-		}
-		c.snapshots[id] = snapshot
-	}
-	c.mu.Unlock()
-	return nil
-}
-
 // SetModelForSelection persists the selected chat model and updates its live runtime.
 func (c *Controller) SetModelForSelection(ctx context.Context, selection Selection, providerID, modelID string) error {
 	providerID = strings.TrimSpace(providerID)
@@ -534,49 +474,6 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 		c.snapshots[chatRecord.ID] = snapshot
 	}
 	c.mu.Unlock()
-	return nil
-}
-
-// SetAccessSettings updates the active session sandbox access settings.
-func (c *Controller) SetAccessSettings(ctx context.Context, settings accesssettings.Settings) error {
-	settings = accesssettings.Normalize(settings)
-	if err := accesssettings.Validate(settings); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	session := c.session
-	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
-	for _, rt := range c.runtimes {
-		if rt != nil {
-			runtimes = append(runtimes, rt)
-		}
-	}
-	c.mu.Unlock()
-	if session.ID != "" {
-		owner, err := c.agent.LoadSession(ctx, session.ID)
-		if err != nil {
-			return err
-		}
-		session, err = owner.SetAccessSettings(ctx, settings)
-		if err != nil {
-			return err
-		}
-	}
-	c.mu.Lock()
-	c.session = session
-	for idx := range c.sessions {
-		if c.sessions[idx].ID == session.ID {
-			c.sessions[idx] = session
-		}
-	}
-	for id, snapshot := range c.snapshots {
-		snapshot.Session = session
-		c.snapshots[id] = snapshot
-	}
-	c.mu.Unlock()
-	for _, rt := range runtimes {
-		rt.SetSession(session)
-	}
 	return nil
 }
 
