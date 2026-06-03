@@ -3,6 +3,7 @@ package debugsrv
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,59 @@ func TestRecorderAddsHTTPRequestDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRecorderKeepsLastTwentyFullHTTPRequestBodies(t *testing.T) {
+	t.Parallel()
+
+	rec := NewRecorder()
+	for i := 0; i < 25; i++ {
+		body := `{"messages":[{"role":"user","content":"` + strings.Repeat(fmt.Sprintf("%02d", i), 5000) + `"}]}`
+		rec.RecordHTTP(HTTPTrace{
+			ProviderID:   "p",
+			SessionID:    "session-a",
+			ChatID:       "chat-a",
+			Method:       http.MethodPost,
+			Path:         "/v1/chat/completions",
+			RequestBody:  body,
+			ResponseBody: `data: {"prompt_progress":{"total":123,"cache":45,"processed":67}}`,
+		})
+	}
+
+	traces := rec.HTTPTraces()
+	if len(traces) != 20 {
+		t.Fatalf("expected last 20 traces, got %d", len(traces))
+	}
+	if !strings.Contains(traces[0].RequestBody, strings.Repeat("05", 100)) {
+		t.Fatalf("expected oldest retained trace to be request 05, got %.80q", traces[0].RequestBody)
+	}
+	if len(traces[0].RequestBody) <= 8192 {
+		t.Fatalf("expected full request body larger than old 8 KB cap, got %d", len(traces[0].RequestBody))
+	}
+	if traces[0].RequestBytes != len(traces[0].RequestBody) {
+		t.Fatalf("request bytes = %d, want %d", traces[0].RequestBytes, len(traces[0].RequestBody))
+	}
+	if traces[0].Meta["prompt_progress_total"] != "123" {
+		t.Fatalf("expected prompt progress metadata, got %#v", traces[0].Meta)
+	}
+}
+
+func TestRecorderFiltersHTTPTraces(t *testing.T) {
+	t.Parallel()
+
+	rec := NewRecorder()
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p1", SessionID: "session-a", ChatID: "chat-a", RequestBody: `{"messages":[]}`})
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p1", SessionID: "session-a", ChatID: "chat-b", RequestBody: `{"messages":[]}`})
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p2", SessionID: "session-b", ChatID: "chat-c", RequestBody: `{"messages":[]}`})
+
+	traces := rec.HTTPTraces(HTTPTraceFilter{SessionID: "session-a", ChatID: "chat-b"})
+	if len(traces) != 1 || traces[0].ChatID != "chat-b" {
+		t.Fatalf("expected chat-b trace, got %#v", traces)
+	}
+	traces = rec.HTTPTraces(HTTPTraceFilter{ProviderID: "p1", Limit: 1})
+	if len(traces) != 1 || traces[0].ChatID != "chat-b" {
+		t.Fatalf("expected latest p1 trace, got %#v", traces)
+	}
+}
+
 func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	t.Parallel()
 
@@ -182,6 +236,158 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	if global.Events[0].Kind != "startup_timing" {
 		t.Fatalf("expected startup timing event in global stream, got %#v", global.Events[0])
+	}
+}
+
+func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultChat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sideChat, err := modeltest.CreateChat(context.Background(), st, session.ID, "Side", "execution", &defaultChat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, defaultChat.ID, domain.UserMessage{Text: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, sideChat.ID, domain.UserMessage{Text: "side-one"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, sideChat.ID, domain.UserMessage{Text: "side-two"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := NewRecorder()
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: defaultChat.ID, RequestBody: `{"messages":[{"role":"user","content":"default"}]}`})
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: sideChat.ID, RequestBody: `{"messages":[{"role":"user","content":"side"}]}`})
+	srv := httptest.NewServer(Handler(st, rec))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(sideChat.ID) + "/transcript?tail=true&limit=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected transcript status %d: %s", resp.StatusCode, string(data))
+	}
+	var transcript struct {
+		SessionID id.ID                 `json:"session_id"`
+		ChatID    id.ID                 `json:"chat_id"`
+		Timeline  []domain.TimelineItem `json:"timeline"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
+		t.Fatal(err)
+	}
+	if transcript.ChatID != sideChat.ID || len(transcript.Timeline) != 1 {
+		t.Fatalf("unexpected transcript response: %#v", transcript)
+	}
+	user, ok := transcript.Timeline[0].Content.(domain.UserMessage)
+	if !ok || user.Text != "side-two" {
+		t.Fatalf("expected side chat tail item, got %#v", transcript.Timeline)
+	}
+
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(sideChat.ID) + "/http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var traces struct {
+		Traces []HTTPTrace `json:"traces"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&traces); err != nil {
+		t.Fatal(err)
+	}
+	if len(traces.Traces) != 1 || traces.Traces[0].ChatID != sideChat.ID || !strings.Contains(traces.Traces[0].RequestBody, "side") {
+		t.Fatalf("expected side chat HTTP trace, got %#v", traces.Traces)
+	}
+
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/not-a-chat/http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected invalid chat/session pair to fail, got %d", resp.StatusCode)
+	}
+}
+
+func TestServerExposesSpecificChatDebugDetails(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, chat.ID, domain.Compaction{
+		Status:              "completed",
+		Summary:             "summary",
+		FirstKeptItemID:     "kept-1",
+		BeforeContextTokens: 1000,
+		AfterContextTokens:  300,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{
+		Text:  "done",
+		Usage: &domain.Usage{PromptTokens: 123, CompletionTokens: 4, CachedTokens: 100, TotalTokens: 127},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := NewRecorder()
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: chat.ID, RequestBody: `{"messages":[{"role":"user","content":"x"}]}`})
+	srv := httptest.NewServer(Handler(st, rec))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(chat.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected chat detail status %d: %s", resp.StatusCode, string(data))
+	}
+	var payload struct {
+		LatestCompaction map[string]any `json:"latest_compaction"`
+		LatestUsage      map[string]any `json:"latest_usage"`
+		HTTPTraces       []HTTPTrace    `json:"http_traces"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.LatestCompaction["first_kept_item_id"] != "kept-1" {
+		t.Fatalf("expected latest compaction detail, got %#v", payload.LatestCompaction)
+	}
+	if payload.LatestUsage["usage"] == nil {
+		t.Fatalf("expected latest usage detail, got %#v", payload.LatestUsage)
+	}
+	if len(payload.HTTPTraces) != 1 || payload.HTTPTraces[0].ChatID != chat.ID {
+		t.Fatalf("expected matching HTTP trace, got %#v", payload.HTTPTraces)
 	}
 }
 
