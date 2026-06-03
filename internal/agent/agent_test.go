@@ -5025,6 +5025,73 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 	}
 }
 
+func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	old := appendUserTimelineItem(t, st, chat.ID, "old item before valid compaction")
+	valid, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+		Summary:         "valid compact summary",
+		Status:          "completed",
+		FirstKeptItemID: old.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendUserTimelineItem(t, st, chat.ID, "real tail that must survive")
+	if _, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+		Status:          "failed",
+		Trigger:         "manual",
+		FirstKeptItemID: valid.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+		Summary:         "invalid compact summary",
+		Status:          "completed",
+		FirstKeptItemID: old.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(messages)
+	if strings.Contains(joined, "invalid compact summary") {
+		t.Fatalf("invalid compaction boundary should be ignored, got %s", joined)
+	}
+	if !strings.Contains(joined, "real tail that must survive") {
+		t.Fatalf("expected tail after failed compaction marker to survive, got %s", joined)
+	}
+}
+
+func providerMessagesText(messages []provider.Message) string {
+	var parts []string
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.Content) != "" {
+			parts = append(parts, msg.Content)
+		}
+		for _, part := range msg.ContentParts {
+			if strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, part.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	t.Parallel()
 

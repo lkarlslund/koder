@@ -1869,7 +1869,9 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
 			if strings.TrimSpace(compacted.Summary) == "" {
-				segmentStart = idx + 1
+				continue
+			}
+			if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
 				continue
 			}
 			envelope.Instructions = baseInstructions
@@ -2927,7 +2929,9 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
 			if strings.TrimSpace(compacted.Summary) == "" {
-				segmentStart = idx + 1
+				continue
+			}
+			if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
 				continue
 			}
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
@@ -2948,6 +2952,13 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 		envelope.Items = append(envelope.Items, messages...)
 	}
 	return envelope, nil
+}
+
+func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {
+	if strings.TrimSpace(firstKeptItemID) == "" {
+		return true
+	}
+	return firstKeptTimelineIndex(items, firstKeptItemID) >= 0
 }
 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
