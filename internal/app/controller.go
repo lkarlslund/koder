@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/version"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -60,6 +61,7 @@ type State struct {
 	ModelInfo     ModelInfo                      `json:"model_info"`
 	Theme         string                         `json:"theme"`
 	ProjectRoot   string                         `json:"project_root"`
+	Build         version.Info                   `json:"build"`
 	RestartNeeded bool                           `json:"restart_needed"`
 	RestartBuild  RestartBuildInfo               `json:"restart_build,omitempty"`
 	Error         string                         `json:"error,omitempty"`
@@ -538,6 +540,7 @@ func (c *Controller) stateLocked() State {
 		ModelInfo:     c.modelInfoLocked(),
 		Theme:         c.theme,
 		ProjectRoot:   c.session.ProjectRoot,
+		Build:         version.Current(),
 		RestartNeeded: c.restartNeeded,
 		RestartBuild:  c.restartBuild,
 		Error:         c.lastErr,

@@ -922,6 +922,46 @@
         restartBuildInfo() {
           return this.state.restart_build || this.state.RestartBuild || {};
         },
+        currentBuildInfo() {
+          return this.state.build || this.state.Build || {};
+        },
+        shortBuildCommit(build) {
+          let commit = String(build.commit || build.Commit || '').trim();
+          if (!commit) return '';
+          if (commit.length > 12) commit = commit.slice(0, 12);
+          if (String(build.dirty || build.Dirty || '').trim() === 'true') commit += '-dirty';
+          return commit;
+        },
+        formatBuildTimestamp(raw, includeDate = false) {
+          raw = String(raw || '').trim();
+          if (!raw || raw === 'unknown') return '';
+          const date = new Date(raw);
+          if (!Number.isFinite(date.getTime())) return raw;
+          const pad = (value) => String(value).padStart(2, '0');
+          const time = pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+          if (!includeDate) return time;
+          return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + time;
+        },
+        currentBuildLabel() {
+          const build = this.currentBuildInfo();
+          const commit = this.shortBuildCommit(build);
+          const built = this.formatBuildTimestamp(build.build_time || build.BuildTime);
+          if (commit && built) return commit + ' · ' + built;
+          return commit || built;
+        },
+        currentBuildTitle() {
+          const build = this.currentBuildInfo();
+          const parts = [];
+          const name = String(build.name || build.Name || 'koder').trim();
+          const version = String(build.version || build.Version || '').trim();
+          const commit = String(build.commit || build.Commit || '').trim();
+          const dirty = String(build.dirty || build.Dirty || '').trim();
+          const built = this.formatBuildTimestamp(build.build_time || build.BuildTime, true);
+          if (version) parts.push(name + ' ' + version);
+          if (commit) parts.push('commit: ' + commit + (dirty === 'true' ? ' (dirty)' : ''));
+          if (built) parts.push('built: ' + built);
+          return parts.join('\n') || 'Current build';
+        },
         restartBuildCommitLabel() {
           const build = this.restartBuildInfo();
           let commit = String(build.commit || build.Commit || '').trim();

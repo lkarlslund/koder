@@ -960,6 +960,7 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 		Sessions:      sessionState.Sessions,
 		Theme:         state.Theme,
 		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
+		Build:         state.Build,
 		RestartNeeded: state.RestartNeeded,
 		RestartBuild:  state.RestartBuild,
 		Error:         strings.TrimSpace(message),
@@ -1141,6 +1142,7 @@ type stateDelta struct {
 	ModelInfo     any    `json:"model_info,omitempty"`
 	Theme         string `json:"theme,omitempty"`
 	ProjectRoot   string `json:"project_root,omitempty"`
+	Build         any    `json:"build,omitempty"`
 	RestartNeeded bool   `json:"restart_needed,omitempty"`
 	RestartBuild  any    `json:"restart_build,omitempty"`
 	Error         string `json:"error,omitempty"`
@@ -1265,6 +1267,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		ModelInfo:     state.ModelInfo,
 		Theme:         state.Theme,
 		ProjectRoot:   state.ProjectRoot,
+		Build:         state.Build,
 		RestartNeeded: state.RestartNeeded,
 		RestartBuild:  state.RestartBuild,
 		Error:         state.Error,
