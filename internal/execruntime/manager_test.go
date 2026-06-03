@@ -2,6 +2,7 @@ package execruntime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -116,6 +117,37 @@ func TestManagerWriteStdinEmptyWaitsAndDrainsNewOutput(t *testing.T) {
 	}
 	if status.Drained {
 		t.Fatal("expected status snapshot not to be marked drained")
+	}
+}
+
+func TestManagerExecPreviewUsesSixteenKiBAndLineBoundary(t *testing.T) {
+	var output strings.Builder
+	for i := 1; i <= 1200; i++ {
+		output.WriteString(fmt.Sprintf("line-%04d %s\n", i, strings.Repeat("x", 32)))
+	}
+	p := &process{output: output.String()}
+	snap := p.snapshot(0)
+	if len(snap.Output) > defaultPreviewBytes {
+		t.Fatalf("expected output <= %d bytes, got %d", defaultPreviewBytes, len(snap.Output))
+	}
+	if strings.HasPrefix(snap.Output, "bcdef") || strings.HasPrefix(snap.Output, "ollection") {
+		t.Fatalf("expected output to start at a line boundary, got %q", snap.Output[:min(len(snap.Output), 32)])
+	}
+	if !strings.HasPrefix(snap.Output, "line-") {
+		t.Fatalf("expected output to start with a full line, got %q", snap.Output[:min(len(snap.Output), 32)])
+	}
+	if !strings.Contains(snap.Output, "line-1200") {
+		t.Fatalf("expected preview to keep tail output, got suffix %q", snap.Output[max(0, len(snap.Output)-64):])
+	}
+}
+
+func TestTailOnLineBoundaryDropsPartialAndOversizedSingleLine(t *testing.T) {
+	got := tailOnLineBoundary("first\nsecond\nthird\n", 13)
+	if got != "second\nthird\n" {
+		t.Fatalf("unexpected line-boundary tail: %q", got)
+	}
+	if got := tailOnLineBoundary(strings.Repeat("x", 20), 10); got != "" {
+		t.Fatalf("expected oversized single line to be dropped, got %q", got)
 	}
 }
 

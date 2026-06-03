@@ -28,7 +28,7 @@ const (
 	defaultRows          = 24
 	defaultCols          = 80
 	defaultTailBytes     = 64 * 1024
-	defaultPreviewBytes  = 4 * 1024
+	defaultPreviewBytes  = 16 * 1024
 	defaultSubscriberCap = 32
 	defaultStdinWait     = 250 * time.Millisecond
 	postExitDrainGrace   = 50 * time.Millisecond
@@ -533,12 +533,8 @@ func (p *process) appendOutput(delta string) {
 	p.output += delta
 	p.drainOutput += delta
 	p.outputBytes += len(delta)
-	if len(p.output) > defaultTailBytes {
-		p.output = p.output[len(p.output)-defaultTailBytes:]
-	}
-	if len(p.drainOutput) > defaultTailBytes {
-		p.drainOutput = p.drainOutput[len(p.drainOutput)-defaultTailBytes:]
-	}
+	p.output = tailOnLineBoundary(p.output, defaultTailBytes)
+	p.drainOutput = tailOnLineBoundary(p.drainOutput, defaultTailBytes)
 }
 
 func (p *process) snapshot(maxBytes int) Snapshot {
@@ -548,9 +544,7 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 	if maxBytes <= 0 {
 		maxBytes = defaultPreviewBytes
 	}
-	if len(output) > maxBytes {
-		output = output[len(output)-maxBytes:]
-	}
+	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
 		ProcessID:   p.processID,
 		SessionID:   p.sessionID,
@@ -580,9 +574,7 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 	if maxBytes <= 0 {
 		maxBytes = defaultPreviewBytes
 	}
-	if len(output) > maxBytes {
-		output = output[len(output)-maxBytes:]
-	}
+	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
 		ProcessID:   p.processID,
 		SessionID:   p.sessionID,
@@ -603,6 +595,24 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
 	}
+}
+
+func tailOnLineBoundary(output string, maxBytes int) string {
+	if maxBytes <= 0 || len(output) <= maxBytes {
+		return output
+	}
+	cut := len(output) - maxBytes
+	if cut == 0 || output[cut-1] == '\n' {
+		return output[cut:]
+	}
+	if idx := strings.IndexByte(output[cut:], '\n'); idx >= 0 {
+		start := cut + idx + 1
+		if start < len(output) {
+			return output[start:]
+		}
+		return ""
+	}
+	return ""
 }
 
 func (p *process) waitForOutput(ctx context.Context, wait time.Duration) error {
