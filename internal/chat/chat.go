@@ -1083,6 +1083,17 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 
 	r.mu.Lock()
 	r.state.ReplaceTimeline(next)
+	r.chat.LastKnownContextTokens = 0
+	r.chat.ContextTokensKnown = false
+	r.chat.TokenUsage = domain.Usage{}
+	r.chat.UpdatedAt = time.Now().UTC()
+	r.state.UpdateChat(func(chat *domain.Chat) {
+		chat.LastKnownContextTokens = 0
+		chat.ContextTokensKnown = false
+		chat.TokenUsage = domain.Usage{}
+		chat.UpdatedAt = r.chat.UpdatedAt
+	})
+	chatRecord := r.chat
 	r.timelineLoaded = true
 	result := LiveRewindResult{
 		ChatID:         chatID,
@@ -1091,6 +1102,9 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 		RemainingCount: len(next),
 	}
 	r.mu.Unlock()
+	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+		return LiveRewindResult{}, err
+	}
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, true))
 	return result, nil
 }

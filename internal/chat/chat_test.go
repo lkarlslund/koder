@@ -1244,6 +1244,11 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "remove"}); err != nil {
 		t.Fatal(err)
 	}
+	chatRecord.LastKnownContextTokens = 1234
+	chatRecord.ContextTokensKnown = true
+	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+		t.Fatal(err)
+	}
 	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
 
 	result, err := rt.RewindLiveTimelineFrom(ctx, anchor.ID)
@@ -1263,6 +1268,13 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	}
 	if len(persisted) != 1 || persisted[0].ID != keep.ID {
 		t.Fatalf("stored timeline was not truncated: %#v", persisted)
+	}
+	updated, err := GetChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastKnownContextTokens != 0 || updated.ContextTokensKnown {
+		t.Fatalf("expected rewind to clear stale context counters, got %#v", updated)
 	}
 }
 
