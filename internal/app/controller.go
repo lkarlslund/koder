@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -592,6 +593,12 @@ func (c *Controller) MarkRestartNeeded(build RestartBuildInfo) {
 	if c == nil {
 		return
 	}
+	slog.Info("restart needed received",
+		"build_id", build.BuildID,
+		"commit", build.Commit,
+		"dirty", build.Dirty,
+		"build_time", build.BuildTime,
+	)
 	c.mu.Lock()
 	c.restartNeeded = true
 	c.restartBuild = build
@@ -838,11 +845,17 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 		c.workspaceRefreshTimer.Stop()
 	}
 	c.mu.RUnlock()
+	slog.Info("controller shutdown requested", "reason", reason, "runtimes", len(runtimes), "unsubscribers", len(unsubs), "agent", c.agent != nil)
 	for _, unsub := range unsubs {
 		unsub()
 	}
 	if c.agent != nil {
-		return c.agent.Shutdown(ctx, reason)
+		if err := c.agent.Shutdown(ctx, reason); err != nil {
+			slog.Error("controller shutdown failed", "reason", reason, "error", err)
+			return err
+		}
+		slog.Info("controller shutdown complete", "reason", reason, "agent", true)
+		return nil
 	}
 	var firstErr error
 	for _, rt := range runtimes {
@@ -856,6 +869,11 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 			firstErr = err
 		}
 	}
+	if firstErr != nil {
+		slog.Error("controller shutdown failed", "reason", reason, "error", firstErr)
+		return firstErr
+	}
+	slog.Info("controller shutdown complete", "reason", reason, "agent", false, "runtimes", len(runtimes))
 	return firstErr
 }
 

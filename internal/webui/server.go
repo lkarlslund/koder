@@ -259,6 +259,13 @@ func (s *Server) handleRestartNeeded(w http.ResponseWriter, r *http.Request) {
 	if build.BuildID == "" {
 		build.BuildID = restartBuildID(build)
 	}
+	slog.Info("restart-needed api received",
+		"remote", r.RemoteAddr,
+		"build_id", build.BuildID,
+		"commit", build.Commit,
+		"dirty", build.Dirty,
+		"build_time", build.BuildTime,
+	)
 	s.controller.MarkRestartNeeded(build)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -586,6 +593,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if !ok {
 			return nil, fmt.Errorf("unknown shutdown reason %q", in.Reason)
 		}
+		slog.Info("shutdown rpc received", "client", clientID, "reason", reason)
 		return map[string]bool{"stopping": true}, s.controller.ShutdownWithCancelReason(ctx, reason)
 	case "restart_process":
 		var in struct {
@@ -598,14 +606,18 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if in.Hard {
 			reason = chat.CancelReasonRestartInterruptHard
 		}
+		slog.Info("restart rpc received", "client", clientID, "hard", in.Hard, "reason", reason)
 		go func() {
 			if err := s.controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
 				slog.Error("shutdown for process restart", "error", err, "hard", in.Hard)
 				return
 			}
+			slog.Info("shutdown for process restart complete", "hard", in.Hard)
 			if err := s.requestProcessRestart(); err != nil {
 				slog.Error("request process restart", "error", err, "hard", in.Hard)
+				return
 			}
+			slog.Info("process restart requested", "hard", in.Hard)
 		}()
 		return map[string]bool{"restarting": true, "acknowledged": true, "hard": in.Hard}, nil
 	case "compact":

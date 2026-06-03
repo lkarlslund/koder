@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -182,6 +183,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("koder context cancelled; shutting down")
 			if err := controller.Shutdown(context.Background()); err != nil {
 				return err
 			}
@@ -191,12 +193,15 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 			if signal == syscall.SIGUSR1 {
 				reason = chatpkg.CancelReasonRestartInterrupt
 			}
+			slog.Info("koder signal received", "signal", signal.String(), "reason", reason)
 			if err := controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
 				return err
 			}
 			if signal == syscall.SIGUSR1 {
+				slog.Info("koder exiting for process restart", "exit_code", processRestartExitCode)
 				return errProcessRestart
 			}
+			slog.Info("koder shutdown complete", "signal", signal.String())
 			return nil
 		}
 	}

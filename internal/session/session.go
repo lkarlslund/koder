@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -547,6 +548,7 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 		}
 	}
 	s.mu.Unlock()
+	slog.Info("session renamed", "session_id", updated.ID, "title", updated.Title)
 	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
@@ -578,6 +580,7 @@ func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings
 		}
 	}
 	s.mu.Unlock()
+	slog.Info("session access settings stored", "session_id", updated.ID)
 	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
@@ -737,6 +740,7 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 		return nil
 	}
 	s.mu.RLock()
+	sessionID := s.session.ID
 	runtimes := make([]*chatpkg.Chat, 0, len(s.runtimes))
 	for _, rt := range s.runtimes {
 		if rt != nil {
@@ -766,6 +770,7 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 	for _, unsub := range unsubs {
 		unsub()
 	}
+	slog.Info("session shutdown requested", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "subscribers", len(subs), "unsubscribers", len(unsubs))
 	for _, rt := range runtimes {
 		var err error
 		if reason == "" {
@@ -774,9 +779,11 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 			err = rt.Shutdown(ctx, reason)
 		}
 		if err != nil {
+			slog.Error("session shutdown failed", "session_id", sessionID, "reason", reason, "error", err)
 			return err
 		}
 	}
+	slog.Info("session shutdown complete", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes))
 	return nil
 }
 
@@ -807,6 +814,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 	todos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	slog.Info("milestone plan stored", "session_id", sessionID, "milestones", len(plan.Milestones), "summary_bytes", len(plan.Summary))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Todos: todos, TodosByRef: todosByRef})
 	return cloneMilestonePlan(plan), nil
 }
@@ -855,6 +863,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	todos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	slog.Info("todos added", "session_id", sessionID, "milestone_ref", milestoneRef, "count", len(items))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: todos, TodosByRef: todosByRef})
 	return slices.Clone(items), nil
 }
@@ -910,6 +919,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	allTodos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
+	slog.Info("todo stored", "session_id", sessionID, "todo_id", item.ID, "milestone_ref", ref, "status", item.Status, "note_bytes", len(item.Note))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: allTodos, TodosByRef: todosByRef})
 	return item, nil
 }

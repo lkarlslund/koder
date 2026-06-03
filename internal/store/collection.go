@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -127,7 +128,11 @@ func (c Collection[T]) Delete(ctx context.Context, id any) error {
 	if err != nil {
 		return err
 	}
-	return c.store.backend.Delete(ctx, c.spec.Namespace, key)
+	if err := c.store.backend.Delete(ctx, c.spec.Namespace, key); err != nil {
+		return err
+	}
+	slog.Debug("store delete", "namespace", c.spec.Namespace, "id", key)
+	return nil
 }
 
 // List returns records matching query, sorted by ID when the spec has an ID function.
@@ -198,7 +203,12 @@ func (c Collection[T]) put(ctx context.Context, value T) error {
 	for _, spec := range c.spec.Indexes {
 		indexes[spec.Name] = spec.Value(value)
 	}
-	return c.store.backend.Put(ctx, c.spec.Namespace, c.spec.GetID(value), data, indexes)
+	id := c.spec.GetID(value)
+	if err := c.store.backend.Put(ctx, c.spec.Namespace, id, data, indexes); err != nil {
+		return err
+	}
+	slog.Debug("store put", "namespace", c.spec.Namespace, "id", id, "bytes", len(data), "indexes", len(indexes))
+	return nil
 }
 
 func collectionIDKey(id any) (string, error) {

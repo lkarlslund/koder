@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -702,6 +703,7 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	chatRecord := r.chat
 	if r.state == nil {
 		r.mu.RUnlock()
+		slog.Info("chat persist", "chat_id", chatRecord.ID, "session_id", chatRecord.SessionID, "timeline_items", 0, "queued_inputs", len(chatRecord.QueuedInputs), "state_loaded", false)
 		return UpdateChat(ctx, st, chatRecord)
 	}
 	timeline := r.state.SnapshotTimeline()
@@ -736,6 +738,14 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if err := UpdateChat(ctx, st, chatRecord); err != nil {
 		return r.markPersistError(err)
 	}
+	slog.Info("chat persist",
+		"chat_id", chatRecord.ID,
+		"session_id", chatRecord.SessionID,
+		"timeline_items", len(timeline),
+		"inserted_items", changed,
+		"queued_inputs", len(chatRecord.QueuedInputs),
+		"state_loaded", true,
+	)
 	if changed {
 		r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
 	}
@@ -743,6 +753,15 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 }
 
 func (r *Chat) Enqueue(item QueueItem) {
+	chatID := id.ID("")
+	sessionID := id.ID("")
+	if r != nil {
+		r.mu.RLock()
+		chatID = r.chat.ID
+		sessionID = r.chat.SessionID
+		r.mu.RUnlock()
+	}
+	slog.Info("chat queue item received", "chat_id", chatID, "session_id", sessionID, "kind", item.Kind, "text_bytes", len(item.Text), "attachments", len(item.Attachments))
 	r.inbox <- enqueueCmd{item: item}
 }
 
@@ -828,6 +847,8 @@ func (r *Chat) Compact(instructions string) error {
 	}
 	instructions = strings.TrimSpace(instructions)
 	r.mu.Lock()
+	chatID := r.chat.ID
+	sessionID := r.chat.SessionID
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
@@ -841,6 +862,7 @@ func (r *Chat) Compact(instructions string) error {
 	r.status = StatusWaitingLLM
 	r.statusText = "Compacting session..."
 	r.mu.Unlock()
+	slog.Info("chat compaction requested", "chat_id", chatID, "session_id", sessionID, "instructions_bytes", len(instructions))
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 
 	out := make(chan domain.Event, 32)
@@ -890,6 +912,15 @@ func (r *Chat) Shutdown(ctx context.Context, reason CancelReason) error {
 }
 
 func (r *Chat) closeAfterCancel(ctx context.Context, reason CancelReason) error {
+	chatID := id.ID("")
+	sessionID := id.ID("")
+	if r != nil {
+		r.mu.RLock()
+		chatID = r.chat.ID
+		sessionID = r.chat.SessionID
+		r.mu.RUnlock()
+	}
+	slog.Info("chat cancel received", "chat_id", chatID, "session_id", sessionID, "reason", reason, "hard", reason.Hard(), "restart", reason.Restart())
 	noticeReason := reason.NoticeReason()
 	if noticeReason == "" {
 		return r.closeAfterDrain(ctx, "")
@@ -905,7 +936,10 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 	autoRestart := len(cancelActive) > 1 && cancelActive[1]
 	r.mu.Lock()
 	if r.closed {
+		chatID := r.chat.ID
+		sessionID := r.chat.SessionID
 		r.mu.Unlock()
+		slog.Info("chat close skipped", "chat_id", chatID, "session_id", sessionID, "reason", interruptReason, "already_closed", true)
 		return nil
 	}
 	wasActive := r.active
@@ -930,7 +964,18 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 		}
 	}
 	cancel := r.cancel
+	chatID := r.chat.ID
+	sessionID := r.chat.SessionID
 	r.mu.Unlock()
+	slog.Info("chat close requested",
+		"chat_id", chatID,
+		"session_id", sessionID,
+		"reason", interruptReason,
+		"active", wasActive,
+		"running_tool", wasRunningTool,
+		"cancel_active", shouldCancelActive,
+		"auto_restart", autoRestart,
+	)
 	if autoRestartChat.ID != "" && r.deps.Store != nil {
 		if err := UpdateChat(context.Background(), r.deps.Store, autoRestartChat); err != nil {
 			return err
@@ -968,6 +1013,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 		return err
 	}
 	r.Close()
+	slog.Info("chat close complete", "chat_id", chatID, "session_id", sessionID, "reason", interruptReason)
 	return nil
 }
 
