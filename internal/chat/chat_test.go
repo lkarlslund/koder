@@ -44,8 +44,9 @@ type cancelAwareRunner struct {
 
 type pendingToolFakeRunner struct {
 	runtimeFakeRunner
-	resumeCalls  int
-	resumeEvents []<-chan domain.Event
+	resumeCalls         int
+	resumeEvents        []<-chan domain.Event
+	continueAfterResume bool
 }
 
 type turnPromptFakeRunner struct {
@@ -282,9 +283,10 @@ func (f *runtimeFakeRunner) DenyToolForTurn(_ context.Context, _ *TurnState, _ s
 	return nil
 }
 
-func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(_ context.Context, _ *TurnState, out chan<- domain.Event) (bool, error) {
+func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(ctx context.Context, turn *TurnState, out chan<- domain.Event) (bool, error) {
 	f.mu.Lock()
 	f.resumeCalls++
+	shouldContinue := f.continueAfterResume
 	var events <-chan domain.Event
 	if len(f.resumeEvents) > 0 {
 		events = f.resumeEvents[0]
@@ -295,9 +297,19 @@ func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(_ context.Context, _ *
 		return false, nil
 	}
 	for evt := range events {
+		if evt.Kind == domain.EventKindToolResult && evt.Item.ID == "" && turn != nil {
+			item, err := turn.chat.RecordToolResult(ctx, evt.Tool, evt.ToolCallID, nil, domain.ToolResult{
+				Text:   evt.Text,
+				Status: domain.ToolResultStatusOK,
+			})
+			if err != nil {
+				return false, err
+			}
+			evt.Item = item
+		}
 		out <- evt
 	}
-	return false, nil
+	return shouldContinue, nil
 }
 
 func (f *pendingToolFakeRunner) resumeCallCount() int {
@@ -1123,6 +1135,67 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for resumed tool event")
 		}
+	}
+}
+
+func TestResumePendingToolsDispatchesQueuedUserBeforeAutoContinue(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindFileRead,
+		Args:       map[string]string{"path": "README.md"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan domain.Event)
+	runner := &pendingToolFakeRunner{
+		resumeEvents:        []<-chan domain.Event{events},
+		continueAfterResume: true,
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	deadline := time.After(2 * time.Second)
+	for runner.resumeCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for pending tool resume")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "queued while tools resume"})
+	deadline = time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued user to be stored: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	events <- domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindFileRead, ToolCallID: "call_1", Text: "ok"}
+	close(events)
+
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued user prompt: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "queued while tools resume" {
+		t.Fatalf("prompt = %q, want queued user message", got)
+	}
+	if got := runner.continueCallCount(); got != 0 {
+		t.Fatalf("resume auto-continued before queued user, continue calls=%d", got)
+	}
+	if got := len(rt.Snapshot().QueuedInputs); got != 0 {
+		t.Fatalf("queued user was not consumed, queue len=%d", got)
 	}
 }
 

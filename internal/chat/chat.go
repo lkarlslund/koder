@@ -1651,19 +1651,23 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
+	turn := r.turnState()
 	go func() {
 		defer close(out)
-		shouldContinue, err := service.ApproveToolForTurn(ctx, r.turnState(), toolCallID, rule, out)
+		shouldContinue, err := service.ApproveToolForTurn(ctx, turn, toolCallID, rule, out)
 		if err != nil {
-			r.handleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
 		if shouldContinue {
-			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop service is not configured"))
+			if turn.chat.hasQueuedModelTurn() {
 				return
 			}
-			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
+			if r.deps.Turns == nil {
+				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
+				return
+			}
+			r.continueTurnLoop(ctx, r.deps.Turns, turn, nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -1774,6 +1778,9 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 			return
 		}
 		if shouldContinue {
+			if turn.chat.hasQueuedModelTurn() {
+				return
+			}
 			if r.deps.Turns == nil {
 				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
 				return
@@ -2358,6 +2365,24 @@ func (r *Chat) snapshotQueue() []domain.QueuedInput {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return cloneQueuedInputs(r.queue)
+}
+
+func (r *Chat) hasQueuedModelTurn() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, item := range r.queue {
+		if item.Held {
+			continue
+		}
+		switch domain.DeliveryForQueuedInput(item) {
+		case domain.QueuedInputDeliveryContinue, domain.QueuedInputDeliveryNextTurn:
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Chat) broadcast(update Update) {
