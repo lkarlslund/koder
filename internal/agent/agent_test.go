@@ -5077,6 +5077,53 @@ func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
 	}
 }
 
+func TestChunkedCompactionStartsAfterLatestValidCompaction(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.AutoCompactAt = 80
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 5000})
+	engine := New(cfg, nil, nil)
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, ProviderID: "test", ModelID: "test-model", WorkflowRole: chatrole.Compaction}
+	timeline := []domain.TimelineItem{
+		{ID: "old-1", Seq: 1, Content: domain.UserMessage{Text: "old prefix " + strings.Repeat("a", 300)}},
+		{ID: "old-2", Seq: 2, Content: domain.UserMessage{Text: "old kept"}},
+		{ID: "compact-1", Seq: 3, Content: domain.Compaction{Summary: "old summary", Status: "completed", FirstKeptItemID: "old-2"}},
+	}
+	for idx := range 40 {
+		timeline = append(timeline, domain.TimelineItem{
+			ID:      id.ID(fmt.Sprintf("new-%02d", idx)),
+			Seq:     int64(len(timeline) + 1),
+			Content: domain.UserMessage{Text: fmt.Sprintf("new segment %02d %s", idx, strings.Repeat("b", 700))},
+		})
+	}
+	timeline = append(timeline,
+		domain.TimelineItem{ID: "tail-tool", Seq: int64(len(timeline) + 1), Content: domain.AssistantMessage{Tools: []domain.ToolCall{{Tool: domain.ToolKindFileRead, ToolCallID: "call_tail"}}}},
+		domain.TimelineItem{ID: "tail-user", Seq: int64(len(timeline) + 2), Content: domain.UserMessage{Text: "tail should remain"}},
+	)
+
+	req, firstKept, err := engine.buildCompactionRequestForTimeline(session, chat, timeline, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) == 0 {
+		t.Fatal("expected compaction request messages")
+	}
+	if firstKept == "old-1" || firstKept == "old-2" {
+		t.Fatalf("chunked compaction recut old compacted prefix, firstKept=%s", firstKept)
+	}
+	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == firstKept })
+	if idx <= 3 {
+		t.Fatalf("expected first kept item inside current segment after previous compaction, got %s at index %d", firstKept, idx)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > engine.compactionRequestByteBudget(chat) {
+		t.Fatalf("expected request within budget, got %d > %d", len(body), engine.compactionRequestByteBudget(chat))
+	}
+}
+
 func providerMessagesText(messages []provider.Message) string {
 	var parts []string
 	for _, msg := range messages {

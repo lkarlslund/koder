@@ -2843,13 +2843,14 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 	}
 
 	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
-	if keepStart <= 1 {
+	segmentStart := compactionSegmentStartForNextCut(timeline, keepStart)
+	if keepStart <= segmentStart+1 {
 		return req, firstKeptItemID, nil
 	}
 	var bestReq provider.ChatRequest
 	bestFirstKeptItemID := ""
 	bestFound := false
-	low, high := 1, keepStart
+	low, high := segmentStart+1, keepStart
 	for low <= high {
 		mid := low + (high-low)/2
 		candidateMessages, candidateFirstKeptItemID, buildErr := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid)
@@ -2959,6 +2960,22 @@ func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string
 		return true
 	}
 	return firstKeptTimelineIndex(items, firstKeptItemID) >= 0
+}
+
+func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart int) int {
+	keepStart = max(0, min(keepStart, len(timeline)))
+	segmentStart := 0
+	for idx, item := range timeline[:keepStart] {
+		compacted, ok := item.Content.(domain.Compaction)
+		if !ok || strings.TrimSpace(compacted.Summary) == "" {
+			continue
+		}
+		if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
+			continue
+		}
+		segmentStart = idx + 1
+	}
+	return segmentStart
 }
 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
