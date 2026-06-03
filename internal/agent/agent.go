@@ -2809,7 +2809,8 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
 	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
-	base := compactionBaseForNextCut(timeline, keepStart)
+	base := compactionBaseForNextCut(timeline, len(timeline))
+	keepStart = max(keepStart, base.MinKeepStart)
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
@@ -2893,7 +2894,9 @@ func estimatedRequestTokens(req provider.ChatRequest) int {
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
-	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, compactionBaseForNextCut(timeline, keepStart))
+	base := compactionBaseForNextCut(timeline, len(timeline))
+	keepStart = max(keepStart, base.MinKeepStart)
+	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 }
 
 func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int, base compactionCutBase) ([]provider.Message, string, error) {

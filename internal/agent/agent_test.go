@@ -5126,6 +5126,32 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 	}
 }
 
+func TestRepeatedCompactionWithoutCurrentToolTailKeepsCurrentSegmentBoundary(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.AutoCompactAt = 80
+	cfg.CompactionKeepToolCalls = 1
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
+	engine := New(cfg, nil, nil)
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, ProviderID: "test", ModelID: "test-model", WorkflowRole: chatrole.Compaction}
+	timeline := []domain.TimelineItem{
+		{ID: "old-1", Seq: 1, Content: domain.UserMessage{Text: "old prefix " + strings.Repeat("a", 300)}},
+		{ID: "old-tool", Seq: 2, Content: domain.AssistantMessage{Tools: []domain.ToolCall{{Tool: domain.ToolKindFileRead, ToolCallID: "call_old"}}}},
+		{ID: "old-tool-result", Seq: 3, Content: domain.UserMessage{Text: "old tool output"}},
+		{ID: "compact-1", Seq: 4, Content: domain.Compaction{Summary: "old summary", Status: "completed", FirstKeptItemID: "old-tool"}},
+		{ID: "current-user", Seq: 5, Content: domain.UserMessage{Text: "current segment starts here"}},
+		{ID: "current-assistant", Seq: 6, Content: domain.AssistantMessage{Text: "current answer"}},
+	}
+
+	_, firstKept, err := engine.buildCompactionRequestForTimeline(session, chat, timeline, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstKept != "current-user" {
+		t.Fatalf("expected first kept item at current segment start, got %s", firstKept)
+	}
+}
+
 func providerMessagesText(messages []provider.Message) string {
 	var parts []string
 	for _, msg := range messages {
