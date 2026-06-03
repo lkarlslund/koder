@@ -34,12 +34,27 @@ func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 	want := map[string]any{
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   false,
-			"preserve_thinking": false,
+			"preserve_thinking": true,
 		},
 		"return_progress": true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected compatible body: %#v", got)
+	}
+}
+
+func TestRequestExtraBodyKeepsCompatibleQwenTemplateCacheStable(t *testing.T) {
+	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+		ModelID:      "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset:  ModelPresetDefault,
+		ThinkingMode: "disabled",
+	})
+	kwargs, ok := got["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat template kwargs, got %#v", got)
+	}
+	if kwargs["enable_thinking"] != false || kwargs["preserve_thinking"] != true {
+		t.Fatalf("expected disabled thinking with preserved template shape, got %#v", kwargs)
 	}
 }
 

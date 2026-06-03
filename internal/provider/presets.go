@@ -88,7 +88,7 @@ func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]
 		} else {
 			body["chat_template_kwargs"] = map[string]any{
 				"enable_thinking":   false,
-				"preserve_thinking": false,
+				"preserve_thinking": true,
 			}
 		}
 	}
@@ -166,7 +166,10 @@ func setThinkingOptions(body map[string]any, cfg config.Provider, enabled bool, 
 	}
 	kwargs := chatTemplateKwargs(body)
 	kwargs["enable_thinking"] = enabled
-	kwargs["preserve_thinking"] = enabled
+	// Qwen 3.6's llama.cpp-compatible Jinja template changes older assistant
+	// formatting when preserve_thinking is false and a new user message is
+	// appended. Keep the template shape stable even when thinking is disabled.
+	kwargs["preserve_thinking"] = true
 	if budget > 0 {
 		kwargs["thinking_budget"] = budget
 	}

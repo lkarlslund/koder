@@ -2098,7 +2098,7 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
-	if !ok || got["preserve_thinking"] != false || got["enable_thinking"] != false {
+	if !ok || got["preserve_thinking"] != true || got["enable_thinking"] != false {
 		t.Fatalf("expected qwen non-thinking kwargs, got %#v", req.ExtraBody)
 	}
 	if _, ok := req.ExtraBody["thinking_token_budget"]; ok {
@@ -2143,7 +2143,7 @@ func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
 		t.Fatalf("expected sampling settings in request, got %#v", req.ExtraBody)
 	}
 	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
-	if !ok || got["enable_thinking"] != false || got["preserve_thinking"] != false {
+	if !ok || got["enable_thinking"] != false || got["preserve_thinking"] != true {
 		t.Fatalf("expected thinking disabled in request, got %#v", req.ExtraBody)
 	}
 }
