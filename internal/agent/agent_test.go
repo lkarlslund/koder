@@ -72,6 +72,28 @@ func TestLintTouchedFilesReportsOnlyTouchedFileErrors(t *testing.T) {
 	}
 }
 
+func TestCompactionMessagesRenderLintMessage(t *testing.T) {
+	engine := &Engine{}
+	item := domain.TimelineItem{
+		ID:      "lint-item",
+		Content: domain.LintMessage{Text: "bad.json\n- syntax error", Files: []string{"bad.json"}},
+	}
+
+	messages, err := engine.compactionMessagesForTimelineItem(domain.Session{}, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one lint compaction message, got %#v", messages)
+	}
+	if messages[0].Role != provider.RoleUser {
+		t.Fatalf("expected user role for lint diagnostics, got %s", messages[0].Role)
+	}
+	if !strings.Contains(messages[0].Content, "Post-edit diagnostics:") || !strings.Contains(messages[0].Content, "bad.json") {
+		t.Fatalf("expected lint diagnostics in compaction message, got %q", messages[0].Content)
+	}
+}
+
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Default().WithStateDir(t.TempDir())

@@ -3110,6 +3110,12 @@ func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item 
 		return []provider.Message{{Role: provider.RoleUser, Content: compactTextForCompaction(content.Tool.String()+" output:\n"+body, "tool execution")}}, nil
 	case domain.Notice:
 		return nil, nil
+	case domain.LintMessage:
+		body := strings.TrimSpace(content.Text)
+		if body == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: provider.RoleUser, Content: compactTextForCompaction("Post-edit diagnostics:\n"+body, "lint diagnostics")}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
 	}
