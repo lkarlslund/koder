@@ -161,3 +161,26 @@ func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 		t.Fatalf("expected estimated usage, got %#v", got)
 	}
 }
+
+func TestChatStateCurrentContextSizeDerivesMissingAnchorFromCompaction(t *testing.T) {
+	now := time.Now().UTC()
+	state := NewTimelineState(
+		domain.Chat{ID: "chat-7", LastKnownContextTokens: 0, ContextTokensKnown: false},
+		[]domain.TimelineItem{
+			{ID: "019aa000-0000-7000-8000-000000000001", ChatID: "chat-7", Seq: 1, Content: domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 7102}, CreatedAt: now},
+			{ID: "019aa000-0000-7000-8000-000000000002", ChatID: "chat-7", Seq: 2, Content: domain.UserMessage{Text: "continue"}, CreatedAt: now.Add(time.Second)},
+		},
+		nil,
+	)
+
+	got := state.CurrentContextSize()
+	if got.AnchorTokens != 7102 {
+		t.Fatalf("anchor = %d", got.AnchorTokens)
+	}
+	if got.TotalTokens <= got.AnchorTokens {
+		t.Fatalf("expected tail estimate added to anchor, got %#v", got)
+	}
+	if !got.Estimated {
+		t.Fatalf("expected estimated usage, got %#v", got)
+	}
+}

@@ -1237,6 +1237,10 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	compacted, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 456})
+	if err != nil {
+		t.Fatal(err)
+	}
 	anchor, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
 	if err != nil {
 		t.Fatal(err)
@@ -1255,26 +1259,29 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RemovedCount != 2 || result.RemainingCount != 1 {
+	if result.RemovedCount != 2 || result.RemainingCount != 2 {
 		t.Fatalf("unexpected rewind result: %#v", result)
 	}
 	snapshot := rt.Snapshot()
-	if len(snapshot.Timeline) != 1 || snapshot.Timeline[0].ID != keep.ID {
+	if len(snapshot.Timeline) != 2 || snapshot.Timeline[0].ID != keep.ID || snapshot.Timeline[1].ID != compacted.ID {
 		t.Fatalf("live timeline was not truncated: %#v", snapshot.Timeline)
 	}
 	persisted, err := TimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(persisted) != 1 || persisted[0].ID != keep.ID {
+	if len(persisted) != 2 || persisted[0].ID != keep.ID || persisted[1].ID != compacted.ID {
 		t.Fatalf("stored timeline was not truncated: %#v", persisted)
 	}
 	updated, err := GetChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.LastKnownContextTokens != 0 || updated.ContextTokensKnown {
-		t.Fatalf("expected rewind to clear stale context counters, got %#v", updated)
+	if updated.LastKnownContextTokens != 456 || updated.ContextTokensKnown {
+		t.Fatalf("expected rewind to preserve derived context anchor, got %#v", updated)
+	}
+	if snapshot.Context.AnchorTokens != 456 || snapshot.Context.TotalTokens < 456 {
+		t.Fatalf("expected live snapshot context to use derived anchor, got %#v", snapshot.Context)
 	}
 }
 

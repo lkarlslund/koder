@@ -181,12 +181,15 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s == nil {
 		return domain.ContextUsage{}
 	}
-	tailEstimate, anchored := estimateTimelineTailTokens(s.SnapshotTimeline())
+	tailEstimate, timelineAnchor, anchored := estimateTimelineTailTokens(s.SnapshotTimeline())
 	if tailEstimate < 0 {
 		tailEstimate = 0
 	}
 	liveTokens := s.PendingAssistantContextTokens()
-	anchor := s.chat.LastKnownContextTokens
+	anchor := timelineAnchor
+	if anchor == 0 {
+		anchor = s.chat.LastKnownContextTokens
+	}
 	if anchor < 0 {
 		anchor = 0
 	}
@@ -203,32 +206,35 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	return usage
 }
 
-func estimateTimelineTailTokens(items []domain.TimelineItem) (int, bool) {
-	anchorIdx, ok := latestTimelineContextAnchor(items)
+func estimateTimelineTailTokens(items []domain.TimelineItem) (int, int, bool) {
+	anchorIdx, anchorTokens, ok := latestTimelineContextAnchor(items)
 	if !ok {
-		return 0, false
+		return 0, 0, false
 	}
 	total := 0
 	for idx := anchorIdx + 1; idx < len(items); idx++ {
 		total += estimateTimelineItemTokens(items[idx])
 	}
-	return total, true
+	return total, anchorTokens, true
 }
 
-func latestTimelineContextAnchor(items []domain.TimelineItem) (int, bool) {
+func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
 	for idx := len(items) - 1; idx >= 0; idx-- {
 		switch payload := items[idx].Content.(type) {
 		case domain.AssistantMessage:
 			if payload.Usage != nil && payload.Usage.Normalized().HasAnyTokens() {
-				return idx, true
+				contextTokens, ok := payload.Usage.Normalized().ContextTokens()
+				if ok {
+					return idx, contextTokens, true
+				}
 			}
 		case domain.Compaction:
 			if payload.Status == "completed" && payload.AfterContextTokens > 0 {
-				return idx, true
+				return idx, payload.AfterContextTokens, true
 			}
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 func estimateTimelineItemTokens(item domain.TimelineItem) int {

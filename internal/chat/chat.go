@@ -1083,12 +1083,13 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 
 	r.mu.Lock()
 	r.state.ReplaceTimeline(next)
-	r.chat.LastKnownContextTokens = 0
+	contextUsage := r.state.CurrentContextSize()
+	r.chat.LastKnownContextTokens = contextUsage.AnchorTokens
 	r.chat.ContextTokensKnown = false
 	r.chat.TokenUsage = domain.Usage{}
 	r.chat.UpdatedAt = time.Now().UTC()
 	r.state.UpdateChat(func(chat *domain.Chat) {
-		chat.LastKnownContextTokens = 0
+		chat.LastKnownContextTokens = contextUsage.AnchorTokens
 		chat.ContextTokensKnown = false
 		chat.TokenUsage = domain.Usage{}
 		chat.UpdatedAt = r.chat.UpdatedAt
