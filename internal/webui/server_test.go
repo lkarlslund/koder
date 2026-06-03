@@ -1466,8 +1466,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.context-meter-fill.context-danger`) {
 		t.Fatalf("expected active chat context to render as a progress meter")
 	}
-	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) || !strings.Contains(fullPage, `estimateTextTokens(text)`) || !strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) {
-		t.Fatalf("expected reasoning summary to render live token count")
+	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) ||
+		!strings.Contains(fullPage, `estimateTextTokens(text)`) ||
+		!strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) ||
+		!strings.Contains(fullPage, `hasCavemanReasoning(item.content.reasoning)`) ||
+		!strings.Contains(fullPage, `reasoningDisplayText(item)`) {
+		t.Fatalf("expected reasoning summary to render live token count and optional caveman view")
 	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")

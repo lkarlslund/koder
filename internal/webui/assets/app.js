@@ -625,7 +625,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1641,7 +1641,31 @@
         thinkingLabel(reasoning) {
           const explicit = Number(reasoning?.tokens || reasoning?.Tokens || reasoning?.token_count || reasoning?.TokenCount || 0);
           const tokens = explicit > 0 ? explicit : this.estimateTextTokens(reasoning?.text || reasoning?.Text || '');
-          return 'thinking (' + tokens + ' tokens)';
+          const suffix = this.hasCavemanReasoning(reasoning) ? ' · caveman available' : '';
+          return 'thinking (' + tokens + ' tokens)' + suffix;
+        },
+        hasCavemanReasoning(reasoning) {
+          return String(reasoning?.caveman || reasoning?.Caveman || '').trim().length > 0;
+        },
+        reasoningViewKey(item) {
+          return this.timelineItemID(item) || String(item?.id || item?.ID || '');
+        },
+        reasoningView(item) {
+          const key = this.reasoningViewKey(item);
+          const view = key ? this.reasoningViews[key] : '';
+          return view === 'caveman' ? 'caveman' : 'original';
+        },
+        setReasoningView(item, view) {
+          const key = this.reasoningViewKey(item);
+          if (!key) return;
+          this.reasoningViews[key] = view === 'caveman' ? 'caveman' : 'original';
+        },
+        reasoningDisplayText(item) {
+          const reasoning = item?.content?.reasoning || item?.Content?.Reasoning || {};
+          if (this.reasoningView(item) === 'caveman') {
+            return reasoning.caveman || reasoning.Caveman || '';
+          }
+          return reasoning.text || reasoning.Text || '';
         },
         estimateTextTokens(text) {
           const source = String(text || '').trim();

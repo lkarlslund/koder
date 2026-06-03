@@ -117,7 +117,11 @@
               <template x-if="item.content?.reasoning?.text">
                 <details class="reasoning mb-2">
                   <summary x-text="thinkingLabel(item.content.reasoning)"></summary>
-                  <pre x-text="item.content.reasoning.text"></pre>
+                  <div class="reasoning-view-toggle btn-group btn-group-sm" x-show="hasCavemanReasoning(item.content.reasoning)">
+                    <button type="button" class="btn" :class="reasoningView(item) === 'original' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'original')">Original</button>
+                    <button type="button" class="btn" :class="reasoningView(item) === 'caveman' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'caveman')">Caveman</button>
+                  </div>
+                  <pre x-text="reasoningDisplayText(item)"></pre>
                 </details>
               </template>
               <div class="markdown-body" x-effect="renderMarkdownElement($el, item.content?.text || '', itemMarkdownOptions(item))"></div>
