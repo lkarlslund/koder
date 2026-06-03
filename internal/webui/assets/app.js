@@ -517,6 +517,9 @@
       const values = [];
       if (args.command) values.push(args.command);
       if (args.cmd) values.push(args.cmd);
+      if (args.process_id) values.push('process_id=' + args.process_id);
+      const timeout = timeoutLabel(args.timeout_ms || args.yield_time_ms);
+      if (timeout) values.push((args.yield_time_ms ? 'wait=' : 'timeout=') + timeout);
       for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
         if (args[key]) values.push(key + '=' + args[key]);
       }
@@ -528,13 +531,23 @@
       const lines = [];
       const processID = firstValue(data, ['process_id', 'ProcessID']);
       const command = firstValue(data, ['command', 'Command']);
+      const timeout = timeoutLabel(firstValue(data, ['timeout_ms', 'TimeoutMS']));
       const state = firstValue(data, ['state', 'State']);
       const exitCode = firstValue(data, ['exit_code', 'ExitCode']);
       if (processID) lines.push('process_id: ' + processID);
       if (command) lines.push('command: ' + command);
+      if (timeout) lines.push('timeout: ' + timeout);
       if (state) lines.push('state: ' + state);
       if (exitCode !== '') lines.push('exit_code: ' + exitCode);
       return lines.length ? lines : fallback;
+    }
+    function timeoutLabel(value) {
+      const ms = Number(value || 0);
+      if (!Number.isFinite(ms) || ms <= 0) return '';
+      if (ms < 1000) return String(ms) + 'ms';
+      if (ms % 60000 === 0) return String(ms / 60000) + 'm';
+      if (ms % 1000 === 0) return String(ms / 1000) + 's';
+      return String(ms) + 'ms';
     }
     function renderToolResult(tool) {
       const kind = String((tool && tool.tool) || '');
@@ -2249,6 +2262,7 @@
           const value = process?.exit_code ?? process?.ExitCode;
           return value === undefined || value === null ? '' : String(value);
         },
+        execProcessTimeout(process) { return timeoutLabel(process?.timeout_ms ?? process?.TimeoutMS); },
         execProcessLabel(process) {
           const id = this.execProcessID(process);
           const state = this.execProcessState(process) || 'unknown';
@@ -2273,6 +2287,8 @@
           const workdir = process?.workdir || process?.Workdir || '';
           if (workdir) lines.push(workdir);
           lines.push(this.execProcessLabel(process));
+          const timeout = this.execProcessTimeout(process);
+          if (timeout) lines.push('timeout: ' + timeout);
           const bytes = process?.output_bytes || process?.OutputBytes || 0;
           if (bytes) lines.push(String(bytes) + ' output bytes captured');
           return lines.filter(Boolean).join('\n');

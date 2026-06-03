@@ -1113,8 +1113,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) ||
 		!strings.Contains(fullPage, `if (args.cmd) values.push(args.cmd)`) ||
+		!strings.Contains(fullPage, `if (args.process_id) values.push('process_id=' + args.process_id)`) ||
+		!strings.Contains(fullPage, `(args.yield_time_ms ? 'wait=' : 'timeout=') + timeout`) ||
 		!strings.Contains(fullPage, `case 'exec_command': return command ? 'Start exec ' + command : 'Start exec'`) ||
 		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
+		!strings.Contains(fullPage, `if (timeout) lines.push('timeout: ' + timeout)`) ||
 		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
@@ -1134,6 +1137,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `showAllExecProcesses`) ||
 		!strings.Contains(fullPage, `execProcessState(process) === 'running'`) ||
 		!strings.Contains(fullPage, `exec-process-tooltip`) ||
+		!strings.Contains(fullPage, `execProcessTimeout(process)`) ||
 		!strings.Contains(fullPage, `execProcessOutput(process)`) {
 		t.Fatalf("expected current chat exec processes to render with running/default filtering and console-output hover tooltips")
 	}
