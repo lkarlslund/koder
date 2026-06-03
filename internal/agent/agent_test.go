@@ -96,7 +96,9 @@ func TestCompactionMessagesRenderLintMessage(t *testing.T) {
 
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
-	return config.Default().WithStateDir(t.TempDir())
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.ToolDefaults[domain.ToolKindBash] = true
+	return cfg
 }
 
 func defaultChatForSession(t *testing.T, st *store.Store, sessionID id.ID) domain.Chat {

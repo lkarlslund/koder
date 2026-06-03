@@ -50,6 +50,12 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
+	if cfg.ToolDefaults[toolkind.ToolKindBash] {
+		t.Fatal("expected bash disabled by default")
+	}
+	if !cfg.ToolDefaults[toolkind.ToolKindExecCommand] {
+		t.Fatal("expected exec_command enabled by default")
+	}
 	if len(cfg.Providers) != 0 {
 		t.Fatalf("expected no providers in default config, got %#v", cfg.Providers)
 	}
@@ -222,6 +228,36 @@ file_read = false
 		if !kind.IsAKind() {
 			t.Fatalf("loaded invalid tool kind %d", kind)
 		}
+	}
+}
+
+func TestLoadBackfillsMissingToolDefaultsFromCurrentDefaults(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configRoot := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`
+[tool_defaults]
+file_read = true
+`)
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ToolDefaults[toolkind.ToolKindBash] {
+		t.Fatalf("expected missing bash default to backfill disabled: %#v", cfg.ToolDefaults)
+	}
+	if !cfg.ToolDefaults[toolkind.ToolKindExecCommand] {
+		t.Fatalf("expected missing exec_command default to backfill enabled: %#v", cfg.ToolDefaults)
 	}
 }
 

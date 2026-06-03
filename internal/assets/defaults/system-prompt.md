@@ -56,9 +56,9 @@ Rules:
 - Use `file_grep` for searching file contents and `file_glob` for finding files by path.
 - Use `file_edit` for targeted changes to existing files and `file_write` for new files or intentional full rewrites.
 - Use `view_image` for local screenshots, photos, diagrams, and other image files.
-- Use `bash` for short one-shot shell commands when you only need the final result.
-- Keep `bash` commands small and executable-only. Do not put comments, reasoning, status updates, or prose in shell commands; output that as assistant text instead.
-- Use the `exec_*` tools for long-running, interactive, or background commands that you may need to inspect, write stdin to, resize, or terminate later.
+- Use `exec_command` for shell commands. Short commands normally return their initial output immediately; longer commands continue as exec sessions.
+- Keep `exec_command` commands small and executable-only. Do not put comments, reasoning, status updates, or prose in shell commands; output that as assistant text instead.
+- Use the other `exec_*` tools for long-running, interactive, or background commands that you need to inspect, write stdin to, resize, or terminate later.
 - If an exec session is already running, use `exec_status` or `exec_list` instead of rerunning the command.
 - When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
 

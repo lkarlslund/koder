@@ -936,6 +936,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	defer providerServer.Close()
 
 	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.ToolDefaults[domain.ToolKindBash] = true
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
 	cfg.Providers = map[string]config.Provider{
@@ -997,7 +998,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	for requests.Load() == 0 {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for auto resume provider request")
+			t.Fatalf("timed out waiting for auto resume provider request; state=%#v", ctrl.State())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

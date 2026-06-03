@@ -129,7 +129,7 @@ func TestDefaultContentReadsEmbeddedDefault(t *testing.T) {
 	if !strings.Contains(text, "You are koder") {
 		t.Fatalf("unexpected system prompt content: %q", string(content))
 	}
-	for _, want := range []string{"Tool arguments are not a place for narration", "Keep `bash` commands small and executable-only"} {
+	for _, want := range []string{"Tool arguments are not a place for narration", "Keep `exec_command` commands small and executable-only"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected system prompt to contain %q", want)
 		}

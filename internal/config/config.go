@@ -185,6 +185,7 @@ func Default() Config {
 	for _, kind := range toolkind.KindValues() {
 		toolDefaults[kind] = true
 	}
+	toolDefaults[toolkind.ToolKindBash] = false
 	return Config{
 		DefaultProvider:         "",
 		MaxToolLoopSteps:        defaultMaxToolLoopSteps,
@@ -252,7 +253,7 @@ func (c *Config) applyDefaults() {
 	pruneToolDefaults(c.ToolDefaults)
 	for _, kind := range toolkind.KindValues() {
 		if _, ok := c.ToolDefaults[kind]; !ok {
-			c.ToolDefaults[kind] = true
+			c.ToolDefaults[kind] = def.ToolDefaults[kind]
 		}
 	}
 	if c.Permissions.Profile == "" {
