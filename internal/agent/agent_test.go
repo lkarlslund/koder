@@ -4980,7 +4980,7 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testing.T) {
 	t.Parallel()
 
-	var requestBody string
+	var requestBodies []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
@@ -4990,8 +4990,8 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
-		requestBody = string(body)
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"chunked compact summary"}}]}`))
+		requestBodies = append(requestBodies, string(body))
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"content":"chunked compact summary %d"}}]}`, len(requestBodies))))
 	}))
 	defer server.Close()
 
@@ -5005,7 +5005,7 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
 	cfg.AutoCompactAt = 80
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 5000})
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 40000})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -5020,7 +5020,7 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	appendUserTimelineItem(t, st, chat.ID, "early-history-marker "+strings.Repeat("a", 400))
-	for idx := range 40 {
+	for idx := range 160 {
 		appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: fmt.Sprintf("middle history %02d %s", idx, strings.Repeat("b", 700))})
 	}
 	appendUserTimelineItem(t, st, chat.ID, "late-tail-marker "+strings.Repeat("z", 700))
@@ -5033,18 +5033,23 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 		t.Fatal(err)
 	}
 
+	if len(requestBodies) < 2 {
+		t.Fatalf("expected compactSession to continue chunking until the target tail, got %d request(s)", len(requestBodies))
+	}
 	compactionChat, _, err := engine.compactionSessionClient(chat, client)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requestBody) > engine.compactionRequestByteBudget(compactionChat) {
-		t.Fatalf("expected chunked compaction request within budget, got %d > %d", len(requestBody), engine.compactionRequestByteBudget(compactionChat))
+	for idx, requestBody := range requestBodies {
+		if len(requestBody) > engine.compactionRequestByteBudget(compactionChat) {
+			t.Fatalf("expected chunked compaction request %d within budget, got %d > %d; request lengths=%v", idx, len(requestBody), engine.compactionRequestByteBudget(compactionChat), requestBodyLengths(requestBodies))
+		}
 	}
-	if !strings.Contains(requestBody, "early-history-marker") {
-		t.Fatalf("expected chunked request to include older prefix, got %s", requestBody)
+	if !strings.Contains(requestBodies[0], "early-history-marker") {
+		t.Fatalf("expected first chunked request to include older prefix, got %s", requestBodies[0])
 	}
-	if strings.Contains(requestBody, "late-tail-marker") {
-		t.Fatalf("expected chunked request to leave later tail for a future compaction, got %s", requestBody)
+	if !strings.Contains(requestBodies[len(requestBodies)-1], "late-tail-marker") {
+		t.Fatalf("expected final chunked request to include the later tail, got %s", requestBodies[len(requestBodies)-1])
 	}
 
 	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
@@ -5057,8 +5062,8 @@ func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testin
 			firstKeptItemID = compacted.FirstKeptItemID
 		}
 	}
-	if strings.TrimSpace(firstKeptItemID) == "" {
-		t.Fatal("expected chunked compaction to preserve an unsummarized tail")
+	if strings.TrimSpace(firstKeptItemID) != "" {
+		t.Fatalf("expected final chunked compaction to reach the no-tail target, got first kept item %s", firstKeptItemID)
 	}
 }
 
@@ -5181,6 +5186,14 @@ func providerMessagesText(messages []provider.Message) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func requestBodyLengths(requests []string) []int {
+	lengths := make([]int, 0, len(requests))
+	for _, request := range requests {
+		lengths = append(lengths, len(request))
+	}
+	return lengths
 }
 
 func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
