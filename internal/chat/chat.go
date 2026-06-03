@@ -243,12 +243,31 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		if err != nil {
 			return nil, err
 		}
+		chatRecord, err = repairContextCacheFromTimeline(ctx, deps.Store, chatRecord, timeline)
+		if err != nil {
+			return nil, err
+		}
 	}
 	approvals, err := PendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
 	return newChat(session, chatRecord, timeline, approvals, deps, onClose, loadTimeline)
+}
+
+func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRecord domain.Chat, timeline []domain.TimelineItem) (domain.Chat, error) {
+	anchorTokens, ok := timelineContextAnchorTokens(timeline)
+	if !ok || anchorTokens <= 0 || chatRecord.LastKnownContextTokens == anchorTokens {
+		return chatRecord, nil
+	}
+	chatRecord.LastKnownContextTokens = anchorTokens
+	chatRecord.ContextTokensKnown = false
+	if st != nil {
+		if err := UpdateChat(ctx, st, chatRecord); err != nil {
+			return domain.Chat{}, err
+		}
+	}
+	return chatRecord, nil
 }
 
 // New builds a live chat from hydrated persisted state.
@@ -993,6 +1012,11 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 		return r.markPersistError(err)
 	}
 	r.mu.Lock()
+	chatRecord, err = repairContextCacheFromTimeline(ctx, st, chatRecord, timeline)
+	if err != nil {
+		r.mu.Unlock()
+		return r.markPersistError(err)
+	}
 	r.session = session
 	r.chat = chatRecord
 	if r.state == nil {

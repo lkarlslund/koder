@@ -237,6 +237,11 @@ func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
 	return 0, 0, false
 }
 
+func timelineContextAnchorTokens(items []domain.TimelineItem) (int, bool) {
+	_, tokens, ok := latestTimelineContextAnchor(items)
+	return tokens, ok
+}
+
 func estimateTimelineItemTokens(item domain.TimelineItem) int {
 	var texts []string
 	switch payload := item.Content.(type) {

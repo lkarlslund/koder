@@ -1285,6 +1285,41 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	}
 }
 
+func TestLoadRepairsMissingContextCacheFromTimeline(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 7102}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
+		t.Fatal(err)
+	}
+	chatRecord.LastKnownContextTokens = 0
+	chatRecord.ContextTokensKnown = false
+	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := Load(ctx, session, chatRecord, depsForFake(st, &runtimeFakeRunner{}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+
+	snapshot := rt.Snapshot()
+	if snapshot.Chat.LastKnownContextTokens != 7102 || snapshot.Context.AnchorTokens != 7102 {
+		t.Fatalf("expected context anchor repaired from timeline, got chat=%#v context=%#v", snapshot.Chat, snapshot.Context)
+	}
+	stored, err := GetChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LastKnownContextTokens != 7102 || stored.ContextTokensKnown {
+		t.Fatalf("expected stored context cache repaired, got %#v", stored)
+	}
+}
+
 func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
