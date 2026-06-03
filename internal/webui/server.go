@@ -113,6 +113,8 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/restart-needed", s.handleRestartNeeded)
+	mux.HandleFunc("/api/rpc", s.handleHTTPRPC)
+	mux.HandleFunc("/api/rpc/", s.handleHTTPRPC)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -473,6 +475,40 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
+	s.markConnected()
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	req, err := decodeHTTPRPCRequest(r)
+	if err != nil {
+		writeHTTPRPCResponse(w, rpcResponse{OK: false, Error: err.Error()})
+		return
+	}
+	clientID := strings.TrimSpace(req.ClientID)
+	if clientID == "" {
+		clientID = "http-" + string(id.New())
+	}
+	if req.SelectedSession != "" || req.SelectedChat != "" {
+		s.setClientSelection(clientID, clientSelection{SessionID: req.SelectedSession, ChatID: req.SelectedChat})
+	}
+	if err := s.prepareClientSelection(r.Context(), clientID, req.Method); err != nil {
+		writeHTTPRPCResponse(w, rpcResponse{ID: req.ID, OK: false, Error: err.Error()})
+		return
+	}
+	result, err := s.handleRPC(r.Context(), clientID, req.Method, req.Params)
+	if err == nil {
+		s.updateClientSelectionFromResult(clientID, result)
+		s.updateDebugChats()
+	}
+	resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	writeHTTPRPCResponse(w, resp)
 }
 
 func (s *Server) handleRPC(ctx context.Context, clientID string, method string, params json.RawMessage) (any, error) {
@@ -1392,6 +1428,13 @@ type rpcRequest struct {
 	Params json.RawMessage `json:"params"`
 }
 
+type httpRPCRequest struct {
+	rpcRequest
+	ClientID        string `json:"client_id"`
+	SelectedSession id.ID  `json:"selected_session"`
+	SelectedChat    id.ID  `json:"selected_chat"`
+}
+
 type rpcResponse struct {
 	ID     any    `json:"id"`
 	OK     bool   `json:"ok"`
@@ -1409,6 +1452,65 @@ func decodeParams(raw json.RawMessage, out any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func decodeHTTPRPCRequest(r *http.Request) (httpRPCRequest, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return httpRPCRequest{}, fmt.Errorf("read rpc request: %w", err)
+	}
+	method := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/rpc"), "/")
+	if method != "" {
+		return httpRPCRequest{
+			rpcRequest: rpcRequest{Method: method, Params: paramsBody(body)},
+			ClientID:   strings.TrimSpace(r.URL.Query().Get("client_id")),
+			SelectedSession: id.ID(strings.TrimSpace(firstNonEmpty(
+				r.URL.Query().Get("selected_session"),
+				r.URL.Query().Get("session_id"),
+				r.URL.Query().Get("session"),
+			))),
+			SelectedChat: id.ID(strings.TrimSpace(firstNonEmpty(
+				r.URL.Query().Get("selected_chat"),
+				r.URL.Query().Get("chat_id"),
+				r.URL.Query().Get("chat"),
+			))),
+		}, nil
+	}
+	var req httpRPCRequest
+	if len(bytesTrimSpace(body)) == 0 {
+		return httpRPCRequest{}, fmt.Errorf("rpc request body is required")
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return httpRPCRequest{}, fmt.Errorf("decode rpc request: %w", err)
+	}
+	req.Method = strings.TrimSpace(req.Method)
+	if req.Method == "" {
+		return httpRPCRequest{}, fmt.Errorf("rpc method is required")
+	}
+	if len(req.Params) == 0 {
+		req.Params = json.RawMessage(`{}`)
+	}
+	return req, nil
+}
+
+func paramsBody(body []byte) json.RawMessage {
+	if len(bytesTrimSpace(body)) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(body)
+}
+
+func bytesTrimSpace(value []byte) []byte {
+	return []byte(strings.TrimSpace(string(value)))
+}
+
+func writeHTTPRPCResponse(w http.ResponseWriter, resp rpcResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	if !resp.OK {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value any) error {

@@ -152,6 +152,93 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 }
 
+func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Post(srv.URL()+"/api/rpc", "application/json", strings.NewReader(`{"id":7,"method":"list_sessions","params":{}}`))
+	if err != nil {
+		t.Fatalf("post rpc: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected rpc ok status, got %d: %s", resp.StatusCode, body)
+	}
+	var payload struct {
+		ID     int  `json:"id"`
+		OK     bool `json:"ok"`
+		Result struct {
+			ActiveID id.ID `json:"active_id"`
+			Sessions []struct {
+				ID id.ID `json:"id"`
+			} `json:"sessions"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected rpc ok, got %s", payload.Error)
+	}
+	if payload.ID != 7 {
+		t.Fatalf("expected response id 7, got %d", payload.ID)
+	}
+	if payload.Result.ActiveID != ctrl.State().Session.ID || len(payload.Result.Sessions) != 1 {
+		t.Fatalf("unexpected sessions response: %#v", payload.Result)
+	}
+}
+
+func TestHTTPRPCMethodPathUsesExplicitSelection(t *testing.T) {
+	ctrl := newTestController(t)
+	firstID := ctrl.State().Session.ID
+	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	secondID := ctrl.State().Session.ID
+	if err := ctrl.SwitchSession(context.Background(), firstID); err != nil {
+		t.Fatalf("switch back to first session: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Post(srv.URL()+"/api/rpc/get_state?selected_session="+string(secondID), "application/json", nil)
+	if err != nil {
+		t.Fatalf("post rpc method: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected rpc ok status, got %d: %s", resp.StatusCode, body)
+	}
+	var payload struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID id.ID `json:"id"`
+			} `json:"session"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	if !payload.OK {
+		t.Fatalf("expected rpc ok, got %s", payload.Error)
+	}
+	if payload.Result.Session.ID != secondID {
+		t.Fatalf("expected selected session %s, got %s", secondID, payload.Result.Session.ID)
+	}
+}
+
 func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
 	chatID := id.ID("chat-1")
 	items := make([]domain.TimelineItem, 0, 5)
