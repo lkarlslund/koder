@@ -1229,6 +1229,43 @@ func TestLoadMetadataDefersTimelineUntilNeeded(t *testing.T) {
 	}
 }
 
+func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	keep, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "remove"}); err != nil {
+		t.Fatal(err)
+	}
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	result, err := rt.RewindLiveTimelineFrom(ctx, anchor.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RemovedCount != 2 || result.RemainingCount != 1 {
+		t.Fatalf("unexpected rewind result: %#v", result)
+	}
+	snapshot := rt.Snapshot()
+	if len(snapshot.Timeline) != 1 || snapshot.Timeline[0].ID != keep.ID {
+		t.Fatalf("live timeline was not truncated: %#v", snapshot.Timeline)
+	}
+	persisted, err := TimelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted) != 1 || persisted[0].ID != keep.ID {
+		t.Fatalf("stored timeline was not truncated: %#v", persisted)
+	}
+}
+
 func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

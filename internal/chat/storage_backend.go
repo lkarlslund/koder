@@ -186,6 +186,10 @@ func PutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineI
 	return TimelineCollection(st).Put(ctx, item)
 }
 
+func DeleteTimelineItem(ctx context.Context, st *store.Store, itemID id.ID) error {
+	return TimelineCollection(st).Delete(ctx, itemID)
+}
+
 func InsertTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) (domain.TimelineItem, error) {
 	return TimelineCollection(st).Insert(ctx, item)
 }

@@ -400,6 +400,61 @@ func (c *Controller) TimelinePage(ctx context.Context, chatID, before id.ID, lim
 	return owner.TimelinePage(ctx, chatID, before, limit, all)
 }
 
+func (c *Controller) RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error) {
+	if c == nil {
+		return nil, fmt.Errorf("controller is nil")
+	}
+	if c.agent == nil {
+		return nil, fmt.Errorf("no chat agent")
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if chatID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rt, err := owner.Chat(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := rt.RewindLiveTimelineFrom(ctx, anchorItemID)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := rt.Snapshot()
+	status := sidebarStatusFromSnapshot(snapshot)
+	c.mu.Lock()
+	if c.runtimes == nil {
+		c.runtimes = map[id.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[id.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[id.ID]ChatSidebarStatus{}
+	}
+	c.runtimes[chatID] = rt
+	c.snapshots[chatID] = snapshot
+	c.statuses[chatID] = status
+	if c.chat.ID == chatID {
+		c.runtime = rt
+		c.chat = snapshot.Chat
+	}
+	c.mu.Unlock()
+	c.broadcast("chat_delta", chat.Update{
+		Snapshot:   snapshot,
+		Status:     snapshot.Status,
+		StatusText: snapshot.StatusText,
+		Context:    snapshot.Context,
+		Active:     snapshot.Active,
+	})
+	return result, nil
+}
+
 func (c *Controller) populateStateSnapshotsLocked(state *State) {
 	for idx := range state.Chats {
 		if state.Chats[idx].ID == c.chat.ID {

@@ -118,7 +118,9 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
-		debugsrv.NewServer(options.Store, s.debug).Register(mux)
+		debugServer := debugsrv.NewServer(options.Store, s.debug)
+		debugServer.SetChatRewinder(controller)
+		debugServer.Register(mux)
 	}
 	s.server = &http.Server{Handler: mux}
 	go func() {

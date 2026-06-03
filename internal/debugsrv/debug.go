@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/pprof"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -580,6 +582,11 @@ func (r *Recorder) HTTPTraces() []HTTPTrace {
 type Server struct {
 	store    *store.Store
 	recorder *Recorder
+	rewinder ChatRewinder
+}
+
+type ChatRewinder interface {
+	RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error)
 }
 
 func NewServer(st *store.Store, recorder *Recorder) *Server {
@@ -590,6 +597,13 @@ func NewServer(st *store.Store, recorder *Recorder) *Server {
 		store:    st,
 		recorder: recorder,
 	}
+}
+
+func (s *Server) SetChatRewinder(rewinder ChatRewinder) {
+	if s == nil {
+		return
+	}
+	s.rewinder = rewinder
 }
 
 func Handler(st *store.Store, recorder *Recorder) http.Handler {
@@ -1104,6 +1118,8 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch parts[1] {
+	case "chats":
+		s.handleSessionChatRoutes(w, r, id.ID(sessionID), parts[2:])
 	case "transcript":
 		s.handleTranscript(w, r, sessionID)
 	case "events":
@@ -1121,6 +1137,84 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleSessionChatRoutes(w http.ResponseWriter, r *http.Request, sessionID id.ID, parts []string) {
+	if len(parts) != 2 || parts[1] != "rewind" {
+		http.NotFound(w, r)
+		return
+	}
+	chatID := id.ID(strings.TrimSpace(parts[0]))
+	if chatID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid chat id"))
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	if s.rewinder == nil {
+		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("debug chat rewinder is unavailable"))
+		return
+	}
+	var req struct {
+		AnchorItemID id.ID  `json:"anchor_item_id"`
+		Selector     string `json:"selector"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	anchorID := req.AnchorItemID
+	if anchorID == "" {
+		var err error
+		anchorID, err = s.resolveRewindAnchor(r.Context(), sessionID, chatID, req.Selector)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	result, err := s.rewinder.RewindLiveChat(r.Context(), sessionID, chatID, anchorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":     sessionID,
+		"chat_id":        chatID,
+		"anchor_item_id": anchorID,
+		"result":         result,
+	})
+}
+
+func (s *Server) resolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error) {
+	if strings.TrimSpace(selector) == "" {
+		selector = "first_compaction_error"
+	}
+	if selector != "first_compaction_error" {
+		return "", fmt.Errorf("unsupported rewind selector %q", selector)
+	}
+	chats, err := debugListChats(ctx, s.store, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if !slices.ContainsFunc(chats, func(chat domain.Chat) bool { return chat.ID == chatID }) {
+		return "", fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
+	}
+	timeline, err := debugTimelineForChat(ctx, s.store, chatID)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range timeline {
+		compaction, ok := item.Content.(domain.Compaction)
+		if ok && compaction.Status == "failed" {
+			return item.ID, nil
+		}
+	}
+	return "", fmt.Errorf("chat %s has no failed compaction item", chatID)
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID id.ID) {

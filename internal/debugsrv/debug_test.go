@@ -16,6 +16,19 @@ import (
 	"github.com/lkarlslund/koder/internal/version"
 )
 
+type fakeChatRewinder struct {
+	sessionID id.ID
+	chatID    id.ID
+	anchorID  id.ID
+}
+
+func (f *fakeChatRewinder) RewindLiveChat(_ context.Context, sessionID, chatID, anchorItemID id.ID) (any, error) {
+	f.sessionID = sessionID
+	f.chatID = chatID
+	f.anchorID = anchorItemID
+	return map[string]any{"removed_count": 3}, nil
+}
+
 func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +182,56 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	if global.Events[0].Kind != "startup_timing" {
 		t.Fatalf("expected startup timing event in global stream, got %#v", global.Events[0])
+	}
+}
+
+func TestServerRewindResolvesFirstCompactionError(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "keep"}); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := appendDebugTimelineItem(st, chat.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "remove"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rewinder := &fakeChatRewinder{}
+	debugServer := NewServer(st, NewRecorder())
+	debugServer.SetChatRewinder(rewinder)
+	mux := http.NewServeMux()
+	debugServer.Register(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/debug/sessions/"+string(session.ID)+"/chats/"+string(chat.ID)+"/rewind", "application/json", strings.NewReader(`{"selector":"first_compaction_error"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected rewind status %d: %s", resp.StatusCode, body)
+	}
+	if rewinder.sessionID != session.ID || rewinder.chatID != chat.ID || rewinder.anchorID != failed.ID {
+		t.Fatalf("rewinder got session=%s chat=%s anchor=%s, want session=%s chat=%s anchor=%s", rewinder.sessionID, rewinder.chatID, rewinder.anchorID, session.ID, chat.ID, failed.ID)
 	}
 }
 

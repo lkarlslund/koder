@@ -1030,6 +1030,71 @@ func (r *Chat) Snapshot() Snapshot {
 	}
 }
 
+type LiveRewindResult struct {
+	ChatID         id.ID `json:"chat_id"`
+	AnchorItemID   id.ID `json:"anchor_item_id"`
+	RemovedCount   int   `json:"removed_count"`
+	RemainingCount int   `json:"remaining_count"`
+}
+
+// RewindLiveTimelineFrom trims the transcript from anchorItemID onward through
+// the hydrated chat owner, updating both live state and durable storage.
+func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (LiveRewindResult, error) {
+	if r == nil {
+		return LiveRewindResult{}, fmt.Errorf("chat runtime is required")
+	}
+	if anchorItemID == "" {
+		return LiveRewindResult{}, fmt.Errorf("anchor item id is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return LiveRewindResult{}, err
+	}
+	r.mu.Lock()
+	if r.status != StatusIdle && r.status != StatusErrored {
+		r.mu.Unlock()
+		return LiveRewindResult{}, fmt.Errorf("cannot rewind chat %s while status is %s", r.chat.ID, r.status)
+	}
+	if r.state == nil {
+		r.mu.Unlock()
+		return LiveRewindResult{}, fmt.Errorf("chat timeline is not loaded")
+	}
+	timeline := r.state.SnapshotTimeline()
+	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool {
+		return item.ID == anchorItemID
+	})
+	if idx < 0 {
+		r.mu.Unlock()
+		return LiveRewindResult{}, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, r.chat.ID)
+	}
+	next := slices.Clone(timeline[:idx])
+	removed := slices.Clone(timeline[idx:])
+	chatID := r.chat.ID
+	st := r.deps.Store
+	r.mu.Unlock()
+
+	if st == nil {
+		return LiveRewindResult{}, fmt.Errorf("store is required")
+	}
+	for _, item := range removed {
+		if err := DeleteTimelineItem(ctx, st, item.ID); err != nil {
+			return LiveRewindResult{}, err
+		}
+	}
+
+	r.mu.Lock()
+	r.state.ReplaceTimeline(next)
+	r.timelineLoaded = true
+	result := LiveRewindResult{
+		ChatID:         chatID,
+		AnchorItemID:   anchorItemID,
+		RemovedCount:   len(removed),
+		RemainingCount: len(next),
+	}
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, true))
+	return result, nil
+}
+
 // SetSession replaces the live session metadata used for future chat runs.
 func (r *Chat) SetSession(session domain.Session) {
 	r.mu.Lock()

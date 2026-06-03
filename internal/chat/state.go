@@ -430,6 +430,14 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 	return out
 }
 
+// ReplaceTimeline replaces the loaded timeline while preserving current chat metadata.
+func (s *ChatState) ReplaceTimeline(timeline []domain.TimelineItem) {
+	if s == nil {
+		return
+	}
+	s.MergeTimelineLoaded(s.chat, timeline, nil)
+}
+
 // ActiveAssistant returns the latest unsealed assistant item, creating one when absent.
 func (s *ChatState) ActiveAssistant(chatID id.ID, now time.Time) *TimelineRecord {
 	if record := s.LatestActiveAssistant(); record != nil {
