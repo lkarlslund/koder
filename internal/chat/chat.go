@@ -247,6 +247,12 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		if err != nil {
 			return nil, err
 		}
+	} else if chatRecord.LastKnownContextTokens <= 0 {
+		var err error
+		chatRecord, err = repairContextCacheFromStore(ctx, deps.Store, chatRecord)
+		if err != nil {
+			return nil, err
+		}
 	}
 	approvals, err := PendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
@@ -268,6 +274,14 @@ func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRe
 		}
 	}
 	return chatRecord, nil
+}
+
+func repairContextCacheFromStore(ctx context.Context, st *store.Store, chatRecord domain.Chat) (domain.Chat, error) {
+	timeline, err := TimelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	return repairContextCacheFromTimeline(ctx, st, chatRecord, timeline)
 }
 
 // New builds a live chat from hydrated persisted state.
