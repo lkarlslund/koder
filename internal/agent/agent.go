@@ -2587,6 +2587,9 @@ func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.M
 }
 
 func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
+	if !chat.ContextTokensKnown {
+		return 0, false
+	}
 	if !e.cfg.HasUsableProvider(chat.ProviderID) {
 		return 0, false
 	}
@@ -2629,106 +2632,96 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return err
 	}
 
-	seenBoundaries := map[string]bool{}
-	for {
-		timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
-		if err != nil {
-			return err
-		}
-		targetFirstKeptItemID := e.compactionTargetFirstKeptItemID(timeline)
-		req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
-		if err != nil {
-			return err
-		}
-		if len(req.Messages) <= 1 {
-			return nil
-		}
-		beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
-		compactionItem, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.Compaction{
+	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	if err != nil {
+		return err
+	}
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
+	if err != nil {
+		return err
+	}
+	if len(req.Messages) <= 1 {
+		return nil
+	}
+	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	compactionItem, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.Compaction{
+		Trigger:             trigger,
+		Status:              "pending",
+		FirstKeptItemID:     firstKeptItemID,
+		BeforeContextTokens: beforeContextTokens,
+	})
+	if err != nil {
+		return err
+	}
+	updateCompactionState := func(summary, status string, afterContextTokens int) error {
+		compactionItem.Content = domain.Compaction{
+			Summary:             summary,
 			Trigger:             trigger,
-			Status:              "pending",
+			Status:              status,
 			FirstKeptItemID:     firstKeptItemID,
 			BeforeContextTokens: beforeContextTokens,
-		})
-		if err != nil {
-			return err
+			AfterContextTokens:  afterContextTokens,
 		}
-		updateCompactionState := func(summary, status string, afterContextTokens int) error {
-			compactionItem.Content = domain.Compaction{
-				Summary:             summary,
-				Trigger:             trigger,
-				Status:              status,
-				FirstKeptItemID:     firstKeptItemID,
-				BeforeContextTokens: beforeContextTokens,
-				AfterContextTokens:  afterContextTokens,
-			}
-			compactionItem.UpdatedAt = time.Now().UTC()
-			if status == "completed" || status == "failed" {
-				compactionItem.Seal(compactionItem.UpdatedAt)
-			}
-			return chatpkg.PutTimelineItem(ctx, e.store, compactionItem)
+		compactionItem.UpdatedAt = time.Now().UTC()
+		if status == "completed" || status == "failed" {
+			compactionItem.Seal(compactionItem.UpdatedAt)
 		}
-		if out != nil {
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: "Compacting session...",
-				Item: compactionItem,
-				Meta: map[string]string{"refresh": "details", "compaction": "started"},
-			}
-		}
-		resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
-		if err != nil {
-			_ = updateCompactionState("", "failed", 0)
-			return err
-		}
-		summary := strings.TrimSpace(resp.Text)
-		if summary == "" {
-			summary = strings.TrimSpace(resp.Reasoning)
-		}
-		if summary == "" {
-			_ = updateCompactionState("", "failed", 0)
-			return fmt.Errorf("empty compaction summary")
-		}
-		afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
-		if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
-			return err
-		}
-		if chat, err := chatpkg.GetChat(ctx, e.store, chatID); err == nil {
-			chat.LastKnownContextTokens = afterContextTokens
-			chat.ContextTokensKnown = false
-			chat.TokenUsage = domain.Usage{}
-			if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-		if out != nil {
-			completed := compactionItem
-			completed.Content = domain.Compaction{
-				Summary:             summary,
-				Trigger:             trigger,
-				Status:              "completed",
-				FirstKeptItemID:     firstKeptItemID,
-				BeforeContextTokens: beforeContextTokens,
-				AfterContextTokens:  afterContextTokens,
-			}
-			completed.Seal(time.Now().UTC())
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: "Session compacted",
-				Item: completed,
-				Meta: map[string]string{"refresh": "details", "compaction": "completed"},
-			}
-		}
-		if firstKeptItemID == targetFirstKeptItemID {
-			return nil
-		}
-		if seenBoundaries[firstKeptItemID] {
-			return fmt.Errorf("compaction boundary did not advance past %s", firstKeptItemID)
-		}
-		seenBoundaries[firstKeptItemID] = true
+		return chatpkg.PutTimelineItem(ctx, e.store, compactionItem)
 	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Compacting session...",
+			Item: compactionItem,
+			Meta: map[string]string{"refresh": "details", "compaction": "started"},
+		}
+	}
+	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
+	if err != nil {
+		_ = updateCompactionState("", "failed", 0)
+		return err
+	}
+	summary := strings.TrimSpace(resp.Text)
+	if summary == "" {
+		summary = strings.TrimSpace(resp.Reasoning)
+	}
+	if summary == "" {
+		_ = updateCompactionState("", "failed", 0)
+		return fmt.Errorf("empty compaction summary")
+	}
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
+	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
+		return err
+	}
+	if chat, err := chatpkg.GetChat(ctx, e.store, chatID); err == nil {
+		chat.LastKnownContextTokens = afterContextTokens
+		chat.ContextTokensKnown = false
+		chat.TokenUsage = domain.Usage{}
+		if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+	if out != nil {
+		completed := compactionItem
+		completed.Content = domain.Compaction{
+			Summary:             summary,
+			Trigger:             trigger,
+			Status:              "completed",
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+			AfterContextTokens:  afterContextTokens,
+		}
+		completed.Seal(time.Now().UTC())
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Item: completed,
+			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
+		}
+	}
+	return nil
 }
 
 func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger string, out chan<- domain.Event) error {
@@ -2740,94 +2733,84 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 		return err
 	}
 
-	seenBoundaries := map[string]bool{}
-	for {
-		timeline := turn.Timeline()
-		targetFirstKeptItemID := e.compactionTargetFirstKeptItemID(timeline)
-		req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, "", e.providerStreamingEnabled(compactionChat))
-		if err != nil {
-			return err
-		}
-		if len(req.Messages) <= 1 {
-			return nil
-		}
-		beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
-		now := time.Now().UTC()
-		compactionItem := domain.TimelineItem{
-			ID:        chatpkg.NewTimelineID(now),
-			ChatID:    chat.ID,
-			Seq:       int64(len(timeline) + 1),
-			CreatedAt: now,
-			UpdatedAt: now,
-			Content: domain.Compaction{
-				Trigger:             trigger,
-				Status:              "pending",
-				FirstKeptItemID:     firstKeptItemID,
-				BeforeContextTokens: beforeContextTokens,
-			},
-		}
-		compactionItem, err = turn.UpsertTimelineItem(ctx, compactionItem)
-		if err != nil {
-			return err
-		}
-		updateCompactionState := func(summary, status string, afterContextTokens int) error {
-			compactionItem.Content = domain.Compaction{
-				Summary:             summary,
-				Trigger:             trigger,
-				Status:              status,
-				FirstKeptItemID:     firstKeptItemID,
-				BeforeContextTokens: beforeContextTokens,
-				AfterContextTokens:  afterContextTokens,
-			}
-			compactionItem.UpdatedAt = time.Now().UTC()
-			if status == "completed" || status == "failed" {
-				compactionItem.Seal(compactionItem.UpdatedAt)
-			}
-			var updateErr error
-			compactionItem, updateErr = turn.UpsertTimelineItem(ctx, compactionItem)
-			return updateErr
-		}
-		if out != nil {
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: "Compacting session...",
-				Item: compactionItem,
-				Meta: map[string]string{"refresh": "details", "compaction": "started"},
-			}
-		}
-		resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
-		if err != nil {
-			_ = updateCompactionState("", "failed", 0)
-			return err
-		}
-		summary := strings.TrimSpace(resp.Text)
-		if summary == "" {
-			summary = strings.TrimSpace(resp.Reasoning)
-		}
-		if summary == "" {
-			_ = updateCompactionState("", "failed", 0)
-			return fmt.Errorf("empty compaction summary")
-		}
-		afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
-		if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
-			return err
-		}
-		if out != nil {
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: "Session compacted",
-				Item: compactionItem,
-				Meta: map[string]string{"refresh": "details", "compaction": "completed"},
-			}
-		}
-		if firstKeptItemID == targetFirstKeptItemID {
-			return nil
-		}
-		if seenBoundaries[firstKeptItemID] {
-			return fmt.Errorf("compaction boundary did not advance past %s", firstKeptItemID)
-		}
-		seenBoundaries[firstKeptItemID] = true
+	timeline := turn.Timeline()
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, "", e.providerStreamingEnabled(compactionChat))
+	if err != nil {
+		return err
 	}
+	if len(req.Messages) <= 1 {
+		return nil
+	}
+	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	now := time.Now().UTC()
+	compactionItem := domain.TimelineItem{
+		ID:        chatpkg.NewTimelineID(now),
+		ChatID:    chat.ID,
+		Seq:       int64(len(timeline) + 1),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Content: domain.Compaction{
+			Trigger:             trigger,
+			Status:              "pending",
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+		},
+	}
+	compactionItem, err = turn.UpsertTimelineItem(ctx, compactionItem)
+	if err != nil {
+		return err
+	}
+	updateCompactionState := func(summary, status string, afterContextTokens int) error {
+		compactionItem.Content = domain.Compaction{
+			Summary:             summary,
+			Trigger:             trigger,
+			Status:              status,
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+			AfterContextTokens:  afterContextTokens,
+		}
+		compactionItem.UpdatedAt = time.Now().UTC()
+		if status == "completed" || status == "failed" {
+			compactionItem.Seal(compactionItem.UpdatedAt)
+		}
+		var updateErr error
+		compactionItem, updateErr = turn.UpsertTimelineItem(ctx, compactionItem)
+		return updateErr
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Compacting session...",
+			Item: compactionItem,
+			Meta: map[string]string{"refresh": "details", "compaction": "started"},
+		}
+	}
+	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
+	if err != nil {
+		_ = updateCompactionState("", "failed", 0)
+		return err
+	}
+	summary := strings.TrimSpace(resp.Text)
+	if summary == "" {
+		summary = strings.TrimSpace(resp.Reasoning)
+	}
+	if summary == "" {
+		_ = updateCompactionState("", "failed", 0)
+		return fmt.Errorf("empty compaction summary")
+	}
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
+	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
+		return err
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Item: compactionItem,
+			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
+		}
+	}
+	return nil
 }
 
 func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
@@ -2861,39 +2844,7 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 	if err != nil {
 		return provider.ChatRequest{}, "", err
 	}
-	req := e.compactionChatRequest(session, chat, messages, instructions, stream)
-	if len(messages) <= 1 || e.compactionRequestWithinBudget(chat, req) {
-		return req, firstKeptItemID, nil
-	}
-
-	segmentStart := base.Start
-	if keepStart <= segmentStart+1 {
-		return req, firstKeptItemID, nil
-	}
-	var bestReq provider.ChatRequest
-	bestFirstKeptItemID := ""
-	bestFound := false
-	low, high := segmentStart+1, keepStart
-	for low <= high {
-		mid := low + (high-low)/2
-		candidateMessages, candidateFirstKeptItemID, buildErr := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid, base)
-		if buildErr != nil {
-			return provider.ChatRequest{}, "", buildErr
-		}
-		candidateReq := e.compactionChatRequest(session, chat, candidateMessages, instructions, stream)
-		if e.compactionRequestWithinBudget(chat, candidateReq) {
-			bestReq = candidateReq
-			bestFirstKeptItemID = candidateFirstKeptItemID
-			bestFound = true
-			low = mid + 1
-			continue
-		}
-		high = mid - 1
-	}
-	if bestFound {
-		return bestReq, bestFirstKeptItemID, nil
-	}
-	return req, firstKeptItemID, nil
+	return e.compactionChatRequest(session, chat, messages, instructions, stream), firstKeptItemID, nil
 }
 
 func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
@@ -2903,35 +2854,9 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 	}), stream)
 }
 
-func (e *Engine) compactionRequestWithinBudget(chat domain.Chat, req provider.ChatRequest) bool {
-	budget := e.compactionRequestByteBudget(chat)
-	if budget <= 0 {
-		return true
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		return true
-	}
-	return len(data) <= budget
-}
-
-func (e *Engine) compactionRequestByteBudget(chat domain.Chat) int {
-	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
-	if contextWindow <= 0 {
-		return 0
-	}
-	threshold := min(100, e.autoCompactThreshold())
-	return (contextWindow * threshold * 3) / 100
-}
-
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
 	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, compactionBaseForNextCut(timeline, keepStart))
-}
-
-func (e *Engine) compactionTargetFirstKeptItemID(timeline []domain.TimelineItem) string {
-	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
-	return firstKeptItemIDForCompactionCut(timeline, keepStart)
 }
 
 func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int, base compactionCutBase) ([]provider.Message, string, error) {
