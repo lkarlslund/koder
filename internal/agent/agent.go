@@ -708,7 +708,6 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 		})
 	}
 	if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
-		session.ProjectRoot = resolution.Snapshot.ProjectRoot
 		session.ProjectChecksum = resolution.Snapshot.Checksum
 		session.AgentsResolved = resolution.ResolvedAgents
 		session.AgentsSummary = resolution.ConflictSummary

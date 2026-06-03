@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
@@ -704,6 +705,49 @@ func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
 	second := engine.sessionEnvironmentPrompt(session)
 	if second != "cached prompt" {
 		t.Fatalf("expected cached environment prompt, got %q", second)
+	}
+}
+
+func TestRefreshSessionAgentsDoesNotChangeSessionProjectRoot(t *testing.T) {
+	ctx := context.Background()
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	parent := t.TempDir()
+	if err := os.Mkdir(filepath.Join(parent, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	selected := filepath.Join(parent, "altid")
+	if err := os.Mkdir(selected, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessionpkg.CreateSession(ctx, st, "AltID", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionProjectRoot(ctx, st, session.ID, selected); err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	engine := New(cfg, st, nil)
+	engine.agents = agents.NewManager(cfg.StateDir(), filepath.Join(t.TempDir(), "AGENTS.md"))
+	refreshed, err := engine.refreshSessionAgents(ctx, domain.Session{
+		ID:          session.ID,
+		ProjectRoot: selected,
+	}, chatRecord, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.ProjectRoot != selected {
+		t.Fatalf("expected session project root to remain %q, got %q", selected, refreshed.ProjectRoot)
+	}
+	if refreshed.ProjectChecksum == "" {
+		t.Fatal("expected agents refresh to store discovery checksum")
 	}
 }
 
