@@ -4088,6 +4088,9 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	if !ok || user.Text != "steer the running turn" {
 		t.Fatalf("expected persisted user message item, got %#v", evt.Item)
 	}
+	if user.Delivery != domain.QueuedInputDeliveryTurnBoundary {
+		t.Fatalf("user delivery = %q, want %q", user.Delivery, domain.QueuedInputDeliveryTurnBoundary)
+	}
 
 	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -4095,6 +4098,39 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	}
 	if len(timeline) != 1 || timeline[0].ID != evt.Item.ID {
 		t.Fatalf("expected event item to match persisted timeline, event=%#v timeline=%#v", evt.Item, timeline)
+	}
+}
+
+func TestConversationMessagesRenderSteerAsSteeringUpdate(t *testing.T) {
+	engine := New(testConfig(t), nil, nil)
+	session := domain.Session{ID: "session-1", ProjectRoot: "/tmp/project"}
+	chat := domain.Chat{ID: "chat-1"}
+	item := domain.TimelineItem{
+		ID:     "item-1",
+		ChatID: chat.ID,
+		Content: domain.UserMessage{
+			Text:     "we have pdftotext",
+			Source:   domain.UserMessageSourceUser,
+			Delivery: domain.QueuedInputDeliveryTurnBoundary,
+		},
+	}
+
+	messages, err := engine.conversationMessagesForTimelineItem(session, chat, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
+	}
+	text := messages[0].Content
+	for _, want := range []string{
+		"User steering update:",
+		"<user_input>\nwe have pdftotext\n</user_input>",
+		"Apply this update to the active turn before choosing the next action.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("steer message missing %q in %q", want, text)
+		}
 	}
 }
 

@@ -53,12 +53,13 @@ func (i *TimelineItem) Seal(now time.Time) {
 
 // UserMessage stores one user-facing prompt item.
 type UserMessage struct {
-	Text        string       `json:"text,omitempty"`
-	Source      string       `json:"source,omitempty"`
-	QueueID     ID           `json:"queue_id,omitempty"`
-	QueuedAt    time.Time    `json:"queued_at,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-	References  []Reference  `json:"references,omitempty"`
+	Text        string              `json:"text,omitempty"`
+	Source      string              `json:"source,omitempty"`
+	Delivery    QueuedInputDelivery `json:"delivery,omitempty"`
+	QueueID     ID                  `json:"queue_id,omitempty"`
+	QueuedAt    time.Time           `json:"queued_at,omitempty"`
+	Attachments []Attachment        `json:"attachments,omitempty"`
+	References  []Reference         `json:"references,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.

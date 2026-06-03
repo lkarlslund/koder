@@ -847,6 +847,9 @@ func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
 	if user.Source != domain.UserMessageSourceSubchat {
 		t.Fatalf("queued steer source = %q, want %q", user.Source, domain.UserMessageSourceSubchat)
 	}
+	if user.Delivery != domain.QueuedInputDeliveryTurnBoundary {
+		t.Fatalf("queued steer delivery = %q, want %q", user.Delivery, domain.QueuedInputDeliveryTurnBoundary)
+	}
 }
 
 func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {

@@ -545,7 +545,7 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 
 func userMessageForSteers(steers []domain.QueuedInput) domain.UserMessage {
 	texts := make([]string, 0, len(steers))
-	var user domain.UserMessage
+	user := domain.UserMessage{Delivery: domain.QueuedInputDeliveryTurnBoundary}
 	for idx, queued := range steers {
 		if text := strings.TrimSpace(queued.Text); text != "" {
 			texts = append(texts, text)

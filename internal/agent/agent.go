@@ -720,12 +720,15 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return sessionpkg.GetSession(ctx, e.store, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID id.ID, prompt string, source string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID id.ID, prompt string, source string, delivery domain.QueuedInputDelivery, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
 	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	user.Source = strings.TrimSpace(source)
+	if delivery.IsAQueuedInputDelivery() {
+		user.Delivery = delivery
+	}
 	item, err := chatpkg.AppendTimeline(ctx, e.store, chatID, user)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -819,7 +822,11 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 		return false, err
 	}
 	chat.QueuedInputs = remaining
-	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, domain.UserMessageSourceForQueuedInput(item), queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
+	source := domain.UserMessageSourceForQueuedInput(item)
+	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryTurnBoundary && source == domain.UserMessageSourceUser {
+		source = domain.UserMessageSourceSteer
+	}
+	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, source, domain.DeliveryForQueuedInput(item), queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
 	if err != nil {
 		return false, err
 	}
@@ -1964,12 +1971,19 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 			return nil, err
 		}
 		if ok {
+			if userMessageIsSteer(content) {
+				msg = wrapStructuredSteerMessage(msg)
+			}
 			return []provider.Message{msg}, nil
 		}
 		if strings.TrimSpace(content.Text) == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: provider.RoleUser, Content: content.Text}}, nil
+		text := content.Text
+		if userMessageIsSteer(content) {
+			text = steerUserMessageText(text)
+		}
+		return []provider.Message{{Role: provider.RoleUser, Content: text}}, nil
 	case domain.AssistantMessage:
 		var toolCalls []provider.ToolCall
 		for _, tool := range content.Tools {
@@ -2030,6 +2044,34 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 	default:
 		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
 	}
+}
+
+func userMessageIsSteer(msg domain.UserMessage) bool {
+	return msg.Delivery == domain.QueuedInputDeliveryTurnBoundary
+}
+
+func steerUserMessageText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return "User steering update:\n" +
+		"<user_input>\n" + text + "\n</user_input>\n\n" +
+		"Apply this update to the active turn before choosing the next action."
+}
+
+func wrapStructuredSteerMessage(msg provider.Message) provider.Message {
+	if strings.TrimSpace(msg.Content) != "" {
+		msg.Content = steerUserMessageText(msg.Content)
+	}
+	if len(msg.ContentParts) > 0 {
+		wrapped := make([]provider.ContentPart, 0, len(msg.ContentParts)+2)
+		wrapped = append(wrapped, provider.TextPart("User steering update:\n"))
+		wrapped = append(wrapped, msg.ContentParts...)
+		wrapped = append(wrapped, provider.TextPart("\n\nApply this update to the active turn before choosing the next action."))
+		msg.ContentParts = wrapped
+	}
+	return msg
 }
 
 func (e *Engine) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCall) (provider.Message, bool) {
