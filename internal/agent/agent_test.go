@@ -5067,7 +5067,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
 	cfg.AutoCompactAt = 80
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 40000})
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 200000})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -5118,6 +5118,53 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	}
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		t.Fatal("expected compaction to preserve a tail boundary")
+	}
+}
+
+func TestBuildCompactionRequestRecutsWhenRequestExceedsContext(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.AutoCompactAt = 80
+	cfg.CompactionKeepToolCalls = 1
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 12000})
+	engine := New(cfg, nil, nil)
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, ProviderID: "test", ModelID: "test-model", WorkflowRole: chatrole.Compaction}
+	timeline := []domain.TimelineItem{
+		{ID: "early", Seq: 1, Content: domain.UserMessage{Text: "early marker " + strings.Repeat("a", 1000)}},
+	}
+	for idx := range 80 {
+		timeline = append(timeline, domain.TimelineItem{
+			ID:      id.ID(fmt.Sprintf("middle-%02d", idx)),
+			Seq:     int64(len(timeline) + 1),
+			Content: domain.AssistantMessage{Text: fmt.Sprintf("middle %02d %s", idx, strings.Repeat("b", 500))},
+		})
+	}
+	timeline = append(timeline,
+		domain.TimelineItem{ID: "tail-tool", Seq: int64(len(timeline) + 1), Content: domain.AssistantMessage{Tools: []domain.ToolCall{{Tool: domain.ToolKindFileRead, ToolCallID: "call_tail"}}}},
+		domain.TimelineItem{ID: "tail-user", Seq: int64(len(timeline) + 2), Content: domain.UserMessage{Text: "tail marker"}},
+	)
+
+	req, firstKept, err := engine.buildCompactionRequestForTimeline(session, chat, timeline, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !engine.compactionRequestWithinContext(chat, req) {
+		t.Fatalf("expected fitted compaction request within budget, estimated=%d budget=%d", estimatedRequestTokens(req), engine.compactionRequestTokenBudget(chat))
+	}
+	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == firstKept })
+	if idx <= 0 || idx >= len(timeline) {
+		t.Fatalf("expected recut first kept item inside timeline, got %q at %d", firstKept, idx)
+	}
+	originalKeepStart := preservedTimelineToolCallTailStart(timeline, engine.compactionKeepToolCalls())
+	if idx >= originalKeepStart {
+		t.Fatalf("expected fitted request to preserve a larger tail, first kept index=%d original=%d", idx, originalKeepStart)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "tail marker") {
+		t.Fatalf("expected preserved tail to be excluded from compaction source, got %s", string(body))
 	}
 }
 
