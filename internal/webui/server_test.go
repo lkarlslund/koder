@@ -1084,7 +1084,8 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
-		!strings.Contains(fullPage, `if (options.renderDiagrams !== false) this.renderDiagrams();`) {
+		!strings.Contains(fullPage, `Promise.resolve(rendered).then`) ||
+		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
 		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates with optional diagram rendering")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {

@@ -1030,10 +1030,9 @@
           this.applyTheme();
           this.error = this.state.error || '';
           this.syncInterruptArmed();
-          const renderDiagrams = this.shouldRenderDiagramsAfterChatDelta(delta, current, next);
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-          }, {renderDiagrams});
+          }, {renderDiagrams: false});
           this.reportClientStateSoon();
         },
         shouldRenderDiagramsAfterChatDelta(delta, previous, next) {
@@ -1333,16 +1332,29 @@
         afterTranscriptDOMUpdate(fn, options = {}) {
           this.$nextTick(() => {
             requestAnimationFrame(() => {
-              if (options.renderDiagrams !== false) this.renderDiagrams();
-              fn();
-              setTimeout(() => { if (options.renderDiagrams !== false) this.renderDiagrams(); fn(); }, 0);
+              const run = () => {
+                fn();
+                requestAnimationFrame(fn);
+                setTimeout(fn, 0);
+              };
+              if (options.renderDiagrams === false) {
+                run();
+                return;
+              }
+              const rendered = this.renderDiagrams();
+              run();
+              Promise.resolve(rendered).then(() => {
+                fn();
+                requestAnimationFrame(fn);
+                setTimeout(fn, 0);
+              });
             });
           });
         },
         renderDiagrams() {
           const root = this.transcriptElement();
-          renderMermaidIn(root).then(() => this.enhanceDisplayedMedia(root));
           this.enhanceDisplayedMedia(root);
+          return renderMermaidIn(root).then(() => this.enhanceDisplayedMedia(root));
         },
         enhanceDisplayedMedia(root) {
           if (!root) return;
