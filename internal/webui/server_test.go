@@ -28,6 +28,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
@@ -1755,6 +1756,62 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	}
 	if resp.Result.Snapshot.Chat.ID != firstID {
 		t.Fatalf("expected response snapshot chat %s, got %s", firstID, resp.Result.Snapshot.Chat.ID)
+	}
+}
+
+func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx := context.Background()
+	second, err := ctrl.CreateSession(ctx, "Second", t.TempDir())
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	secondState, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: second.ID})
+	if err != nil {
+		t.Fatalf("state for second session: %v", err)
+	}
+	secondChatID := secondState.ActiveChatID
+	if secondChatID == "" {
+		t.Fatal("expected second session active chat")
+	}
+
+	wsCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(wsCtx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(wsCtx, "ws://"+srv.Addr()+"/ws?session="+string(second.ID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	writeRPC(t, wsCtx, conn, 1, "hello", `{}`)
+	_ = readRPCResponse(t, wsCtx, conn, 1)
+
+	if _, err := ctrl.UpdateChat(ctx, second.ID, secondChatID, tools.ChatUpdateRequest{Title: "Renamed second chat"}); err != nil {
+		t.Fatalf("update second session chat: %v", err)
+	}
+
+	deadline, stop := context.WithTimeout(wsCtx, time.Second)
+	defer stop()
+	for {
+		_, data, err := conn.Read(deadline)
+		if err != nil {
+			t.Fatalf("expected selected session chat_delta: %v", err)
+		}
+		var msg struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ChatID id.ID `json:"chat_id"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatalf("decode websocket push: %v", err)
+		}
+		if msg.Type == "chat_delta" && msg.Payload.ChatID == secondChatID {
+			return
+		}
 	}
 }
 

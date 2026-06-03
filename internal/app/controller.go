@@ -650,6 +650,86 @@ func (c *Controller) Subscribe() (<-chan Event, func()) {
 	}
 }
 
+// SubscribeSelection subscribes to events from the selected session owner.
+func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection) (<-chan Event, func(), error) {
+	if c == nil || c.agent == nil {
+		return nil, nil, fmt.Errorf("no chat agent")
+	}
+	if selection.SessionID == "" {
+		return nil, nil, fmt.Errorf("session id is required")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	sessionEvents, sessionUnsub := owner.Subscribe()
+	out := make(chan Event, 64)
+	done := make(chan struct{})
+	var unsubOnce sync.Once
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case event, ok := <-sessionEvents:
+				if !ok {
+					return
+				}
+				if converted, ok := c.eventForSelectedSession(event); ok {
+					select {
+					case out <- converted:
+					default:
+					}
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	unsub := func() {
+		unsubOnce.Do(func() {
+			close(done)
+			sessionUnsub()
+		})
+	}
+	return out, unsub, nil
+}
+
+func (c *Controller) eventForSelectedSession(event sessionpkg.Event) (Event, bool) {
+	switch event.Kind {
+	case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived:
+		update := event.Update
+		if update.Snapshot.Chat.ID == "" {
+			update.Snapshot = event.Snapshot
+		}
+		if update.Snapshot.Chat.ID == "" {
+			update.Snapshot.Chat = event.Chat
+		}
+		if update.Snapshot.Chat.ID == "" {
+			return Event{}, false
+		}
+		if update.Status == "" {
+			update.Status = update.Snapshot.Status
+		}
+		if update.StatusText == "" {
+			update.StatusText = update.Snapshot.StatusText
+		}
+		update.Active = update.Active || update.Snapshot.Active
+		return Event{Type: "chat_delta", Payload: update}, true
+	case sessionpkg.EventPlanningChanged:
+		return Event{Type: "planning_delta", Payload: map[string]any{
+			"milestones":         event.Plan,
+			"todos":              slices.Clone(event.Todos),
+			"todos_by_milestone": cloneTodosByRef(event.TodosByRef),
+		}}, true
+	case sessionpkg.EventTasksChanged:
+		return Event{Type: "tasks_delta", Payload: map[string]any{"tasks": slices.Clone(event.Tasks)}}, true
+	case sessionpkg.EventSessionChanged:
+		return Event{Type: "session_delta", Payload: map[string]any{"session": event.Session}}, true
+	default:
+		return Event{}, false
+	}
+}
+
 // SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
 func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection Selection, kind chat.QueueKind, text string, drafts []attachment.Draft) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -846,9 +926,11 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	}
 	c.mu.RUnlock()
 	slog.Info("controller shutdown requested", "reason", reason, "runtimes", len(runtimes), "unsubscribers", len(unsubs), "agent", c.agent != nil)
-	for _, unsub := range unsubs {
-		unsub()
-	}
+	defer func() {
+		for _, unsub := range unsubs {
+			unsub()
+		}
+	}()
 	if c.agent != nil {
 		if err := c.agent.Shutdown(ctx, reason); err != nil {
 			slog.Error("controller shutdown failed", "reason", reason, "error", err)

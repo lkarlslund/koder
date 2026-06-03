@@ -386,6 +386,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	clientID := string(id.New())
+	slog.Info("websocket connected", "client", clientID, "remote", r.RemoteAddr, "session", strings.TrimSpace(r.URL.Query().Get("session")))
 	if sessionID := id.ID(strings.TrimSpace(r.URL.Query().Get("session"))); sessionID != "" {
 		s.setClientSelection(clientID, clientSelection{SessionID: sessionID})
 	}
@@ -399,8 +400,59 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer s.debug.UnregisterClient(clientID)
 	}
 	defer s.deleteClientSelection(clientID)
-	events, unsub := s.controller.Subscribe()
-	defer unsub()
+	pushEvents := make(chan app.Event, 128)
+	controllerEvents, controllerUnsub := s.controller.Subscribe()
+	defer controllerUnsub()
+	go func() {
+		for event := range controllerEvents {
+			if !websocketUsesGlobalControllerEvent(event.Type) {
+				continue
+			}
+			select {
+			case pushEvents <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	var selectedUnsub func()
+	var selectedSubscription clientSelection
+	syncSelectedSubscription := func() {
+		selection := s.clientSelection(clientID)
+		if selection.SessionID == selectedSubscription.SessionID && selection.ChatID == selectedSubscription.ChatID {
+			return
+		}
+		if selectedUnsub != nil {
+			selectedUnsub()
+			selectedUnsub = nil
+		}
+		selectedSubscription = selection
+		if selection.SessionID == "" {
+			return
+		}
+		events, unsub, err := s.controller.SubscribeSelection(ctx, app.Selection{SessionID: selection.SessionID, ChatID: selection.ChatID})
+		if err != nil {
+			slog.Error("subscribe websocket to selected session", "client", clientID, "session", selection.SessionID, "chat", selection.ChatID, "error", err)
+			return
+		}
+		selectedUnsub = unsub
+		slog.Info("websocket subscribed to selected session", "client", clientID, "session", selection.SessionID, "chat", selection.ChatID)
+		go func(sessionID, chatID id.ID, events <-chan app.Event) {
+			for event := range events {
+				select {
+				case pushEvents <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+			slog.Info("websocket selected session subscription closed", "client", clientID, "session", sessionID, "chat", chatID)
+		}(selection.SessionID, selection.ChatID, events)
+	}
+	defer func() {
+		if selectedUnsub != nil {
+			selectedUnsub()
+		}
+	}()
 	done := make(chan struct{})
 	var writeMu sync.Mutex
 	var baselineMu sync.RWMutex
@@ -411,10 +463,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer heartbeat.Stop()
 		for {
 			select {
-			case event, ok := <-events:
-				if !ok {
-					return
-				}
+			case event := <-pushEvents:
 				baselineMu.RLock()
 				ready := baselineEstablished
 				baselineMu.RUnlock()
@@ -427,6 +476,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 				s.updateDebugChats()
 				if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
+					slog.Info("websocket closed while writing event", "client", clientID, "type", webEvent.Type, "error", err)
 					return
 				}
 			case <-heartbeat.C:
@@ -436,9 +486,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 						"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 					},
 				}); err != nil {
+					slog.Info("websocket closed while writing heartbeat", "client", clientID, "error", err)
 					return
 				}
 			case <-ctx.Done():
+				slog.Info("websocket context closed", "client", clientID, "error", ctx.Err())
 				return
 			}
 		}
@@ -446,6 +498,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
+			slog.Info("websocket closed while reading", "client", clientID, "error", err)
 			return
 		}
 		var req rpcRequest
@@ -462,6 +515,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			resp.Error = err.Error()
 		}
 		if err := writeJSON(ctx, conn, &writeMu, resp); err != nil {
+			slog.Info("websocket closed while writing rpc response", "client", clientID, "method", req.Method, "error", err)
 			return
 		}
 		if err == nil {
@@ -471,6 +525,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			baselineMu.Lock()
 			baselineEstablished = true
 			baselineMu.Unlock()
+			syncSelectedSubscription()
 		}
 		select {
 		case <-done:
@@ -1301,6 +1356,15 @@ func rpcEstablishesSnapshotBaseline(method string, result any) bool {
 		return ok
 	}
 	return false
+}
+
+func websocketUsesGlobalControllerEvent(typ string) bool {
+	switch typ {
+	case "chat_delta", "chats_delta", "planning_delta", "tasks_delta", "session_delta", "selection_delta", "workspace_delta", "snapshot":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *Server) updateDebugChats() {
