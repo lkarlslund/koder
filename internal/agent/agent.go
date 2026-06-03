@@ -54,6 +54,7 @@ type Engine struct {
 	exec       *execruntime.Manager
 	envMu      sync.Mutex
 	envPrompts map[id.ID]string
+	caveman    *cavemanService
 	sessionMu  sync.RWMutex
 	sessions   map[id.ID]*sessionpkg.Session
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
@@ -82,6 +83,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
 		exec:       execruntime.NewManager(),
+		caveman:    newCavemanService(cfg.Thinking.CavemanParallelism),
 		sessions:   map[id.ID]*sessionpkg.Session{},
 		retryPause: waitForRetry,
 	}
@@ -90,6 +92,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+	e.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)
 		go func() {
@@ -470,13 +473,13 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	if itemErr != nil {
 		return chatpkg.TurnStepResult{}, itemErr
 	}
-	resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, chat.ProviderID, client, out, req, assistantItem)
+	resp, streamed, cavemanJob, completeErr := e.chatWithRetry(ctx, session, chat, client, out, req, assistantItem)
 	if completeErr != nil {
 		return chatpkg.TurnStepResult{}, completeErr
 	}
 
 	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
-	reasoningContent, reasoningErr := e.reasoningContentForResponse(ctx, chat, client, reasoning, out)
+	reasoningContent, reasoningErr := e.reasoningContentForResponse(ctx, chat, client, reasoning, cavemanJob, out)
 	if reasoningErr != nil {
 		return chatpkg.TurnStepResult{}, reasoningErr
 	}
@@ -976,10 +979,29 @@ func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
 	return modelConfigForRequest(e.cfg, chat.ProviderID, chat.ModelID)
 }
 
-func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, events chan<- domain.Event) (domain.ReasoningContent, error) {
+func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, job cavemanJob, events chan<- domain.Event) (domain.ReasoningContent, error) {
 	result := domain.ReasoningContent{Text: reasoning}
 	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
 		return result, nil
+	}
+	if !job.Valid() {
+		var err error
+		job, err = e.startCavemanThinking(ctx, chat, chatClient, reasoning, events)
+		if err != nil {
+			return domain.ReasoningContent{}, err
+		}
+	}
+	caveman, err := job.Await(ctx)
+	if err != nil {
+		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
+	}
+	result.Caveman = strings.TrimSpace(caveman)
+	return result, nil
+}
+
+func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, events chan<- domain.Event) (cavemanJob, error) {
+	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+		return cavemanJob{}, nil
 	}
 	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProvider)
 	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModel)
@@ -988,18 +1010,18 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 		modelID = strings.TrimSpace(chat.ModelID)
 	}
 	if providerID == "" || modelID == "" {
-		return domain.ReasoningContent{}, fmt.Errorf("caveman thinking model must be set or use a chat with provider and model")
+		return cavemanJob{}, fmt.Errorf("caveman thinking model must be set or use a chat with provider and model")
 	}
 	client := chatClient
 	if providerID != strings.TrimSpace(chat.ProviderID) || client == nil {
 		providerCfg, ok := e.cfg.Provider(providerID)
 		if !ok {
-			return domain.ReasoningContent{}, fmt.Errorf("caveman thinking provider %q is not configured", providerID)
+			return cavemanJob{}, fmt.Errorf("caveman thinking provider %q is not configured", providerID)
 		}
 		var err error
 		client, err = provider.New(providerID, providerCfg, e.debug)
 		if err != nil {
-			return domain.ReasoningContent{}, err
+			return cavemanJob{}, err
 		}
 	}
 	prompt := cavemanThinkingPrompt(e.cfg.Thinking.CavemanPrompt, reasoning)
@@ -1012,13 +1034,16 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 		Stream:    true,
 		ExtraBody: cavemanThinkingExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
 	}
-	resp, err := e.completeCavemanThinking(ctx, providerID, client, req, events)
-	if err != nil {
-		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
+	if e.caveman == nil {
+		e.caveman = newCavemanService(e.cfg.Thinking.CavemanParallelism)
 	}
-	caveman := strings.TrimSpace(resp.Text)
-	result.Caveman = caveman
-	return result, nil
+	return e.caveman.Submit(ctx, func(jobCtx context.Context) (string, error) {
+		resp, err := e.completeCavemanThinking(jobCtx, providerID, client, req, events)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(resp.Text), nil
+	}), nil
 }
 
 func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
@@ -1670,7 +1695,9 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 	}
 }
 
-func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
+func (e *Engine) chatWithRetry(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, cavemanJob, error) {
+	sessionID := session.ID
+	providerID := chat.ProviderID
 	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
 	promptProgressRetried := false
 	for attempt := 0; ; attempt++ {
@@ -1679,10 +1706,31 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID,
 			err            error
 			streamed       bool
 			receivedStream bool
+			caveman        cavemanJob
+			cavemanErr     error
 		)
 		if req.Stream {
+			var reasoning strings.Builder
+			reasoningSeen := false
+			cavemanStarted := false
+			startCaveman := func() {
+				if cavemanStarted || !reasoningSeen {
+					return
+				}
+				cavemanStarted = true
+				caveman, cavemanErr = e.startCavemanThinking(ctx, chat, client, reasoning.String(), out)
+			}
 			resp, err = client.StreamChatResponse(ctx, req, func(evt domain.Event) {
 				receivedStream = true
+				switch evt.Kind {
+				case domain.EventKindReasoning:
+					if evt.Text != "" {
+						reasoningSeen = true
+						reasoning.WriteString(evt.Text)
+					}
+				case domain.EventKindMessageDelta, domain.EventKindToolCallDelta:
+					startCaveman()
+				}
 				if (evt.Kind == domain.EventKindMessageDelta || evt.Kind == domain.EventKindReasoning) && evt.Item.ID == "" {
 					evt.Item = streamItem
 				}
@@ -1690,15 +1738,21 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID,
 					out <- evt
 				}
 			})
+			if cavemanErr == nil {
+				startCaveman()
+			}
 			streamed = true
 		} else {
 			resp, err = client.CompleteChat(ctx, req)
+		}
+		if cavemanErr != nil {
+			return provider.ChatResponse{}, streamed, cavemanJob{}, cavemanErr
 		}
 		if err == nil {
 			if promptProgressPending {
 				e.setPromptProgressSupport(providerID, true)
 			}
-			return resp, streamed, nil
+			return resp, streamed, caveman, nil
 		}
 		if promptProgressPending && !promptProgressRetried && provider.ShouldRetryWithoutPromptProgress(err) {
 			promptProgressRetried = true
@@ -1713,7 +1767,7 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID,
 		var apiErr *provider.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
 			if attempt >= maxRateLimitRetries {
-				return provider.ChatResponse{}, streamed, err
+				return provider.ChatResponse{}, streamed, cavemanJob{}, err
 			}
 			delay := apiErr.RetryAfter
 			if delay <= 0 {
@@ -1735,12 +1789,12 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID,
 					out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
 				}
 			}); err != nil {
-				return provider.ChatResponse{}, streamed, err
+				return provider.ChatResponse{}, streamed, cavemanJob{}, err
 			}
 			continue
 		}
 		if !shouldRetryTransientChatError(err, req.Stream, receivedStream) || attempt >= maxTransientChatRetries {
-			return provider.ChatResponse{}, streamed, err
+			return provider.ChatResponse{}, streamed, cavemanJob{}, err
 		}
 		delay := transientChatRetryDelay(attempt)
 		retryNumber := attempt + 1
@@ -1760,7 +1814,7 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID id.ID,
 				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatTransientRetryStatus(remaining, retryNumber)}
 			}
 		}); err != nil {
-			return provider.ChatResponse{}, streamed, err
+			return provider.ChatResponse{}, streamed, cavemanJob{}, err
 		}
 	}
 }

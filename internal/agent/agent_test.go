@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3781,6 +3782,85 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	}
 }
 
+func TestRunPromptStartsCavemanBeforeMainStreamCompletes(t *testing.T) {
+	t.Parallel()
+
+	cavemanStarted := make(chan struct{})
+	releaseMain := make(chan struct{})
+	var cavemanOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		if strings.Contains(string(body), "Caveman rewrite only") {
+			cavemanOnce.Do(func() { close(cavemanStarted) })
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"me inspect.\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			flusher.Flush()
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"I should inspect.\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n"))
+		flusher.Flush()
+		select {
+		case <-cavemanStarted:
+		case <-time.After(time.Second):
+			t.Fatal("expected caveman request before main stream completed")
+		}
+		close(releaseMain)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: true},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
+	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanPrompt = "Caveman rewrite only:\n{{thinking}}"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := runLivePromptDefault(t, engine, st, session, "go")
+	select {
+	case <-releaseMain:
+	default:
+		t.Fatal("expected main stream to wait for async caveman start before completing")
+	}
+	var done domain.Event
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindMessageDone {
+			done = evt
+		}
+	}
+	assistant, ok := done.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant item, got %#v", done.Item)
+	}
+	if assistant.Text != "done" || assistant.Reasoning.Caveman != "me inspect." {
+		t.Fatalf("expected streamed response with async caveman reasoning, got %#v", assistant)
+	}
+}
+
 func TestCavemanReasoningStopsOversizedThinkingStream(t *testing.T) {
 	t.Parallel()
 
@@ -6444,7 +6524,9 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
+	session := domain.Session{ID: "session-test"}
+	chat := domain.Chat{ID: "chat-test", SessionID: session.ID, ProviderID: "test", ModelID: "test-model"}
+	resp, streamed, _, err := engine.chatWithRetry(context.Background(), session, chat, client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    provider.RoleUser,
@@ -6514,7 +6596,9 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	_, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
+	session := domain.Session{ID: "session-test"}
+	chat := domain.Chat{ID: "chat-test", SessionID: session.ID, ProviderID: "test", ModelID: "test-model"}
+	_, streamed, _, err := engine.chatWithRetry(context.Background(), session, chat, client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    provider.RoleUser,
@@ -6598,7 +6682,9 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 	}
 
 	events := make(chan domain.Event, 16)
-	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
+	session := domain.Session{ID: "session-test"}
+	chat := domain.Chat{ID: "chat-test", SessionID: session.ID, ProviderID: "test", ModelID: "test-model"}
+	resp, streamed, _, err := engine.chatWithRetry(context.Background(), session, chat, client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    provider.RoleUser,

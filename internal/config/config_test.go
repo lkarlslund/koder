@@ -47,6 +47,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Thinking.CavemanPrompt != DefaultCavemanThinkingPrompt {
 		t.Fatalf("expected default caveman prompt, got %q", cfg.Thinking.CavemanPrompt)
 	}
+	if cfg.Thinking.CavemanParallelism != defaultCavemanParallelism {
+		t.Fatalf("expected default caveman parallelism %d, got %d", defaultCavemanParallelism, cfg.Thinking.CavemanParallelism)
+	}
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
@@ -78,6 +81,7 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	cfg.Thinking.CavemanProvider = "test"
 	cfg.Thinking.CavemanModel = "model"
 	cfg.Thinking.CavemanPrompt = "rewrite:\n{{thinking}}"
+	cfg.Thinking.CavemanParallelism = 3
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +89,7 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" {
+	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" || loaded.Thinking.CavemanParallelism != 3 {
 		t.Fatalf("expected thinking settings to round-trip, got %#v", loaded.Thinking)
 	}
 }

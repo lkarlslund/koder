@@ -26,10 +26,11 @@ type Store struct {
 }
 
 type Thinking struct {
-	CavemanEnabled  bool   `toml:"caveman_enabled"`
-	CavemanProvider string `toml:"caveman_provider"`
-	CavemanModel    string `toml:"caveman_model"`
-	CavemanPrompt   string `toml:"caveman_prompt"`
+	CavemanEnabled     bool   `toml:"caveman_enabled"`
+	CavemanProvider    string `toml:"caveman_provider"`
+	CavemanModel       string `toml:"caveman_model"`
+	CavemanPrompt      string `toml:"caveman_prompt"`
+	CavemanParallelism int    `toml:"caveman_parallelism,omitempty"`
 }
 
 type Provider struct {
@@ -128,6 +129,7 @@ const providerConfigurationHint = "configure at least one provider in config.tom
 const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
+const defaultCavemanParallelism = 1
 const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
 const DefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
@@ -239,7 +241,8 @@ func Default() Config {
 			AutoContinue: true,
 		},
 		Thinking: Thinking{
-			CavemanPrompt: DefaultCavemanThinkingPrompt,
+			CavemanPrompt:      DefaultCavemanThinkingPrompt,
+			CavemanParallelism: defaultCavemanParallelism,
 		},
 	}
 }
@@ -294,6 +297,9 @@ func (c *Config) applyDefaults() {
 	}
 	c.Thinking.CavemanProvider = strings.TrimSpace(c.Thinking.CavemanProvider)
 	c.Thinking.CavemanModel = strings.TrimSpace(c.Thinking.CavemanModel)
+	if c.Thinking.CavemanParallelism <= 0 {
+		c.Thinking.CavemanParallelism = defaultCavemanParallelism
+	}
 	switch strings.TrimSpace(c.Thinking.CavemanPrompt) {
 	case "":
 		c.Thinking.CavemanPrompt = def.Thinking.CavemanPrompt
