@@ -14,6 +14,7 @@ const (
 	Orchestrator Role = "orchestrator"
 	Planning     Role = "planning"
 	Execution    Role = "execution"
+	Compaction   Role = "compaction"
 )
 
 const legacyDecomposition Role = "decomposition"
@@ -33,7 +34,7 @@ func (s Spec) AllowsTool(kind toolkind.Kind) bool {
 	if !s.Registered {
 		return false
 	}
-	if len(s.AllowTools) > 0 {
+	if s.AllowTools != nil {
 		return s.AllowTools[kind]
 	}
 	if len(s.DenyTools) > 0 && s.DenyTools[kind] {
@@ -53,6 +54,15 @@ func DefaultRegistry() Registry {
 		General:      orchestrationSpec(General, "Chat"),
 		Orchestrator: orchestrationSpec(Orchestrator, "Orchestrate"),
 		Planning:     orchestrationSpec(Planning, "Plan"),
+		Compaction: {
+			Registered:  true,
+			Name:        Compaction,
+			DisplayName: "Compact",
+			SystemPrompt: strings.TrimSpace(`This chat summarizes conversation history for compaction.
+
+Return only the compacted summary requested by the compaction prompt.`),
+			AllowTools: toolSet(),
+		},
 		Execution: {
 			Registered:  true,
 			Name:        Execution,

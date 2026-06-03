@@ -917,7 +917,9 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) && chatrole.AllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
 			req.Tools = append(req.Tools, e.mcp.ToolDefinitionsWithReserved(req.Tools)...)
 		}
-		req.ToolChoice = "auto"
+		if len(req.Tools) > 0 {
+			req.ToolChoice = "auto"
+		}
 	}
 	return req
 }
@@ -2813,10 +2815,12 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 }
 
 func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
+	next := chat
+	next.WorkflowRole = chatrole.Compaction
 	providerID := strings.TrimSpace(e.cfg.CompactionProvider)
 	modelID := strings.TrimSpace(e.cfg.CompactionModel)
 	if providerID == "" && modelID == "" {
-		return chat, client, nil
+		return next, client, nil
 	}
 	if providerID == "" || modelID == "" {
 		return domain.Chat{}, nil, fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
@@ -2825,7 +2829,6 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 	if !ok || providerCfg.Disabled {
 		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
 	}
-	next := chat
 	next.ProviderID = providerID
 	next.ModelID = modelID
 	compactionClient, err := provider.New(providerID, providerCfg, e.debug)

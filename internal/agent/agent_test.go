@@ -4935,6 +4935,9 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 		!strings.Contains(requestBody, "focus on your list of directives") {
 		t.Fatalf("expected manual compaction instructions in request, got %s", requestBody)
 	}
+	if strings.Contains(requestBody, `"tools"`) || strings.Contains(requestBody, `"tool_choice"`) {
+		t.Fatalf("expected compaction request to omit tools, got %s", requestBody)
+	}
 }
 
 func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
