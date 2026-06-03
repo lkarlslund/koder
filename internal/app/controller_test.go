@@ -84,6 +84,7 @@ func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 		SessionID: state.Session.ID,
 		ChatID:    state.ActiveChatID,
 		Command:   "printf hi",
+		Workdir:   state.Session.ProjectRoot,
 		YieldTime: 50 * time.Millisecond,
 	})
 	if err != nil {
@@ -118,6 +119,7 @@ func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
 		SessionID: selection.SessionID,
 		ChatID:    selection.ChatID,
 		Command:   "sleep 1",
+		Workdir:   ctrl.State().Session.ProjectRoot,
 	})
 	if err != nil {
 		t.Fatalf("start exec: %v", err)

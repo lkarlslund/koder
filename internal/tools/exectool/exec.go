@@ -247,6 +247,7 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	meta := map[string]string{
 		"process_id": snap.ProcessID,
 		"command":    snap.Command,
+		"workdir":    rel,
 		"state":      string(snap.State),
 		"tty":        strconv.FormatBool(snap.TTY),
 	}

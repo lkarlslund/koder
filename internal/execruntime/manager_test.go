@@ -14,6 +14,7 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 		SessionID: "session-1",
 		ChatID:    "chat-2",
 		Command:   "read line; printf 'got:%s' \"$line\"",
+		Workdir:   t.TempDir(),
 		YieldTime: 100 * time.Millisecond,
 	})
 	if err != nil {
@@ -54,6 +55,7 @@ func TestManagerWriteStdinEmptyWaitsAndDrainsNewOutput(t *testing.T) {
 		SessionID: "session-1",
 		ChatID:    "chat-2",
 		Command:   "printf first; sleep 0.2; printf second; sleep 0.2",
+		Workdir:   t.TempDir(),
 		YieldTime: 100 * time.Millisecond,
 	})
 	if err != nil {
@@ -123,6 +125,7 @@ func TestManagerListAndTerminate(t *testing.T) {
 		SessionID: "session-1",
 		ChatID:    "chat-2",
 		Command:   "sleep 10",
+		Workdir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -160,6 +163,7 @@ func TestManagerSubscribeReceivesOutput(t *testing.T) {
 		SessionID: "session-1",
 		ChatID:    "chat-2",
 		Command:   "printf hi",
+		Workdir:   t.TempDir(),
 		YieldTime: 50 * time.Millisecond,
 	})
 	if err != nil {

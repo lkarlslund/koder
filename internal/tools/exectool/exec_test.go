@@ -1,6 +1,10 @@
 package exectool
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,6 +41,57 @@ func TestCommandNormalizeArgs(t *testing.T) {
 	}
 }
 
+func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	control := &recordingExecControl{}
+	result, err := (commandTool{}).Execute(context.Background(), tools.Runtime{
+		Workdir:   root,
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, tools.Request{
+		Args: map[string]string{"cmd": "pwd"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if control.start.Workdir != root {
+		t.Fatalf("expected session project root workdir %q, got %q", root, control.start.Workdir)
+	}
+	if result.Meta["workdir"] != "." {
+		t.Fatalf("expected relative workdir metadata '.', got %#v", result.Meta)
+	}
+	stored, ok := result.Stored.(tools.ExecStoredResult)
+	if !ok {
+		t.Fatalf("expected exec stored result, got %T", result.Stored)
+	}
+	if stored.Workdir != "." {
+		t.Fatalf("expected stored relative workdir '.', got %q", stored.Workdir)
+	}
+}
+
+func TestCommandExecuteResolvesWorkdirRelativeToSessionProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("create subdir: %v", err)
+	}
+	control := &recordingExecControl{}
+	_, err := (commandTool{}).Execute(context.Background(), tools.Runtime{
+		Workdir:   root,
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, tools.Request{
+		Args: map[string]string{"cmd": "pwd", "workdir": "sub"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if want := filepath.Join(root, "sub"); control.start.Workdir != want {
+		t.Fatalf("expected session-relative workdir %q, got %q", want, control.start.Workdir)
+	}
+}
+
 func TestWriteStdinAllowsEmptyCharsForWait(t *testing.T) {
 	args, err := (writeStdinTool{}).NormalizeArgs(map[string]string{"process_id": "exec_1", "chars": "", "yield_time_ms": "1000"})
 	if err != nil {
@@ -48,6 +103,49 @@ func TestWriteStdinAllowsEmptyCharsForWait(t *testing.T) {
 	if preview := (writeStdinTool{}).Preview(tools.Request{Args: map[string]string{"process_id": "exec_1"}}); !strings.Contains(preview, "Wait for output") {
 		t.Fatalf("expected wait preview, got %q", preview)
 	}
+}
+
+type recordingExecControl struct {
+	start execruntime.StartRequest
+}
+
+func (c *recordingExecControl) Start(_ context.Context, req execruntime.StartRequest) (execruntime.Snapshot, error) {
+	c.start = req
+	if req.Workdir == "" {
+		return execruntime.Snapshot{}, errors.New("workdir is empty")
+	}
+	return execruntime.Snapshot{
+		ProcessID: "exec_1",
+		SessionID: req.SessionID,
+		ChatID:    req.ChatID,
+		Command:   req.Command,
+		Workdir:   req.Workdir,
+		State:     execruntime.StateCompleted,
+	}, nil
+}
+
+func (c *recordingExecControl) Status(context.Context, execruntime.StatusRequest) (execruntime.Snapshot, error) {
+	return execruntime.Snapshot{}, errors.New("not implemented")
+}
+
+func (c *recordingExecControl) List(context.Context, execruntime.ListRequest) ([]execruntime.Snapshot, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingExecControl) WriteStdin(context.Context, execruntime.WriteStdinRequest) (execruntime.Snapshot, error) {
+	return execruntime.Snapshot{}, errors.New("not implemented")
+}
+
+func (c *recordingExecControl) Resize(context.Context, execruntime.ResizeRequest) (execruntime.Snapshot, error) {
+	return execruntime.Snapshot{}, errors.New("not implemented")
+}
+
+func (c *recordingExecControl) Terminate(context.Context, execruntime.TerminateRequest) (execruntime.Snapshot, error) {
+	return execruntime.Snapshot{}, errors.New("not implemented")
+}
+
+func (c *recordingExecControl) Cleanup(context.Context, execruntime.CleanupRequest) ([]execruntime.Snapshot, error) {
+	return nil, errors.New("not implemented")
 }
 
 func TestExecStartMessageDistinguishesRunningProcess(t *testing.T) {

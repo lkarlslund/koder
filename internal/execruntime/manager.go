@@ -236,6 +236,9 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	if req.SessionID == "" || req.ChatID == "" {
 		return Snapshot{}, errors.New("session_id and chat_id are required")
 	}
+	if strings.TrimSpace(req.Workdir) == "" {
+		return Snapshot{}, errors.New("workdir is required")
+	}
 	shell, args, err := shellArgs(req.Shell, req.Login, command)
 	if err != nil {
 		return Snapshot{}, err
