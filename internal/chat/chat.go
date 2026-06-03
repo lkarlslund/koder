@@ -248,12 +248,6 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		if err != nil {
 			return nil, err
 		}
-	} else if chatRecord.LastKnownContextTokens <= 0 {
-		var err error
-		chatRecord, err = repairContextCacheFromStore(ctx, deps.Store, chatRecord)
-		if err != nil {
-			return nil, err
-		}
 	}
 	approvals, err := PendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
@@ -264,25 +258,28 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 
 func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRecord domain.Chat, timeline []domain.TimelineItem) (domain.Chat, error) {
 	anchorTokens, ok := timelineContextAnchorTokens(timeline)
-	if !ok || anchorTokens <= 0 || chatRecord.LastKnownContextTokens == anchorTokens {
+	if !ok || anchorTokens <= 0 {
+		if !chatRecord.ContextTokensKnown && chatRecord.LastKnownContextTokens != 0 {
+			chatRecord.LastKnownContextTokens = 0
+			if st != nil {
+				if err := UpdateChat(ctx, st, chatRecord); err != nil {
+					return domain.Chat{}, err
+				}
+			}
+		}
+		return chatRecord, nil
+	}
+	if chatRecord.LastKnownContextTokens == anchorTokens && chatRecord.ContextTokensKnown {
 		return chatRecord, nil
 	}
 	chatRecord.LastKnownContextTokens = anchorTokens
-	chatRecord.ContextTokensKnown = false
+	chatRecord.ContextTokensKnown = true
 	if st != nil {
 		if err := UpdateChat(ctx, st, chatRecord); err != nil {
 			return domain.Chat{}, err
 		}
 	}
 	return chatRecord, nil
-}
-
-func repairContextCacheFromStore(ctx context.Context, st *store.Store, chatRecord domain.Chat) (domain.Chat, error) {
-	timeline, err := TimelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		return domain.Chat{}, err
-	}
-	return repairContextCacheFromTimeline(ctx, st, chatRecord, timeline)
 }
 
 // New builds a live chat from hydrated persisted state.
@@ -1135,14 +1132,17 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 
 	r.mu.Lock()
 	r.state.ReplaceTimeline(next)
-	contextUsage := r.state.CurrentContextSize()
-	r.chat.LastKnownContextTokens = contextUsage.AnchorTokens
-	r.chat.ContextTokensKnown = false
+	contextTokens, contextKnown := timelineContextAnchorTokens(next)
+	if !contextKnown {
+		contextTokens = 0
+	}
+	r.chat.LastKnownContextTokens = contextTokens
+	r.chat.ContextTokensKnown = contextKnown
 	r.chat.TokenUsage = domain.Usage{}
 	r.chat.UpdatedAt = time.Now().UTC()
 	r.state.UpdateChat(func(chat *domain.Chat) {
-		chat.LastKnownContextTokens = contextUsage.AnchorTokens
-		chat.ContextTokensKnown = false
+		chat.LastKnownContextTokens = contextTokens
+		chat.ContextTokensKnown = contextKnown
 		chat.TokenUsage = domain.Usage{}
 		chat.UpdatedAt = r.chat.UpdatedAt
 	})
@@ -1941,13 +1941,13 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 			r.status = StatusWaitingLLM
 			r.statusText = text
 		}
-		if afterTokens, ok := completedCompactionContext(evt.Item, evt.Meta); ok {
-			r.chat.LastKnownContextTokens = afterTokens
+		if completedCompaction(evt.Item, evt.Meta) {
+			r.chat.LastKnownContextTokens = 0
 			r.chat.ContextTokensKnown = false
 			r.chat.TokenUsage = domain.Usage{}
 			if r.state != nil {
 				r.state.UpdateChat(func(chat *domain.Chat) {
-					chat.LastKnownContextTokens = afterTokens
+					chat.LastKnownContextTokens = 0
 					chat.ContextTokensKnown = false
 					chat.TokenUsage = domain.Usage{}
 				})
@@ -2044,15 +2044,12 @@ func compactionStatusText(evt domain.Event) (string, bool) {
 	return text, true
 }
 
-func completedCompactionContext(item domain.TimelineItem, meta map[string]string) (int, bool) {
+func completedCompaction(item domain.TimelineItem, meta map[string]string) bool {
 	if meta["compaction"] != "completed" {
-		return 0, false
+		return false
 	}
 	payload, ok := item.Content.(domain.Compaction)
-	if !ok || payload.AfterContextTokens <= 0 {
-		return 0, false
-	}
-	return payload.AfterContextTokens, true
+	return ok && payload.Status == "completed"
 }
 
 func timelineItemSummary(item domain.TimelineItem) string {

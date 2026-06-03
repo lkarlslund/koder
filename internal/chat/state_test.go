@@ -148,21 +148,12 @@ func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 	if got.AnchorTokens != 1200 {
 		t.Fatalf("anchor = %d", got.AnchorTokens)
 	}
-	if got.TailTokens <= 0 {
-		t.Fatalf("expected tail estimate, got %#v", got)
-	}
-	if got.LiveTokens <= 0 {
-		t.Fatalf("expected live estimate, got %d", got.LiveTokens)
-	}
-	if got.TotalTokens != got.AnchorTokens+got.TailTokens+got.LiveTokens {
-		t.Fatalf("total mismatch %#v", got)
-	}
-	if !got.Estimated {
-		t.Fatalf("expected estimated usage, got %#v", got)
+	if got.TotalTokens != got.AnchorTokens {
+		t.Fatalf("expected exact known total, got %#v", got)
 	}
 }
 
-func TestChatStateCurrentContextSizeDerivesMissingAnchorFromCompaction(t *testing.T) {
+func TestChatStateCurrentContextSizeIgnoresCompactionEstimate(t *testing.T) {
 	now := time.Now().UTC()
 	state := NewTimelineState(
 		domain.Chat{ID: "chat-7", LastKnownContextTokens: 0, ContextTokensKnown: false},
@@ -174,13 +165,7 @@ func TestChatStateCurrentContextSizeDerivesMissingAnchorFromCompaction(t *testin
 	)
 
 	got := state.CurrentContextSize()
-	if got.AnchorTokens != 7102 {
-		t.Fatalf("anchor = %d", got.AnchorTokens)
-	}
-	if got.TotalTokens <= got.AnchorTokens {
-		t.Fatalf("expected tail estimate added to anchor, got %#v", got)
-	}
-	if !got.Estimated {
-		t.Fatalf("expected estimated usage, got %#v", got)
+	if got.AnchorTokens != 0 || got.TotalTokens != 0 {
+		t.Fatalf("expected compaction estimate ignored, got %#v", got)
 	}
 }

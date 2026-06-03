@@ -4284,140 +4284,6 @@ func TestConversationMessagesRenderSteerAsSteeringUpdate(t *testing.T) {
 	}
 }
 
-func TestRunPromptAutoCompactsWhenFirstModelTurnCrossesThreshold(t *testing.T) {
-	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		request := string(body)
-		requests = append(requests, request)
-		if strings.Contains(request, "Summarize this coding session so another agent can continue it with minimal loss.") {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"compact summary"}}],"usage":{"total_tokens":1}}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
-	}))
-	defer server.Close()
-
-	cfg := testConfig(t)
-	cfg.Providers = map[string]config.Provider{
-		"test": {
-			BaseURL: server.URL + "/v1",
-			Timeout: time.Second,
-		},
-	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
-
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultChat := defaultChatForSession(t, st, session.ID)
-	sideChat, err := sessionpkg.CreateChat(context.Background(), st, session.ID, "side", chatrole.General, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	appendUserTimelineItem(t, st, sideChat.ID, "old side prompt")
-	appendAssistantTimelineItem(t, st, sideChat.ID, domain.AssistantMessage{Text: "old side answer"})
-
-	prompt := "pending prompt " + strings.Repeat("x", 90000)
-	existingMessages, err := engine.buildConversationPreview(context.Background(), session, sideChat.ID, "", nil, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pendingMessages, err := engine.buildConversationPreview(context.Background(), session, sideChat.ID, prompt, nil, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	existingPct, ok := engine.estimateRequestUsagePercent(sideChat, existingMessages)
-	if !ok {
-		t.Fatal("expected existing request usage estimate")
-	}
-	pendingPct, ok := engine.estimateRequestUsagePercent(sideChat, pendingMessages)
-	if !ok {
-		t.Fatal("expected pending request usage estimate")
-	}
-	if pendingPct <= existingPct {
-		t.Fatalf("expected pending prompt to increase usage, existing=%d pending=%d", existingPct, pendingPct)
-	}
-	engine.cfg.AutoCompactAt = existingPct + 1
-
-	events := runLivePrompt(t, engine, session, sideChat, prompt)
-	var sawCompactionStatus bool
-	var sawFinalAnswer bool
-	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ~") {
-			sawCompactionStatus = true
-		}
-		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
-			sawFinalAnswer = true
-		}
-	}
-	if !sawCompactionStatus {
-		t.Fatal("expected auto-compaction before the first model request when prompt crosses threshold")
-	}
-	if !sawFinalAnswer {
-		t.Fatal("expected final assistant answer")
-	}
-	if len(requests) != 2 {
-		t.Fatalf("expected compaction request and final model request, got %d", len(requests))
-	}
-	if !strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
-		t.Fatalf("expected first request to compact, got %s", requests[0])
-	}
-	if !strings.Contains(requests[1], "Compacted session summary for continuation:") {
-		t.Fatalf("expected final model request to continue from compacted summary, got %s", requests[1])
-	}
-
-	sideTimeline, err := chatpkg.TimelineForChat(context.Background(), st, sideChat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sawPendingUser bool
-	var sawCompaction bool
-	for _, item := range sideTimeline {
-		switch content := item.Content.(type) {
-		case domain.Compaction:
-			sawCompaction = true
-		case domain.UserMessage:
-			if strings.HasPrefix(content.Text, "pending prompt ") {
-				sawPendingUser = true
-			}
-		}
-	}
-	if !sawPendingUser {
-		t.Fatal("expected pending prompt to be persisted")
-	}
-	if !sawCompaction {
-		t.Fatal("expected side chat to be compacted")
-	}
-
-	defaultTimeline, err := chatpkg.TimelineForChat(context.Background(), st, defaultChat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range defaultTimeline {
-		if _, ok := item.Content.(domain.Compaction); ok {
-			t.Fatalf("did not expect default chat to be compacted, got %#v", defaultTimeline)
-		}
-	}
-}
-
 func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4475,7 +4341,7 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	events := runLivePrompt(t, engine, session, chat, "continue")
 	var sawCompactionStatus bool
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ~") {
+		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ") {
 			sawCompactionStatus = true
 		}
 	}
@@ -4792,7 +4658,7 @@ func TestRunPromptIgnoresUnknownContextUsageAfterCompaction(t *testing.T) {
 
 	events := runLivePrompt(t, engine, session, chat, "continue")
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ~") {
+		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ") {
 			t.Fatalf("did not expect auto-compaction from unknown context usage, got %#v", evt)
 		}
 	}
@@ -4801,98 +4667,6 @@ func TestRunPromptIgnoresUnknownContextUsageAfterCompaction(t *testing.T) {
 	}
 	if strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
 		t.Fatalf("did not expect compaction request, got %s", requests[0])
-	}
-}
-
-func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	largePath := filepath.Join(dir, "large.txt")
-	largeContent := strings.Repeat("tool output line "+strings.Repeat("x", 70)+"\n", 3000)
-	if err := os.WriteFile(largePath, []byte(largeContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		requests = append(requests, string(body))
-		switch {
-		case strings.Contains(string(body), "Summarize this coding session so another agent can continue it with minimal loss."):
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\ncontinue from tool output\n\n## Next Step\nuse the compacted summary and continue"}}],"usage":{"total_tokens":1}}`))
-		case strings.Contains(string(body), "Compacted session summary for continuation:"):
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
-		case len(requests) == 1:
-			args, err := json.Marshal(map[string]string{"path": largePath})
-			if err != nil {
-				t.Fatalf("marshal args: %v", err)
-			}
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":` + strconv.Quote(string(args)) + `}}]}}],"usage":{"total_tokens":1}}`))
-		default:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
-		}
-	}))
-	defer server.Close()
-
-	cfg := testConfig(t)
-	cfg.AutoCompactAt = 20
-	cfg.Providers = map[string]config.Provider{
-		"test": {
-			BaseURL: server.URL + "/v1",
-			Timeout: time.Second,
-		},
-	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 50000})
-
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "auto"); err != nil {
-		t.Fatal(err)
-	}
-
-	events := runLivePromptDefault(t, engine, st, session, "inspect the file and continue")
-	var sawFinalAnswer bool
-	var seen []domain.EventKind
-	for _, evt := range events {
-		seen = append(seen, evt.Kind)
-		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
-			sawFinalAnswer = true
-		}
-	}
-	if !sawFinalAnswer {
-		t.Fatalf("expected final assistant answer after tool-result-triggered auto compact; requests=%d events=%v", len(requests), seen)
-	}
-	if len(requests) < 3 {
-		t.Fatalf("expected prompt, compact, and continuation requests, got %d", len(requests))
-	}
-	var sawCompactionRequest bool
-	for _, req := range requests {
-		if strings.Contains(req, "Summarize this coding session so another agent can continue it with minimal loss.") {
-			sawCompactionRequest = true
-			break
-		}
-	}
-	if !sawCompactionRequest {
-		t.Fatalf("expected at least one compaction request, got %#v", requests)
 	}
 }
 

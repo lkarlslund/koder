@@ -2559,7 +2559,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 		return false, nil
 	}
 	if out != nil {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% context used", used)}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% known context used", used)}
 	}
 	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
 		return false, err
@@ -2572,18 +2572,7 @@ func (e *Engine) autoCompactThreshold() int {
 }
 
 func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
-	estimated, estimatedOK := e.estimateRequestUsagePercent(chat, messages)
-	known, knownOK := e.knownContextUsagePercent(chat)
-	switch {
-	case estimatedOK && knownOK:
-		return max(estimated, known), true
-	case estimatedOK:
-		return estimated, true
-	case knownOK:
-		return known, true
-	default:
-		return 0, false
-	}
+	return e.knownContextUsagePercent(chat)
 }
 
 func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
@@ -2594,25 +2583,6 @@ func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
 		return 0, false
 	}
 	return contextUsagePercent(chat.LastKnownContextTokens, e.cfg.ContextWindow(chat.ProviderID, chat.ModelID))
-}
-
-func (e *Engine) estimateRequestUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
-	if !e.cfg.HasUsableProvider(chat.ProviderID) {
-		return 0, false
-	}
-	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
-	body, err := json.Marshal(messages)
-	if err != nil || len(body) == 0 {
-		return 0, false
-	}
-	// Rough byte-based estimate over the replayed conversation payload only.
-	// Ignore static request/tool schema overhead so auto-compaction reacts to
-	// message churn rather than repeatedly compacting tiny summaries.
-	estimatedTokens := len(body) / 4
-	if estimatedTokens <= 0 {
-		return 0, false
-	}
-	return contextUsagePercent(estimatedTokens, contextWindow)
 }
 
 func contextUsagePercent(tokens, contextWindow int) (int, bool) {
@@ -2694,7 +2664,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return err
 	}
 	if chat, err := chatpkg.GetChat(ctx, e.store, chatID); err == nil {
-		chat.LastKnownContextTokens = afterContextTokens
+		chat.LastKnownContextTokens = 0
 		chat.ContextTokensKnown = false
 		chat.TokenUsage = domain.Usage{}
 		if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
@@ -163,59 +162,24 @@ func (s *ChatState) HasPendingExecutableToolCalls() bool {
 	return false
 }
 
-func (s *ChatState) PendingAssistantContextTokens() int {
-	if s == nil {
-		return 0
-	}
-	total := 0
-	if text := strings.TrimSpace(s.pending.Reasoning); text != "" {
-		total += tokenestimate.Text(text)
-	}
-	if text := strings.TrimSpace(s.pending.Text); text != "" {
-		total += tokenestimate.Text(text)
-	}
-	return total
-}
-
 func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s == nil {
 		return domain.ContextUsage{}
 	}
-	tailEstimate, timelineAnchor, anchored := estimateTimelineTailTokens(s.SnapshotTimeline())
-	if tailEstimate < 0 {
-		tailEstimate = 0
+	tokens := 0
+	if s.chat.ContextTokensKnown {
+		tokens = s.chat.LastKnownContextTokens
 	}
-	liveTokens := s.PendingAssistantContextTokens()
-	anchor := timelineAnchor
-	if anchor == 0 {
-		anchor = s.chat.LastKnownContextTokens
+	if timelineAnchor, ok := timelineContextAnchorTokens(s.SnapshotTimeline()); ok {
+		tokens = timelineAnchor
 	}
-	if anchor < 0 {
-		anchor = 0
+	if tokens < 0 {
+		tokens = 0
 	}
-	usage := domain.ContextUsage{
-		AnchorTokens: anchor,
-		TailTokens:   tailEstimate,
-		LiveTokens:   liveTokens,
-		TotalTokens:  anchor + tailEstimate + liveTokens,
-		Estimated:    !s.chat.ContextTokensKnown || tailEstimate > 0 || liveTokens > 0,
+	return domain.ContextUsage{
+		AnchorTokens: tokens,
+		TotalTokens:  tokens,
 	}
-	if !anchored && !s.chat.ContextTokensKnown {
-		usage.Estimated = true
-	}
-	return usage
-}
-
-func estimateTimelineTailTokens(items []domain.TimelineItem) (int, int, bool) {
-	anchorIdx, anchorTokens, ok := latestTimelineContextAnchor(items)
-	if !ok {
-		return 0, 0, false
-	}
-	total := 0
-	for idx := anchorIdx + 1; idx < len(items); idx++ {
-		total += estimateTimelineItemTokens(items[idx])
-	}
-	return total, anchorTokens, true
 }
 
 func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
@@ -228,10 +192,6 @@ func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
 					return idx, contextTokens, true
 				}
 			}
-		case domain.Compaction:
-			if payload.Status == "completed" && payload.AfterContextTokens > 0 {
-				return idx, payload.AfterContextTokens, true
-			}
 		}
 	}
 	return 0, 0, false
@@ -240,50 +200,6 @@ func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
 func timelineContextAnchorTokens(items []domain.TimelineItem) (int, bool) {
 	_, tokens, ok := latestTimelineContextAnchor(items)
 	return tokens, ok
-}
-
-func estimateTimelineItemTokens(item domain.TimelineItem) int {
-	var texts []string
-	switch payload := item.Content.(type) {
-	case domain.UserMessage:
-		if text := strings.TrimSpace(payload.Text); text != "" {
-			texts = append(texts, domain.MessageRoleUser.String(), text)
-		}
-		for _, attachment := range payload.Attachments {
-			if attachment.Name != "" {
-				texts = append(texts, attachment.Name)
-			}
-		}
-		for _, ref := range payload.References {
-			if ref.Display != "" {
-				texts = append(texts, ref.Display)
-			}
-		}
-	case domain.AssistantMessage:
-		texts = append(texts, domain.MessageRoleAssistant.String())
-		if text := strings.TrimSpace(payload.Reasoning.Text); text != "" {
-			texts = append(texts, text)
-		}
-		if text := strings.TrimSpace(payload.Text); text != "" {
-			texts = append(texts, text)
-		}
-		for _, tool := range payload.Tools {
-			texts = append(texts, tool.Tool.String(), string(tool.ToolCallID))
-			if tool.Result != nil {
-				texts = append(texts, tool.Result.Text)
-			}
-			if tool.Error != nil {
-				texts = append(texts, tool.Error.Message)
-			}
-		}
-	case domain.Notice:
-		texts = append(texts, payload.Text)
-	case domain.Compaction:
-		texts = append(texts, payload.Summary)
-	case domain.LintMessage:
-		texts = append(texts, payload.Text)
-	}
-	return tokenestimate.Text(strings.Join(texts, "\n"))
 }
 
 // Timeline returns the ordered timeline records for the current chat.

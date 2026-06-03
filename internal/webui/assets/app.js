@@ -1773,7 +1773,10 @@
           const total = context.TotalTokens || context.total_tokens || 0;
           if (total > 0) return total;
           const chat = this.activeChat();
-          return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+          if (chat.ContextTokensKnown || chat.context_tokens_known) {
+            return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+          }
+          return 0;
         },
         usageField(usage, pascal, snake) {
           return Number((usage && (usage[pascal] ?? usage[snake])) || 0);
@@ -1813,20 +1816,20 @@
           return Math.max(0, Math.min(100, this.activeContextPercent()));
         },
         activeContextLabel() {
+          if (!this.activeContextTokens()) return 'Context unknown';
           return 'Context ' + this.activeContextPercent() + '%';
         },
         activeContextTokenLabel() {
+          if (!this.activeContextTokens()) return 'unknown / ' + this.formatTokens(this.activeContextWindow());
           return this.formatContextTokens(this.activeContextTokens()) + ' / ' + this.formatTokens(this.activeContextWindow());
         },
         activeContextTooltip() {
           const tokens = this.activeContextTokens();
           const windowSize = this.activeContextWindow();
+          if (!tokens) return 'Context: unknown\nKoder only shows provider-reported context usage from successful turns.';
           const pct = this.activeContextPercent();
           const lines = ['Context: ' + this.formatContextTokens(tokens) + ' / ' + this.formatTokens(windowSize) + ' tokens (' + pct + '%)'];
           if (windowSize > 0) lines.push('Remaining: ' + this.formatContextTokens(Math.max(0, windowSize - tokens)) + ' tokens');
-          const snapshot = this.activeSnapshot();
-          const context = snapshot.Context || snapshot.context || {};
-          if (context.Estimated || context.estimated) lines.push('Estimate includes pending or unanchored transcript content');
           const usage = this.activeTokenUsage();
           const total = this.usageField(usage, 'TotalTokens', 'total_tokens');
           const prompt = this.usageField(usage, 'PromptTokens', 'prompt_tokens');
@@ -2059,7 +2062,10 @@
           const context = snapshot.Context || snapshot.context || {};
           const liveTotal = context.TotalTokens || context.total_tokens || 0;
           if (liveTotal > 0) return liveTotal;
-          return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+          if (chat.ContextTokensKnown || chat.context_tokens_known) {
+            return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+          }
+          return 0;
         },
         chatContextWindow() {
           const info = this.activeModelInfo();
@@ -2072,12 +2078,14 @@
           return Math.max(0, Math.min(999, Math.round((tokens / windowSize) * 100)));
         },
         chatContextLabel(chat) {
+          if (!this.chatContextTokens(chat)) return '(ctx unknown)';
           const pct = this.chatContextPercent(chat);
           return '(' + pct + '% ctx)';
         },
         chatContextTooltip(chat) {
           const tokens = this.chatContextTokens(chat);
           const windowSize = this.chatContextWindow();
+          if (!tokens) return 'Context: unknown\nKoder only shows provider-reported context usage from successful turns.';
           const pct = this.chatContextPercent(chat);
           const lines = ['Context: ' + this.formatContextTokens(tokens) + ' / ' + this.formatTokens(windowSize) + ' tokens (' + pct + '%)'];
           if (windowSize > 0) {

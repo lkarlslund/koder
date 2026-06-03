@@ -1277,11 +1277,11 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.LastKnownContextTokens != 456 || updated.ContextTokensKnown {
-		t.Fatalf("expected rewind to preserve derived context anchor, got %#v", updated)
+	if updated.LastKnownContextTokens != 0 || updated.ContextTokensKnown {
+		t.Fatalf("expected rewind to clear unknown context after estimated compaction, got %#v", updated)
 	}
-	if snapshot.Context.AnchorTokens != 456 || snapshot.Context.TotalTokens < 456 {
-		t.Fatalf("expected live snapshot context to use derived anchor, got %#v", snapshot.Context)
+	if snapshot.Context.AnchorTokens != 0 || snapshot.Context.TotalTokens != 0 {
+		t.Fatalf("expected live snapshot context to ignore estimated compaction, got %#v", snapshot.Context)
 	}
 }
 
@@ -1289,7 +1289,7 @@ func TestLoadRepairsMissingContextCacheFromTimeline(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 7102}); err != nil {
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
@@ -1315,16 +1315,16 @@ func TestLoadRepairsMissingContextCacheFromTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.LastKnownContextTokens != 7102 || stored.ContextTokensKnown {
+	if stored.LastKnownContextTokens != 7102 || !stored.ContextTokensKnown {
 		t.Fatalf("expected stored context cache repaired, got %#v", stored)
 	}
 }
 
-func TestLoadMetadataRepairsMissingContextCacheFromTimeline(t *testing.T) {
+func TestLoadMetadataKeepsContextCacheLazy(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 7102}); err != nil {
+	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
 		t.Fatal(err)
 	}
 	chatRecord.LastKnownContextTokens = 0
@@ -1343,15 +1343,18 @@ func TestLoadMetadataRepairsMissingContextCacheFromTimeline(t *testing.T) {
 	if snapshot.TimelineLoadedAll {
 		t.Fatal("expected metadata load to keep timeline lazy")
 	}
-	if snapshot.Chat.LastKnownContextTokens != 7102 {
-		t.Fatalf("expected metadata context cache repaired, got %#v", snapshot.Chat)
+	if snapshot.Chat.LastKnownContextTokens != 0 || snapshot.Chat.ContextTokensKnown {
+		t.Fatalf("expected metadata context cache to remain unknown, got %#v", snapshot.Chat)
+	}
+	if snapshot.Context.AnchorTokens != 0 || snapshot.Context.TotalTokens != 0 {
+		t.Fatalf("expected metadata context usage to remain unknown, got %#v", snapshot.Context)
 	}
 	stored, err := GetChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.LastKnownContextTokens != 7102 || stored.ContextTokensKnown {
-		t.Fatalf("expected stored context cache repaired, got %#v", stored)
+	if stored.LastKnownContextTokens != 0 || stored.ContextTokensKnown {
+		t.Fatalf("expected stored context cache to remain unknown, got %#v", stored)
 	}
 }
 
@@ -2216,7 +2219,7 @@ func TestRuntimeStopAfterCurrentTurnDoesNotCancelStreamingContext(t *testing.T) 
 	close(runner.events)
 }
 
-func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
+func TestRuntimeCompactionCompletionClearsKnownContext(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
 	chat.LastKnownContextTokens = 1200
@@ -2259,20 +2262,20 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 			if !update.ContextChanged {
 				t.Fatal("expected context change update")
 			}
-			if got := update.Snapshot.Context.AnchorTokens; got != 400 {
+			if got := update.Snapshot.Context.AnchorTokens; got != 0 {
 				t.Fatalf("anchor tokens = %d", got)
 			}
-			if got := update.Snapshot.Context.TotalTokens; got < 400 {
+			if got := update.Snapshot.Context.TotalTokens; got != 0 {
 				t.Fatalf("total tokens = %d", got)
 			}
-			if got := update.Snapshot.Chat.LastKnownContextTokens; got != 400 {
+			if got := update.Snapshot.Chat.LastKnownContextTokens; got != 0 {
 				t.Fatalf("chat last known context = %d", got)
+			}
+			if update.Snapshot.Chat.ContextTokensKnown {
+				t.Fatal("expected context to be unknown after compaction")
 			}
 			if update.Snapshot.TokenUsage.HasAnyTokens() || update.Snapshot.Chat.TokenUsage.HasAnyTokens() {
 				t.Fatalf("expected token usage reset after compaction, got snapshot=%#v chat=%#v", update.Snapshot.TokenUsage, update.Snapshot.Chat.TokenUsage)
-			}
-			if !update.Snapshot.Context.Estimated {
-				t.Fatal("expected compacted context to be marked estimated")
 			}
 			if len(update.Snapshot.Timeline) == 0 {
 				t.Fatal("expected compaction item in snapshot")

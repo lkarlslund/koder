@@ -194,10 +194,7 @@ type Chat struct {
 
 type ContextUsage struct {
 	AnchorTokens int
-	TailTokens   int
-	LiveTokens   int
 	TotalTokens  int
-	Estimated    bool
 }
 
 type QueuedInputKind uint8
