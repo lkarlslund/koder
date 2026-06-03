@@ -2173,6 +2173,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ChatControl:           e,
 		Exec:                  e.exec,
 		MCP:                   e.mcp,
+		AllowedTools:          e.effectiveToolStates(session),
 		FileTracker:           codeIntelFileTracker{root: sessionProjectRoot(session)},
 		AccessSettings:        sessionAccessSettings(session, e.cfg),
 	}
@@ -3876,6 +3877,9 @@ func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID id.ID, req t
 }
 
 func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {
+	if enabled, ok := cfg.ToolDefaults[kind]; ok && !enabled {
+		return false
+	}
 	if enabled, ok := session.ToolStates[kind]; ok {
 		return enabled
 	}
@@ -3883,6 +3887,14 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 		return enabled
 	}
 	return true
+}
+
+func (e *Engine) effectiveToolStates(session domain.Session) map[domain.ToolKind]bool {
+	out := make(map[domain.ToolKind]bool, len(toolkind.KindValues()))
+	for _, kind := range toolkind.KindValues() {
+		out[kind] = toolEnabledForSession(e.cfg, session, kind)
+	}
+	return out
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {

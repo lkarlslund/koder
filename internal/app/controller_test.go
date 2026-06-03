@@ -1009,7 +1009,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if _, err := chatpkg.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindBash,
-		Args:       map[string]string{"command": "pkill -f ./shups"},
+		Args:       map[string]string{"command": "printf resumed-tool"},
 		Status:     domain.ToolStatusPending,
 	}}, "", domain.Usage{}); err != nil {
 		t.Fatalf("append pending tool call: %v", err)

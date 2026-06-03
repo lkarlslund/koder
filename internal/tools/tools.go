@@ -164,6 +164,7 @@ type Runtime struct {
 	ChatControl           ChatControl
 	SessionControl        SessionControl
 	TaskControl           TaskControl
+	AllowedTools          map[domain.ToolKind]bool
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	FileTracker           FileTracker
@@ -515,6 +516,9 @@ func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefiniti
 		return provider.ToolDefinition{}, false
 	}
 	if !chatrole.AllowsTool(runtime.ChatRole, kind) {
+		return provider.ToolDefinition{}, false
+	}
+	if enabled, ok := runtime.AllowedTools[kind]; ok && !enabled {
 		return provider.ToolDefinition{}, false
 	}
 	if dynamic, ok := tool.(definitionProvider); ok {

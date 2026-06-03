@@ -817,6 +817,42 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	}
 }
 
+func TestGlobalToolDefaultDisablesPersistedSessionToolState(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ToolDefaults[domain.ToolKindBash] = false
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
+		domain.ToolKindBash: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{"command": "pwd"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result event, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "disabled for this session") {
+		t.Fatalf("expected disabled tool message, got %#v", evt)
+	}
+}
+
 func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
@@ -2231,6 +2267,36 @@ func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
 	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
 	if !ok || got["enable_thinking"] != false || got["preserve_thinking"] != true {
 		t.Fatalf("expected thinking disabled in request, got %#v", req.ExtraBody)
+	}
+}
+
+func TestPreviewNextRequestHidesGloballyDisabledTools(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ToolDefaults[domain.ToolKindBash] = false
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
+		domain.ToolKindBash: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range req.Tools {
+		if def.Function.Name == domain.ToolKindBash.String() {
+			t.Fatalf("expected globally disabled bash to be hidden from request tools: %#v", req.Tools)
+		}
 	}
 }
 
