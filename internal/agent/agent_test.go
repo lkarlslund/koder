@@ -220,6 +220,23 @@ func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID
 	return item
 }
 
+func appendSteerTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text string) domain.TimelineItem {
+	t.Helper()
+	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.UserMessage{
+		Text:     text,
+		Source:   domain.UserMessageSourceSteer,
+		Delivery: domain.QueuedInputDeliveryTurnBoundary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
 func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID id.ID, msg domain.AssistantMessage) domain.TimelineItem {
 	t.Helper()
 	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, msg)
@@ -1669,6 +1686,80 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	}
 	if conversation[len(conversation)-1].Role != provider.RoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" || conversation[len(conversation)-1].Content != "/typed/output" {
 		t.Fatalf("expected structured tool message, got %#v", conversation[len(conversation)-1])
+	}
+}
+
+func TestBuildConversationCoalescesSteerAfterToolResultIntoToolMessage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/typed/output", domain.BashStoredResult{Command: "pwd", Output: "/typed/output"})
+	appendSteerTimelineItem(t, st, chat.ID, "we have pdftotext")
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) < 3 {
+		t.Fatalf("expected assistant tool call and coalesced tool output, got %#v", conversation)
+	}
+	last := conversation[len(conversation)-1]
+	if last.Role != provider.RoleTool || last.ToolCallID != "call_1" {
+		t.Fatalf("expected steer to remain in tool-result continuation, got %#v", last)
+	}
+	for _, want := range []string{"/typed/output", "User steering update:", "<user_input>\nwe have pdftotext\n</user_input>"} {
+		if !strings.Contains(last.Content, want) {
+			t.Fatalf("coalesced tool message missing %q in %q", want, last.Content)
+		}
+	}
+	for idx, msg := range conversation {
+		if idx == len(conversation)-1 {
+			continue
+		}
+		if msg.Role == provider.RoleUser && strings.Contains(msg.Content, "User steering update:") {
+			t.Fatalf("steer should not render as separate user message after tool result: %#v", conversation)
+		}
+	}
+}
+
+func TestBuildConversationKeepsStandaloneSteerAsUserMessage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendSteerTimelineItem(t, st, chat.ID, "use curl")
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) < 2 {
+		t.Fatalf("expected system plus steer user message, got %#v", conversation)
+	}
+	last := conversation[len(conversation)-1]
+	if last.Role != provider.RoleUser || !strings.Contains(last.Content, "<user_input>\nuse curl\n</user_input>") {
+		t.Fatalf("expected standalone steer as user message, got %#v", last)
 	}
 }
 

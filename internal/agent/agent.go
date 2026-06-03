@@ -1886,7 +1886,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
-		envelope.Items = append(envelope.Items, messages...)
+		envelope.Items = appendTimelinePromptMessages(envelope.Items, item, messages...)
 	}
 	envelope.Instructions = append(envelope.Instructions, transient...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
@@ -1899,6 +1899,62 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 		}
 	}
 	return envelope, nil
+}
+
+func appendTimelinePromptMessages(items []provider.Message, item domain.TimelineItem, messages ...provider.Message) []provider.Message {
+	coalesceSteer := false
+	if user, ok := item.Content.(domain.UserMessage); ok {
+		coalesceSteer = userMessageIsSteer(user)
+	}
+	for _, msg := range messages {
+		if coalesceSteer && msg.Role == provider.RoleUser && len(items) > 0 && items[len(items)-1].Role == provider.RoleTool {
+			items[len(items)-1] = appendSteerToToolMessage(items[len(items)-1], msg)
+			continue
+		}
+		items = append(items, msg)
+	}
+	return items
+}
+
+func appendSteerToToolMessage(toolMsg, steerMsg provider.Message) provider.Message {
+	if len(toolMsg.ContentParts) > 0 || len(steerMsg.ContentParts) > 0 {
+		toolMsg.ContentParts = appendMessageParts(toolMsg)
+		toolMsg.Content = ""
+		toolMsg.ContentParts = append(toolMsg.ContentParts, provider.TextPart("\n\n"+steerMessageContent(steerMsg)))
+		return toolMsg
+	}
+	steer := steerMessageContent(steerMsg)
+	if steer == "" {
+		return toolMsg
+	}
+	if strings.TrimSpace(toolMsg.Content) == "" {
+		toolMsg.Content = steer
+	} else {
+		toolMsg.Content = strings.TrimSpace(toolMsg.Content) + "\n\n" + steer
+	}
+	return toolMsg
+}
+
+func appendMessageParts(msg provider.Message) []provider.ContentPart {
+	parts := make([]provider.ContentPart, 0, 1+len(msg.ContentParts))
+	if strings.TrimSpace(msg.Content) != "" {
+		parts = append(parts, provider.TextPart(strings.TrimSpace(msg.Content)))
+	}
+	parts = append(parts, msg.ContentParts...)
+	return parts
+}
+
+func steerMessageContent(msg provider.Message) string {
+	if strings.TrimSpace(msg.Content) != "" {
+		return strings.TrimSpace(msg.Content)
+	}
+	var parts []string
+	for _, part := range msg.ContentParts {
+		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+			parts = append(parts, strings.TrimSpace(part.Text))
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
@@ -1915,7 +1971,7 @@ func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat 
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, messages...)
+		out = appendTimelinePromptMessages(out, item, messages...)
 	}
 	return out, nil
 }
