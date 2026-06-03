@@ -193,6 +193,32 @@ func collectLiveUpdates(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.U
 	}
 }
 
+func receiveRequest(t *testing.T, requests <-chan string) string {
+	t.Helper()
+	select {
+	case request := <-requests:
+		return request
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for provider request")
+		return ""
+	}
+}
+
+func waitForLiveEvent(t *testing.T, updates <-chan chatpkg.Update, done func(domain.Event) bool) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && done(*update.Event) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for live event")
+		}
+	}
+}
+
 func runLiveContinueDefault(t *testing.T, engine *Engine, st *store.Store, session domain.Session, note string) []domain.Event {
 	t.Helper()
 	chatRecord := defaultChatForSession(t, st, session.ID)
@@ -4354,6 +4380,94 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	if !strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
 		t.Fatalf("expected first request to compact, got %s", requests[0])
 	}
+	if !strings.Contains(requests[1], "compact summary") {
+		t.Fatalf("expected second request to use compacted summary, got %s", requests[1])
+	}
+	if !strings.Contains(requests[1], "continue") {
+		t.Fatalf("expected second request to include the queued user message, got %s", requests[1])
+	}
+	if strings.Contains(requests[1], "previous work") || strings.Contains(requests[1], "stopped before next action") {
+		t.Fatalf("expected second request to omit pre-compaction raw history, got %s", requests[1])
+	}
+}
+
+func TestManualCompactNextPromptUsesCompactedLiveTimeline(t *testing.T) {
+	requests := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		request := string(body)
+		requests <- request
+		if strings.Contains(request, "Summarize this coding session so another agent can continue it with minimal loss.") {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"manual compact summary"}}],"usage":{"total_tokens":1}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 1000})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "raw old work that must be summarized away")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "raw old answer that must be summarized away"})
+
+	rt, err := chatpkg.Load(context.Background(), session, chat, engine.ChatDeps(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	if err := rt.Compact(""); err != nil {
+		t.Fatal(err)
+	}
+	compactRequest := receiveRequest(t, requests)
+	if !strings.Contains(compactRequest, "raw old work that must be summarized away") {
+		t.Fatalf("expected compaction request to include raw history, got %s", compactRequest)
+	}
+
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Text: "next user prompt"})
+	nextRequest := receiveRequest(t, requests)
+	if !strings.Contains(nextRequest, "manual compact summary") {
+		t.Fatalf("expected next request to include compacted summary, got %s", nextRequest)
+	}
+	if !strings.Contains(nextRequest, "next user prompt") {
+		t.Fatalf("expected next request to include new user prompt, got %s", nextRequest)
+	}
+	if strings.Contains(nextRequest, "raw old work that must be summarized away") || strings.Contains(nextRequest, "raw old answer that must be summarized away") {
+		t.Fatalf("expected next request to omit pre-compaction raw history, got %s", nextRequest)
+	}
+	waitForLiveEvent(t, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
+	})
 }
 
 func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
