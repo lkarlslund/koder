@@ -1469,6 +1469,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) ||
 		!strings.Contains(fullPage, `estimateTextTokens(text)`) ||
 		!strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) ||
+		!strings.Contains(fullPage, `cavemanThinkingSuffix(reasoning)`) ||
+		!strings.Contains(fullPage, `caveman available (' + tokens + ' tokens)'`) ||
 		!strings.Contains(fullPage, `hasCavemanReasoning(item.content.reasoning)`) ||
 		!strings.Contains(fullPage, `reasoningDisplayText(item)`) {
 		t.Fatalf("expected reasoning summary to render live token count and optional caveman view")

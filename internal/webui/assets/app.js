@@ -1641,11 +1641,17 @@
         thinkingLabel(reasoning) {
           const explicit = Number(reasoning?.tokens || reasoning?.Tokens || reasoning?.token_count || reasoning?.TokenCount || 0);
           const tokens = explicit > 0 ? explicit : this.estimateTextTokens(reasoning?.text || reasoning?.Text || '');
-          const suffix = this.hasCavemanReasoning(reasoning) ? ' · caveman available' : '';
+          const suffix = this.cavemanThinkingSuffix(reasoning);
           return 'thinking (' + tokens + ' tokens)' + suffix;
         },
         hasCavemanReasoning(reasoning) {
           return String(reasoning?.caveman || reasoning?.Caveman || '').trim().length > 0;
+        },
+        cavemanThinkingSuffix(reasoning) {
+          if (!this.hasCavemanReasoning(reasoning)) return '';
+          const explicit = Number(reasoning?.caveman_tokens || reasoning?.CavemanTokens || reasoning?.caveman_token_count || reasoning?.CavemanTokenCount || 0);
+          const tokens = explicit > 0 ? explicit : this.estimateTextTokens(reasoning?.caveman || reasoning?.Caveman || '');
+          return ' · caveman available (' + tokens + ' tokens)';
         },
         reasoningViewKey(item) {
           return this.timelineItemID(item) || String(item?.id || item?.ID || '');
