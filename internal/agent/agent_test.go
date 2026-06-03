@@ -4940,6 +4940,91 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 	}
 }
 
+func TestCompactSessionChunksHistoryWhenCompactionRequestExceedsBudget(t *testing.T) {
+	t.Parallel()
+
+	var requestBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		requestBody = string(body)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"chunked compact summary"}}]}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.AutoCompactAt = 80
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 5000})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "early-history-marker "+strings.Repeat("a", 400))
+	for idx := range 40 {
+		appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: fmt.Sprintf("middle history %02d %s", idx, strings.Repeat("b", 700))})
+	}
+	appendUserTimelineItem(t, st, chat.ID, "late-tail-marker "+strings.Repeat("z", 700))
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	compactionChat, _, err := engine.compactionSessionClient(chat, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requestBody) > engine.compactionRequestByteBudget(compactionChat) {
+		t.Fatalf("expected chunked compaction request within budget, got %d > %d", len(requestBody), engine.compactionRequestByteBudget(compactionChat))
+	}
+	if !strings.Contains(requestBody, "early-history-marker") {
+		t.Fatalf("expected chunked request to include older prefix, got %s", requestBody)
+	}
+	if strings.Contains(requestBody, "late-tail-marker") {
+		t.Fatalf("expected chunked request to leave later tail for a future compaction, got %s", requestBody)
+	}
+
+	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstKeptItemID string
+	for _, item := range timeline {
+		if compacted, ok := item.Content.(domain.Compaction); ok && compacted.Status == "completed" {
+			firstKeptItemID = compacted.FirstKeptItemID
+		}
+	}
+	if strings.TrimSpace(firstKeptItemID) == "" {
+		t.Fatal("expected chunked compaction to preserve an unsummarized tail")
+	}
+}
+
 func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	t.Parallel()
 

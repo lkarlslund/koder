@@ -2626,16 +2626,16 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		return err
-	}
-	if len(messages) <= 1 {
-		return nil
-	}
 	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
+	}
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
+	if err != nil {
+		return err
+	}
+	if len(req.Messages) <= 1 {
+		return nil
 	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
 	compactionItem, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.Compaction{
@@ -2670,10 +2670,6 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
-		Role:    provider.RoleUser,
-		Content: e.compactPromptWithInstructions(instructions),
-	}), e.providerStreamingEnabled(compactionChat))
 	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
@@ -2727,16 +2723,16 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 		return fmt.Errorf("turn state is required")
 	}
 	timeline := turn.Timeline()
-	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		return err
-	}
-	if len(messages) <= 1 {
-		return nil
-	}
 	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
+	}
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, "", e.providerStreamingEnabled(compactionChat))
+	if err != nil {
+		return err
+	}
+	if len(req.Messages) <= 1 {
+		return nil
 	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
 	now := time.Now().UTC()
@@ -2782,10 +2778,6 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
-		Role:    provider.RoleUser,
-		Content: e.compactPrompt(),
-	}), e.providerStreamingEnabled(compactionChat))
 	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
@@ -2838,19 +2830,95 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 	return next, compactionClient, nil
 }
 
+func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
+	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
+	if err != nil {
+		return provider.ChatRequest{}, "", err
+	}
+	req := e.compactionChatRequest(session, chat, messages, instructions, stream)
+	if len(messages) <= 1 || e.compactionRequestWithinBudget(chat, req) {
+		return req, firstKeptItemID, nil
+	}
+
+	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
+	if keepStart <= 1 {
+		return req, firstKeptItemID, nil
+	}
+	var bestReq provider.ChatRequest
+	bestFirstKeptItemID := ""
+	bestFound := false
+	low, high := 1, keepStart
+	for low <= high {
+		mid := low + (high-low)/2
+		candidateMessages, candidateFirstKeptItemID, buildErr := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid)
+		if buildErr != nil {
+			return provider.ChatRequest{}, "", buildErr
+		}
+		candidateReq := e.compactionChatRequest(session, chat, candidateMessages, instructions, stream)
+		if e.compactionRequestWithinBudget(chat, candidateReq) {
+			bestReq = candidateReq
+			bestFirstKeptItemID = candidateFirstKeptItemID
+			bestFound = true
+			low = mid + 1
+			continue
+		}
+		high = mid - 1
+	}
+	if bestFound {
+		return bestReq, bestFirstKeptItemID, nil
+	}
+	return req, firstKeptItemID, nil
+}
+
+func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
+	return e.chatRequest(session, chat, append(messages, provider.Message{
+		Role:    provider.RoleUser,
+		Content: e.compactPromptWithInstructions(instructions),
+	}), stream)
+}
+
+func (e *Engine) compactionRequestWithinBudget(chat domain.Chat, req provider.ChatRequest) bool {
+	budget := e.compactionRequestByteBudget(chat)
+	if budget <= 0 {
+		return true
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return true
+	}
+	return len(data) <= budget
+}
+
+func (e *Engine) compactionRequestByteBudget(chat domain.Chat) int {
+	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
+	if contextWindow <= 0 {
+		return 0
+	}
+	threshold := min(100, e.autoCompactThreshold())
+	return (contextWindow * threshold * 3) / 100
+}
+
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
-	head := timeline
-	firstKeptItemID := ""
-	if keepStart < len(timeline) {
-		head = timeline[:keepStart]
-		firstKeptItemID = timeline[keepStart].ID
-	}
+	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart)
+}
+
+func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int) ([]provider.Message, string, error) {
+	keepStart = max(0, min(keepStart, len(timeline)))
+	head := timeline[:keepStart]
+	firstKeptItemID := firstKeptItemIDForCompactionCut(timeline, keepStart)
 	envelope, err := e.buildCompactionPromptEnvelopeForTimeline(session, chat, head)
 	if err != nil {
 		return nil, "", err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
+}
+
+func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart int) string {
+	if keepStart < 0 || keepStart >= len(timeline) {
+		return ""
+	}
+	return timeline[keepStart].ID
 }
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
