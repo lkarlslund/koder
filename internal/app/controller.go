@@ -223,7 +223,7 @@ type BrowserPreferences struct {
 // CompactionPreferences contains global compaction controls.
 type CompactionPreferences struct {
 	AutoCompactAt        int    `json:"auto_compact_at"`
-	KeepToolBatches      int    `json:"keep_tool_batches"`
+	KeepToolCalls        int    `json:"keep_tool_calls"`
 	ProviderID           string `json:"provider_id"`
 	ModelID              string `json:"model_id"`
 	UseChatModel         bool   `json:"use_chat_model"`

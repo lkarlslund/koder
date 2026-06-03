@@ -29,8 +29,8 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.AutoCompactAt != defaultAutoCompactAt {
 		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
 	}
-	if cfg.CompactionKeepToolBatches != defaultCompactionKeepToolBatches {
-		t.Fatalf("expected default kept tool batches %d, got %d", defaultCompactionKeepToolBatches, cfg.CompactionKeepToolBatches)
+	if cfg.CompactionKeepToolCalls != defaultCompactionKeepToolCalls {
+		t.Fatalf("expected default kept tool calls %d, got %d", defaultCompactionKeepToolCalls, cfg.CompactionKeepToolCalls)
 	}
 	if cfg.CompactionProvider != "" || cfg.CompactionModel != "" {
 		t.Fatalf("expected chat model compaction default, got %q/%q", cfg.CompactionProvider, cfg.CompactionModel)
@@ -311,19 +311,19 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	if cfg.AutoCompactAt != defaultAutoCompactAt {
 		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
 	}
-	if cfg.CompactionKeepToolBatches != defaultCompactionKeepToolBatches {
-		t.Fatalf("expected kept tool batches backfilled to %d, got %d", defaultCompactionKeepToolBatches, cfg.CompactionKeepToolBatches)
+	if cfg.CompactionKeepToolCalls != defaultCompactionKeepToolCalls {
+		t.Fatalf("expected kept tool calls backfilled to %d, got %d", defaultCompactionKeepToolCalls, cfg.CompactionKeepToolCalls)
 	}
 }
 
-func TestNormalizeCompactionKeepToolBatchesClampsRange(t *testing.T) {
-	if got := NormalizeCompactionKeepToolBatches(-1); got != 0 {
+func TestNormalizeCompactionKeepToolCallsClampsRange(t *testing.T) {
+	if got := NormalizeCompactionKeepToolCalls(-1); got != 0 {
 		t.Fatalf("expected low clamp to 0, got %d", got)
 	}
-	if got := NormalizeCompactionKeepToolBatches(11); got != maxCompactionKeepToolBatches {
-		t.Fatalf("expected high clamp to %d, got %d", maxCompactionKeepToolBatches, got)
+	if got := NormalizeCompactionKeepToolCalls(11); got != maxCompactionKeepToolCalls {
+		t.Fatalf("expected high clamp to %d, got %d", maxCompactionKeepToolCalls, got)
 	}
-	if got := NormalizeCompactionKeepToolBatches(4); got != 4 {
+	if got := NormalizeCompactionKeepToolCalls(4); got != 4 {
 		t.Fatalf("expected in-range value unchanged, got %d", got)
 	}
 }

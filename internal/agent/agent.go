@@ -1964,7 +1964,7 @@ func steerMessageContent(msg provider.Message) string {
 func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
 	start := firstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
+		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil
@@ -1992,25 +1992,25 @@ func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string)
 	return -1
 }
 
-func preservedTimelineToolTailStart(items []domain.TimelineItem, keepBatches int) int {
-	if keepBatches <= 0 || len(items) == 0 {
+func preservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
+	if keepCalls <= 0 || len(items) == 0 {
 		return len(items)
 	}
-	starts := make([]int, 0, keepBatches)
-	for idx, item := range items {
+	remaining := keepCalls
+	firstToolIdx := len(items)
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		item := items[idx]
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok || len(assistant.Tools) == 0 {
 			continue
 		}
-		starts = append(starts, idx)
+		firstToolIdx = idx
+		remaining -= len(assistant.Tools)
+		if remaining <= 0 {
+			return idx
+		}
 	}
-	if len(starts) == 0 {
-		return len(items)
-	}
-	if keepBatches >= len(starts) {
-		return starts[0]
-	}
-	return starts[len(starts)-keepBatches]
+	return firstToolIdx
 }
 
 func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
@@ -2491,8 +2491,8 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 	return config.Provider{}
 }
 
-func (e *Engine) compactionKeepToolBatches() int {
-	return config.NormalizeCompactionKeepToolBatches(e.cfg.CompactionKeepToolBatches)
+func (e *Engine) compactionKeepToolCalls() int {
+	return config.NormalizeCompactionKeepToolCalls(e.cfg.CompactionKeepToolCalls)
 }
 
 func (e *Engine) systemPrompt() string {
@@ -2833,7 +2833,9 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 }
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
-	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
+	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
+	base := compactionBaseForNextCut(timeline, keepStart)
+	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
 	}
@@ -2842,8 +2844,7 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 		return req, firstKeptItemID, nil
 	}
 
-	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
-	segmentStart := compactionSegmentStartForNextCut(timeline, keepStart)
+	segmentStart := base.Start
 	if keepStart <= segmentStart+1 {
 		return req, firstKeptItemID, nil
 	}
@@ -2853,7 +2854,7 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 	low, high := segmentStart+1, keepStart
 	for low <= high {
 		mid := low + (high-low)/2
-		candidateMessages, candidateFirstKeptItemID, buildErr := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid)
+		candidateMessages, candidateFirstKeptItemID, buildErr := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid, base)
 		if buildErr != nil {
 			return provider.ChatRequest{}, "", buildErr
 		}
@@ -2902,19 +2903,54 @@ func (e *Engine) compactionRequestByteBudget(chat domain.Chat) int {
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
-	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
-	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart)
+	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
+	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, compactionBaseForNextCut(timeline, keepStart))
 }
 
-func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int) ([]provider.Message, string, error) {
+func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int, base compactionCutBase) ([]provider.Message, string, error) {
 	keepStart = max(0, min(keepStart, len(timeline)))
+	if base.Start > keepStart {
+		base.Start = keepStart
+	}
 	head := timeline[:keepStart]
 	firstKeptItemID := firstKeptItemIDForCompactionCut(timeline, keepStart)
-	envelope, err := e.buildCompactionPromptEnvelopeForTimeline(session, chat, head)
+	var envelope provider.PromptEnvelope
+	var err error
+	if strings.TrimSpace(base.Summary) != "" {
+		envelope, err = e.buildCompactionPromptEnvelopeForTimelineRange(session, chat, timeline[base.Start:keepStart], base.Summary)
+	} else {
+		envelope, err = e.buildCompactionPromptEnvelopeForTimeline(session, chat, head)
+	}
 	if err != nil {
 		return nil, "", err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
+}
+
+type compactionCutBase struct {
+	Start   int
+	Summary string
+}
+
+func compactionBaseForNextCut(timeline []domain.TimelineItem, keepStart int) compactionCutBase {
+	keepStart = max(0, min(keepStart, len(timeline)))
+	base := compactionCutBase{Start: compactionSegmentStartForNextCut(timeline, keepStart)}
+	for idx, item := range timeline {
+		compacted, ok := item.Content.(domain.Compaction)
+		if !ok || strings.TrimSpace(compacted.Summary) == "" {
+			continue
+		}
+		firstKeptIdx := firstKeptTimelineIndex(timeline, compacted.FirstKeptItemID)
+		if firstKeptIdx < base.Start || firstKeptIdx >= keepStart || firstKeptIdx >= idx {
+			continue
+		}
+		if !validCompactionBoundary(timeline[base.Start:idx], compacted.FirstKeptItemID) {
+			continue
+		}
+		base.Start = firstKeptIdx
+		base.Summary = compacted.Summary
+	}
+	return base
 }
 
 func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart int) string {
@@ -2955,6 +2991,21 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 	return envelope, nil
 }
 
+func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, baseSummary string) (provider.PromptEnvelope, error) {
+	envelope := provider.PromptEnvelope{
+		Instructions: e.baseInstructionsForChat(session, chat),
+		Items:        []provider.Message{compactedHistoryMessage(baseSummary)},
+	}
+	for _, item := range timeline {
+		messages, err := e.compactionMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(chat))
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		envelope.Items = append(envelope.Items, messages...)
+	}
+	return envelope, nil
+}
+
 func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		return true
@@ -2981,7 +3032,7 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
 	start := firstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
+		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil

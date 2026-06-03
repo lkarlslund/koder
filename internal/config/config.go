@@ -85,26 +85,26 @@ type PermissionRule = permissionprofile.Rule
 type ToolDefaults map[toolkind.Kind]bool
 
 type Config struct {
-	DefaultProvider           string                  `toml:"default_provider"`
-	DefaultModel              string                  `toml:"default_model"`
-	CompactionProvider        string                  `toml:"compaction_provider"`
-	CompactionModel           string                  `toml:"compaction_model"`
-	MaxToolLoopSteps          int                     `toml:"max_tool_loop_steps"`
-	AutoCompactAt             int                     `toml:"auto_compact_at"`
-	CompactionKeepToolBatches int                     `toml:"compaction_keep_tool_batches"`
-	ToolDefaults              ToolDefaults            `toml:"tool_defaults"`
-	Providers                 map[string]Provider     `toml:"providers"`
-	Models                    []ModelConfig           `toml:"models"`
-	MCPServers                map[string]MCPServer    `toml:"mcp_servers"`
-	Permissions               PermissionRules         `toml:"permissions"`
-	Access                    accesssettings.Settings `toml:"access"`
-	Store                     Store                   `toml:"store"`
-	UI                        UI                      `toml:"ui"`
-	Thinking                  Thinking                `toml:"thinking"`
-	path                      string
-	configDir                 string
-	stateDir                  string
-	cacheDir                  string
+	DefaultProvider         string                  `toml:"default_provider"`
+	DefaultModel            string                  `toml:"default_model"`
+	CompactionProvider      string                  `toml:"compaction_provider"`
+	CompactionModel         string                  `toml:"compaction_model"`
+	MaxToolLoopSteps        int                     `toml:"max_tool_loop_steps"`
+	AutoCompactAt           int                     `toml:"auto_compact_at"`
+	CompactionKeepToolCalls int                     `toml:"compaction_keep_tool_calls"`
+	ToolDefaults            ToolDefaults            `toml:"tool_defaults"`
+	Providers               map[string]Provider     `toml:"providers"`
+	Models                  []ModelConfig           `toml:"models"`
+	MCPServers              map[string]MCPServer    `toml:"mcp_servers"`
+	Permissions             PermissionRules         `toml:"permissions"`
+	Access                  accesssettings.Settings `toml:"access"`
+	Store                   Store                   `toml:"store"`
+	UI                      UI                      `toml:"ui"`
+	Thinking                Thinking                `toml:"thinking"`
+	path                    string
+	configDir               string
+	stateDir                string
+	cacheDir                string
 }
 
 func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
@@ -127,8 +127,8 @@ func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
 const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
 const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
-const defaultCompactionKeepToolBatches = 2
-const maxCompactionKeepToolBatches = 10
+const defaultCompactionKeepToolCalls = 2
+const maxCompactionKeepToolCalls = 10
 const DefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
 
 func Load() (Config, error) {
@@ -169,8 +169,8 @@ func Load() (Config, error) {
 	if !strings.Contains(string(data), "auto_compact_at") {
 		cfg.AutoCompactAt = defaultAutoCompactAt
 	}
-	if !strings.Contains(string(data), "compaction_keep_tool_batches") {
-		cfg.CompactionKeepToolBatches = defaultCompactionKeepToolBatches
+	if !strings.Contains(string(data), "compaction_keep_tool_calls") {
+		cfg.CompactionKeepToolCalls = defaultCompactionKeepToolCalls
 	}
 	cfg.configDir = configDir
 	cfg.stateDir = stateDir()
@@ -186,15 +186,15 @@ func Default() Config {
 		toolDefaults[kind] = true
 	}
 	return Config{
-		DefaultProvider:           "",
-		MaxToolLoopSteps:          defaultMaxToolLoopSteps,
-		AutoCompactAt:             defaultAutoCompactAt,
-		CompactionKeepToolBatches: defaultCompactionKeepToolBatches,
-		ToolDefaults:              toolDefaults,
-		Providers:                 map[string]Provider{},
-		Models:                    []ModelConfig{},
-		MCPServers:                map[string]MCPServer{},
-		Access:                    accesssettings.Default(),
+		DefaultProvider:         "",
+		MaxToolLoopSteps:        defaultMaxToolLoopSteps,
+		AutoCompactAt:           defaultAutoCompactAt,
+		CompactionKeepToolCalls: defaultCompactionKeepToolCalls,
+		ToolDefaults:            toolDefaults,
+		Providers:               map[string]Provider{},
+		Models:                  []ModelConfig{},
+		MCPServers:              map[string]MCPServer{},
+		Access:                  accesssettings.Default(),
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -239,7 +239,7 @@ func (c *Config) applyDefaults() {
 	if c.AutoCompactAt <= 0 {
 		c.AutoCompactAt = def.AutoCompactAt
 	}
-	c.CompactionKeepToolBatches = NormalizeCompactionKeepToolBatches(c.CompactionKeepToolBatches)
+	c.CompactionKeepToolCalls = NormalizeCompactionKeepToolCalls(c.CompactionKeepToolCalls)
 	if c.Providers == nil {
 		c.Providers = def.Providers
 	}
@@ -534,12 +534,12 @@ func NormalizeLlamaSlotScope(value string) string {
 	}
 }
 
-func NormalizeCompactionKeepToolBatches(value int) int {
+func NormalizeCompactionKeepToolCalls(value int) int {
 	if value < 0 {
 		return 0
 	}
-	if value > maxCompactionKeepToolBatches {
-		return maxCompactionKeepToolBatches
+	if value > maxCompactionKeepToolCalls {
+		return maxCompactionKeepToolCalls
 	}
 	return value
 }

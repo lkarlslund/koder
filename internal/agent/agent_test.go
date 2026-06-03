@@ -1292,9 +1292,9 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	}
 }
 
-func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing.T) {
+func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 1
+	cfg.CompactionKeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1319,7 +1319,7 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 		t.Fatal(err)
 	}
 	if len(conversation) < 3 {
-		t.Fatalf("expected summary plus preserved tool batch, got %#v", conversation)
+		t.Fatalf("expected summary plus preserved tool call, got %#v", conversation)
 	}
 	if !strings.Contains(conversation[len(conversation)-3].Content, "summary block") {
 		t.Fatalf("expected compact summary in context, got %#v", conversation)
@@ -1335,9 +1335,46 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	}
 }
 
+func TestPreservedTimelineToolCallTailStartCountsToolCalls(t *testing.T) {
+	items := []domain.TimelineItem{
+		{
+			ID:      "old-user",
+			Content: domain.UserMessage{Text: "old"},
+		},
+		{
+			ID: "old-tools",
+			Content: domain.AssistantMessage{Tools: []domain.ToolCall{
+				{ToolCallID: "call_1", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
+				{ToolCallID: "call_2", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
+			}},
+		},
+		{
+			ID:      "middle-user",
+			Content: domain.UserMessage{Text: "middle"},
+		},
+		{
+			ID: "latest-tools",
+			Content: domain.AssistantMessage{Tools: []domain.ToolCall{
+				{ToolCallID: "call_3", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
+				{ToolCallID: "call_4", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
+			}},
+		},
+	}
+
+	if got := preservedTimelineToolCallTailStart(items, 2); got != 3 {
+		t.Fatalf("expected preserve boundary at latest tool item, got %d", got)
+	}
+	if got := preservedTimelineToolCallTailStart(items, 3); got != 1 {
+		t.Fatalf("expected preserve boundary to include previous tool item, got %d", got)
+	}
+	if got := preservedTimelineToolCallTailStart(items, 0); got != len(items) {
+		t.Fatalf("expected no preserved tail when keep count is zero, got %d", got)
+	}
+}
+
 func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 1
+	cfg.CompactionKeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1381,7 +1418,7 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 
 func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 1
+	cfg.CompactionKeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1422,7 +1459,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 
 func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 1
+	cfg.CompactionKeepToolCalls = 1
 	workdir := t.TempDir()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1468,7 +1505,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if firstKeptItemID != tailItem.ID {
-		t.Fatalf("expected preserved tail to start at latest tool batch, got %s want %s", firstKeptItemID, tailItem.ID)
+		t.Fatalf("expected preserved tail to start at latest tool call, got %s want %s", firstKeptItemID, tailItem.ID)
 	}
 	payload, err := json.Marshal(conversation)
 	if err != nil {
@@ -1498,7 +1535,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 
 func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 0
+	cfg.CompactionKeepToolCalls = 0
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1549,7 +1586,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 
 func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolBatches = 1
+	cfg.CompactionKeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1582,7 +1619,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 		t.Fatal(err)
 	}
 	if firstKeptItemID != latestToolItem.ID {
-		t.Fatalf("expected latest tool batch to be preserved from compaction source, got %s want %s", firstKeptItemID, latestToolItem.ID)
+		t.Fatalf("expected latest tool call to be preserved from compaction source, got %s want %s", firstKeptItemID, latestToolItem.ID)
 	}
 	rendered := ""
 	for _, msg := range conversation {
@@ -1597,7 +1634,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 		}
 	}
 	if strings.Contains(rendered, "go test") || strings.Contains(rendered, "call_latest") {
-		t.Fatalf("expected latest preserved tool batch excluded from compaction source, got %q", rendered)
+		t.Fatalf("expected latest preserved tool call excluded from compaction source, got %q", rendered)
 	}
 }
 
@@ -2587,7 +2624,7 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 		t.Fatalf("expected slower tool result second, got %#v", toolResults)
 	}
 	if !sawFinalAnswer {
-		t.Fatal("expected final assistant answer after tool batch")
+		t.Fatal("expected final assistant answer after tool call")
 	}
 	if len(requests) < 2 {
 		t.Fatalf("expected at least two provider requests, got %d", len(requests))
@@ -2629,7 +2666,7 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenStopRequested(t *testing.T) 
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{req}, out)
 	if err != nil {
-		t.Fatalf("expected graceful stop after tool batch, got %v", err)
+		t.Fatalf("expected graceful stop after tool call, got %v", err)
 	}
 	if needsApproval {
 		t.Fatal("did not expect approval request")
@@ -5121,6 +5158,13 @@ func TestChunkedCompactionStartsAfterLatestValidCompaction(t *testing.T) {
 	}
 	if len(body) > engine.compactionRequestByteBudget(chat) {
 		t.Fatalf("expected request within budget, got %d > %d", len(body), engine.compactionRequestByteBudget(chat))
+	}
+	bodyText := string(body)
+	if !strings.Contains(bodyText, "old summary") {
+		t.Fatalf("expected next chunk request to include previous summary, got %s", bodyText)
+	}
+	if strings.Contains(bodyText, "old prefix") {
+		t.Fatalf("did not expect next chunk request to replay already summarized prefix, got %s", bodyText)
 	}
 }
 
