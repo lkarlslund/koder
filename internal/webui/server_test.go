@@ -61,14 +61,11 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 
 func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	ctrl := newTestController(t)
-	sessionID := ctrl.State().Session.ID
-	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
-	secondID := ctrl.State().Session.ID
-	if err := ctrl.SwitchSession(context.Background(), sessionID); err != nil {
-		t.Fatalf("switch back to first session: %v", err)
-	}
+	secondID := second.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -107,13 +104,11 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := ctrl.State().Session.ID
-	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
-	secondID := ctrl.State().Session.ID
-	if err := ctrl.SwitchSession(context.Background(), firstID); err != nil {
-		t.Fatalf("switch back to first session: %v", err)
-	}
+	secondID := second.ID
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,6 +144,58 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 	if resp.Result.State.Session.ID != secondID {
 		t.Fatalf("expected hello for second session %s, got %s; first was %s", secondID, resp.Result.State.Session.ID, firstID)
+	}
+}
+
+func TestWebSocketClientsKeepIndependentSessionSelections(t *testing.T) {
+	ctrl := newTestController(t)
+	firstID := ctrl.State().Session.ID
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	secondID := second.ID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	firstConn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(firstID), nil)
+	if err != nil {
+		t.Fatalf("dial first websocket: %v", err)
+	}
+	defer firstConn.Close(websocket.StatusNormalClosure, "")
+	secondConn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(secondID), nil)
+	if err != nil {
+		t.Fatalf("dial second websocket: %v", err)
+	}
+	defer secondConn.Close(websocket.StatusNormalClosure, "")
+
+	writeRPC(t, ctx, firstConn, 1, "hello", `{}`)
+	if got := readRPCStateSession(t, ctx, firstConn, 1); got != firstID {
+		t.Fatalf("expected first hello session %s, got %s", firstID, got)
+	}
+	writeRPC(t, ctx, secondConn, 1, "hello", `{}`)
+	if got := readRPCStateSession(t, ctx, secondConn, 1); got != secondID {
+		t.Fatalf("expected second hello session %s, got %s", secondID, got)
+	}
+	writeRPC(t, ctx, secondConn, 2, "get_state", `{}`)
+	if got := readRPCStateSession(t, ctx, secondConn, 2); got != secondID {
+		t.Fatalf("expected second get_state session %s, got %s", secondID, got)
+	}
+	writeRPC(t, ctx, firstConn, 2, "get_state", `{}`)
+	if got := readRPCStateSession(t, ctx, firstConn, 2); got != firstID {
+		t.Fatalf("expected first get_state to remain %s, got %s", firstID, got)
+	}
+	writeRPC(t, ctx, secondConn, 3, "switch_session", fmt.Sprintf(`{"session_id":"%s"}`, firstID))
+	if got := readRPCStateSession(t, ctx, secondConn, 3); got != firstID {
+		t.Fatalf("expected second client switch to %s, got %s", firstID, got)
+	}
+	writeRPC(t, ctx, firstConn, 3, "get_state", `{}`)
+	if got := readRPCStateSession(t, ctx, firstConn, 3); got != firstID {
+		t.Fatalf("expected first client to remain %s after second switch, got %s", firstID, got)
 	}
 }
 
@@ -1619,13 +1666,14 @@ func TestAssetHashIncludesVendoredAssets(t *testing.T) {
 
 func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	ctrl := newTestController(t)
+	sessionID := ctrl.State().Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessionID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1650,7 +1698,10 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	if !resp.Result.Updated {
 		t.Fatal("expected set_model acknowledgement")
 	}
-	state := ctrl.State()
+	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("state for session: %v", err)
+	}
 	if state.Snapshot.Chat.ModelID != "next-model" {
 		t.Fatalf("expected controller chat next-model, got %q", state.Snapshot.Chat.ModelID)
 	}
@@ -1658,6 +1709,7 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 
 func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	ctrl := newTestController(t)
+	sessionID := ctrl.State().Session.ID
 	firstID := ctrl.State().ActiveChatID
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
 		t.Fatalf("new chat: %v", err)
@@ -1673,7 +1725,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessionID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1710,6 +1762,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 
 func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	ctrl := newTestController(t)
+	sessionID := ctrl.State().Session.ID
 	firstID := ctrl.State().ActiveChatID
 	if err := ctrl.NewChat(context.Background(), "second"); err != nil {
 		t.Fatalf("new second chat: %v", err)
@@ -1726,7 +1779,7 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessionID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1752,7 +1805,10 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	if !resp.Result.Reordered {
 		t.Fatal("expected reorder_chats acknowledgement")
 	}
-	state := ctrl.State()
+	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("state for session: %v", err)
+	}
 	got := make([]id.ID, 0, len(state.Chats))
 	for _, chat := range state.Chats {
 		got = append(got, chat.ID)
@@ -1769,6 +1825,7 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 
 func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	ctrl := newTestController(t)
+	sessionID := ctrl.State().Session.ID
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
 		t.Fatalf("new chat: %v", err)
 	}
@@ -1780,7 +1837,7 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessionID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1805,7 +1862,10 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	if resp.Result.ActiveChatID == "" || resp.Result.ActiveChatID == deletedID {
 		t.Fatalf("expected delete_chat response to select a different chat, got %s", resp.Result.ActiveChatID)
 	}
-	state := ctrl.State()
+	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("state for session: %v", err)
+	}
 	if state.ActiveChatID == deletedID {
 		t.Fatalf("expected active chat to switch away from %s", deletedID)
 	}
@@ -2376,4 +2436,41 @@ func readRPCResponse(t *testing.T, ctx context.Context, conn *websocket.Conn, id
 			return msg
 		}
 	}
+}
+
+func writeRPC(t *testing.T, ctx context.Context, conn *websocket.Conn, rpcID int, method, params string) {
+	t.Helper()
+	payload := fmt.Sprintf(`{"id":%d,"method":"%s","params":%s}`, rpcID, method, params)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
+		t.Fatalf("write %s: %v", method, err)
+	}
+}
+
+func readRPCStateSession(t *testing.T, ctx context.Context, conn *websocket.Conn, rpcID float64) id.ID {
+	t.Helper()
+	msg := readRPCResponse(t, ctx, conn, rpcID)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID id.ID `json:"id"`
+			} `json:"session"`
+			State struct {
+				Session struct {
+					ID id.ID `json:"id"`
+				} `json:"session"`
+			} `json:"state"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected rpc ok, got %s", resp.Error)
+	}
+	if resp.Result.State.Session.ID != "" {
+		return resp.Result.State.Session.ID
+	}
+	return resp.Result.Session.ID
 }

@@ -446,10 +446,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: nil, OK: false, Error: err.Error()})
 			continue
 		}
-		if err := s.prepareClientSelection(ctx, clientID, req.Method); err != nil {
-			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: req.ID, OK: false, Error: err.Error()})
-			continue
-		}
 		result, err := s.handleRPC(ctx, clientID, req.Method, req.Params)
 		if err == nil {
 			s.updateClientSelectionFromResult(clientID, result)
@@ -494,10 +490,6 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SelectedSession != "" || req.SelectedChat != "" {
 		s.setClientSelection(clientID, clientSelection{SessionID: req.SelectedSession, ChatID: req.SelectedChat})
-	}
-	if err := s.prepareClientSelection(r.Context(), clientID, req.Method); err != nil {
-		writeHTTPRPCResponse(w, rpcResponse{ID: req.ID, OK: false, Error: err.Error()})
-		return
 	}
 	result, err := s.handleRPC(r.Context(), clientID, req.Method, req.Params)
 	if err == nil {
@@ -544,16 +536,17 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
+		selection := s.appSelection(clientID)
 		if in.Steer {
-			return map[string]bool{"queued": true}, s.controller.SendSteerWithAttachments(in.Text, in.Attachments)
+			return map[string]bool{"queued": true}, s.controller.SendSteerWithSelection(ctx, selection, in.Text, in.Attachments)
 		}
-		return map[string]bool{"queued": true}, s.controller.SendPromptWithAttachments(in.Text, in.Attachments)
+		return map[string]bool{"queued": true}, s.controller.SendPromptWithSelection(ctx, selection, in.Text, in.Attachments)
 	case "continue":
 		var in struct {
 			Note string `json:"note"`
 		}
 		_ = decodeParams(params, &in)
-		return map[string]bool{"queued": true}, s.controller.Continue(in.Note)
+		return map[string]bool{"queued": true}, s.controller.ContinueForSelection(ctx, s.appSelection(clientID), in.Note)
 	case "reorder_queue":
 		var in struct {
 			IDs []id.ID `json:"ids"`
@@ -561,7 +554,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"reordered": true}, s.controller.ReorderQueue(in.IDs)
+		return map[string]bool{"reordered": true}, s.controller.ReorderQueueForSelection(ctx, s.appSelection(clientID), in.IDs)
 	case "delete_queue_item":
 		var in struct {
 			ID id.ID `json:"id"`
@@ -569,7 +562,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"deleted": true}, s.controller.DeleteQueueItem(in.ID)
+		return map[string]bool{"deleted": true}, s.controller.DeleteQueueItemForSelection(ctx, s.appSelection(clientID), in.ID)
 	case "send_queue_item_now":
 		var in struct {
 			ID id.ID `json:"id"`
@@ -577,11 +570,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"queued": true}, s.controller.SendQueueItemNow(in.ID)
+		return map[string]bool{"queued": true}, s.controller.SendQueueItemNowForSelection(ctx, s.appSelection(clientID), in.ID)
 	case "stop":
-		return map[string]bool{"stopped": true}, s.controller.Stop()
+		return map[string]bool{"stopped": true}, s.controller.StopForSelection(ctx, s.appSelection(clientID))
 	case "stop_after_turn":
-		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurn()
+		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurnForSelection(ctx, s.appSelection(clientID))
 	case "shutdown":
 		var in struct {
 			Reason string `json:"reason"`
@@ -622,9 +615,9 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"started": true}, s.controller.Compact(in.Instructions)
+		return map[string]bool{"started": true}, s.controller.CompactForSelection(ctx, s.appSelection(clientID), in.Instructions)
 	case "refresh_workspace":
-		if err := s.controller.RefreshWorkspace(ctx); err != nil {
+		if err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID)); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"started": true}, nil
@@ -642,7 +635,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if limit <= 0 || limit > defaultTimelinePageSize*4 {
 			limit = defaultTimelinePageSize
 		}
-		page, err := s.controller.TimelinePage(ctx, in.ChatID, in.Before, limit, in.All)
+		page, err := s.controller.TimelinePage(ctx, s.clientSelection(clientID).SessionID, in.ChatID, in.Before, limit, in.All)
 		if err != nil {
 			return nil, err
 		}
@@ -661,20 +654,22 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SwitchChat(ctx, in.ChatID); err != nil {
-			return nil, err
-		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
+		selection := s.clientSelection(clientID)
+		selection.ChatID = in.ChatID
+		s.setClientSelection(clientID, selection)
 		return s.stateForClient(ctx, clientID)
 	case "new_chat":
 		var in struct {
 			Title string `json:"title"`
 		}
 		_ = decodeParams(params, &in)
-		if err := s.controller.NewChat(ctx, in.Title); err != nil {
+		chatRecord, err := s.controller.NewChatForSelection(ctx, s.appSelection(clientID), in.Title)
+		if err != nil {
 			return nil, err
 		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
+		selection := s.clientSelection(clientID)
+		selection.ChatID = chatRecord.ID
+		s.setClientSelection(clientID, selection)
 		return s.stateForClient(ctx, clientID)
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
@@ -685,10 +680,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SwitchSession(ctx, in.SessionID); err != nil {
+		exists, err := s.sessionExists(ctx, in.SessionID)
+		if err != nil {
 			return nil, err
 		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
+		if !exists {
+			return nil, fmt.Errorf("session not found: %s", in.SessionID)
+		}
+		s.setClientSelection(clientID, clientSelection{SessionID: in.SessionID})
 		return s.stateForClient(ctx, clientID)
 	case "new_session":
 		var in struct {
@@ -696,10 +695,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			ProjectRoot string `json:"project_root"`
 		}
 		_ = decodeParams(params, &in)
-		if err := s.controller.NewSessionWithProjectRoot(ctx, in.Title, in.ProjectRoot); err != nil {
+		session, err := s.controller.CreateSession(ctx, in.Title, in.ProjectRoot)
+		if err != nil {
 			return nil, err
 		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
+		s.setClientSelection(clientID, clientSelection{SessionID: session.ID})
 		return s.stateForClient(ctx, clientID)
 	case "rename_session":
 		var in struct {
@@ -728,7 +728,6 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			s.clearClientSelection(clientID)
 			return s.welcomeState(ctx, "Session deleted."), nil
 		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
 		return s.stateForClient(ctx, clientID)
 	case "browse_project_folder":
 		path, err := browseProjectFolder()
@@ -743,10 +742,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.DeleteChat(ctx, in.ChatID); err != nil {
+		selection := s.clientSelection(clientID)
+		if err := s.controller.DeleteChatForSelection(ctx, s.appSelection(clientID), in.ChatID); err != nil {
 			return nil, err
 		}
-		s.setClientSelectionFromState(clientID, s.controller.State())
+		if selection.ChatID == in.ChatID {
+			selection.ChatID = ""
+			s.setClientSelection(clientID, selection)
+		}
 		return s.stateForClient(ctx, clientID)
 	case "reorder_chats":
 		var in struct {
@@ -755,7 +758,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.ReorderChats(ctx, in.ChatIDs); err != nil {
+		if err := s.controller.ReorderChatsForSelection(ctx, s.appSelection(clientID), in.ChatIDs); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"reordered": true}, nil
@@ -770,7 +773,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if in.ToolCallID == "" {
 			return nil, fmt.Errorf("tool_call_id is required")
 		}
-		return map[string]bool{"accepted": true}, s.controller.Approve(in.ToolCallID)
+		return map[string]bool{"accepted": true}, s.controller.ApproveForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
 	case "deny":
 		var in struct {
 			ToolCallID string `json:"tool_call_id"`
@@ -782,7 +785,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if in.ToolCallID == "" {
 			return nil, fmt.Errorf("tool_call_id is required")
 		}
-		return map[string]bool{"accepted": true}, s.controller.Deny(in.ToolCallID)
+		return map[string]bool{"accepted": true}, s.controller.DenyForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
 	case "composer_completions":
 		var in struct {
 			Text   string `json:"text"`
@@ -837,7 +840,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SetModel(ctx, in.ProviderID, in.ModelID); err != nil {
+		if err := s.controller.SetModelForSelection(ctx, s.appSelection(clientID), in.ProviderID, in.ModelID); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"updated": true}, nil
@@ -896,7 +899,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SetAccessSettings(ctx, in); err != nil {
+		if err := s.controller.SetAccessSettingsForSelection(ctx, s.appSelection(clientID), in); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"updated": true}, nil
@@ -922,64 +925,21 @@ func (s *Server) requestProcessRestart() error {
 	return nil
 }
 
-func (s *Server) prepareClientSelection(ctx context.Context, clientID, method string) error {
-	if !rpcUsesActiveSelection(method) {
-		return nil
-	}
-	selection := s.clientSelection(clientID)
-	if selection.SessionID == "" {
-		return nil
-	}
-	state := s.controller.State()
-	if state.Session.ID != selection.SessionID {
-		exists, err := s.sessionExists(ctx, selection.SessionID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("session not found: %s", selection.SessionID)
-		}
-		if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
-			return err
-		}
-		state = s.controller.State()
-	}
-	if selection.ChatID != "" && state.ActiveChatID != selection.ChatID {
-		return s.controller.SwitchChat(ctx, selection.ChatID)
-	}
-	return nil
-}
-
 func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State, error) {
 	selection := s.clientSelection(clientID)
 	if selection.SessionID == "" {
 		return s.welcomeState(ctx, ""), nil
 	}
-	if selection.SessionID != "" {
-		state := s.controller.State()
-		if state.Session.ID != selection.SessionID {
-			exists, err := s.sessionExists(ctx, selection.SessionID)
-			if err != nil {
-				return app.State{}, err
-			}
-			if !exists {
-				s.clearClientSelection(clientID)
-				return s.welcomeState(ctx, fmt.Sprintf("Session not found: %s", selection.SessionID)), nil
-			}
-			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
-				return app.State{}, err
-			}
+	state, err := s.controller.StateForSelection(ctx, app.Selection{SessionID: selection.SessionID, ChatID: selection.ChatID})
+	if err != nil {
+		if exists, existsErr := s.sessionExists(ctx, selection.SessionID); existsErr == nil && !exists {
+			s.clearClientSelection(clientID)
+			return s.welcomeState(ctx, fmt.Sprintf("Session not found: %s", selection.SessionID)), nil
 		}
+		return app.State{}, err
 	}
-	if selection.ChatID != "" {
-		state := s.controller.State()
-		if state.ActiveChatID != selection.ChatID {
-			if err := s.controller.SwitchChat(ctx, selection.ChatID); err != nil {
-				return app.State{}, err
-			}
-		}
-	}
-	state, err := s.fillActiveTimelineForClient(ctx, s.controller.State())
+	s.setClientSelection(clientID, clientSelection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+	state, err = s.fillActiveTimelineForClient(ctx, state)
 	if err != nil {
 		return app.State{}, err
 	}
@@ -1059,7 +1019,7 @@ func (s *Server) fillActiveTimelineForClient(ctx context.Context, state app.Stat
 	if len(snapshot.Timeline) > 0 || snapshot.TimelineLoadedAll {
 		return state, nil
 	}
-	page, err := s.controller.TimelinePage(ctx, chatID, "", defaultTimelinePageSize, false)
+	page, err := s.controller.TimelinePage(ctx, state.Session.ID, chatID, "", defaultTimelinePageSize, false)
 	if err != nil {
 		return app.State{}, err
 	}
@@ -1108,15 +1068,7 @@ func (s *Server) sessionExists(ctx context.Context, sessionID id.ID) (bool, erro
 }
 
 func rpcUsesActiveSelection(method string) bool {
-	switch strings.TrimSpace(method) {
-	case "send_prompt", "continue", "stop", "stop_after_turn", "compact",
-		"reorder_queue", "delete_queue_item", "send_queue_item_now",
-		"load_timeline", "switch_chat", "new_chat", "delete_chat", "reorder_chats",
-		"approve", "deny", "set_model", "set_access_settings":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func (s *Server) updateClientSelectionFromResult(clientID string, result any) {
@@ -1155,6 +1107,11 @@ func (s *Server) clientSelection(clientID string) clientSelection {
 	s.clientSelectionMu.Lock()
 	defer s.clientSelectionMu.Unlock()
 	return s.clientSelections[clientID]
+}
+
+func (s *Server) appSelection(clientID string) app.Selection {
+	selection := s.clientSelection(clientID)
+	return app.Selection{SessionID: selection.SessionID, ChatID: selection.ChatID}
 }
 
 func (s *Server) deleteClientSelection(clientID string) {

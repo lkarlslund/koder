@@ -67,6 +67,12 @@ type State struct {
 	Error         string                         `json:"error,omitempty"`
 }
 
+// Selection identifies the browser client's selected session/chat.
+type Selection struct {
+	SessionID id.ID
+	ChatID    id.ID
+}
+
 // RestartBuildInfo describes the already-built binary waiting for a process restart.
 type RestartBuildInfo struct {
 	Version   string `json:"version,omitempty"`
@@ -381,13 +387,83 @@ func (c *Controller) State() State {
 	return c.stateLocked()
 }
 
-// TimelinePage returns a transcript page for a chat in the currently selected session.
-func (c *Controller) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (chat.TimelinePage, error) {
+// StateForSelection returns a detached browser state for a single client selection.
+func (c *Controller) StateForSelection(ctx context.Context, selection Selection) (State, error) {
 	c.mu.RLock()
-	sessionID := c.session.ID
+	base := State{
+		Sessions:      slices.Clone(c.sessions),
+		Theme:         c.theme,
+		Build:         version.Current(),
+		RestartNeeded: c.restartNeeded,
+		RestartBuild:  c.restartBuild,
+		Error:         c.lastErr,
+	}
 	c.mu.RUnlock()
+	if sessions, err := c.workspaceSessions(ctx); err == nil {
+		base.Sessions = sessions
+	} else if len(base.Sessions) == 0 {
+		return State{}, err
+	}
+	if selection.SessionID == "" {
+		return base, nil
+	}
+	owner, session, chatRecord, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return State{}, err
+	}
+	ownerSnapshot := owner.Snapshot()
+	snapshot := chat.Snapshot{}
+	if rt != nil {
+		snapshot = rt.Snapshot()
+	} else if existing, ok := ownerSnapshot.Snapshots[chatRecord.ID]; ok {
+		snapshot = existing
+	}
+	if snapshot.Chat.ID == "" {
+		snapshot.Chat = chatRecord
+	}
+	if snapshot.Session.ID == "" {
+		snapshot.Session = session
+	}
+	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
+	statuses := idleStatusesForChats(ownerSnapshot.Chats)
+	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
+	for chatID, item := range ownerSnapshot.Snapshots {
+		item = c.snapshotWithExecProcessesForSession(session, item)
+		snapshots[chatID] = item
+		if _, ok := statuses[chatID]; ok {
+			statuses[chatID] = sidebarStatusFromSnapshot(item)
+		}
+	}
+	snapshots[chatRecord.ID] = snapshot
+	statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
+	return State{
+		Session:       session,
+		Sessions:      base.Sessions,
+		Chats:         slices.Clone(ownerSnapshot.Chats),
+		ChatStatuses:  chatStatusesForChats(ownerSnapshot.Chats, statuses),
+		ActiveChatID:  chatRecord.ID,
+		Access:        c.accessStateForSession(session),
+		Snapshot:      snapshot,
+		Snapshots:     snapshots,
+		Milestones:    ownerSnapshot.Plan,
+		Todos:         slices.Clone(ownerSnapshot.Todos),
+		TodosByRef:    cloneTodosByRef(ownerSnapshot.TodosByRef),
+		Workspace:     workspacepkg.Status{ProjectRoot: session.ProjectRoot},
+		ContextWindow: c.contextWindowForChat(chatRecord),
+		ModelInfo:     c.modelInfoForChat(chatRecord),
+		Theme:         base.Theme,
+		ProjectRoot:   session.ProjectRoot,
+		Build:         base.Build,
+		RestartNeeded: base.RestartNeeded,
+		RestartBuild:  base.RestartBuild,
+		Error:         base.Error,
+	}, nil
+}
+
+// TimelinePage returns a transcript page for a chat in an explicitly selected session.
+func (c *Controller) TimelinePage(ctx context.Context, sessionID, chatID, before id.ID, limit int, all bool) (chat.TimelinePage, error) {
 	if sessionID == "" {
-		return chat.TimelinePage{}, fmt.Errorf("no active session")
+		return chat.TimelinePage{}, fmt.Errorf("session id is required")
 	}
 	if chatID == "" {
 		return chat.TimelinePage{}, fmt.Errorf("chat id is required")
@@ -577,13 +653,37 @@ func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.
 	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindUser, drafts)
 }
 
+// SendPromptWithSelection appends a user prompt to the selected chat queue.
+func (c *Controller) SendPromptWithSelection(ctx context.Context, selection Selection, text string, drafts []attachment.Draft) error {
+	return c.SendPromptWithKindSelection(ctx, selection, chat.QueueKindUser, text, drafts)
+}
+
 // SendSteerWithAttachments appends an explicit turn-boundary steer to the active chat queue.
 func (c *Controller) SendSteerWithAttachments(text string, drafts []attachment.Draft) error {
 	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindSteer, drafts)
 }
 
+// SendSteerWithSelection appends an explicit turn-boundary steer to the selected chat queue.
+func (c *Controller) SendSteerWithSelection(ctx context.Context, selection Selection, text string, drafts []attachment.Draft) error {
+	return c.SendPromptWithKindSelection(ctx, selection, chat.QueueKindSteer, text, drafts)
+}
+
 // SendPromptWithKindAndAttachments enqueues a prompt with the given delivery kind.
 func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.QueueKind, drafts []attachment.Draft) error {
+	rt := c.currentRuntime()
+	return c.enqueuePrompt(rt, text, kind, drafts)
+}
+
+// SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
+func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection Selection, kind chat.QueueKind, text string, drafts []attachment.Draft) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return c.enqueuePrompt(rt, text, kind, drafts)
+}
+
+func (c *Controller) enqueuePrompt(rt *chat.Chat, text string, kind chat.QueueKind, drafts []attachment.Draft) error {
 	text = strings.TrimSpace(text)
 	validated := make([]attachment.Draft, 0, len(drafts))
 	manager := attachment.NewManager(c.cfg.StateDir())
@@ -597,7 +697,6 @@ func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.Que
 	if text == "" && len(validated) == 0 {
 		return fmt.Errorf("prompt is empty")
 	}
-	rt := c.currentRuntime()
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -609,6 +708,19 @@ func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.Que
 // ReorderQueue reorders the queued inputs in the active chat by their IDs.
 func (c *Controller) ReorderQueue(ids []id.ID) error {
 	rt := c.currentRuntime()
+	return reorderRuntimeQueue(rt, ids)
+}
+
+// ReorderQueueForSelection reorders the selected chat queued inputs by ID.
+func (c *Controller) ReorderQueueForSelection(ctx context.Context, selection Selection, ids []id.ID) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return reorderRuntimeQueue(rt, ids)
+}
+
+func reorderRuntimeQueue(rt *chat.Chat, ids []id.ID) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -619,6 +731,19 @@ func (c *Controller) ReorderQueue(ids []id.ID) error {
 // DeleteQueueItem removes a queued input from the active chat by ID.
 func (c *Controller) DeleteQueueItem(id id.ID) error {
 	rt := c.currentRuntime()
+	return deleteRuntimeQueueItem(rt, id)
+}
+
+// DeleteQueueItemForSelection removes a queued input from the selected chat.
+func (c *Controller) DeleteQueueItemForSelection(ctx context.Context, selection Selection, id id.ID) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return deleteRuntimeQueueItem(rt, id)
+}
+
+func deleteRuntimeQueueItem(rt *chat.Chat, id id.ID) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -629,6 +754,19 @@ func (c *Controller) DeleteQueueItem(id id.ID) error {
 // SendQueueItemNow promotes a held queued input for immediate next-turn delivery.
 func (c *Controller) SendQueueItemNow(id id.ID) error {
 	rt := c.currentRuntime()
+	return sendRuntimeQueueItemNow(rt, id)
+}
+
+// SendQueueItemNowForSelection promotes a held queued input for the selected chat.
+func (c *Controller) SendQueueItemNowForSelection(ctx context.Context, selection Selection, id id.ID) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return sendRuntimeQueueItemNow(rt, id)
+}
+
+func sendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -644,6 +782,19 @@ func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType str
 // Continue asks the active chat to continue.
 func (c *Controller) Continue(note string) error {
 	rt := c.currentRuntime()
+	return continueRuntime(rt, note)
+}
+
+// ContinueForSelection asks the selected chat to continue.
+func (c *Controller) ContinueForSelection(ctx context.Context, selection Selection, note string) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return continueRuntime(rt, note)
+}
+
+func continueRuntime(rt *chat.Chat, note string) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -654,21 +805,55 @@ func (c *Controller) Continue(note string) error {
 // Stop cancels the active chat turn.
 func (c *Controller) Stop() error {
 	rt := c.currentRuntime()
+	return stopRuntime(rt, chat.CancelReasonUserInterruptHard)
+}
+
+// StopForSelection cancels the selected chat turn.
+func (c *Controller) StopForSelection(ctx context.Context, selection Selection) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return stopRuntime(rt, chat.CancelReasonUserInterruptHard)
+}
+
+func stopRuntime(rt *chat.Chat, reason chat.CancelReason) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Cancel(chat.CancelReasonUserInterruptHard)
+	rt.Cancel(reason)
 	return nil
 }
 
 // StopAfterCurrentTurn asks the active chat to stop at the next persisted turn boundary.
 func (c *Controller) StopAfterCurrentTurn() error {
 	rt := c.currentRuntime()
+	return stopRuntime(rt, chat.CancelReasonUserInterrupt)
+}
+
+// StopAfterCurrentTurnForSelection asks the selected chat to stop at the next turn boundary.
+func (c *Controller) StopAfterCurrentTurnForSelection(ctx context.Context, selection Selection) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return stopRuntime(rt, chat.CancelReasonUserInterrupt)
+}
+
+// CompactForSelection starts compaction on the selected chat.
+func (c *Controller) CompactForSelection(ctx context.Context, selection Selection, instructions string) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return compactRuntime(rt, instructions)
+}
+
+func compactRuntime(rt *chat.Chat, instructions string) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Cancel(chat.CancelReasonUserInterrupt)
-	return nil
+	return rt.Compact(instructions)
 }
 
 // Shutdown gracefully drains the active runtime and releases subscriptions.
@@ -753,6 +938,19 @@ func (c *Controller) Compact(instructions string) error {
 // Approve approves a pending tool call in the active chat.
 func (c *Controller) Approve(toolCallID string) error {
 	rt := c.currentRuntime()
+	return approveRuntimeTool(rt, toolCallID)
+}
+
+// ApproveForSelection approves a pending tool call in the selected chat.
+func (c *Controller) ApproveForSelection(ctx context.Context, selection Selection, toolCallID string) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return approveRuntimeTool(rt, toolCallID)
+}
+
+func approveRuntimeTool(rt *chat.Chat, toolCallID string) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -763,6 +961,19 @@ func (c *Controller) Approve(toolCallID string) error {
 // Deny denies a pending tool call in the active chat.
 func (c *Controller) Deny(toolCallID string) error {
 	rt := c.currentRuntime()
+	return denyRuntimeTool(rt, toolCallID)
+}
+
+// DenyForSelection denies a pending tool call in the selected chat.
+func (c *Controller) DenyForSelection(ctx context.Context, selection Selection, toolCallID string) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return denyRuntimeTool(rt, toolCallID)
+}
+
+func denyRuntimeTool(rt *chat.Chat, toolCallID string) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
@@ -901,6 +1112,50 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	})
 	c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": snapshot.Chat.ID})
 	return nil
+}
+
+// NewChatForSelection creates a chat in the selected session without changing controller selection.
+func (c *Controller) NewChatForSelection(ctx context.Context, selection Selection, title string) (domain.Chat, error) {
+	owner, session, parent, _, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	rt, err := owner.NewChat(ctx, parent.ID, title)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	snapshot := rt.Snapshot()
+	if snapshot.Chat.ID == "" {
+		return domain.Chat{}, fmt.Errorf("created chat has no id")
+	}
+	c.mu.Lock()
+	if c.runtimes == nil {
+		c.runtimes = map[id.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[id.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[id.ID]ChatSidebarStatus{}
+	}
+	c.runtimes[snapshot.Chat.ID] = rt
+	snapshot = c.snapshotWithExecProcessesLocked(snapshot)
+	c.snapshots[snapshot.Chat.ID] = snapshot
+	c.statuses[snapshot.Chat.ID] = sidebarStatusFromSnapshot(snapshot)
+	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{snapshot.Chat})
+	c.mu.Unlock()
+	for _, sub := range execSubscriptions {
+		go c.forwardExecRuntime(sub.chatID, sub.events)
+	}
+	c.broadcast("chat_delta", chat.Update{
+		Snapshot:   snapshot,
+		Status:     snapshot.Status,
+		StatusText: snapshot.StatusText,
+		Context:    snapshot.Context,
+		Active:     snapshot.Active,
+	})
+	c.broadcast("chats_delta", map[string]any{"session_id": session.ID, "chat": snapshot.Chat})
+	return snapshot.Chat, nil
 }
 
 // ListChats returns the controller's live chat list for the active session.
@@ -1048,6 +1303,13 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID id.ID) error {
 	return err
 }
 
+// DeleteChatForSelection archives a chat in the selected session.
+func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
+	archived := true
+	_, err := c.UpdateChat(ctx, selection.SessionID, chatID, tools.ChatUpdateRequest{Archived: &archived})
+	return err
+}
+
 // UpdateChat updates chat metadata through the owning session.
 func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	if chatID == "" {
@@ -1076,15 +1338,18 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.
 	}
 	target := status.Chat
 	c.mu.Lock()
-	upsertChat(&c.chats, target)
-	if c.chat.ID == target.ID {
-		c.chat = target
+	matchesActiveSession := c.session.ID == sessionID
+	if matchesActiveSession {
+		upsertChat(&c.chats, target)
+		if c.chat.ID == target.ID {
+			c.chat = target
+		}
 	}
 	if snapshot, ok := c.snapshots[target.ID]; ok {
 		snapshot.Chat = target
 		c.snapshots[target.ID] = snapshot
 	}
-	if archivingActive {
+	if matchesActiveSession && archivingActive {
 		if next, ok := chatByID(c.chats, nextChatID); ok {
 			c.chat = next
 			if rt := c.runtimes[next.ID]; rt != nil {
@@ -1131,6 +1396,34 @@ func (c *Controller) ReorderChats(ctx context.Context, chatIDs []id.ID) error {
 	return nil
 }
 
+// ReorderChatsForSelection persists sidebar chat order for the selected session.
+func (c *Controller) ReorderChatsForSelection(ctx context.Context, selection Selection, chatIDs []id.ID) error {
+	if selection.SessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return err
+	}
+	ordered, err := owner.ReorderChats(ctx, chatIDs)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	for _, item := range ordered {
+		if snapshot, ok := c.snapshots[item.ID]; ok {
+			snapshot.Chat = item
+			c.snapshots[item.ID] = snapshot
+		}
+	}
+	c.mu.Unlock()
+	c.broadcast("chats_delta", map[string]any{"session_id": selection.SessionID, "chats": ordered})
+	return nil
+}
+
 // Sessions returns sessions for the current workspace.
 func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	sessions, err := c.workspaceSessions(ctx)
@@ -1166,19 +1459,34 @@ func (c *Controller) NewSession(ctx context.Context, title string) error {
 
 // NewSessionWithProjectRoot creates and switches to a new session with an explicit project root.
 func (c *Controller) NewSessionWithProjectRoot(ctx context.Context, title string, projectRoot string) error {
+	_, err := c.CreateSession(ctx, title, projectRoot)
+	return err
+}
+
+// CreateSession creates a new session without changing controller selection.
+func (c *Controller) CreateSession(ctx context.Context, title string, projectRoot string) (domain.Session, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		c.mu.RLock()
 		projectRoot = c.session.ProjectRoot
 		c.mu.RUnlock()
 	}
 	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
+		return domain.Session{}, fmt.Errorf("no chat agent")
 	}
 	owner, err := c.agent.CreateSession(ctx, title, projectRoot)
 	if err != nil {
-		return err
+		return domain.Session{}, err
 	}
-	return c.loadSession(ctx, owner.Snapshot().Session.ID, "")
+	session := owner.Snapshot().Session
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	c.mu.Lock()
+	c.sessions = sessions
+	c.mu.Unlock()
+	c.broadcast("sessions_delta", map[string]any{"sessions": sessions})
+	return session, nil
 }
 
 // RenameSession updates a session title.
@@ -1240,25 +1548,8 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if err := c.ensureSessionIdle(ctx, sessionID, chats); err != nil {
 		return err
 	}
-	c.mu.RLock()
-	deletingSelected := c.session.ID == sessionID
-	c.mu.RUnlock()
 	if err := c.agent.DeleteSession(ctx, sessionID); err != nil {
 		return err
-	}
-	if deletingSelected {
-		sessions, err := c.workspaceSessions(ctx)
-		if err != nil {
-			return err
-		}
-		if len(sessions) == 0 {
-			next, err := c.agent.CreateSession(ctx, "New Session", session.ProjectRoot)
-			if err != nil {
-				return err
-			}
-			return c.loadSession(ctx, next.Snapshot().Session.ID, "")
-		}
-		return c.loadSession(ctx, newestSession(sessions).ID, "")
 	}
 	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
@@ -1271,8 +1562,18 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 		delete(c.snapshots, chatRecord.ID)
 		delete(c.statuses, chatRecord.ID)
 	}
+	if c.session.ID == sessionID {
+		c.session = domain.Session{}
+		c.chat = domain.Chat{}
+		c.runtime = nil
+		c.chats = nil
+		c.milestone = planning.Plan{}
+		c.todos = nil
+		c.todosByRef = nil
+		c.workspace = workspacepkg.Status{}
+	}
 	c.mu.Unlock()
-	c.broadcast("snapshot", c.State())
+	c.broadcast("sessions_delta", map[string]any{"sessions": sessions, "deleted_session_id": sessionID})
 	return nil
 }
 
@@ -1310,6 +1611,21 @@ func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	projectRoot := c.session.ProjectRoot
 	c.mu.RUnlock()
 	return c.requestWorkspaceRefresh(ctx, sessionID, projectRoot, workspaceRefreshUser)
+}
+
+// RefreshWorkspaceForSelection requests a workspace scan for the selected session.
+func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) error {
+	if selection.SessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	session, err := sessionpkg.GetSession(ctx, c.store, selection.SessionID)
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+	}
+	return c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshUser)
 }
 
 func (c *Controller) requestWorkspaceRefresh(ctx context.Context, sessionID id.ID, projectRoot string, trigger workspaceRefreshTrigger) error {
@@ -1873,6 +2189,18 @@ func idleStatusesForChats(chats []domain.Chat) map[id.ID]ChatSidebarStatus {
 	return out
 }
 
+func chatStatusesForChats(chats []domain.Chat, statuses map[id.ID]ChatSidebarStatus) []ChatSidebarStatus {
+	out := make([]ChatSidebarStatus, 0, len(chats))
+	for _, item := range chats {
+		status, ok := statuses[item.ID]
+		if !ok {
+			status = idleChatSidebarStatus(item.ID)
+		}
+		out = append(out, status)
+	}
+	return out
+}
+
 func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
 	out := make([]ChatSidebarStatus, 0, len(c.chats))
 	for _, item := range c.chats {
@@ -2010,10 +2338,101 @@ func (c *Controller) currentRuntime() *chat.Chat {
 	return c.runtime
 }
 
+func (c *Controller) resolveSelectedRuntime(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
+	owner, session, chatRecord, err := c.resolveSelectedChat(ctx, selection, allowDefaultChat)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, err
+	}
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, err
+	}
+	c.mu.Lock()
+	if c.runtimes == nil {
+		c.runtimes = map[id.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[id.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[id.ID]ChatSidebarStatus{}
+	}
+	c.runtimes[chatRecord.ID] = rt
+	snapshot := rt.Snapshot()
+	snapshot = c.snapshotWithExecProcessesLocked(snapshot)
+	c.snapshots[chatRecord.ID] = snapshot
+	c.statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
+	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{chatRecord})
+	c.mu.Unlock()
+	for _, sub := range execSubscriptions {
+		go c.forwardExecRuntime(sub.chatID, sub.events)
+	}
+	return owner, session, chatRecord, rt, nil
+}
+
+func (c *Controller) resolveSelectedChat(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, error) {
+	if selection.SessionID == "" {
+		return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, err
+	}
+	ownerSnapshot := owner.Snapshot()
+	session := ownerSnapshot.Session
+	if session.ID == "" {
+		return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("session %s not found", selection.SessionID)
+	}
+	if !c.sessionInWorkspace(session) {
+		return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+	}
+	chatID := selection.ChatID
+	if chatID == "" {
+		if !allowDefaultChat {
+			return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("chat id is required")
+		}
+		chatRecord := newestOpenChat(ownerSnapshot.Chats)
+		if chatRecord.ID == "" {
+			chatRecord, err = owner.EnsureDefaultChat(ctx)
+			if err != nil {
+				return nil, domain.Session{}, domain.Chat{}, err
+			}
+		}
+		chatID = chatRecord.ID
+	}
+	chatRecord, err := owner.EnsureChatModel(ctx, chatID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, err
+	}
+	session, chatRecord, _, err = owner.TouchSelection(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, err
+	}
+	chatRecord.PermissionProfile = ""
+	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
+	return owner, session, chatRecord, nil
+}
+
 func (c *Controller) accessStateLocked() AccessState {
 	settings := c.session.AccessSettings
 	if accesssettings.IsZero(settings) {
 		settings = c.cfg.Access
+	}
+	return AccessState{
+		Settings: accesssettings.Normalize(settings),
+		Presets:  accesssettings.Presets(),
+	}
+}
+
+func (c *Controller) accessStateForSession(session domain.Session) AccessState {
+	settings := session.AccessSettings
+	if accesssettings.IsZero(settings) {
+		c.mu.RLock()
+		settings = c.cfg.Access
+		c.mu.RUnlock()
 	}
 	return AccessState{
 		Settings: accesssettings.Normalize(settings),
@@ -2073,6 +2492,51 @@ func (c *Controller) broadcast(typ string, payload any) {
 	}
 }
 
+func (c *Controller) contextWindowForChat(chatRecord domain.Chat) int {
+	providerID := strings.TrimSpace(chatRecord.ProviderID)
+	modelID := strings.TrimSpace(chatRecord.ModelID)
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	if providerID == "" || modelID == "" {
+		if strings.TrimSpace(cfg.DefaultProvider) != "" && strings.TrimSpace(cfg.DefaultModel) != "" {
+			return cfg.ContextWindow(cfg.DefaultProvider, cfg.DefaultModel)
+		}
+		return 32768
+	}
+	return cfg.ContextWindow(providerID, modelID)
+}
+
+func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
+	providerID := strings.TrimSpace(chatRecord.ProviderID)
+	modelID := strings.TrimSpace(chatRecord.ModelID)
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok {
+		providerCfg = config.Provider{}
+	}
+	info := ModelInfo{
+		ProviderID:    providerID,
+		ModelID:       modelID,
+		ContextWindow: c.contextWindowForChat(chatRecord),
+		SupportsTools: true,
+	}
+	if modelID == "" {
+		return info
+	}
+	enriched, err := provider.NewCapabilityStore(cfg.StateDir()).EnrichModel(providerID, providerCfg, domain.Model{ID: modelID})
+	if err != nil {
+		return info
+	}
+	info.SupportsImages = enriched.SupportsImages
+	info.SupportsPDFs = enriched.SupportsPDFs
+	info.CapabilitiesKnown = enriched.CapabilitiesKnown
+	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
+	return info
+}
+
 func newestSession(sessions []domain.Session) domain.Session {
 	var best domain.Session
 	for _, item := range sessions {
@@ -2090,6 +2554,19 @@ func newestChat(chats []domain.Chat) domain.Chat {
 	var best domain.Chat
 	for _, item := range chats {
 		if item.ID == "" {
+			continue
+		}
+		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
+			best = item
+		}
+	}
+	return best
+}
+
+func newestOpenChat(chats []domain.Chat) domain.Chat {
+	var best domain.Chat
+	for _, item := range chats {
+		if item.Archived || item.ID == "" {
 			continue
 		}
 		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {

@@ -497,6 +497,46 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	return nil
 }
 
+// SetModelForSelection persists the selected chat model and updates its live runtime.
+func (c *Controller) SetModelForSelection(ctx context.Context, selection Selection, providerID, modelID string) error {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" {
+		return fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return fmt.Errorf("model id is required")
+	}
+	if !c.cfg.HasUsableProvider(providerID) {
+		return fmt.Errorf("provider %q is not configured", providerID)
+	}
+	c.ensureModelConfig(ctx, providerID, modelID)
+	owner, _, chatRecord, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	chatRecord, err = owner.SetChatModel(ctx, chatRecord.ID, providerID, modelID)
+	if err != nil {
+		return err
+	}
+	session := owner.Snapshot().Session
+	rt.SetChat(chatRecord)
+	rt.SetSession(session)
+	c.mu.Lock()
+	for idx := range c.sessions {
+		if c.sessions[idx].ID == session.ID {
+			c.sessions[idx] = session
+		}
+	}
+	if snapshot, ok := c.snapshots[chatRecord.ID]; ok {
+		snapshot.Chat = chatRecord
+		snapshot.Session = session
+		c.snapshots[chatRecord.ID] = snapshot
+	}
+	c.mu.Unlock()
+	return nil
+}
+
 // SetAccessSettings updates the active session sandbox access settings.
 func (c *Controller) SetAccessSettings(ctx context.Context, settings accesssettings.Settings) error {
 	settings = accesssettings.Normalize(settings)
@@ -532,6 +572,53 @@ func (c *Controller) SetAccessSettings(ctx context.Context, settings accesssetti
 	for id, snapshot := range c.snapshots {
 		snapshot.Session = session
 		c.snapshots[id] = snapshot
+	}
+	c.mu.Unlock()
+	for _, rt := range runtimes {
+		rt.SetSession(session)
+	}
+	return nil
+}
+
+// SetAccessSettingsForSelection updates the selected session sandbox access settings.
+func (c *Controller) SetAccessSettingsForSelection(ctx context.Context, selection Selection, settings accesssettings.Settings) error {
+	settings = accesssettings.Normalize(settings)
+	if err := accesssettings.Validate(settings); err != nil {
+		return err
+	}
+	if selection.SessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return err
+	}
+	session, err := owner.SetAccessSettings(ctx, settings)
+	if err != nil {
+		return err
+	}
+	snapshot := owner.Snapshot()
+	runtimes := make([]*chat.Chat, 0, len(snapshot.Snapshots))
+	for _, item := range snapshot.Chats {
+		rt, err := owner.Chat(ctx, item.ID)
+		if err == nil && rt != nil {
+			runtimes = append(runtimes, rt)
+		}
+	}
+	c.mu.Lock()
+	for idx := range c.sessions {
+		if c.sessions[idx].ID == session.ID {
+			c.sessions[idx] = session
+		}
+	}
+	for id, item := range c.snapshots {
+		if item.Session.ID == session.ID {
+			item.Session = session
+			c.snapshots[id] = item
+		}
 	}
 	c.mu.Unlock()
 	for _, rt := range runtimes {

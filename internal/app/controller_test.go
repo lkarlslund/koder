@@ -891,12 +891,16 @@ func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
 	firstState := ctrl.State()
 	firstSessionID := firstState.Session.ID
 	firstChatID := firstState.ActiveChatID
-	if err := ctrl.NewSession(ctx, "Second"); err != nil {
+	secondSession, err := ctrl.CreateSession(ctx, "Second", firstState.Session.ProjectRoot)
+	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	secondState := ctrl.State()
-	if secondState.Session.ID == firstSessionID {
-		t.Fatal("expected second session to be selected")
+	if got := ctrl.State().Session.ID; got != firstSessionID {
+		t.Fatalf("expected controller selection to remain %s, got %s", firstSessionID, got)
+	}
+	secondState, err := ctrl.StateForSelection(ctx, Selection{SessionID: secondSession.ID})
+	if err != nil {
+		t.Fatalf("state for second session: %v", err)
 	}
 	secondChatID := secondState.ActiveChatID
 
