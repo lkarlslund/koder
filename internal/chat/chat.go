@@ -2522,20 +2522,11 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {
-	priority := []domain.QueuedInputDelivery{
-		domain.QueuedInputDeliveryContinue,
-		domain.QueuedInputDeliveryNextTurn,
-		domain.QueuedInputDeliveryTurnBoundary,
-	}
-	for _, delivery := range priority {
-		for idx, item := range items {
-			if item.Held {
-				continue
-			}
-			if domain.DeliveryForQueuedInput(item) == delivery {
-				return idx
-			}
+	for idx, item := range items {
+		if item.Held {
+			continue
 		}
+		return idx
 	}
 	return -1
 }

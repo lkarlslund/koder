@@ -570,6 +570,47 @@ func TestRuntimeIdleSteerDispatchesAsTurn(t *testing.T) {
 	close(events)
 }
 
+func TestRuntimeDispatchesQueuedInputsFIFOAcrossDeliveryKinds(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	steerEvents := make(chan domain.Event, 1)
+	steerEvents <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(steerEvents)
+	continueEvents := make(chan domain.Event, 1)
+	continueEvents <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(continueEvents)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{steerEvents, continueEvents}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "queued steer"})
+	rt.Enqueue(QueueItem{Kind: QueueKindContinue, Source: domain.UserMessageSourceAutoResume})
+
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for steer prompt: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "queued steer" {
+		t.Fatalf("first prompt = %q, want queued steer", got)
+	}
+	deadline = time.After(2 * time.Second)
+	for runner.continueCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for continue after steer: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+		t.Fatalf("queued inputs = %#v", got)
+	}
+}
+
 func TestRuntimeArchiveRequiresIdleChat(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
