@@ -2839,7 +2839,7 @@ func (e *Engine) fitCompactionRequestToContext(session domain.Session, chat doma
 	if e.compactionRequestTokenBudget(chat) <= 0 {
 		return provider.ChatRequest{}, "", false, nil
 	}
-	low := max(0, min(base.Start, keepStart))
+	low := max(0, min(base.MinKeepStart, keepStart))
 	high := max(0, min(keepStart, len(timeline)))
 	var bestReq provider.ChatRequest
 	var bestFirstKeptItemID string
@@ -2917,23 +2917,25 @@ func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Ses
 }
 
 type compactionCutBase struct {
-	Start   int
-	Summary string
+	Start        int
+	MinKeepStart int
+	Summary      string
 }
 
 func compactionBaseForNextCut(timeline []domain.TimelineItem, keepStart int) compactionCutBase {
 	keepStart = max(0, min(keepStart, len(timeline)))
-	base := compactionCutBase{Start: compactionSegmentStartForNextCut(timeline, keepStart)}
+	segmentStart := compactionSegmentStartForNextCut(timeline, keepStart)
+	base := compactionCutBase{Start: segmentStart, MinKeepStart: segmentStart}
 	for idx, item := range timeline {
 		compacted, ok := item.Content.(domain.Compaction)
 		if !ok || strings.TrimSpace(compacted.Summary) == "" {
 			continue
 		}
 		firstKeptIdx := firstKeptTimelineIndex(timeline, compacted.FirstKeptItemID)
-		if firstKeptIdx < base.Start || firstKeptIdx >= keepStart || firstKeptIdx >= idx {
+		if firstKeptIdx < 0 || firstKeptIdx >= segmentStart || firstKeptIdx >= idx {
 			continue
 		}
-		if !validCompactionBoundary(timeline[base.Start:idx], compacted.FirstKeptItemID) {
+		if !validCompactionBoundary(timeline[:idx], compacted.FirstKeptItemID) {
 			continue
 		}
 		base.Start = firstKeptIdx

@@ -5067,6 +5067,65 @@ func TestCompactionRequestStartsAfterLatestValidCompaction(t *testing.T) {
 	}
 }
 
+func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.AutoCompactAt = 80
+	cfg.CompactionKeepToolCalls = 1
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
+	engine := New(cfg, nil, nil)
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, ProviderID: "test", ModelID: "test-model", WorkflowRole: chatrole.Compaction}
+	timeline := []domain.TimelineItem{
+		{ID: "old-1", Seq: 1, Content: domain.UserMessage{Text: "old prefix " + strings.Repeat("a", 300)}},
+		{ID: "old-2", Seq: 2, Content: domain.UserMessage{Text: "old kept"}},
+		{ID: "compact-1", Seq: 3, Content: domain.Compaction{Summary: "old summary", Status: "completed", FirstKeptItemID: "old-2"}},
+		{ID: "after-compact-user", Seq: 4, Content: domain.UserMessage{Text: "current segment start"}},
+	}
+	for idx := range 25 {
+		timeline = append(timeline, domain.TimelineItem{
+			ID:      id.ID(fmt.Sprintf("current-%02d", idx)),
+			Seq:     int64(len(timeline) + 1),
+			Content: domain.UserMessage{Text: fmt.Sprintf("current segment %02d %s", idx, strings.Repeat("b", 400))},
+		})
+	}
+	timeline = append(timeline,
+		domain.TimelineItem{ID: "tail-tool", Seq: int64(len(timeline) + 1), Content: domain.AssistantMessage{Tools: []domain.ToolCall{{Tool: domain.ToolKindFileRead, ToolCallID: "call_tail"}}}},
+		domain.TimelineItem{ID: "tail-user", Seq: int64(len(timeline) + 2), Content: domain.UserMessage{Text: "tail should remain raw"}},
+	)
+
+	_, firstKept, err := engine.buildCompactionRequestForTimeline(session, chat, timeline, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstKeptIdx := firstKeptTimelineIndex(timeline, firstKept)
+	if firstKeptIdx <= 3 {
+		t.Fatalf("expected repeated compaction first kept item inside current segment, got %q at %d", firstKept, firstKeptIdx)
+	}
+	timeline = append(timeline, domain.TimelineItem{
+		ID:  "compact-2",
+		Seq: int64(len(timeline) + 1),
+		Content: domain.Compaction{
+			Summary:         "new summary",
+			Status:          "completed",
+			FirstKeptItemID: firstKept,
+		},
+	})
+	messages, err := engine.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(provider.SerializePromptEnvelope(messages))
+	if !strings.Contains(joined, "new summary") {
+		t.Fatalf("expected latest compaction summary in replay, got %s", joined)
+	}
+	if strings.Contains(joined, "old prefix") || strings.Contains(joined, "current segment start") {
+		t.Fatalf("expected repeated compaction to replace prior history, got %s", joined)
+	}
+	if !strings.Contains(joined, "tail should remain raw") {
+		t.Fatalf("expected preserved tail after repeated compaction, got %s", joined)
+	}
+}
+
 func providerMessagesText(messages []provider.Message) string {
 	var parts []string
 	for _, msg := range messages {
