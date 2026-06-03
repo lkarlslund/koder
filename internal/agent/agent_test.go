@@ -1774,7 +1774,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	}
 }
 
-func TestBuildConversationCoalescesSteerAfterToolResultIntoToolMessage(t *testing.T) {
+func TestBuildConversationRendersSteerAfterToolResultAsSeparateUserMessage(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1797,24 +1797,23 @@ func TestBuildConversationCoalescesSteerAfterToolResultIntoToolMessage(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) < 3 {
-		t.Fatalf("expected assistant tool call and coalesced tool output, got %#v", conversation)
+	if len(conversation) < 4 {
+		t.Fatalf("expected assistant tool call, tool output, and separate steer, got %#v", conversation)
 	}
-	last := conversation[len(conversation)-1]
-	if last.Role != provider.RoleTool || last.ToolCallID != "call_1" {
-		t.Fatalf("expected steer to remain in tool-result continuation, got %#v", last)
+	toolMsg := conversation[len(conversation)-2]
+	if toolMsg.Role != provider.RoleTool || toolMsg.ToolCallID != "call_1" {
+		t.Fatalf("expected tool result before steer, got %#v", toolMsg)
 	}
-	for _, want := range []string{"/typed/output", "User steering update:", "<user_input>\nwe have pdftotext\n</user_input>"} {
-		if !strings.Contains(last.Content, want) {
-			t.Fatalf("coalesced tool message missing %q in %q", want, last.Content)
-		}
+	if toolMsg.Content != "/typed/output" {
+		t.Fatalf("expected plain tool output without steer, got %q", toolMsg.Content)
 	}
-	for idx, msg := range conversation {
-		if idx == len(conversation)-1 {
-			continue
-		}
-		if msg.Role == provider.RoleUser && strings.Contains(msg.Content, "User steering update:") {
-			t.Fatalf("steer should not render as separate user message after tool result: %#v", conversation)
+	steerMsg := conversation[len(conversation)-1]
+	if steerMsg.Role != provider.RoleUser {
+		t.Fatalf("expected steer as separate user message, got %#v", steerMsg)
+	}
+	for _, want := range []string{"User steering update:", "<user_input>\nwe have pdftotext\n</user_input>"} {
+		if !strings.Contains(steerMsg.Content, want) {
+			t.Fatalf("steer message missing %q in %q", want, steerMsg.Content)
 		}
 	}
 }
