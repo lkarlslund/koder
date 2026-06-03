@@ -487,7 +487,7 @@
       const data = toolData(tool);
       const args = toolArgs(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
-      const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
+      const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command', 'cmd']);
       switch (kind) {
         case 'file_read': return readTitle(path, args, data);
         case 'file_write': return path ? 'Write ' + path : 'Write file';
@@ -496,7 +496,7 @@
           if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
           return 'Run command';
         }
-        case 'exec_command': return 'Start exec';
+        case 'exec_command': return command ? 'Start exec ' + command : 'Start exec';
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
         case 'exec_write_stdin': return 'Write exec stdin';
@@ -516,6 +516,7 @@
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       const values = [];
       if (args.command) values.push(args.command);
+      if (args.cmd) values.push(args.cmd);
       for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
         if (args[key]) values.push(key + '=' + args[key]);
       }
@@ -525,12 +526,12 @@
       const output = firstValue(data, ['output', 'Output']);
       if (output) return output;
       const lines = [];
-      const message = firstValue(data, ['message', 'Message']);
       const processID = firstValue(data, ['process_id', 'ProcessID']);
+      const command = firstValue(data, ['command', 'Command']);
       const state = firstValue(data, ['state', 'State']);
       const exitCode = firstValue(data, ['exit_code', 'ExitCode']);
-      if (message) lines.push(message);
       if (processID) lines.push('process_id: ' + processID);
+      if (command) lines.push('command: ' + command);
       if (state) lines.push('state: ' + state);
       if (exitCode !== '') lines.push('exit_code: ' + exitCode);
       return lines.length ? lines : fallback;

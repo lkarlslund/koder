@@ -105,6 +105,55 @@ func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	}
 }
 
+func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
+	ctrl, _, execManager := newTestControllerWithExec(t)
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	events, unsub, err := ctrl.SubscribeSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("subscribe selection: %v", err)
+	}
+	defer unsub()
+	snap, err := execManager.Start(ctx, execruntime.StartRequest{
+		SessionID: selection.SessionID,
+		ChatID:    selection.ChatID,
+		Command:   "sleep 1",
+	})
+	if err != nil {
+		t.Fatalf("start exec: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = execManager.Terminate(context.Background(), execruntime.TerminateRequest{
+			SessionID: selection.SessionID,
+			ChatID:    selection.ChatID,
+			ProcessID: snap.ProcessID,
+		})
+	})
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				t.Fatal("selection subscription closed")
+			}
+			if event.Type != "chat_delta" {
+				continue
+			}
+			update, ok := event.Payload.(chat.Update)
+			if !ok {
+				t.Fatalf("expected chat update payload, got %T", event.Payload)
+			}
+			for _, process := range update.Snapshot.ExecProcesses {
+				if process.ProcessID == snap.ProcessID && process.Command == "sleep 1" && process.State == "running" {
+					return
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for selected exec process update")
+		}
+	}
+}
+
 func TestControllerSelectedStateCanCreateAndSelectChats(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	ctx := context.Background()

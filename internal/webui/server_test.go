@@ -1111,7 +1111,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `tool-status-badge-error`) {
 		t.Fatalf("expected colorful tool status badges with done wording")
 	}
-	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
+	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) ||
+		!strings.Contains(fullPage, `if (args.cmd) values.push(args.cmd)`) ||
+		!strings.Contains(fullPage, `case 'exec_command': return command ? 'Start exec ' + command : 'Start exec'`) ||
+		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
+		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
 	if !strings.Contains(fullPage, `tool-result-body-mono`) || !strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {

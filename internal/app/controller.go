@@ -15,6 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -663,6 +664,16 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 		return nil, nil, err
 	}
 	sessionEvents, sessionUnsub := owner.Subscribe()
+	var execEvents <-chan execruntime.Event
+	var execUnsub func()
+	if selection.ChatID != "" {
+		c.mu.RLock()
+		manager := c.execManagerLocked()
+		c.mu.RUnlock()
+		if manager != nil {
+			execEvents, execUnsub = manager.Subscribe(selection.ChatID)
+		}
+	}
 	out := make(chan Event, 64)
 	done := make(chan struct{})
 	var unsubOnce sync.Once
@@ -680,6 +691,17 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 					default:
 					}
 				}
+			case _, ok := <-execEvents:
+				if !ok {
+					execEvents = nil
+					continue
+				}
+				if converted, ok := c.eventForSelectedExec(ctx, owner, selection); ok {
+					select {
+					case out <- converted:
+					default:
+					}
+				}
 			case <-done:
 				return
 			}
@@ -689,6 +711,9 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 		unsubOnce.Do(func() {
 			close(done)
 			sessionUnsub()
+			if execUnsub != nil {
+				execUnsub()
+			}
 		})
 	}
 	return out, unsub, nil
@@ -707,6 +732,14 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event) (Event, boo
 		if update.Snapshot.Chat.ID == "" {
 			return Event{}, false
 		}
+		session := event.Session
+		if session.ID == "" {
+			session = update.Snapshot.Session
+		}
+		if session.ID == "" {
+			session.ID = event.SessionID
+		}
+		update.Snapshot = c.snapshotWithExecProcessesForSession(session, update.Snapshot)
 		if update.Status == "" {
 			update.Status = update.Snapshot.Status
 		}
@@ -728,6 +761,46 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event) (Event, boo
 	default:
 		return Event{}, false
 	}
+}
+
+func (c *Controller) eventForSelectedExec(ctx context.Context, owner *sessionpkg.Session, selection Selection) (Event, bool) {
+	if owner == nil || selection.SessionID == "" || selection.ChatID == "" {
+		return Event{}, false
+	}
+	sessionSnapshot := owner.Snapshot()
+	snapshot := sessionSnapshot.Snapshots[selection.ChatID]
+	if snapshot.Chat.ID == "" {
+		if rt, err := owner.Chat(ctx, selection.ChatID); err == nil && rt != nil {
+			snapshot = rt.Snapshot()
+		}
+	}
+	if snapshot.Chat.ID == "" {
+		for _, item := range sessionSnapshot.Chats {
+			if item.ID == selection.ChatID {
+				snapshot.Chat = item
+				break
+			}
+		}
+	}
+	if snapshot.Chat.ID == "" {
+		return Event{}, false
+	}
+	session := sessionSnapshot.Session
+	if session.ID == "" {
+		session.ID = selection.SessionID
+	}
+	if snapshot.Session.ID == "" {
+		snapshot.Session = session
+	}
+	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
+	return Event{Type: "chat_delta", Payload: chat.Update{
+		Snapshot:   snapshot,
+		Status:     snapshot.Status,
+		StatusText: snapshot.StatusText,
+		Context:    snapshot.Context,
+		TokenUsage: snapshot.TokenUsage,
+		Active:     snapshot.Active,
+	}}, true
 }
 
 // SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
