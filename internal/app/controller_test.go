@@ -156,6 +156,50 @@ func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
 	}
 }
 
+func TestControllerSelectionStripsOffscreenTranscriptItems(t *testing.T) {
+	ctrl, _, _ := newTestControllerWithExec(t)
+	selectedChatID := id.ID("selected-chat")
+	offscreenChatID := id.ID("offscreen-chat")
+	item := domain.TimelineItem{
+		ID:      "item-1",
+		ChatID:  offscreenChatID,
+		Seq:     1,
+		Content: domain.AssistantMessage{Text: "streaming elsewhere"},
+	}
+	event, ok := ctrl.eventForSelectedSession(sessionpkg.Event{
+		Kind:      sessionpkg.EventChatChanged,
+		SessionID: "session-1",
+		Update: chat.Update{
+			Event: &domain.Event{
+				Kind: domain.EventKindMessageDelta,
+				Item: item,
+				Text: "streaming elsewhere",
+			},
+			Snapshot: chat.Snapshot{
+				Chat:   domain.Chat{ID: offscreenChatID, SessionID: "session-1", Title: "Offscreen"},
+				Status: chat.StatusStreamingResponse,
+				Active: true,
+			},
+			TranscriptChanged: true,
+			ContextChanged:    true,
+			StatusChanged:     true,
+		},
+	}, selectedChatID)
+	if !ok {
+		t.Fatal("expected chat delta")
+	}
+	update, ok := event.Payload.(chat.Update)
+	if !ok {
+		t.Fatalf("expected chat update, got %T", event.Payload)
+	}
+	if update.Event != nil || update.TranscriptChanged || update.ContextChanged {
+		t.Fatalf("expected offscreen transcript payload to be stripped, got %#v", update)
+	}
+	if update.Snapshot.Chat.ID != offscreenChatID || update.Status != chat.StatusStreamingResponse || !update.Active {
+		t.Fatalf("expected offscreen sidebar status to remain, got %#v", update)
+	}
+}
+
 func TestControllerSelectedStateCanCreateAndSelectChats(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	ctx := context.Background()

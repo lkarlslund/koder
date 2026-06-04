@@ -1164,8 +1164,9 @@
           if (!delta) return;
           const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim();
           if (!id) return;
-          const scroll = this.transcriptScrollState();
-          const seq = ++this.scrollRestoreSeq;
+          const active = id === this.activeChatID();
+          const scroll = active ? this.transcriptScrollState() : null;
+          const seq = active ? ++this.scrollRestoreSeq : this.scrollRestoreSeq;
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[id] || snapshots[String(id)] || {};
           const next = {...current};
@@ -1193,9 +1194,11 @@
           }
           if (delta.error) this.error = delta.error;
           this.syncInterruptArmed();
-          this.afterTranscriptDOMUpdate(() => {
-            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-          });
+          if (active) {
+            this.afterTranscriptDOMUpdate(() => {
+              if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
+            });
+          }
           this.reportClientStateSoon();
         },
         patchTimelineItem(timeline, item) {

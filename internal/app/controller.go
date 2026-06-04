@@ -685,7 +685,7 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 				if !ok {
 					return
 				}
-				if converted, ok := c.eventForSelectedSession(event); ok {
+				if converted, ok := c.eventForSelectedSession(event, selection.ChatID); ok {
 					select {
 					case out <- converted:
 					default:
@@ -719,7 +719,7 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 	return out, unsub, nil
 }
 
-func (c *Controller) eventForSelectedSession(event sessionpkg.Event) (Event, bool) {
+func (c *Controller) eventForSelectedSession(event sessionpkg.Event, selectedChatID id.ID) (Event, bool) {
 	switch event.Kind {
 	case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived:
 		update := event.Update
@@ -747,6 +747,11 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event) (Event, boo
 			update.StatusText = update.Snapshot.StatusText
 		}
 		update.Active = update.Active || update.Snapshot.Active
+		if selectedChatID != "" && update.Snapshot.Chat.ID != selectedChatID {
+			update.Event = nil
+			update.TranscriptChanged = false
+			update.ContextChanged = false
+		}
 		return Event{Type: "chat_delta", Payload: update}, true
 	case sessionpkg.EventPlanningChanged:
 		return Event{Type: "planning_delta", Payload: map[string]any{
