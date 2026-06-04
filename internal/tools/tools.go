@@ -417,6 +417,8 @@ func toolAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, cont
 }
 
 func toolAttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+	unlock := store.LockTimelineMutation()
+	defer unlock()
 	items, err := toolTimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err

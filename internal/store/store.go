@@ -2,11 +2,20 @@ package store
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/lkarlslund/koder/internal/store/driver"
 	"github.com/lkarlslund/koder/internal/store/driver/jsonfsdriver"
 	"github.com/lkarlslund/koder/internal/store/driver/pebbledriver"
 )
+
+var timelineMutationMu sync.Mutex
+
+// LockTimelineMutation serializes read-modify-write timeline updates.
+func LockTimelineMutation() func() {
+	timelineMutationMu.Lock()
+	return timelineMutationMu.Unlock
+}
 
 const (
 	BackendPebble = "pebble"

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -23,8 +22,6 @@ type Approval struct {
 	Status     domain.ApprovalStatus
 	CreatedAt  time.Time
 }
-
-var toolCallStorageMu sync.Mutex
 
 func TimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
@@ -266,8 +263,8 @@ func failToolCallsMatching(ctx context.Context, st *store.Store, chatID id.ID, m
 	if message == "" {
 		message = "Tool execution failed because koder restarted before the tool completed."
 	}
-	toolCallStorageMu.Lock()
-	defer toolCallStorageMu.Unlock()
+	unlock := store.LockTimelineMutation()
+	defer unlock()
 	items, err := TimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return 0, err
@@ -341,8 +338,8 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCall
 	if toolCallID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("update tool call: tool call id is required")
 	}
-	toolCallStorageMu.Lock()
-	defer toolCallStorageMu.Unlock()
+	unlock := store.LockTimelineMutation()
+	defer unlock()
 	items, err := TimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
