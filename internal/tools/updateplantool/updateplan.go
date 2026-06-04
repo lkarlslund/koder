@@ -92,23 +92,7 @@ func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.
 	if err != nil {
 		return nil, err
 	}
-	return planUpdatedEvents(req.Tool, events), nil
-}
-
-func planUpdatedEvents(tool domain.ToolKind, events <-chan domain.Event) <-chan domain.Event {
-	out := make(chan domain.Event)
-	go func() {
-		defer close(out)
-		for evt := range events {
-			if evt.Kind == domain.EventKindToolResult {
-				evt.Kind = domain.EventKindStatus
-				evt.Text = "Plan updated"
-				evt.Tool = tool
-			}
-			out <- evt
-		}
-	}()
-	return out
+	return events, nil
 }
 
 func normalizePlan(raw string) ([]step, error) {

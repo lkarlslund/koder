@@ -52,21 +52,5 @@ func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.
 	if err != nil {
 		return nil, err
 	}
-	return taskUpdateEvents(task.Body, req.Tool, events), nil
-}
-
-func taskUpdateEvents(body string, tool domain.ToolKind, events <-chan domain.Event) <-chan domain.Event {
-	out := make(chan domain.Event)
-	go func() {
-		defer close(out)
-		for evt := range events {
-			if evt.Kind == domain.EventKindToolResult {
-				evt.Kind = domain.EventKindTaskUpdate
-				evt.Text = body
-				evt.Tool = tool
-			}
-			out <- evt
-		}
-	}()
-	return out
+	return events, nil
 }

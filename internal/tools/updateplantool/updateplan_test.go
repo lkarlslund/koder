@@ -52,9 +52,23 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := modeltest.AppendTimeline(context.Background(), st, chat.ID, domain.AssistantMessage{
+		Tools: []domain.ToolCall{{
+			ToolCallID: "call_plan",
+			Tool:       domain.ToolKindUpdatePlan,
+			Status:     domain.ToolStatusPending,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, ChatID: chat.ID, SessionControl: tooltest.NewSessionControl(st)}
 	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
-		Tool: domain.ToolKindUpdatePlan,
+		Tool:       domain.ToolKindUpdatePlan,
+		ToolCallID: "call_plan",
 		Args: map[string]string{
 			"plan":        `[{"step":"Inspect","status":"completed"}]`,
 			"explanation": "Done",
@@ -67,12 +81,16 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	evt := <-events
-	if evt.Kind != domain.EventKindStatus || evt.Text != "Plan updated" {
+	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindUpdatePlan || evt.Item.ID == "" {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
+	assistant, ok := evt.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant item, got %#v", evt.Item.Content)
+	}
+	call := assistant.ToolByID("call_plan")
+	if call == nil || call.Status != domain.ToolStatusDone || call.Result == nil {
+		t.Fatalf("expected completed plan tool call, got %#v", call)
 	}
 	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -81,12 +99,16 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("unexpected stored plan output: %#v", items)
 	}
-	exec, ok := items[0].Content.(domain.ToolExecution)
-	if !ok || exec.Result == nil {
-		t.Fatalf("expected plan tool execution, got %#v", items[0])
+	storedAssistant, ok := items[0].Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant plan tool call, got %#v", items[0])
 	}
-	if _, ok := exec.Result.Data.(domain.UpdatePlanStoredResult); !ok {
-		t.Fatalf("expected typed plan result, got %#v", exec.Result.Data)
+	storedCall := storedAssistant.ToolByID("call_plan")
+	if storedCall == nil || storedCall.Result == nil {
+		t.Fatalf("expected stored plan result, got %#v", storedCall)
+	}
+	if _, ok := storedCall.Result.Data.(domain.UpdatePlanStoredResult); !ok {
+		t.Fatalf("expected typed plan result, got %#v", storedCall.Result.Data)
 	}
 }
 

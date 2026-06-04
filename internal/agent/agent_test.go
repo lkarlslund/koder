@@ -6300,7 +6300,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evt.Kind != domain.EventKindTaskUpdate || evt.Text != "write docs" {
+	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindTask || evt.Item.ID == "" {
 		t.Fatalf("unexpected task update event: %#v", evt)
 	}
 
