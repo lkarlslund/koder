@@ -56,7 +56,7 @@ func (e *Engine) Sessions(ctx context.Context) ([]domain.Session, error) {
 }
 
 // CreateSession creates, configures, and loads a live session owner.
-func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (*sessionpkg.Session, error) {
+func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, createProjectRoot bool) (*sessionpkg.Session, error) {
 	if e == nil || e.store == nil {
 		return nil, fmt.Errorf("engine store is required")
 	}
@@ -68,7 +68,19 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 	if projectRoot != "" {
 		info, err := os.Stat(projectRoot)
 		if err != nil {
-			return nil, err
+			if !os.IsNotExist(err) || !createProjectRoot {
+				if os.IsNotExist(err) {
+					return nil, fmt.Errorf("project root does not exist: %s", projectRoot)
+				}
+				return nil, err
+			}
+			if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+				return nil, fmt.Errorf("create project root %s: %w", projectRoot, err)
+			}
+			info, err = os.Stat(projectRoot)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !info.IsDir() {
 			return nil, fmt.Errorf("project root must be a directory: %s", projectRoot)

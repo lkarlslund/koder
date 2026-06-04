@@ -999,19 +999,36 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	if len(sessionState.Sessions) != 2 {
 		t.Fatalf("expected both project-root sessions, got %#v", sessionState.Sessions)
 	}
-	created, err := ctrl.CreateSession(ctx, "Second A", workspaceA)
+	created, err := ctrl.CreateSession(ctx, "Second A", workspaceA, false)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if got := created.ProjectRoot; got != workspaceA {
 		t.Fatalf("expected new session project root %q, got %q", workspaceA, got)
 	}
+	missingRoot := filepath.Join(t.TempDir(), "missing", "project")
+	if _, err := ctrl.CreateSession(ctx, "Missing", missingRoot, false); err == nil || !strings.Contains(err.Error(), "project root does not exist") {
+		t.Fatalf("expected missing project root error, got %v", err)
+	}
+	if _, err := os.Stat(missingRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected missing project root to remain absent, got %v", err)
+	}
+	createdMissing, err := ctrl.CreateSession(ctx, "Created Missing", missingRoot, true)
+	if err != nil {
+		t.Fatalf("create missing project root session: %v", err)
+	}
+	if got := createdMissing.ProjectRoot; got != missingRoot {
+		t.Fatalf("expected created project root %q, got %q", missingRoot, got)
+	}
+	if info, err := os.Stat(missingRoot); err != nil || !info.IsDir() {
+		t.Fatalf("expected project root directory to be created, info=%#v err=%v", info, err)
+	}
 	sessionState, err = ctrl.Sessions(ctx)
 	if err != nil {
 		t.Fatalf("sessions after new: %v", err)
 	}
-	if len(sessionState.Sessions) != 3 {
-		t.Fatalf("expected three sessions, got %#v", sessionState.Sessions)
+	if len(sessionState.Sessions) != 4 {
+		t.Fatalf("expected four sessions, got %#v", sessionState.Sessions)
 	}
 }
 
@@ -1022,7 +1039,7 @@ func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
 	firstState := ctrl.State()
 	firstSessionID := firstState.Session.ID
 	firstChatID := firstState.ActiveChatID
-	secondSession, err := ctrl.CreateSession(ctx, "Second", firstState.Session.ProjectRoot)
+	secondSession, err := ctrl.CreateSession(ctx, "Second", firstState.Session.ProjectRoot, false)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -1409,7 +1426,7 @@ func TestControllerSelectedSessionPersistsLastUsedSession(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	first := ctrl.State().Session.ID
-	if _, err := ctrl.CreateSession(ctx, "Second", workdir); err != nil {
+	if _, err := ctrl.CreateSession(ctx, "Second", workdir, false); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if _, err := ctrl.StateForSelection(ctx, Selection{SessionID: first}); err != nil {

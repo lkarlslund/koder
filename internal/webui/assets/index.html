@@ -697,10 +697,17 @@
         <label class="form-label mb-0">
           <span class="small text-secondary">Project folder</span>
           <div class="input-group mt-1">
-            <input class="form-control" x-model="sessionDraft.projectRoot" :readonly="sessionEditorMode === 'edit'" placeholder="/path/to/project">
+            <input class="form-control" x-model="sessionDraft.projectRoot" :readonly="sessionEditorMode === 'edit'" placeholder="/path/to/project" @input="sessionDraft.createProjectRoot = false; sessionDraft.missingProjectRoot = ''; sessionDraft.error = ''">
             <button class="btn btn-outline-secondary" type="button" title="Browse project folder" x-show="sessionEditorMode !== 'edit'" @click="browseProjectFolder()"><i class="bi bi-folder2-open"></i></button>
           </div>
         </label>
+        <div class="alert alert-warning py-2 mb-0" x-show="sessionEditorMode === 'create' && sessionDraft.missingProjectRoot" style="display: none;">
+          <div class="small mb-2">Project folder does not exist. Create it and save this session?</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-warning" type="button" @click="sessionDraft.createProjectRoot = true; saveSessionEditor()">Create folder and save</button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" @click="sessionDraft.missingProjectRoot = ''; sessionDraft.error = ''">Keep editing</button>
+          </div>
+        </div>
       </div>
     </section>
   </div>

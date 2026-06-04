@@ -619,7 +619,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -2799,21 +2799,26 @@
         },
         beginCreateSession() {
           this.sessionEditorMode = 'create';
-          this.sessionDraft = {id: '', title: '', projectRoot: this.state.project_root || ''};
+          this.sessionDraft = {id: '', title: '', projectRoot: this.state.project_root || '', createProjectRoot: false, missingProjectRoot: '', error: ''};
           this.showSessionEditor = true;
         },
         beginEditSession(session) {
           this.sessionEditorMode = 'edit';
-          this.sessionDraft = {id: this.sessionID(session), title: this.sessionTitle(session), projectRoot: this.sessionProjectRoot(session)};
+          this.sessionDraft = {id: this.sessionID(session), title: this.sessionTitle(session), projectRoot: this.sessionProjectRoot(session), createProjectRoot: false, missingProjectRoot: '', error: ''};
           this.showSessionEditor = true;
         },
         closeSessionEditor() {
           this.showSessionEditor = false;
-          this.sessionDraft = {id: '', title: '', projectRoot: ''};
+          this.sessionDraft = {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''};
         },
         browseProjectFolder() {
           this.rpc('browse_project_folder', {}).then(result => {
-            if (result && result.project_root) this.sessionDraft.projectRoot = result.project_root;
+            if (result && result.project_root) {
+              this.sessionDraft.projectRoot = result.project_root;
+              this.sessionDraft.createProjectRoot = false;
+              this.sessionDraft.missingProjectRoot = '';
+              this.sessionDraft.error = '';
+            }
           }).catch(err => this.showToast(err.message));
         },
         saveSessionEditor() {
@@ -2831,8 +2836,25 @@
             return;
           }
           const projectRoot = String(this.sessionDraft.projectRoot || '').trim();
+          if (projectRoot !== this.sessionDraft.missingProjectRoot) {
+            this.sessionDraft.createProjectRoot = false;
+            this.sessionDraft.missingProjectRoot = '';
+            this.sessionDraft.error = '';
+          }
           this.allowSessionURLSync = true;
-          this.rpc('new_session', {title, project_root: projectRoot}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+          this.rpc('new_session', {title, project_root: projectRoot, create_project_root: !!this.sessionDraft.createProjectRoot}).then(s => {
+            this.applyState(s);
+            this.closeSessionDialog();
+          }).catch(err => {
+            const message = err.message || 'create session failed';
+            if (message.includes('project root does not exist:')) {
+              this.sessionDraft.missingProjectRoot = projectRoot;
+              this.sessionDraft.createProjectRoot = false;
+              this.sessionDraft.error = message;
+              return;
+            }
+            this.showToast(message);
+          });
         },
         deleteSession(id) {
           if (!id) return;

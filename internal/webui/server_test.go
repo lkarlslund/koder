@@ -62,7 +62,7 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 
 func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	ctrl := newTestController(t)
-	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := ctrl.State().Session.ID
-	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 func TestWebSocketClientsKeepIndependentSessionSelections(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := ctrl.State().Session.ID
-	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 
 func TestHTTPRPCMethodPathUsesExplicitSelection(t *testing.T) {
 	ctrl := newTestController(t)
-	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir())
+	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -1519,9 +1519,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `showSessionEditor`) ||
 		!strings.Contains(fullPage, `browse_project_folder`) ||
+		!strings.Contains(fullPage, `Create folder and save`) ||
+		!strings.Contains(fullPage, `create_project_root`) ||
 		!strings.Contains(fullPage, `sessionProjectRoot(session)`) ||
 		!strings.Contains(fullPage, `:readonly="sessionEditorMode === 'edit'"`) {
-		t.Fatalf("expected session create/edit dialog with locked edit project folder and browse action")
+		t.Fatalf("expected session create/edit dialog with locked edit project folder, browse action, and create-folder offer")
 	}
 	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `delete_session`) {
 		t.Fatalf("expected session dialog to rename and delete sessions")
@@ -1776,7 +1778,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx := context.Background()
-	second, err := ctrl.CreateSession(ctx, "Second", t.TempDir())
+	second, err := ctrl.CreateSession(ctx, "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -2103,6 +2105,67 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		if session.ID == newID {
 			t.Fatalf("deleted session still listed: %#v", deleteResp.Result.Sessions)
 		}
+	}
+}
+
+func TestWebSocketNewSessionCreatesMissingProjectRootOnlyWhenRequested(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	missingRoot := filepath.Join(t.TempDir(), "missing", "project")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"new_session","params":{"title":"Missing","project_root":%q}}`, missingRoot))); err != nil {
+		t.Fatalf("write missing new_session: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var missingResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &missingResp); err != nil {
+		t.Fatalf("decode missing response: %v", err)
+	}
+	if missingResp.OK || !strings.Contains(missingResp.Error, "project root does not exist") {
+		t.Fatalf("expected missing project root error, got %#v", missingResp)
+	}
+	if _, err := os.Stat(missingRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected missing project root to remain absent, got %v", err)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":2,"method":"new_session","params":{"title":"Created","project_root":%q,"create_project_root":true}}`, missingRoot))); err != nil {
+		t.Fatalf("write create new_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var createdResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				Title       string
+				ProjectRoot string
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &createdResp); err != nil {
+		t.Fatalf("decode created response: %v", err)
+	}
+	if !createdResp.OK {
+		t.Fatalf("expected create new_session ok, got %s", createdResp.Error)
+	}
+	if createdResp.Result.Session.Title != "Created" || createdResp.Result.Session.ProjectRoot != missingRoot {
+		t.Fatalf("unexpected created session: %#v", createdResp.Result.Session)
+	}
+	if info, err := os.Stat(missingRoot); err != nil || !info.IsDir() {
+		t.Fatalf("expected project root directory to be created, info=%#v err=%v", info, err)
 	}
 }
 

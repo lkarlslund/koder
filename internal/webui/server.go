@@ -749,11 +749,12 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.stateForClient(ctx, clientID)
 	case "new_session":
 		var in struct {
-			Title       string `json:"title"`
-			ProjectRoot string `json:"project_root"`
+			Title             string `json:"title"`
+			ProjectRoot       string `json:"project_root"`
+			CreateProjectRoot bool   `json:"create_project_root"`
 		}
 		_ = decodeParams(params, &in)
-		session, err := s.controller.CreateSession(ctx, in.Title, in.ProjectRoot)
+		session, err := s.controller.CreateSession(ctx, in.Title, in.ProjectRoot, in.CreateProjectRoot)
 		if err != nil {
 			return nil, err
 		}

@@ -1337,7 +1337,7 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 }
 
 // CreateSession creates a new session without changing controller selection.
-func (c *Controller) CreateSession(ctx context.Context, title string, projectRoot string) (domain.Session, error) {
+func (c *Controller) CreateSession(ctx context.Context, title string, projectRoot string, createProjectRoot bool) (domain.Session, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		c.mu.RLock()
 		projectRoot = c.session.ProjectRoot
@@ -1346,7 +1346,7 @@ func (c *Controller) CreateSession(ctx context.Context, title string, projectRoo
 	if c.agent == nil {
 		return domain.Session{}, fmt.Errorf("no chat agent")
 	}
-	owner, err := c.agent.CreateSession(ctx, title, projectRoot)
+	owner, err := c.agent.CreateSession(ctx, title, projectRoot, createProjectRoot)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -2004,7 +2004,7 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string, p
 	if c.agent == nil {
 		return domain.Session{}, fmt.Errorf("no chat agent")
 	}
-	owner, err := c.agent.CreateSession(ctx, title, projectRoot)
+	owner, err := c.agent.CreateSession(ctx, title, projectRoot, false)
 	if err != nil {
 		return domain.Session{}, err
 	}
