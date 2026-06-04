@@ -187,6 +187,9 @@ func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID 
 	if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
 		return tools.ChatStatus{}, err
 	}
+	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
+		return tools.ChatStatus{}, fmt.Errorf("chat_update cannot send a message to its own chat; target a direct child chat instead")
+	}
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		rt, err := owner.Chat(ctx, chatID)
 		if err != nil {

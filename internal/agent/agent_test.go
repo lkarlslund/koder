@@ -1218,6 +1218,9 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, tools.ChatUpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
+	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, tools.ChatUpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot send a message to its own chat") {
+		t.Fatalf("expected self-message error, got %v", err)
+	}
 }
 
 func TestStartChatRejectsArchivedParent(t *testing.T) {
