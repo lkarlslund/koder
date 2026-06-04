@@ -162,6 +162,45 @@ func TestWorkspacePathExpandsHomePathInsideWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspacePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	abs, rel, err := tools.WorkspacePath(root, "../repo/../repo/./main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "main.go"); abs != want {
+		t.Fatalf("expected normalized path %q, got %q", want, abs)
+	}
+	if rel != "main.go" {
+		t.Fatalf("expected workspace label main.go, got %q", rel)
+	}
+}
+
+func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{Workdir: root}
+
+	abs, rel, err := tools.WritablePath(runtime, "../repo/../repo/./main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "main.go"); abs != want {
+		t.Fatalf("expected normalized path %q, got %q", want, abs)
+	}
+	if rel != "main.go" {
+		t.Fatalf("expected workspace label main.go, got %q", rel)
+	}
+}
+
 func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	dir := t.TempDir()
 
