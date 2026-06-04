@@ -174,13 +174,57 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 	return e.startPreparedChat(ctx, owner, chatRecord.ID, milestone, scopedTodo, role, objective)
 }
 
-func (e *Engine) UpdateChat(ctx context.Context, sessionID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
+	snapshot := owner.Snapshot()
+	target, ok := chatByID(snapshot.Chats, chatID)
+	if !ok {
+		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
+		return tools.ChatStatus{}, err
+	}
+	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
+		rt, err := owner.Chat(ctx, chatID)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
+		if strings.TrimSpace(update.Message) != "" {
+			kind := chatpkg.QueueKindUser
+			if update.Steer {
+				kind = chatpkg.QueueKindSteer
+			}
+			rt.Enqueue(chatpkg.QueueItem{Kind: kind, Source: domain.UserMessageSourceSubchat, Text: update.Message})
+		}
+		if update.Interrupt {
+			reason := chatpkg.CancelReasonUserInterrupt
+			if update.Hard {
+				reason = chatpkg.CancelReasonUserInterruptHard
+			}
+			rt.Cancel(reason)
+		}
+	}
+	if update.Archived == nil && strings.TrimSpace(update.Title) == "" {
+		return owner.PollChat(ctx, chatID)
+	}
 	status, _, err := owner.UpdateChat(ctx, chatID, update)
 	return status, err
+}
+
+func ensureChatOperationOwner(ownerChatID id.ID, target domain.Chat) error {
+	if ownerChatID == "" {
+		return fmt.Errorf("owner chat id is required")
+	}
+	if target.ID == ownerChatID {
+		return nil
+	}
+	if target.ParentChatID != nil && *target.ParentChatID == ownerChatID {
+		return nil
+	}
+	return fmt.Errorf("chat %s is not owned by chat %s", target.ID, ownerChatID)
 }
 
 func sessionTodoByID(ctx context.Context, owner interface {

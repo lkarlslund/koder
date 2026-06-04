@@ -1117,7 +1117,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	}
 	engine := New(cfg, st, nil)
 	archived := true
-	status, err := engine.UpdateChat(context.Background(), session.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived, Title: "Renamed child"})
+	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived, Title: "Renamed child"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1132,7 +1132,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 		t.Fatalf("expected persisted archive flag, got %#v", reloaded)
 	}
 	archived = false
-	status, err = engine.UpdateChat(context.Background(), session.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived})
+	status, err = engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1145,6 +1145,78 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	}
 	if reloaded.Archived {
 		t.Fatalf("expected persisted restored archive flag, got %#v", reloaded)
+	}
+}
+
+func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := sessionpkg.CreateChat(context.Background(), st, session.ID, "child", chatrole.Execution, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := sessionpkg.CreateChat(context.Background(), st, session.ID, "sibling", chatrole.Execution, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, nil)
+	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Message: "use jadx output", Steer: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Chat.ID != child.ID {
+		t.Fatalf("expected child status, got %#v", status.Chat)
+	}
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childRuntime, err := owner.Chat(context.Background(), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		for _, item := range childRuntime.Snapshot().Timeline {
+			msg, ok := item.Content.(domain.UserMessage)
+			if !ok || msg.Text != "use jadx output" {
+				continue
+			}
+			if msg.Source != domain.UserMessageSourceSubchat {
+				t.Fatalf("unexpected delivered message: %#v", msg)
+			}
+			break
+		}
+		if len(childRuntime.Snapshot().Timeline) > 0 {
+			found := false
+			for _, item := range childRuntime.Snapshot().Timeline {
+				msg, ok := item.Content.(domain.UserMessage)
+				found = found || ok && msg.Text == "use jadx output"
+			}
+			if found {
+				break
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for child message, got %#v", childRuntime.Snapshot().Timeline)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, tools.ChatUpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
+		t.Fatalf("expected ownership error, got %v", err)
 	}
 }
 
@@ -2962,8 +3034,20 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read body: %v", err)
 		}
-		if requests == 1 && strings.Contains(string(body), "next user turn") {
-			t.Fatalf("pending tool continuation should not include queued user message: %s", body)
+		if requests == 1 {
+			var payload struct {
+				Messages []struct {
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			for _, message := range payload.Messages {
+				if strings.Contains(message.Content, "next user turn") {
+					t.Fatalf("pending tool continuation should not include queued user message: %s", body)
+				}
+			}
 		}
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
 	}))

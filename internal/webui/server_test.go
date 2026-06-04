@@ -1803,7 +1803,7 @@ func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
 	writeRPC(t, wsCtx, conn, 1, "hello", `{}`)
 	_ = readRPCResponse(t, wsCtx, conn, 1)
 
-	if _, err := ctrl.UpdateChat(ctx, second.ID, secondChatID, tools.ChatUpdateRequest{Title: "Renamed second chat"}); err != nil {
+	if _, err := ctrl.UpdateChat(ctx, second.ID, secondChatID, secondChatID, tools.ChatUpdateRequest{Title: "Renamed second chat"}); err != nil {
 		t.Fatalf("update second session chat: %v", err)
 	}
 

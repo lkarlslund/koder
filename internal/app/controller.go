@@ -1236,12 +1236,12 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
-	_, err := c.UpdateChat(ctx, selection.SessionID, chatID, tools.ChatUpdateRequest{Archived: &archived})
+	_, err := c.UpdateChat(ctx, selection.SessionID, selection.ChatID, chatID, tools.ChatUpdateRequest{Archived: &archived})
 	return err
 }
 
 // UpdateChat updates chat metadata through the owning session.
-func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatID id.ID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	if chatID == "" {
 		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
 	}
@@ -1262,6 +1262,10 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, chatID id.
 		return tools.ChatStatus{}, err
 	}
 	archivingActive := update.Archived != nil && *update.Archived && chatID == activeChatID
+	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
+		status, err := c.agent.UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
+		return status, err
+	}
 	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {
 		return tools.ChatStatus{}, err
