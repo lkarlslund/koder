@@ -198,6 +198,8 @@ func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content 
 	if content == nil {
 		return domain.TimelineItem{}, fmt.Errorf("append timeline: content is required")
 	}
+	unlock := store.LockTimelineMutation()
+	defer unlock()
 	items, err := TimelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -392,6 +394,8 @@ func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 			return domain.TimelineItem{}, err
 		}
 	} else {
+		unlock := store.LockTimelineMutation()
+		defer unlock()
 		now := time.Now().UTC()
 		if item.ChatID == "" {
 			item.ChatID = chatID

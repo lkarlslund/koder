@@ -1546,6 +1546,47 @@ func TestRuntimeToolResultReturnsStatusToWaitingLLM(t *testing.T) {
 	}
 }
 
+func TestAppendTimelineSerializesSequenceAssignment(t *testing.T) {
+	st := openTestStore(t)
+	_, chatRecord, _ := createSessionWithPlan(t, st)
+	const count = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for idx := 0; idx < count; idx++ {
+		idx := idx
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %02d", idx)})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != count {
+		t.Fatalf("expected %d items, got %d", count, len(items))
+	}
+	seen := map[int64]bool{}
+	for _, item := range items {
+		if item.Seq < 1 || item.Seq > count {
+			t.Fatalf("unexpected seq %d in %#v", item.Seq, items)
+		}
+		if seen[item.Seq] {
+			t.Fatalf("duplicate seq %d in %#v", item.Seq, items)
+		}
+		seen[item.Seq] = true
+	}
+}
+
 func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

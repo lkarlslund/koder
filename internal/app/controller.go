@@ -1852,18 +1852,22 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	if c.agent == nil {
 		return fmt.Errorf("no chat agent")
 	}
-	owner, err := c.agent.LoadSession(ctx, session.ID)
+	chats, err := sessionpkg.ListChats(ctx, c.store, session.ID)
 	if err != nil {
 		return err
 	}
-	ownerSnapshot := owner.Snapshot()
-	chats := ownerSnapshot.Chats
 	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
 		return err
 	}
 	if err := c.failProcessInterruptedToolCalls(ctx, chats); err != nil {
 		return err
 	}
+	owner, err := c.agent.LoadSession(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	ownerSnapshot := owner.Snapshot()
+	chats = ownerSnapshot.Chats
 	var chatRecord domain.Chat
 	if chatID != "" {
 		var ok bool
