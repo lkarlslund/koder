@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -100,6 +101,64 @@ func TestWorkspacePathRejectsSymlinkEscapingWorkspace(t *testing.T) {
 	_, _, err := tools.WorkspacePath(root, "link.txt")
 	if err == nil || !strings.Contains(err.Error(), "outside the workspace") {
 		t.Fatalf("expected outside workspace error, got %v", err)
+	}
+}
+
+func TestReadablePathExpandsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "notes.txt")
+	if err := os.WriteFile(target, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	abs, label, err := tools.ReadablePath(t.TempDir(), "~/notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abs != target {
+		t.Fatalf("expected expanded path %q, got %q", target, abs)
+	}
+	if label != filepath.ToSlash(target) {
+		t.Fatalf("expected absolute label %q, got %q", filepath.ToSlash(target), label)
+	}
+}
+
+func TestWritablePathExpandsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "notes.txt")
+	runtime := tools.Runtime{Workdir: t.TempDir(), AccessSettings: accesssettings.AllowAll()}
+
+	abs, label, err := tools.WritablePath(runtime, "~/notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abs != target {
+		t.Fatalf("expected expanded path %q, got %q", target, abs)
+	}
+	if label != filepath.ToSlash(target) {
+		t.Fatalf("expected absolute label %q, got %q", filepath.ToSlash(target), label)
+	}
+}
+
+func TestWorkspacePathExpandsHomePathInsideWorkspace(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "repo")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	abs, rel, err := tools.WorkspacePath(root, "~/repo/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "main.go"); abs != want {
+		t.Fatalf("expected expanded path %q, got %q", want, abs)
+	}
+	if rel != "main.go" {
+		t.Fatalf("expected workspace label main.go, got %q", rel)
 	}
 }
 

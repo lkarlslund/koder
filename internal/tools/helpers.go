@@ -42,7 +42,22 @@ func NormalizePathInput(raw string) string {
 	if raw == "" {
 		return ""
 	}
+	raw = expandHomePath(raw)
 	return filepath.Clean(filepath.FromSlash(raw))
+}
+
+func expandHomePath(raw string) string {
+	if raw != "~" && !strings.HasPrefix(raw, "~/") && !strings.HasPrefix(raw, `~\`) {
+		return raw
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return raw
+	}
+	if raw == "~" {
+		return home
+	}
+	return filepath.Join(home, raw[2:])
 }
 
 func WorkspacePath(root string, raw string) (abs string, rel string, err error) {
