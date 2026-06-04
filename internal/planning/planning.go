@@ -190,7 +190,7 @@ func ValidMilestoneStatus(status MilestoneStatus) bool {
 func ParseTodoAddItems(raw string) ([]string, error) {
 	var items []TodoAddInput
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return nil, errors.New("items must be a JSON array of todo item objects")
+		return nil, errors.New("items must be a JSON array of task objects")
 	}
 	out := make([]string, 0, len(items))
 	for _, item := range items {
@@ -278,7 +278,7 @@ func ValidateTodoProgress(items []TodoItem) error {
 		}
 	}
 	if inProgress > 1 {
-		return errors.New("todo bucket may contain at most one in_progress item")
+		return errors.New("task list may contain at most one in_progress task")
 	}
 	return nil
 }

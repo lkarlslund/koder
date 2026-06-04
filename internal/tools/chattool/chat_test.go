@@ -74,11 +74,11 @@ func TestNormalizeStartAndPollArgs(t *testing.T) {
 	if listArgs["archived"] != "true" {
 		t.Fatalf("unexpected list args: %#v", listArgs)
 	}
-	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "ref": " alpha ", "title": "Worker", "todo_id": "todo-1"})
+	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "ref": " alpha ", "title": "Worker", "task_id": "task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_ref"] != "alpha" || args["title"] != "Worker" || args["todo_ref"] != "todo-1" {
+	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_ref"] != "alpha" || args["title"] != "Worker" || args["task_ref"] != "task-1" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
 	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "missing", "objective": "do it"}); err == nil || !strings.Contains(err.Error(), "not registered") {

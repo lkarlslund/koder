@@ -157,8 +157,8 @@ func TestCompactModelTextForPartBoundsReadOutput(t *testing.T) {
 }
 
 func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
-	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, "todo_update_item failed: id must be a non-negative integer", tools.ErrorStoredResult{
-		Message: "todo_update_item failed: id must be a non-negative integer",
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTaskUpdateItem, tools.StoredResultStatusError, "task_update_item failed: id must be a non-negative integer", tools.ErrorStoredResult{
+		Message: "task_update_item failed: id must be a non-negative integer",
 	}))
 	if !ok {
 		t.Fatal("expected display text")

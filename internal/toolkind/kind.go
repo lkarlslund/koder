@@ -29,12 +29,12 @@ const (
 	ToolKindMilestoneUpdate
 	ToolKindMilestonePlan
 	ToolKindMilestoneWrite
-	ToolKindTodoList
-	ToolKindTodoAddItems
-	ToolKindTodoUpdateItem
-	ToolKindTodoFetchNext
-	ToolKindTodosAdd
-	ToolKindTodosUpdate
+	ToolKindTaskList
+	ToolKindTaskAddItems
+	ToolKindTaskUpdateItem
+	ToolKindTaskFetchNext
+	ToolKindTasksAdd
+	ToolKindTasksUpdate
 	ToolKindChatList
 	ToolKindChatStart
 	ToolKindChatPoll

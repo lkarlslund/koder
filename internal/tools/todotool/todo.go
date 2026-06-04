@@ -13,30 +13,30 @@ import (
 
 func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
-		Title:       "List todos",
-		Description: "Read the todo bucket for a milestone.",
-		Usage:       "Read the todo bucket for a milestone. If milestone_ref is omitted, this reads the current assigned milestone's todos.",
+		Title:       "List tasks",
+		Description: "Read the task list for a milestone.",
+		Usage:       "Read the task list for a milestone. If milestone_ref is omitted, this reads the current assigned milestone's tasks.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
-		Title:       "Add todo items",
-		Description: "Append new pending todo items to a milestone.",
-		Usage:       "Append new pending todo items to a milestone's todo bucket. Use this to break down the current milestone into concrete execution steps. This rejects duplicate todo content already present in the milestone; update existing todos instead of adding duplicates.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these todo items"},"items":{"type":"array","description":"New todo items to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`,
+		Title:       "Add tasks",
+		Description: "Append new pending tasks to a milestone.",
+		Usage:       "Append new pending tasks to a milestone's task list. Use this to break down the current milestone into concrete execution steps. This rejects duplicate task content already present in the milestone; update existing tasks instead of adding duplicates.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these tasks"},"items":{"type":"array","description":"New tasks to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
-		Title:       "Update todo item",
-		Description: "Update one todo item's status, note, or content.",
-		Usage:       "Update one todo item's status and add a short note explaining what changed or why. Use the exact UUID id returned by todo_list, todo_fetch_next, or todos_add. Do not invent numeric ids. Keep at most one todo item in_progress in a milestone bucket. When marking completed, note what was completed in one concise sentence.",
-		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todos_add"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status","note"],"additionalProperties":false}`,
+		Title:       "Update task",
+		Description: "Update one task's status, note, or content.",
+		Usage:       "Update one task's status and add a short note explaining what changed or why. Use the exact UUID id returned by task_list, task_fetch_next, or tasks_add. Do not invent numeric ids. Keep at most one task in_progress in a milestone. When marking completed, note what was completed in one concise sentence.",
+		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Task UUID returned by task_list, task_fetch_next, or tasks_add"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status","note"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
-		Title:       "Fetch next todo",
-		Description: "Find the next todo item to work on.",
-		Usage:       "Find the next todo item to work on for a milestone. If there is already an in_progress item, it is returned. Otherwise the first pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.",
+		Title:       "Fetch next task",
+		Description: "Find the next task to work on.",
+		Usage:       "Find the next task to work on for a milestone. If there is already an in_progress task, it is returned. Otherwise the first pending task is returned. If all tasks are done, this returns the finished list and a message telling you to move to the next milestone or break it down into tasks.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -47,10 +47,10 @@ type addItemsTool struct{}
 type updateItemTool struct{}
 type fetchNextTool struct{}
 
-func (listTool) Kind() domain.ToolKind       { return domain.ToolKindTodoList }
-func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindTodosAdd }
-func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindTodosUpdate }
-func (fetchNextTool) Kind() domain.ToolKind  { return domain.ToolKindTodoFetchNext }
+func (listTool) Kind() domain.ToolKind       { return domain.ToolKindTaskList }
+func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindTasksAdd }
+func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindTasksUpdate }
+func (fetchNextTool) Kind() domain.ToolKind  { return domain.ToolKindTaskFetchNext }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
@@ -116,14 +116,14 @@ func (fetchNextTool) NormalizeArgs(args map[string]string) (map[string]string, e
 }
 
 func (listTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "List todos")
+	return milestonePreview(req.Args["milestone_ref"], "List tasks")
 }
 func (addItemsTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "Add todo items")
+	return milestonePreview(req.Args["milestone_ref"], "Add tasks")
 }
-func (updateItemTool) Preview(req tools.Request) string { return "Update todo " + req.Args["id"] }
+func (updateItemTool) Preview(req tools.Request) string { return "Update task " + req.Args["id"] }
 func (fetchNextTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "Fetch next todo")
+	return milestonePreview(req.Args["milestone_ref"], "Fetch next task")
 }
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -233,7 +233,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			return tools.TodoBucketResultWithTitle(milestone.Ref, milestone.Title, todos, ""), nil
 		}
 	}
-	return tools.Result{}, fmt.Errorf("todo item %s not found", id)
+	return tools.Result{}, fmt.Errorf("task %s not found", id)
 }
 
 func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -260,24 +260,24 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 			return tools.TodoBucketResult(plan, ref, []planning.TodoItem{item}, ""), nil
 		}
 	}
-	message := "All todo items for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into todo items and start working on them."
+	message := "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
 	return tools.TodoBucketResult(plan, ref, todos, message), nil
 }
 
 func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Listed todos", result.Output
+	return "Listed tasks", result.Output
 }
 
 func (addItemsTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Added todo items", result.Output
+	return "Added tasks", result.Output
 }
 
 func (updateItemTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Updated todo item", result.Output
+	return "Updated task", result.Output
 }
 
 func (fetchNextTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Fetched next todo", result.Output
+	return "Fetched next task", result.Output
 }
 
 func (listTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
@@ -367,7 +367,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
-	return nil, fmt.Errorf("todo item %s not found", id)
+	return nil, fmt.Errorf("task %s not found", id)
 }
 
 func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
@@ -392,7 +392,7 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
-	message = "All todo items for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into todo items and start working on them."
+	message = "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, message)
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
@@ -405,7 +405,7 @@ func ensureMilestoneAcceptsTodos(plan planning.Plan, ref string) error {
 		}
 		switch milestone.Status {
 		case planning.MilestoneStatusCompleted, planning.MilestoneStatusCancelled:
-			return fmt.Errorf("milestone %q is %s; cannot add todos. To reopen this milestone, first call milestone_update with status=ready, then add todos", milestone.Ref, milestone.Status.String())
+			return fmt.Errorf("milestone %q is %s; cannot add tasks. To reopen this milestone, first call milestone_update with status=ready, then add tasks", milestone.Ref, milestone.Status.String())
 		}
 		return nil
 	}

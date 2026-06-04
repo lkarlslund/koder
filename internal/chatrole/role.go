@@ -69,10 +69,10 @@ Return only the compacted summary requested by the compaction prompt.`),
 			DisplayName: "Execute",
 			SystemPrompt: strings.TrimSpace(`This chat is an execution worker.
 
-Focus only on the assigned milestone and todo bucket.
+Focus only on the assigned milestone and task list.
 - Implement the work using available coding tools.
-- Keep todo item status updated as you progress.
-			- Do not rewrite unrelated milestones or todo buckets.`),
+- Keep task status updated as you progress.
+			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
 				toolkind.ToolKindChatStart,
 				toolkind.ToolKindChatPoll,

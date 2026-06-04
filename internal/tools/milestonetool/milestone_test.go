@@ -408,11 +408,11 @@ func TestListAndAddExecute(t *testing.T) {
 	if !strings.Contains(result.Output, "Milestones summary: 1 ready, 1 executing, 1 completed") {
 		t.Fatalf("expected milestone status summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "- [ready] Beta (beta) - todos: 1 pending, 1 completed") {
-		t.Fatalf("expected beta todo summary, got %q", result.Output)
+	if !strings.Contains(result.Output, "- [ready] Beta (beta) - tasks: 1 pending, 1 completed") {
+		t.Fatalf("expected beta task summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "  - [executing] Gamma (gamma) - no todos added to milestone") {
-		t.Fatalf("expected indented gamma todo summary, got %q", result.Output)
+	if !strings.Contains(result.Output, "  - [executing] Gamma (gamma) - no tasks added to milestone") {
+		t.Fatalf("expected indented gamma task summary, got %q", result.Output)
 	}
 
 	result, err = (listTool{}).Execute(context.Background(), runtime, tools.Request{

@@ -108,7 +108,7 @@ func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 	_, err := tools.ParseProviderCall(provider.ToolCall{
 		ID: "call_1",
 		Function: provider.FunctionCall{
-			Name:      domain.ToolKindTodosUpdate.String(),
+			Name:      domain.ToolKindTasksUpdate.String(),
 			Arguments: `{"id":"019aa000-0000-7000-8000-000000000001","status":"InProgress"}`,
 		},
 	})
@@ -116,7 +116,7 @@ func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 	if !errors.As(err, &callErr) {
 		t.Fatalf("expected ProviderCallError, got %T %v", err, err)
 	}
-	if callErr.Request.Tool != domain.ToolKindTodosUpdate || callErr.Request.ToolCallID != "call_1" {
+	if callErr.Request.Tool != domain.ToolKindTasksUpdate || callErr.Request.ToolCallID != "call_1" {
 		t.Fatalf("expected partial todo request identity, got %#v", callErr.Request)
 	}
 	if callErr.Request.Args["status"] != "InProgress" {

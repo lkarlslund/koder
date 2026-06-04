@@ -903,7 +903,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	allTodos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
-	slog.Info("todo stored", "session_id", sessionID, "todo_id", item.ID, "milestone_ref", ref, "status", item.Status, "note_bytes", len(item.Note))
+	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "milestone_ref", ref, "status", item.Status, "note_bytes", len(item.Note))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: allTodos, TodosByRef: todosByRef})
 	return item, nil
 }

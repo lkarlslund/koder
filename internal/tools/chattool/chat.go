@@ -24,8 +24,8 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or todo_ref to scope what the child chat can see. A todo_ref scopes the child to that single todo item. After starting it, go idle unless you have unrelated work; the child chat will report back when it becomes idle, including todo or milestone progress.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"todo_ref":{"type":"string","description":"Optional todo item UUID to scope the child chat to one todo"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or task_ref to scope what the child chat can see. A task_ref scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will report back when it becomes idle, including task or milestone progress.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"task_ref":{"type":"string","description":"Optional task UUID to scope the child chat to one task"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(pollTool{}, tools.ToolSpec{
@@ -98,8 +98,8 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref")); ref != "" {
 		out["milestone_ref"] = ref
 	}
-	if todoRef := strings.TrimSpace(tools.FirstArg(args, "todo_ref", "todo_id")); todoRef != "" {
-		out["todo_ref"] = todoRef
+	if todoRef := strings.TrimSpace(tools.FirstArg(args, "task_ref", "task_id")); todoRef != "" {
+		out["task_ref"] = todoRef
 	}
 	return out, nil
 }
@@ -237,7 +237,7 @@ func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.R
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_ref"],
-		TodoRef:      id.ID(req.Args["todo_ref"]),
+		TodoRef:      id.ID(req.Args["task_ref"]),
 	})
 	if err != nil {
 		return tools.Result{}, err

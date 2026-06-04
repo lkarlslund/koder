@@ -122,7 +122,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		}
 	}
 	if role == chatrole.Execution && milestoneRef == "" {
-		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or todo_ref")
+		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or task_ref")
 	}
 	if role == chatrole.Execution && milestone.Status != planning.MilestoneStatusReady {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
@@ -492,15 +492,15 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID id.ID, milestone
 			fmt.Sprintf("Milestone status: %s", milestone.Status),
 		)
 		if scopedTodo != nil {
-			lines = append(lines, fmt.Sprintf("Todo scope: %s", scopedTodo.ID))
+			lines = append(lines, fmt.Sprintf("Task scope: %s", scopedTodo.ID))
 		}
 		if notes := strings.TrimSpace(milestone.Notes); notes != "" {
 			lines = append(lines, "Milestone notes:", notes)
 		}
 		if len(todos) == 0 {
-			lines = append(lines, "Current todos: none")
+			lines = append(lines, "Current tasks: none")
 		} else {
-			lines = append(lines, "Current todos:")
+			lines = append(lines, "Current tasks:")
 			for _, item := range todos {
 				lines = append(lines, fmt.Sprintf("- [%s] #%s %s", item.Status, item.ID, item.Content))
 			}
@@ -508,7 +508,7 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID id.ID, milestone
 	}
 	switch role {
 	case chatrole.Execution:
-		lines = append(lines, "", "Execute only this milestone using its todo bucket as the working queue.", "Update todo statuses as you make progress and keep the milestone status accurate.", "When finished, set the milestone status to completed or blocked and then go idle.")
+		lines = append(lines, "", "Execute only this milestone using its task list as the working queue.", "Update task statuses as you make progress and keep the milestone status accurate.", "When finished, set the milestone status to completed or blocked and then go idle.")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

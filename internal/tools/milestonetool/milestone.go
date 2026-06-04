@@ -25,7 +25,7 @@ func init() {
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestone",
 		Description: "Create one blank pending milestone.",
-		Usage:       "Create one blank pending milestone with no todo items. Use depends_on_ref to make it a child of another milestone. Use todos_add afterwards to add concrete todo items, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref or title already exists, if depends_on_ref is unknown, or if the dependency would create a cycle.",
+		Usage:       "Create one blank pending milestone with no tasks. Use depends_on_ref to make it a child of another milestone. Use tasks_add afterwards to add concrete tasks, then milestone_update status=ready when the milestone is ready for execution. Fails if the milestone ref or title already exists, if depends_on_ref is unknown, or if the dependency would create a cycle.",
 		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Stable milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"depends_on_ref":{"type":"string","description":"Optional parent milestone ref for tree/dependency structure"}},"required":["ref","title"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -212,7 +212,7 @@ func milestoneTodoSummaries(ctx context.Context, control tools.SessionControl, s
 
 func todoSummary(todos []planning.TodoItem) string {
 	if len(todos) == 0 {
-		return "no todos added to milestone"
+		return "no tasks added to milestone"
 	}
 	counts := make(map[planning.TodoStatus]int)
 	for _, todo := range todos {
@@ -226,7 +226,7 @@ func todoSummary(todos []planning.TodoItem) string {
 		}
 		parts = append(parts, fmt.Sprintf("%d %s", count, status.String()))
 	}
-	return "todos: " + strings.Join(parts, ", ")
+	return "tasks: " + strings.Join(parts, ", ")
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {

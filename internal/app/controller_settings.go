@@ -990,7 +990,7 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 
 func hideToolDefault(kind domain.ToolKind) bool {
 	switch kind {
-	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
 		return true
 	default:
 		return false
@@ -1009,8 +1009,8 @@ func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 		return "chat", "Chat"
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
 		return "milestone", "Milestone"
-	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext, domain.ToolKindTodosAdd, domain.ToolKindTodosUpdate:
-		return "todo", "Todo"
+	case domain.ToolKindTaskList, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindTaskFetchNext, domain.ToolKindTasksAdd, domain.ToolKindTasksUpdate:
+		return "task", "Task"
 	case domain.ToolKindViewImage, domain.ToolKindShowImage:
 		return "image", "Image"
 	default:

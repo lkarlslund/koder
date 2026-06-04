@@ -28,25 +28,25 @@ func TestTodoUpdateItemParsesStringID(t *testing.T) {
 func TestTodoUpdateItemDefinitionUsesUUIDStringID(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {
-		if def.Function.Name != domain.ToolKindTodosUpdate.String() {
+		if def.Function.Name != domain.ToolKindTasksUpdate.String() {
 			continue
 		}
 		params := string(def.Function.Parameters)
 		if !strings.Contains(params, `"id":{"type":"string"`) || strings.Contains(params, `"id":{"type":"integer"`) {
-			t.Fatalf("expected todos_update id to be a string UUID, got %s", params)
+			t.Fatalf("expected tasks_update id to be a string UUID, got %s", params)
 		}
 		if !strings.Contains(params, `"enum":["pending","in_progress","completed"]`) || strings.Contains(params, "InProgress") {
-			t.Fatalf("expected todos_update status enum to match TodoStatus strings, got %s", params)
+			t.Fatalf("expected tasks_update status enum to match TodoStatus strings, got %s", params)
 		}
 		if !strings.Contains(params, `"required":["id","status","note"]`) {
-			t.Fatalf("expected todos_update to require note, got %s", params)
+			t.Fatalf("expected tasks_update to require note, got %s", params)
 		}
 		if !strings.Contains(def.Function.Description, "exact UUID id") {
-			t.Fatalf("expected todos_update description to tell model to use UUID ids, got %q", def.Function.Description)
+			t.Fatalf("expected tasks_update description to tell model to use UUID ids, got %q", def.Function.Description)
 		}
 		return
 	}
-	t.Fatal("todos_update definition not found")
+	t.Fatal("tasks_update definition not found")
 }
 
 func TestTodoStatusUsesSnakeCase(t *testing.T) {
@@ -99,7 +99,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 
 	_, err = executeAndPersist(ctx, t, runtime, tools.Request{
-		Tool: domain.ToolKindTodosAdd,
+		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{
 			"milestone_ref": "implement",
 			"items":         `[{"content":"Write tests"},{"content":"Fix bug"}]`,
@@ -110,7 +110,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 
 	next, err := tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodoFetchNext,
+		Tool: domain.ToolKindTaskFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
 	if err != nil {
@@ -128,32 +128,32 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatalf("unexpected todos: %#v", todos)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "in_progress", "note": "Started writing tests."},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "completed", "note": "Completed the tests."},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": tools.FormatTodoID(todos[1].ID), "status": "completed", "note": "Fixed the bug."},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	done, err := tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodoFetchNext,
+		Tool: domain.ToolKindTaskFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(done.Output, "All todo items for this milestone are done") {
+	if !strings.Contains(done.Output, "All tasks for this milestone are done") {
 		t.Fatalf("expected done coercion message, got %q", done.Output)
 	}
 }
@@ -174,7 +174,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := tools.Request{
-		Tool: domain.ToolKindTodosAdd,
+		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{
 			"milestone_ref": "implement",
 			"items":         `[{"content":"Write tests"},{"content":"Fix bug"}]`,
@@ -213,7 +213,7 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	_, err = tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodosAdd,
+		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{
 			"milestone_ref": "implement",
 			"items":         `[{"content":"  write   tests "}]`,
@@ -241,7 +241,7 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 
 	for _, ref := range []string{"done", "cancelled"} {
 		req := tools.Request{
-			Tool: domain.ToolKindTodosAdd,
+			Tool: domain.ToolKindTasksAdd,
 			Args: map[string]string{
 				"milestone_ref": ref,
 				"items":         `[{"content":"Reopen work"}]`,
@@ -251,10 +251,10 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected closed milestone error for %s", ref)
 		}
-		if !strings.Contains(err.Error(), "cannot add todos") || !strings.Contains(err.Error(), "milestone_update with status=ready") {
+		if !strings.Contains(err.Error(), "cannot add tasks") || !strings.Contains(err.Error(), "milestone_update with status=ready") {
 			t.Fatalf("expected reopen guidance for %s, got %v", ref, err)
 		}
-		if _, err := tools.PersistResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add todos") {
+		if _, err := tools.PersistResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add tasks") {
 			t.Fatalf("expected persist closed milestone error for %s, got %v", ref, err)
 		}
 	}
@@ -277,14 +277,14 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	if _, err := tools.Normalize(tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": string(todos[0].ID), "status": "completed"},
 	}); err == nil || !strings.Contains(err.Error(), "note is required") {
 		t.Fatalf("expected missing note error, got %v", err)
 	}
 
 	result, err := executeAndPersist(ctx, t, runtime, tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": string(todos[0].ID), "status": "completed", "note": "Endpoint was wired and tested."},
 	})
 	if err != nil {
@@ -337,7 +337,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	}
 
 	listed, err := tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodoList,
+		Tool: domain.ToolKindTaskList,
 		Args: map[string]string{"milestone_ref": "implement"},
 	})
 	if err != nil {
@@ -348,13 +348,13 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	}
 
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodosUpdate,
+		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": string(todos[1].ID), "status": planning.TodoStatusCompleted.String(), "note": "Tried to complete scoped todo."},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected scoped todo error, got %v", err)
 	}
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
-		Tool: domain.ToolKindTodosAdd,
+		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{"milestone_ref": "implement", "items": `[{"content":"Third"}]`},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected add todo scoped error, got %v", err)

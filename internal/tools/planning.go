@@ -191,7 +191,7 @@ func TodoBucketResultWithTitle(ref, title string, todos []planning.TodoItem, mes
 	stored := TodoStoredResult(planning.Plan{Milestones: []planning.Milestone{{Ref: ref, Title: title}}}, ref, todos, message)
 	output := FormatTodoOutput(stored)
 	if strings.TrimSpace(output) == "" {
-		output = "No todo items found."
+		output = "No tasks found."
 	}
 	return Result{
 		Output: output,
@@ -219,7 +219,7 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
 		Kind: domain.PartKindToolOutput,
 		Payload: domain.ToolOutputPayload{
-			Tool:   domain.ToolKindTodoList,
+			Tool:   domain.ToolKindTaskList,
 			Status: domain.ToolResultStatusOK,
 			Result: result,
 		},
