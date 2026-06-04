@@ -979,31 +979,11 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 			runtimes = append(runtimes, rt)
 		}
 	}
-	unsubs := make([]func(), 0, len(c.execUnsubs)+2)
-	for _, unsub := range c.execUnsubs {
-		if unsub != nil {
-			unsubs = append(unsubs, unsub)
-		}
-	}
-	if c.unsub != nil {
-		unsubs = append(unsubs, c.unsub)
-	}
-	if c.sessionUnsub != nil {
-		unsubs = append(unsubs, c.sessionUnsub)
-	}
-	if c.workspaceWatchCancel != nil {
-		unsubs = append(unsubs, c.workspaceWatchCancel)
-	}
 	if c.workspaceRefreshTimer != nil {
 		c.workspaceRefreshTimer.Stop()
 	}
 	c.mu.RUnlock()
-	slog.Info("controller shutdown requested", "reason", reason, "runtimes", len(runtimes), "unsubscribers", len(unsubs), "agent", c.agent != nil)
-	defer func() {
-		for _, unsub := range unsubs {
-			unsub()
-		}
-	}()
+	slog.Info("controller shutdown requested", "reason", reason, "runtimes", len(runtimes), "agent", c.agent != nil)
 	if c.agent != nil {
 		if err := c.agent.Shutdown(ctx, reason); err != nil {
 			slog.Error("controller shutdown failed", "reason", reason, "error", err)

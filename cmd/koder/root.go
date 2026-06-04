@@ -166,7 +166,14 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err != nil {
 		return err
 	}
-	server, err := startWebUI(ctx, controller, st, bind, startupOpts.NoOpenBrowser, recorder)
+	restartRequested := make(chan struct{}, 1)
+	server, err := startWebUI(ctx, controller, st, bind, startupOpts.NoOpenBrowser, recorder, func() error {
+		select {
+		case restartRequested <- struct{}{}:
+		default:
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -188,6 +195,9 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 				return err
 			}
 			return ctx.Err()
+		case <-restartRequested:
+			slog.Info("koder exiting for process restart", "exit_code", processRestartExitCode)
+			return errProcessRestart
 		case signal := <-sig:
 			reason := chatpkg.CancelReasonShutdownInterrupt
 			if signal == syscall.SIGUSR1 {
@@ -207,12 +217,13 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *app.Controller, st *store.Store, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, st *store.Store, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder, requestProcessRestart func() error) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
-		Bind:          bind,
-		NoOpenBrowser: noOpenBrowser,
-		Debug:         recorder,
-		Store:         st,
+		Bind:                  bind,
+		NoOpenBrowser:         noOpenBrowser,
+		Debug:                 recorder,
+		Store:                 st,
+		RequestProcessRestart: requestProcessRestart,
 	})
 }
 

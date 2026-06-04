@@ -754,19 +754,7 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 		subs = append(subs, ch)
 	}
 	s.subsMu.Unlock()
-	s.mu.Lock()
-	unsubs := make([]func(), 0, len(s.unsubs))
-	for id, unsub := range s.unsubs {
-		delete(s.unsubs, id)
-		if unsub != nil {
-			unsubs = append(unsubs, unsub)
-		}
-	}
-	s.mu.Unlock()
-	for _, unsub := range unsubs {
-		unsub()
-	}
-	slog.Info("session shutdown requested", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "subscribers", len(subs), "unsubscribers", len(unsubs))
+	slog.Info("session shutdown requested", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "subscribers", len(subs))
 	for _, rt := range runtimes {
 		var err error
 		if reason == "" {
@@ -779,12 +767,6 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 			return err
 		}
 	}
-	s.subsMu.Lock()
-	for id, ch := range s.subs {
-		delete(s.subs, id)
-		close(ch)
-	}
-	s.subsMu.Unlock()
 	slog.Info("session shutdown complete", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes))
 	return nil
 }

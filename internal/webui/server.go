@@ -663,16 +663,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		slog.Info("restart rpc received", "client", clientID, "hard", in.Hard, "reason", reason)
 		go func() {
-			if err := s.controller.ShutdownWithCancelReason(context.Background(), reason); err != nil {
-				slog.Error("shutdown for process restart", "error", err, "hard", in.Hard)
-				return
-			}
-			slog.Info("shutdown for process restart complete", "hard", in.Hard)
-			if err := s.requestProcessRestart(); err != nil {
-				slog.Error("request process restart", "error", err, "hard", in.Hard)
-				return
-			}
-			slog.Info("process restart requested", "hard", in.Hard)
+			s.restartAfterShutdown(reason, in.Hard)
 		}()
 		return map[string]bool{"restarting": true, "acknowledged": true, "hard": in.Hard}, nil
 	case "compact":
@@ -973,6 +964,36 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
+}
+
+func (s *Server) restartAfterShutdown(reason chat.CancelReason, hard bool) {
+	done := make(chan error, 1)
+	go func() {
+		done <- s.controller.ShutdownWithCancelReason(context.Background(), reason)
+	}()
+	if hard {
+		select {
+		case err := <-done:
+			if err != nil {
+				slog.Error("shutdown for process restart", "error", err, "hard", hard)
+				return
+			}
+			slog.Info("shutdown for process restart complete", "hard", hard)
+		case <-time.After(750 * time.Millisecond):
+			slog.Warn("hard restart proceeding before shutdown completed")
+		}
+	} else {
+		if err := <-done; err != nil {
+			slog.Error("shutdown for process restart", "error", err, "hard", hard)
+			return
+		}
+		slog.Info("shutdown for process restart complete", "hard", hard)
+	}
+	if err := s.requestProcessRestart(); err != nil {
+		slog.Error("request process restart", "error", err, "hard", hard)
+		return
+	}
+	slog.Info("process restart requested", "hard", hard)
 }
 
 func (s *Server) requestProcessRestart() error {
