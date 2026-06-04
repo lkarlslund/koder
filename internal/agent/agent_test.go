@@ -1024,7 +1024,7 @@ func TestConsumeChatUpdatesSummarizesPartialMilestoneProgress(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	want := "Chat " + child.ID + " is now idle. Chat completed 1 out of 2 todos for milestone alpha, but is now stopped."
+	want := "Chat " + child.ID + " is now idle. Chat completed 1 out of 2 tasks for milestone alpha, but is now stopped."
 	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
 		for _, item := range items {
 			msg, ok := item.Content.(domain.UserMessage)
@@ -1080,7 +1080,7 @@ func TestConsumeChatUpdatesSummarizesCompletedMilestoneTodos(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	want := "Chat " + child.ID + " is now idle. All 2 todos for milestone alpha are done."
+	want := "Chat " + child.ID + " is now idle. All 2 tasks for milestone alpha are done."
 	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
 		for _, item := range items {
 			msg, ok := item.Content.(domain.UserMessage)
@@ -3552,7 +3552,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 		switch len(requests) {
 		case 1:
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the todo.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tasks_update\",\"arguments\":\"{\\\"id\\\":\\\"019aa000-0000-7000-8000-000000000001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the task.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tasks_update\",\"arguments\":\"{\\\"id\\\":\\\"019aa000-0000-7000-8000-000000000001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"I saw the tool error."}}],"usage":{"total_tokens":1}}`))
@@ -3584,7 +3584,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 	}
 	chatRecord := defaultChatForSession(t, st, session.ID)
 
-	events := runLivePrompt(t, engine, session, chatRecord, "update todo")
+	events := runLivePrompt(t, engine, session, chatRecord, "update task")
 	var sawToolDelta bool
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindToolCallDelta {
@@ -3597,7 +3597,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 	if len(requests) < 2 {
 		t.Fatalf("expected invalid tool call to continue with tool error feedback, got %d requests", len(requests))
 	}
-	if !strings.Contains(string(requests[1]), "Invalid tool call: invalid todo status") {
+	if !strings.Contains(string(requests[1]), "Invalid tool call: invalid task status") {
 		t.Fatalf("expected second request to include tool error feedback, got %s", requests[1])
 	}
 
@@ -3612,7 +3612,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 			continue
 		}
 		for _, tool := range assistant.Tools {
-			if tool.Tool == domain.ToolKindTasksUpdate && tool.Status == domain.ToolStatusErrored && tool.Error != nil && strings.Contains(tool.Error.Message, "invalid todo status") {
+			if tool.Tool == domain.ToolKindTasksUpdate && tool.Status == domain.ToolStatusErrored && tool.Error != nil && strings.Contains(tool.Error.Message, "invalid task status") {
 				sawErroredTool = true
 			}
 		}

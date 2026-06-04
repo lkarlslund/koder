@@ -66,7 +66,7 @@ func TodoScopeAllows(runtime Runtime, todoID id.ID) error {
 	if assigned == "" || todoID == assigned {
 		return nil
 	}
-	return fmt.Errorf("chat is scoped to todo %q", assigned)
+	return fmt.Errorf("chat is scoped to task %q", assigned)
 }
 
 func ScopedTodos(runtime Runtime, todos []planning.TodoItem) []planning.TodoItem {

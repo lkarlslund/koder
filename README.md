@@ -2,16 +2,16 @@
 
 `koder` is a browser-based coding agent for working inside a local checkout with your choice of OpenAI-compatible model provider. It gives the model a real project workspace, structured code tools, persistent chat history, resumable sessions, permissions, skills, MCP integrations, and a web UI built for steering long-running work.
 
-It is meant for developers who want an agent that stays close to the codebase: inspect files, search with structured results, edit safely, run commands when allowed, split work into milestones and todos, and keep the whole session inspectable.
+It is meant for developers who want an agent that stays close to the codebase: inspect files, search with structured results, edit safely, run commands when allowed, split work into milestones and tasks, and keep the whole session inspectable.
 
 ## Why use it?
 
 - **Bring your own model.** Use local or remote OpenAI-compatible `/v1/chat/completions` providers, configure models in the UI, and choose a separate model for compaction when useful.
 - **Work in a real browser UI.** Start `koder`, open the web app, and manage chats, preferences, providers, MCP servers, permissions, and workspace state from one place.
-- **Resume where you left off.** Sessions, chats, tool results, context usage, milestones, todos, approvals, and compaction summaries are persisted locally.
+- **Resume where you left off.** Sessions, chats, tool results, context usage, milestones, tasks, approvals, and compaction summaries are persisted locally.
 - **Use safer code tools.** The model gets typed tools for reading, globbing, grep-style search, code search, targeted edits, explicit full-file writes, shell/exec sessions, image viewing, web fetch/search, skills, and task orchestration.
 - **Avoid accidental rewrites.** Targeted changes should go through `edit`. The `write` tool creates new files by default and refuses to overwrite an existing file unless `force_overwrite=true`.
-- **Scale work with chats.** Use milestones, todos, and background chats to separate planning, decomposition, and execution work without losing the main thread.
+- **Scale work with chats.** Use milestones, tasks, and background chats to separate planning, decomposition, and execution work without losing the main thread.
 - **Customize behavior.** User-editable managed assets live under `~/.koder`, including prompts and bundled skills.
 - **Inspect what happened.** Optional local debug APIs expose runtime state, sessions, transcripts, events, and HTTP activity for troubleshooting.
 
@@ -74,7 +74,7 @@ The agent sees a structured tool surface instead of guessing at raw terminal wor
 - `edit` for targeted replacements in existing files.
 - `write` for new files or explicit full-file overwrites.
 - `bash` and `exec_*` for command execution when allowed.
-- `task`, milestone, todo, and `chat_start` tools for organizing larger work.
+- milestone, task, and `chat_start` tools for organizing larger work.
 - `skill`, MCP, web, and image tools for extending what the agent can do.
 
 Permission profiles control network access, root filesystem mode, workspace mode, additional mounts, and per-tool policy. On Linux, shell sandboxing uses `bwrap` when shell tools are enabled.

@@ -582,7 +582,7 @@ func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionC
 			if name == "" {
 				name = milestone.Ref
 			}
-			return fmt.Errorf("cannot complete milestone %q while todo %s is %s", name, todo.ID, todo.Status.String())
+			return fmt.Errorf("cannot complete milestone %q while task %s is %s", name, todo.ID, todo.Status.String())
 		}
 	}
 	return nil

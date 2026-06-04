@@ -10,7 +10,7 @@ Current architecture highlights:
 - `internal/webui` serves embedded assets and bridges browser websocket RPC to the app controller.
 - `internal/session` owns live session state, chats, planning data, and session-scoped mutation.
 - `internal/agent` owns model turns, tools, approvals, compaction, and chat loop behavior.
-- `internal/store` persists sessions, chats, transcripts, approvals, milestones, todos, tasks, and runtime metadata.
+- `internal/store` persists sessions, chats, transcripts, approvals, milestones, tasks, and runtime metadata.
 
 ## Current gaps
 

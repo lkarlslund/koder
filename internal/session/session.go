@@ -847,7 +847,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	todos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
-	slog.Info("todos added", "session_id", sessionID, "milestone_ref", milestoneRef, "count", len(items))
+	slog.Info("tasks added", "session_id", sessionID, "milestone_ref", milestoneRef, "count", len(items))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: todos, TodosByRef: todosByRef})
 	return slices.Clone(items), nil
 }
@@ -876,7 +876,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	}
 	s.mu.RUnlock()
 	if !found {
-		return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
+		return planning.TodoItem{}, fmt.Errorf("task %s not found", todoID)
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -991,7 +991,7 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 
 func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	if assignedTodoRef(p.chat) != "" {
-		return nil, fmt.Errorf("chat is scoped to todo %q", assignedTodoRef(p.chat))
+		return nil, fmt.Errorf("chat is scoped to task %q", assignedTodoRef(p.chat))
 	}
 	ref, err := p.allowedMilestoneRef(milestoneRef)
 	if err != nil {
@@ -1002,7 +1002,7 @@ func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, miles
 
 func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
-		return planning.TodoItem{}, fmt.Errorf("chat is scoped to todo %q", assigned)
+		return planning.TodoItem{}, fmt.Errorf("chat is scoped to task %q", assigned)
 	}
 	if ref := assignedMilestoneRef(p.chat); ref != "" {
 		todos, err := p.session.ListTodos(ctx, p.chat.SessionID, ref)

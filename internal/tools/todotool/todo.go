@@ -144,7 +144,7 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if tools.AssignedTodoRef(runtime) != "" {
-		return tools.Result{}, fmt.Errorf("chat is scoped to todo %q", tools.AssignedTodoRef(runtime))
+		return tools.Result{}, fmt.Errorf("chat is scoped to task %q", tools.AssignedTodoRef(runtime))
 	}
 	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
@@ -214,7 +214,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			}
 			todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
 			if err != nil {
-				return tools.Result{}, fmt.Errorf("invalid todo status %q", req.Args["status"])
+				return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
 			}
 			todos[idx].Status = todoStatus
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
@@ -343,7 +343,7 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 		}
 		todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
 		if err != nil {
-			return nil, fmt.Errorf("invalid todo status %q", req.Args["status"])
+			return nil, fmt.Errorf("invalid task status %q", req.Args["status"])
 		}
 		for idx := range todos {
 			if todos[idx].ID != id {

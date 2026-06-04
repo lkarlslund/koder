@@ -212,10 +212,10 @@ func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Pl
 
 func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error {
 	if item.ID == "" {
-		return fmt.Errorf("put todo item: id is required")
+		return fmt.Errorf("put task: id is required")
 	}
 	if item.SessionID == "" {
-		return fmt.Errorf("put todo item: session id is required")
+		return fmt.Errorf("put task: session id is required")
 	}
 	if item.UpdatedAt.IsZero() {
 		item.UpdatedAt = time.Now().UTC()

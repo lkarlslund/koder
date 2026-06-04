@@ -29,11 +29,11 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha todo"})
+	alphaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta todo"})
+	betaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(todos) != 1 || todos[0].ID != alphaTodos[0].ID {
-		t.Fatalf("expected alpha-only todos, got %#v", todos)
+		t.Fatalf("expected alpha-only tasks, got %#v", todos)
 	}
 	if _, err := control.ListTodos(ctx, sessionRecord.ID, "beta"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
 		t.Fatalf("expected beta scope error, got %v", err)
@@ -92,10 +92,10 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(listed) != 1 || listed[0].ID != todos[0].ID {
-		t.Fatalf("expected assigned todo only, got %#v", listed)
+		t.Fatalf("expected assigned task only, got %#v", listed)
 	}
-	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "alpha", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
-		t.Fatalf("expected add todo scope error, got %v", err)
+	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "alpha", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+		t.Fatalf("expected add task scope error, got %v", err)
 	}
 }
 

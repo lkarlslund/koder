@@ -383,12 +383,12 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 	}
 	todos, err := ctrl.AddTodoItems(context.Background(), state.Session.ID, "alpha", []string{"Implement alpha"})
 	if err != nil {
-		t.Fatalf("add todo: %v", err)
+		t.Fatalf("add task: %v", err)
 	}
 
 	status, err := ctrl.agent.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, tools.ChatStartRequest{
 		Profile:   chatrole.Execution,
-		Objective: "Implement only the assigned todo",
+		Objective: "Implement only the assigned task",
 		TodoRef:   todos[0].ID,
 	})
 	if err != nil {

@@ -50,7 +50,7 @@ Legend: ✅ = native support, ⚠️ = partial/limited, ❌ = missing, — = not
 
 | Feature  | Koder | Aider | Cline | OpenCode | Gemini CLI | Goose | OpenHands | Codex | Hermes | Continue | Tabby | PR-Agent |
 |----------------------------------|:-----:|:-----:|:-----:|:--------:|:----------:|:-----:|:---------:|:-----:|:------:|:--------:|:-----:|:--------:|
-| **Milestone / todo planning**  | ✅  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  |
+| **Milestone / task planning**  | ✅  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  | ❌  |
 | **Background sub-agents**  | ✅  | ❌  | ❌  | ✅  | ❌  | ❌  | ✅  | ✅  | ✅  | ❌  | ❌  | ❌  |
 | **Multi-agent teams**  | ❌  | ❌  | ✅  | ⚠️  | ❌  | ❌  | ✅  | ❌  | ✅  | ❌  | ❌  | ❌  |
 | **Scheduled / cron tasks**  | ❌  | ❌  | ✅  | ❌  | ❌  | ❌  | ❌  | ❌  | ✅  | ❌  | ❌  | ❌  |
@@ -72,7 +72,7 @@ Legend: ✅ = native support, ⚠️ = partial/limited, ❌ = missing, — = not
 
 ## Key Observations
 
-1. **Koder's unique strengths**: milestone/todo planning, queue/steer while running, shell sandboxing, background sub-agents, permission profiles, and the browser UI. No other agent combines all of these.
+1. **Koder's unique strengths**: milestone/task planning, queue/steer while running, shell sandboxing, background sub-agents, permission profiles, and the browser UI. No other agent combines all of these.
 
 2. **Biggest gaps vs. competition**:
    - **Repo map / codebase index** — Only Aider and Tabby have this. This is the single biggest gap for large codebase support.

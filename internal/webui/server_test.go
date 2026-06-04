@@ -1351,10 +1351,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected sidebar to filter milestones by status")
 	}
 	if !strings.Contains(fullPage, `todoItemsForMilestone(node.milestone)`) {
-		t.Fatalf("expected sidebar to render todos as milestone children")
+		t.Fatalf("expected sidebar to render tasks as milestone children")
 	}
 	if !strings.Contains(fullPage, `milestoneTodoSummary(node.milestone)`) {
-		t.Fatalf("expected collapsed milestones to show todo counts")
+		t.Fatalf("expected collapsed milestones to show task counts")
 	}
 	if !strings.Contains(fullPage, `milestone-progress`) ||
 		!strings.Contains(fullPage, `milestoneProgressStyle(node.milestone, 'failed')`) ||
@@ -1380,7 +1380,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected colorful milestone status badge classes")
 	}
 	if !strings.Contains(fullPage, `todoBadge(todoStatus(todo))`) || !strings.Contains(fullPage, `todoBadge(status)`) {
-		t.Fatalf("expected colorful todo status badge classes")
+		t.Fatalf("expected colorful task status badge classes")
 	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")

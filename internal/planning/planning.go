@@ -217,7 +217,7 @@ func ParseTodoID(raw string) (id.ID, error) {
 func ParseTodoStatus(raw string) (TodoStatus, error) {
 	status, err := TodoStatusString(strings.TrimSpace(raw))
 	if err != nil {
-		return 0, fmt.Errorf("invalid todo status %q", raw)
+		return 0, fmt.Errorf("invalid task status %q", raw)
 	}
 	return status, nil
 }
@@ -240,7 +240,7 @@ func ValidateNoDuplicateTodoContent(existing []TodoItem, added []string) error {
 			continue
 		}
 		if _, ok := seen[content]; ok {
-			return fmt.Errorf("duplicate todo content %q", item)
+			return fmt.Errorf("duplicate task content %q", item)
 		}
 		seen[content] = struct{}{}
 	}

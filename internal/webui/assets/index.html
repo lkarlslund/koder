@@ -351,7 +351,7 @@
               </div>
               <div class="planning-children" x-show="milestoneExpanded(milestoneRef(node.milestone))" x-transition>
                 <template x-if="todoItemsForMilestone(node.milestone).length === 0">
-                  <div class="planning-empty">No todos</div>
+                  <div class="planning-empty">No tasks</div>
                 </template>
                 <template x-for="todo in todoItemsForMilestone(node.milestone)" :key="todo.ID || todo.id">
                   <div class="planning-todo" :title="todoTitle(todo)">

@@ -147,7 +147,7 @@ func orchestrationSpec(name Role, display string) Spec {
 
 You may discuss, ask clarifying questions, manage milestones, decompose work inline, and start background execution chats when helpful.
 - Use milestones for longer-horizon work.
-- Use todos for concrete execution steps.
+- Use tasks for concrete execution steps.
 - Decompose work inline before starting execution chats.`),
 	}
 }

@@ -106,7 +106,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		}
 		scopedTodo = &todo
 		if milestoneRef != "" && todo.MilestoneRef != milestoneRef {
-			return tools.ChatStatus{}, fmt.Errorf("todo %s belongs to milestone %q, not %q", todoRef, todo.MilestoneRef, milestoneRef)
+			return tools.ChatStatus{}, fmt.Errorf("task %s belongs to milestone %q, not %q", todoRef, todo.MilestoneRef, milestoneRef)
 		}
 		milestoneRef = todo.MilestoneRef
 	}
@@ -253,7 +253,7 @@ func sessionTodoByID(ctx context.Context, owner interface {
 			return todo, nil
 		}
 	}
-	return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
+	return planning.TodoItem{}, fmt.Errorf("task %s not found", todoID)
 }
 
 func updateMilestoneStatus(plan planning.Plan, ref string, status planning.MilestoneStatus, ownerChatID id.ID) (planning.Plan, error) {
@@ -420,7 +420,7 @@ func (e *Engine) childIdleNotification(ctx context.Context, chatRecord domain.Ch
 		if err == nil {
 			for _, todo := range todos {
 				if todo.ID == chatRecord.AssignedTodoRef {
-					return fmt.Sprintf("%s Assigned todo #%s is %s.", text, todo.ID, todo.Status)
+					return fmt.Sprintf("%s Assigned task #%s is %s.", text, todo.ID, todo.Status)
 				}
 			}
 		}
@@ -435,9 +435,9 @@ func (e *Engine) childIdleNotification(ctx context.Context, chatRecord domain.Ch
 				}
 			}
 			if completed == len(todos) {
-				return fmt.Sprintf("%s All %d todos for milestone %s are done.", text, len(todos), ref)
+				return fmt.Sprintf("%s All %d tasks for milestone %s are done.", text, len(todos), ref)
 			}
-			return fmt.Sprintf("%s Chat completed %d out of %d todos for milestone %s, but is now stopped.", text, completed, len(todos), ref)
+			return fmt.Sprintf("%s Chat completed %d out of %d tasks for milestone %s, but is now stopped.", text, completed, len(todos), ref)
 		}
 	}
 	statusText = strings.TrimSpace(statusText)

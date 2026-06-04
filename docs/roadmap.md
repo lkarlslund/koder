@@ -5,7 +5,7 @@
 Ship a focused local-first browser coding agent with:
 
 - A single local daemon serving the in-browser application
-- Session-scoped project roots, chats, milestones, todos, approvals, and compaction
+- Session-scoped project roots, chats, milestones, tasks, approvals, and compaction
 - OpenAI-compatible local or remote model providers configured from the browser UI
 - Structured workspace tools for search, reads, edits, shell execution, web/image access, skills, and MCP
 - Browser-first session, provider, permission, and workspace controls

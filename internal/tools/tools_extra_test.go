@@ -117,7 +117,7 @@ func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 		t.Fatalf("expected ProviderCallError, got %T %v", err, err)
 	}
 	if callErr.Request.Tool != domain.ToolKindTasksUpdate || callErr.Request.ToolCallID != "call_1" {
-		t.Fatalf("expected partial todo request identity, got %#v", callErr.Request)
+		t.Fatalf("expected partial task request identity, got %#v", callErr.Request)
 	}
 	if callErr.Request.Args["status"] != "InProgress" {
 		t.Fatalf("expected raw status in partial request, got %#v", callErr.Request.Args)

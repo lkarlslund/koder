@@ -2017,7 +2017,7 @@
         },
         milestoneTodoSummary(milestone) {
           const counts = this.milestoneTodoCounts(milestone);
-          if (!counts.total) return '0 todos';
+          if (!counts.total) return '0 tasks';
           const details = [];
           if (counts.active) details.push(counts.active + ' active');
           if (counts.failed) details.push(counts.failed + ' failed');
@@ -2036,7 +2036,7 @@
         },
         milestoneProgressTitle(milestone) {
           const counts = this.milestoneTodoCounts(milestone);
-          if (!counts.total) return '0 todos';
+          if (!counts.total) return '0 tasks';
           const parts = [
             counts.completed + ' done',
             counts.active + ' active',

@@ -18,10 +18,10 @@ import (
 func TestTodoUpdateItemParsesStringID(t *testing.T) {
 	id, err := planning.ParseTodoID("019aa000-0000-7000-8000-000000000001")
 	if err != nil {
-		t.Fatalf("expected todo id to parse, got %v", err)
+		t.Fatalf("expected task id to parse, got %v", err)
 	}
 	if id != "019aa000-0000-7000-8000-000000000001" {
-		t.Fatalf("expected parsed todo id, got %s", id)
+		t.Fatalf("expected parsed task id, got %s", id)
 	}
 }
 
@@ -36,7 +36,7 @@ func TestTodoUpdateItemDefinitionUsesUUIDStringID(t *testing.T) {
 			t.Fatalf("expected tasks_update id to be a string UUID, got %s", params)
 		}
 		if !strings.Contains(params, `"enum":["pending","in_progress","completed"]`) || strings.Contains(params, "InProgress") {
-			t.Fatalf("expected tasks_update status enum to match TodoStatus strings, got %s", params)
+			t.Fatalf("expected tasks_update status enum to match task status strings, got %s", params)
 		}
 		if !strings.Contains(params, `"required":["id","status","note"]`) {
 			t.Fatalf("expected tasks_update to require note, got %s", params)
@@ -117,7 +117,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(next.Output, "Write tests") {
-		t.Fatalf("expected first pending todo, got %q", next.Output)
+		t.Fatalf("expected first pending task, got %q", next.Output)
 	}
 
 	todos, err := modeltest.ListTodos(ctx, st, session.ID, "implement")
@@ -125,7 +125,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(todos) != 2 {
-		t.Fatalf("unexpected todos: %#v", todos)
+		t.Fatalf("unexpected tasks: %#v", todos)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
@@ -185,7 +185,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(result.Output, "# Write tests") {
-		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
+		t.Fatalf("expected execute preview to contain task content, got %q", result.Output)
 	}
 	events, err := tools.PersistResult(ctx, runtime, req, result)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	}
 	event := <-events
 	if !strings.Contains(event.Text, " Write tests") || !strings.Contains(event.Text, " Fix bug") {
-		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
+		t.Fatalf("expected persisted event to contain real task ids, got %q", event.Text)
 	}
 }
 
@@ -219,8 +219,8 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 			"items":         `[{"content":"  write   tests "}]`,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "duplicate todo content") {
-		t.Fatalf("expected duplicate todo content error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "duplicate task content") {
+		t.Fatalf("expected duplicate task content error, got %v", err)
 	}
 }
 
@@ -344,20 +344,20 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(listed.Output, "First") || strings.Contains(listed.Output, "Second") {
-		t.Fatalf("expected single scoped todo, got %q", listed.Output)
+		t.Fatalf("expected single scoped task, got %q", listed.Output)
 	}
 
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"id": string(todos[1].ID), "status": planning.TodoStatusCompleted.String(), "note": "Tried to complete scoped todo."},
-	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
-		t.Fatalf("expected scoped todo error, got %v", err)
+		Args: map[string]string{"id": string(todos[1].ID), "status": planning.TodoStatusCompleted.String(), "note": "Tried to complete scoped task."},
+	}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+		t.Fatalf("expected scoped task error, got %v", err)
 	}
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{"milestone_ref": "implement", "items": `[{"content":"Third"}]`},
-	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
-		t.Fatalf("expected add todo scoped error, got %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+		t.Fatalf("expected add task scoped error, got %v", err)
 	}
 }
 

@@ -4,7 +4,7 @@
 
 - `cmd/koder`: Cobra entrypoints and process bootstrap
 - `internal/config`: TOML config plus XDG path resolution
-- `internal/store`: Pebble-backed or JSON-file-backed persistence for sessions, chats, messages, parts, approvals, tasks, milestones, and todos
+- `internal/store`: Pebble-backed or JSON-file-backed persistence for sessions, chats, messages, parts, approvals, milestones, and tasks
 - `internal/provider`: OpenAI-compatible `/models` and `/chat/completions` client
 - `internal/tools`: typed local tool execution surface
 - `internal/agent`: prompt handling, tool approval flow, and event emission
@@ -19,7 +19,7 @@ Current v1 shape is a modular monolith inside one binary. The browser UI talks t
 
 - The default backend is `pebble`.
 - An alternate `jsonfs` backend stores inspectable JSON files on disk.
-- Both backends persist the same core application state: sessions, chats, messages, parts, approvals, tasks, milestone plans, and todos.
+- Both backends persist the same core application state: sessions, chats, messages, parts, approvals, milestone plans, and tasks.
 
 The configured backend is selected from `config.toml` through `store.backend`.
 
