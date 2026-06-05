@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -105,8 +106,63 @@ func TestWriteStdinAllowsEmptyCharsForWait(t *testing.T) {
 	}
 }
 
+func TestYieldTimeRejectsZero(t *testing.T) {
+	for name, tool := range map[string]interface {
+		NormalizeArgs(map[string]string) (map[string]string, error)
+	}{
+		"command":     commandTool{},
+		"write_stdin": writeStdinTool{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := tool.NormalizeArgs(map[string]string{
+				"cmd":           "sleep 1",
+				"process_id":    "exec_1",
+				"yield_time_ms": "0",
+			})
+			if err == nil || !strings.Contains(err.Error(), "positive integer") {
+				t.Fatalf("expected positive integer error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteStdinExecuteDefaultsToTenSecondYield(t *testing.T) {
+	control := &recordingExecControl{}
+	_, err := (writeStdinTool{}).Execute(context.Background(), tools.Runtime{
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, tools.Request{
+		Args: map[string]string{"process_id": "exec_1", "chars": ""},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if control.writeStdin.YieldTime != 10*time.Second {
+		t.Fatalf("expected 10s default yield, got %s", control.writeStdin.YieldTime)
+	}
+}
+
+func TestWriteStdinExecuteDoesNotAllowZeroYield(t *testing.T) {
+	control := &recordingExecControl{}
+	_, err := (writeStdinTool{}).Execute(context.Background(), tools.Runtime{
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, tools.Request{
+		Args: map[string]string{"process_id": "exec_1", "chars": "", "yield_time_ms": "0"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if control.writeStdin.YieldTime != 10*time.Second {
+		t.Fatalf("expected zero yield to fall back to 10s, got %s", control.writeStdin.YieldTime)
+	}
+}
+
 type recordingExecControl struct {
-	start execruntime.StartRequest
+	start      execruntime.StartRequest
+	writeStdin execruntime.WriteStdinRequest
 }
 
 func (c *recordingExecControl) Start(_ context.Context, req execruntime.StartRequest) (execruntime.Snapshot, error) {
@@ -132,8 +188,15 @@ func (c *recordingExecControl) List(context.Context, execruntime.ListRequest) ([
 	return nil, errors.New("not implemented")
 }
 
-func (c *recordingExecControl) WriteStdin(context.Context, execruntime.WriteStdinRequest) (execruntime.Snapshot, error) {
-	return execruntime.Snapshot{}, errors.New("not implemented")
+func (c *recordingExecControl) WriteStdin(_ context.Context, req execruntime.WriteStdinRequest) (execruntime.Snapshot, error) {
+	c.writeStdin = req
+	return execruntime.Snapshot{
+		ProcessID: req.ProcessID,
+		SessionID: req.SessionID,
+		ChatID:    req.ChatID,
+		State:     execruntime.StateRunning,
+		Drained:   true,
+	}, nil
 }
 
 func (c *recordingExecControl) Resize(context.Context, execruntime.ResizeRequest) (execruntime.Snapshot, error) {

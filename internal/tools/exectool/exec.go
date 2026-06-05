@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	defaultYieldTime = 250 * time.Millisecond
+	defaultYieldTime           = 250 * time.Millisecond
+	defaultWriteStdinYieldTime = 10 * time.Second
 )
 
 func init() {
@@ -43,7 +44,7 @@ func init() {
 		Title:       "Write exec stdin",
 		Description: "Write stdin text to, or wait for output from, a running persistent exec session.",
 		Usage:       "Write stdin text to a persistent exec session. Pass empty chars to wait for new output or process completion without writing input. Prefer this over repeated exec_status polling for long-running commands; returned output is newly drained output since the previous consuming exec result.",
-		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin. Use an empty string to wait/poll for new output without writing input."},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"yield_time_ms":{"type":"integer","description":"Optional wait in milliseconds for new output before returning. Defaults to a short wait; empty chars may use longer waits."},"max_output_bytes":{"type":"integer","description":"Optional output size to return"}},"required":["process_id"],"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin. Use an empty string to wait/poll for new output without writing input."},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"yield_time_ms":{"type":"integer","description":"Optional positive wait in milliseconds for new output before returning. Defaults to 10000 ms."},"max_output_bytes":{"type":"integer","description":"Optional output size to return"}},"required":["process_id"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(resizeTool{}, tools.ToolSpec{
@@ -125,8 +126,8 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	}
 	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
 		ms, err := tools.ParseFlexibleInt(yield)
-		if err != nil || ms < 0 {
-			return nil, errors.New("yield_time_ms must be a non-negative integer")
+		if err != nil || ms <= 0 {
+			return nil, errors.New("yield_time_ms must be a positive integer")
 		}
 		out["yield_time_ms"] = strconv.Itoa(ms)
 	}
@@ -158,8 +159,8 @@ func (writeStdinTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	}
 	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
 		ms, err := tools.ParseFlexibleInt(yield)
-		if err != nil || ms < 0 {
-			return nil, errors.New("yield_time_ms must be a non-negative integer")
+		if err != nil || ms <= 0 {
+			return nil, errors.New("yield_time_ms must be a positive integer")
 		}
 		out["yield_time_ms"] = strconv.Itoa(ms)
 	}
@@ -313,7 +314,7 @@ func (writeStdinTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 		Chars:      req.Args["chars"],
 		CloseStdin: firstBool(req.Args["close_stdin"], false),
 		MaxBytes:   firstInt(req.Args["max_output_bytes"]),
-		YieldTime:  durationOrDefault(req.Args["yield_time_ms"], 0),
+		YieldTime:  durationOrDefault(req.Args["yield_time_ms"], defaultWriteStdinYieldTime),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -569,7 +570,7 @@ func durationOrDefault(raw string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	value, err := strconv.Atoi(raw)
-	if err != nil || value < 0 {
+	if err != nil || value <= 0 {
 		return fallback
 	}
 	return time.Duration(value) * time.Millisecond
