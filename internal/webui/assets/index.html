@@ -154,7 +154,7 @@
                     <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
                     <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: toolCallID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
                   </div>
-                  <template x-if="tool.result"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
+                  <template x-if="tool.result && toolResultHTML(tool)"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                   <template x-if="tool.error && toolErrorHTML(tool)"><div class="tool-result mt-2" x-html="toolErrorHTML(tool)"></div></template>
                 </div>
               </template>
