@@ -2013,12 +2013,15 @@
           }).length;
         },
         milestoneStatusFilterOptions() {
-          return this.statusFilterOptions(this.milestoneItems().map(milestone => this.milestoneStatus(milestone)), status => ({
+          return this.statusFilterOptions(this.milestoneItems().map(milestone => this.milestoneStatus(milestone)), this.milestoneFilterStatuses(), status => ({
             status,
             label: this.statusLabel(status),
             icon: this.milestoneIcon(status),
             count: 0,
           }));
+        },
+        milestoneFilterStatuses() {
+          return ['executing', 'decomposing', 'ready', 'pending', 'completed', 'blocked', 'cancelled'];
         },
         milestoneStatusFilterEnabled(status) {
           return !this.hiddenMilestoneStatuses[String(status || 'pending')];
@@ -2156,12 +2159,15 @@
           return (this.state.chats || this.state.Chats || []).filter(chat => this.chatArchived(chat)).length;
         },
         chatStatusFilterOptions() {
-          return this.statusFilterOptions((this.state.chats || this.state.Chats || []).map(chat => this.chatFilterStatus(chat)), status => ({
+          return this.statusFilterOptions((this.state.chats || this.state.Chats || []).map(chat => this.chatFilterStatus(chat)), this.chatFilterStatuses(), status => ({
             status,
             label: status === 'archived' ? 'Archived' : this.statusLabel(status),
             icon: status === 'archived' ? 'bi-archive' : this.chatStatusIconForValue(status),
             count: 0,
           }));
+        },
+        chatFilterStatuses() {
+          return ['running_tools', 'streaming_response', 'streaming_thoughts', 'waiting_llm', 'waiting_approval', 'idle', 'error', 'archived'];
         },
         chatFilterStatus(chat) {
           if (this.chatArchived(chat)) return 'archived';
@@ -2281,14 +2287,16 @@
           };
           return labels[value] || value.replaceAll('_', ' ');
         },
-        statusFilterOptions(statuses, build) {
+        statusFilterOptions(statuses, baseline, build) {
           const counts = new Map();
           for (const raw of statuses) {
             const status = String(raw || '').trim();
             if (!status) continue;
             counts.set(status, (counts.get(status) || 0) + 1);
           }
-          return Array.from(counts.keys()).sort((a, b) => this.statusSortIndex(a) - this.statusSortIndex(b) || a.localeCompare(b)).map(status => {
+          const keys = new Set(Array.isArray(baseline) ? baseline.map(status => String(status || '').trim()).filter(Boolean) : []);
+          for (const status of counts.keys()) keys.add(status);
+          return Array.from(keys).sort((a, b) => this.statusSortIndex(a) - this.statusSortIndex(b) || a.localeCompare(b)).map(status => {
             const option = build(status);
             option.count = counts.get(status) || 0;
             return option;

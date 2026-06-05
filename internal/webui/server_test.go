@@ -1382,6 +1382,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `flattenedMilestones()`) ||
 		!strings.Contains(fullPage, `milestoneDependsOnRef`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterOptions()`) ||
+		!strings.Contains(fullPage, `milestoneFilterStatuses()`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterClass(filter.status)`) ||
 		!strings.Contains(fullPage, `toggleMilestoneStatusFilter(filter.status)`) ||
 		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
@@ -1456,6 +1457,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `visibleChats()`) ||
 		!strings.Contains(fullPage, `chatStatusFilterOptions()`) ||
+		!strings.Contains(fullPage, `chatFilterStatuses()`) ||
 		!strings.Contains(fullPage, `toggleChatStatusFilter(filter.status)`) ||
 		!strings.Contains(fullPage, `hiddenChatStatuses`) ||
 		!strings.Contains(fullPage, `Archive this chat?`) ||
