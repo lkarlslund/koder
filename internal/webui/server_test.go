@@ -1182,6 +1182,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
 	if !strings.Contains(fullPage, `rollback_chat`) ||
+		!strings.Contains(fullPage, `this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(s =>`) ||
 		!strings.Contains(fullPage, `fork_chat`) ||
 		!strings.Contains(fullPage, `timelineAction.open`) ||
 		!strings.Contains(fullPage, `timelineItemActionAvailable(item)`) ||

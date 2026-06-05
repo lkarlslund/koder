@@ -1667,7 +1667,9 @@
           this.timelineAction.busy = true;
           this.timelineAction.error = '';
           if (mode === 'rollback') {
-            this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(() => {
+            this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(s => {
+              this.applyState(s, {scrollToBottom: true});
+              this.timelineAction.busy = false;
               this.closeTimelineAction();
             }).catch(err => {
               this.timelineAction.busy = false;
@@ -1684,6 +1686,7 @@
             }
             this.rpc('fork_chat', {chat_id: chatID, anchor_item_id: itemID, title}).then(s => {
               this.applyState(s, {scrollToBottom: true});
+              this.timelineAction.busy = false;
               this.closeTimelineAction();
             }).catch(err => {
               this.timelineAction.busy = false;

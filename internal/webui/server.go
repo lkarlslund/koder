@@ -737,7 +737,10 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.RollbackChatForSelection(ctx, s.appSelection(clientID), in.ChatID, in.AnchorItemID)
+		if _, err := s.controller.RollbackChatForSelection(ctx, s.appSelection(clientID), in.ChatID, in.AnchorItemID); err != nil {
+			return nil, err
+		}
+		return s.stateForClient(ctx, clientID)
 	case "fork_chat":
 		var in struct {
 			ChatID       id.ID  `json:"chat_id"`
