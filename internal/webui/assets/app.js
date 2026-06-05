@@ -798,8 +798,12 @@
             this.reconnectTimer = null;
           }
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const session = encodeURIComponent(this.sessionIDFromLocation() || '');
-          const ws = new WebSocket(proto + '//' + location.host + '/ws' + (session ? '?session=' + session : ''));
+          const route = this.selectionFromLocation();
+          const params = new URLSearchParams();
+          if (route.sessionID) params.set('session', route.sessionID);
+          if (route.chatID) params.set('chat', route.chatID);
+          const query = params.toString();
+          const ws = new WebSocket(proto + '//' + location.host + '/ws' + (query ? '?' + query : ''));
           this.ws = ws;
           this.connecting = true;
           this.connected = false;
@@ -1492,21 +1496,43 @@
           });
           this.reportClientStateSoon();
         },
-        sessionIDFromLocation() {
-          const match = location.pathname.match(/^\/s\/([^/]+)$/);
-          return match ? decodeURIComponent(match[1]) : '';
+        selectionFromLocation() {
+          const match = location.pathname.match(/^\/s\/([^/]+)(?:\/c\/([^/]+))?$/);
+          return {
+            sessionID: match ? decodeURIComponent(match[1]) : '',
+            chatID: match && match[2] ? decodeURIComponent(match[2]) : '',
+          };
         },
+        sessionIDFromLocation() { return this.selectionFromLocation().sessionID; },
+        chatIDFromLocation() { return this.selectionFromLocation().chatID; },
         currentSessionID() { return String(this.state.session?.id || this.state.session?.ID || '').trim(); },
         welcomeMode() { return !this.currentSessionID(); },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
+        sessionURL(id) {
+          const session = String(id || '').trim();
+          return session ? '/s/' + encodeURIComponent(session) : '/';
+        },
+        chatURL(chatID, sessionID) {
+          const session = String(sessionID || this.currentSessionID() || '').trim();
+          const chat = String(chatID || '').trim();
+          if (!session) return '/';
+          return chat ? this.sessionURL(session) + '/c/' + encodeURIComponent(chat) : this.sessionURL(session);
+        },
+        shouldOpenInNewTab(ev) {
+          return !!(ev && (ev.ctrlKey || ev.metaKey || ev.button === 1));
+        },
+        openURLInNewTab(url) {
+          if (!url) return;
+          window.open(url, '_blank', 'noopener');
+        },
         syncSessionURL() {
           const id = this.currentSessionID();
           if (!id) {
-            if (/^\/s\/[^/]+$/.test(location.pathname)) history.replaceState(null, '', '/');
+            if (/^\/s\/[^/]+(?:\/c\/[^/]+)?$/.test(location.pathname)) history.replaceState(null, '', '/');
             this.allowSessionURLSync = false;
             return;
           }
-          const target = '/s/' + encodeURIComponent(id);
+          const target = this.chatURL(this.activeChatID(), id);
           if (location.pathname === target) {
             this.allowSessionURLSync = false;
             return;
@@ -1577,6 +1603,7 @@
         },
         restoreSelectedChat() {
           if (this.restoreChatAttempted) return false;
+          if (this.chatIDFromLocation()) { this.restoreChatAttempted = true; return false; }
           const raw = readTabPreference(this.selectedChatPreferenceName(), '');
           const id = String(raw || '').trim();
           if (!id) { this.restoreChatAttempted = true; return false; }
@@ -2710,7 +2737,14 @@
           if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
           return false;
         },
-        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.closeMobileSidebar(); }); },
+        switchChat(id, ev) {
+          if (!id) return;
+          if (this.shouldOpenInNewTab(ev)) {
+            this.openURLInNewTab(this.chatURL(id));
+            return;
+          }
+          this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.closeMobileSidebar(); });
+        },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
         startChatDrag(ev, id) {
           if (!id) return;
@@ -2947,8 +2981,13 @@
           return root ? `(${root})` : '';
         },
         sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },
-        switchSession(id) {
-          if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
+        switchSession(id, ev) {
+          if (!id) return;
+          if (this.shouldOpenInNewTab(ev)) {
+            this.openURLInNewTab(this.sessionURL(id));
+            return;
+          }
+          if (id === this.activeSessionID()) { this.closeSessionDialog(); return; }
           this.allowSessionURLSync = true;
           this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },

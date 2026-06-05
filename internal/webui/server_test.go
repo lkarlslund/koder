@@ -67,6 +67,11 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 		t.Fatalf("create second session: %v", err)
 	}
 	secondID := second.ID
+	secondState, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: secondID})
+	if err != nil {
+		t.Fatalf("state for second session: %v", err)
+	}
+	secondChatID := secondState.ActiveChatID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -92,6 +97,15 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 		t.Fatalf("expected session app ok, got %d", resp.StatusCode)
 	}
 
+	resp, err = http.Get(srv.URL() + "/s/" + string(secondID) + "/c/" + string(secondChatID))
+	if err != nil {
+		t.Fatalf("get inactive session chat url: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected session chat app ok, got %d", resp.StatusCode)
+	}
+
 	resp, err = http.Get(srv.URL() + "/s/019e72fa-1cb8-73ef-a5ca-247275f3f62f")
 	if err != nil {
 		t.Fatalf("get missing session url: %v", err)
@@ -110,6 +124,15 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 		t.Fatalf("create second session: %v", err)
 	}
 	secondID := second.ID
+	secondState, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: secondID})
+	if err != nil {
+		t.Fatalf("state for second session: %v", err)
+	}
+	defaultChatID := secondState.ActiveChatID
+	sideChat, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: secondID, ChatID: defaultChatID}, "side chat")
+	if err != nil {
+		t.Fatalf("create side chat: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -117,7 +140,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(secondID), nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(secondID)+"&chat="+string(sideChat.ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -133,6 +156,12 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 				Session struct {
 					ID id.ID
 				}
+				ActiveChatID id.ID `json:"active_chat_id"`
+				Snapshot     struct {
+					Chat struct {
+						ID id.ID
+					}
+				}
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -145,6 +174,9 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 	if resp.Result.State.Session.ID != secondID {
 		t.Fatalf("expected hello for second session %s, got %s; first was %s", secondID, resp.Result.State.Session.ID, firstID)
+	}
+	if resp.Result.State.ActiveChatID != sideChat.ID || resp.Result.State.Snapshot.Chat.ID != sideChat.ID {
+		t.Fatalf("expected hello for chat %s, got active=%s snapshot=%s", sideChat.ID, resp.Result.State.ActiveChatID, resp.Result.State.Snapshot.Chat.ID)
 	}
 }
 
@@ -1271,6 +1303,15 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
+	}
+	if !strings.Contains(fullPage, `selectionFromLocation()`) ||
+		!strings.Contains(fullPage, `params.set('chat', route.chatID)`) ||
+		!strings.Contains(fullPage, `this.chatURL(this.activeChatID(), id)`) ||
+		!strings.Contains(fullPage, `switchChat(id, ev)`) ||
+		!strings.Contains(fullPage, `switchSession(id, ev)`) ||
+		!strings.Contains(fullPage, `@auxclick.prevent="switchChat(chatID(chat), $event)"`) ||
+		!strings.Contains(fullPage, `@auxclick.stop.prevent="switchSession(sessionID(session), $event)"`) {
+		t.Fatalf("expected session/chat URL deep links and new-tab click handling")
 	}
 	if !strings.Contains(fullPage, `this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true})`) {
 		t.Fatalf("expected fresh page loads to start at the bottom of the transcript")

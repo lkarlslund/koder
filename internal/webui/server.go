@@ -198,25 +198,39 @@ func (s *Server) markConnected() {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
-	if r.URL.Path != "/" && sessionIDFromPath(r.URL.Path) == "" {
-		http.NotFound(w, r)
-		return
+	if r.URL.Path != "/" {
+		selection, ok := routeSelectionFromPath(r.URL.Path)
+		if !ok || selection.SessionID == "" {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(renderIndexHTML()))
 }
 
-func sessionIDFromPath(path string) id.ID {
+func routeSelectionFromPath(path string) (clientSelection, bool) {
 	path = strings.Trim(strings.TrimSpace(path), "/")
-	if !strings.HasPrefix(path, "s/") {
-		return ""
+	if path == "" {
+		return clientSelection{}, true
 	}
-	value := strings.TrimSpace(strings.TrimPrefix(path, "s/"))
-	if value == "" || strings.Contains(value, "/") {
-		return ""
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 && len(parts) != 4 {
+		return clientSelection{}, false
 	}
-	return id.ID(value)
+	if parts[0] != "s" || strings.TrimSpace(parts[1]) == "" {
+		return clientSelection{}, false
+	}
+	selection := clientSelection{SessionID: id.ID(strings.TrimSpace(parts[1]))}
+	if len(parts) == 2 {
+		return selection, true
+	}
+	if parts[2] != "c" || strings.TrimSpace(parts[3]) == "" {
+		return clientSelection{}, false
+	}
+	selection.ChatID = id.ID(strings.TrimSpace(parts[3]))
+	return selection, true
 }
 
 func handleFavicon(w http.ResponseWriter, r *http.Request) {
@@ -386,9 +400,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	clientID := string(id.New())
-	slog.Info("websocket connected", "client", clientID, "remote", r.RemoteAddr, "session", strings.TrimSpace(r.URL.Query().Get("session")))
-	if sessionID := id.ID(strings.TrimSpace(r.URL.Query().Get("session"))); sessionID != "" {
-		s.setClientSelection(clientID, clientSelection{SessionID: sessionID})
+	initialSelection := clientSelection{
+		SessionID: id.ID(strings.TrimSpace(r.URL.Query().Get("session"))),
+		ChatID:    id.ID(strings.TrimSpace(r.URL.Query().Get("chat"))),
+	}
+	slog.Info("websocket connected", "client", clientID, "remote", r.RemoteAddr, "session", initialSelection.SessionID, "chat", initialSelection.ChatID)
+	if initialSelection.SessionID != "" || initialSelection.ChatID != "" {
+		s.setClientSelection(clientID, initialSelection)
 	}
 	if s.debug != nil {
 		s.debug.RegisterClient(debugsrv.ClientDebug{
