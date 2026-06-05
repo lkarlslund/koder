@@ -1540,6 +1540,15 @@
           if (location.pathname === '/' || this.allowSessionURLSync) history.replaceState(null, '', target);
           this.allowSessionURLSync = false;
         },
+        syncActiveChatURL() {
+          const session = this.currentSessionID();
+          const chat = String(this.activeChatID() || '').trim();
+          if (!session || !chat) return;
+          const current = this.selectionFromLocation();
+          if (current.sessionID && current.sessionID !== session) return;
+          const target = this.chatURL(chat, session);
+          if (location.pathname !== target) history.replaceState(null, '', target);
+        },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.currentSessionID()); },
         milestoneExpansionPreferenceName() {
           const session = encodeURIComponent(this.currentSessionID());
@@ -1610,7 +1619,11 @@
           const exists = (this.state.chats || this.state.Chats || []).some(chat => this.chatID(chat) === id);
           this.restoreChatAttempted = true;
           if (!exists || id === this.activeChatID()) return false;
-          this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s, {scrollToBottom: true}));
+          this.rpc('switch_chat', {chat_id: id}).then(s => {
+            this.applyState(s, {scrollToBottom: true});
+            this.writeSelectedChat();
+            this.syncActiveChatURL();
+          });
           return true;
         },
         activeSnapshot() {
@@ -1713,6 +1726,8 @@
             }
             this.rpc('fork_chat', {chat_id: chatID, anchor_item_id: itemID, title}).then(s => {
               this.applyState(s, {scrollToBottom: true});
+              this.writeSelectedChat();
+              this.syncActiveChatURL();
               this.timelineAction.busy = false;
               this.closeTimelineAction();
             }).catch(err => {
@@ -2743,9 +2758,9 @@
             this.openURLInNewTab(this.chatURL(id));
             return;
           }
-          this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.closeMobileSidebar(); });
+          this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); });
         },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
         startChatDrag(ev, id) {
           if (!id) return;
           this.dragChatID = id;
@@ -2789,7 +2804,7 @@
         endChatDrag() { this.dragChatID = ''; },
         deleteChat(id) {
           if (!id || !confirm('Archive this chat?')) return;
-          this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s, {scrollToBottom: true})).catch(err => this.showToast(err.message));
+          this.rpc('delete_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
         },
         showToast(message) {
           this.toast = message || '';

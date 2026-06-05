@@ -1016,8 +1016,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `welcomeMode()`) ||
 		!strings.Contains(fullPage, `welcome-view`) ||
 		!strings.Contains(fullPage, `beginCreateSessionFromWelcome()`) ||
-		!strings.Contains(fullPage, `allowSessionURLSync`) {
-		t.Fatalf("expected app to include welcome screen and opt-in session URL sync")
+		!strings.Contains(fullPage, `allowSessionURLSync`) ||
+		!strings.Contains(fullPage, `syncActiveChatURL()`) {
+		t.Fatalf("expected app to include welcome screen and opt-in URL sync")
 	}
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
