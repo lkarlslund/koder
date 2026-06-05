@@ -53,6 +53,24 @@ func TestTimelineItemMarshalRoundTripsLintMessage(t *testing.T) {
 	}
 }
 
+func TestReasoningReplayTextUsesOnlyShorterCaveman(t *testing.T) {
+	original := "inspect repository carefully before changing anything"
+	short := ReasoningContent{Text: original, Caveman: "me inspect first"}
+	if got := short.ReplayText(); got != "me inspect first" {
+		t.Fatalf("expected shorter caveman replay, got %q", got)
+	}
+
+	long := ReasoningContent{Text: "short thought", Caveman: "me say many many many extra words and make context worse"}
+	if got := long.ReplayText(); got != "short thought" {
+		t.Fatalf("expected original replay for longer caveman, got %q", got)
+	}
+
+	explicit := ReasoningContent{Text: original, Caveman: "same text but marked worse", Tokens: 4, CavemanTokens: 4}
+	if got := explicit.ReplayText(); got != original {
+		t.Fatalf("expected original replay when caveman is not strictly smaller, got %q", got)
+	}
+}
+
 func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{

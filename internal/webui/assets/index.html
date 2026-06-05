@@ -878,6 +878,10 @@
                     </template>
                   </select>
                 </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Minimum thinking tokens</label>
+                  <input class="form-control" type="number" min="1" step="1" x-model.number="settings.thinking.caveman_min_tokens">
+                </div>
                 <div class="col-12">
                   <label class="form-label small text-secondary">Caveman prompt</label>
                   <textarea class="form-control font-monospace settings-prompt" rows="10" x-model="settings.thinking.caveman_prompt" spellcheck="false"></textarea>

@@ -984,7 +984,7 @@ func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
 }
 
 func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, job cavemanJob, events chan<- domain.Event) (domain.ReasoningContent, error) {
-	result := domain.ReasoningContent{Text: reasoning}
+	result := domain.ReasoningContent{Text: reasoning, Tokens: tokenestimate.Text(reasoning)}
 	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
 		return result, nil
 	}
@@ -995,16 +995,20 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 			return domain.ReasoningContent{}, err
 		}
 	}
+	if !job.Valid() {
+		return result, nil
+	}
 	caveman, err := job.Await(ctx)
 	if err != nil {
 		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
 	}
 	result.Caveman = strings.TrimSpace(caveman)
+	result.CavemanTokens = tokenestimate.Text(result.Caveman)
 	return result, nil
 }
 
 func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, events chan<- domain.Event) (cavemanJob, error) {
-	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+	if !e.shouldCavemanThinking(reasoning) {
 		return cavemanJob{}, nil
 	}
 	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProvider)
@@ -1052,6 +1056,17 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 		}
 		return strings.TrimSpace(resp.Text), nil
 	}), nil
+}
+
+func (e *Engine) shouldCavemanThinking(reasoning string) bool {
+	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+		return false
+	}
+	minTokens := e.cfg.Thinking.CavemanMinTokens
+	if minTokens <= 0 {
+		minTokens = config.DefaultCavemanMinTokens
+	}
+	return tokenestimate.Text(reasoning) >= minTokens
 }
 
 func (e *Engine) completeCavemanThinking(ctx context.Context, providerID id.ID, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
@@ -1724,6 +1739,9 @@ func (e *Engine) chatWithRetry(ctx context.Context, session domain.Session, chat
 			cavemanStarted := false
 			startCaveman := func() {
 				if cavemanStarted || !reasoningSeen {
+					return
+				}
+				if !e.shouldCavemanThinking(reasoning.String()) {
 					return
 				}
 				cavemanStarted = true

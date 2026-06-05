@@ -3810,6 +3810,7 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
 	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanMinTokens = 1
 	cfg.Thinking.CavemanPrompt = "Caveman rewrite only:\n{{thinking}}"
 
 	st, err := store.Open(t.TempDir())
@@ -3914,6 +3915,7 @@ func TestRunPromptStartsCavemanBeforeMainStreamCompletes(t *testing.T) {
 	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
 	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanMinTokens = 1
 	cfg.Thinking.CavemanPrompt = "Caveman rewrite only:\n{{thinking}}"
 
 	st, err := store.Open(t.TempDir())
@@ -3945,6 +3947,22 @@ func TestRunPromptStartsCavemanBeforeMainStreamCompletes(t *testing.T) {
 	}
 	if assistant.Text != "done" || assistant.Reasoning.Caveman != "me inspect." {
 		t.Fatalf("expected streamed response with async caveman reasoning, got %#v", assistant)
+	}
+}
+
+func TestCavemanThinkingHonorsMinimumTokenSetting(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.Thinking.CavemanEnabled = true
+	cfg.Thinking.CavemanMinTokens = 64
+	engine := New(cfg, nil, nil)
+
+	if engine.shouldCavemanThinking("short thought") {
+		t.Fatal("expected short reasoning to skip caveman conversion")
+	}
+	if !engine.shouldCavemanThinking(strings.Repeat("reasoning ", 80)) {
+		t.Fatal("expected reasoning above minimum tokens to activate caveman conversion")
 	}
 }
 

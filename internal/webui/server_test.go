@@ -1665,6 +1665,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `settingsTab === 'thinking'`) ||
 		!strings.Contains(fullPage, `settings.thinking.caveman_enabled`) ||
 		!strings.Contains(fullPage, `thinkingModelValue()`) ||
+		!strings.Contains(fullPage, `settings.thinking.caveman_min_tokens`) ||
 		!strings.Contains(fullPage, `settings.thinking.caveman_prompt`) {
 		t.Fatalf("expected thinking preferences tab with caveman controls")
 	}

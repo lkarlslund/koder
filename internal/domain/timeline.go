@@ -167,19 +167,41 @@ func (m *AssistantMessage) ToolByID(id ToolCallID) *ToolCall {
 
 // ReasoningContent stores normalized reasoning and provider replay metadata.
 type ReasoningContent struct {
-	Text      string          `json:"text,omitempty"`
-	Caveman   string          `json:"caveman,omitempty"`
-	Summary   []string        `json:"summary,omitempty"`
-	Encrypted string          `json:"encrypted,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Raw       json.RawMessage `json:"raw,omitempty"`
+	Text          string          `json:"text,omitempty"`
+	Caveman       string          `json:"caveman,omitempty"`
+	Tokens        int             `json:"tokens,omitempty"`
+	CavemanTokens int             `json:"caveman_tokens,omitempty"`
+	Summary       []string        `json:"summary,omitempty"`
+	Encrypted     string          `json:"encrypted,omitempty"`
+	Signature     string          `json:"signature,omitempty"`
+	Raw           json.RawMessage `json:"raw,omitempty"`
 }
 
 func (r ReasoningContent) ReplayText() string {
-	if text := strings.TrimSpace(r.Caveman); text != "" {
+	text := strings.TrimSpace(r.Text)
+	caveman := strings.TrimSpace(r.Caveman)
+	if caveman == "" {
 		return text
 	}
-	return strings.TrimSpace(r.Text)
+	originalTokens := r.Tokens
+	if originalTokens <= 0 {
+		originalTokens = estimatedTextTokens(text)
+	}
+	cavemanTokens := r.CavemanTokens
+	if cavemanTokens <= 0 {
+		cavemanTokens = estimatedTextTokens(caveman)
+	}
+	if originalTokens > 0 && cavemanTokens > 0 && cavemanTokens < originalTokens {
+		return caveman
+	}
+	return text
+}
+
+func estimatedTextTokens(text string) int {
+	if strings.TrimSpace(text) == "" {
+		return 0
+	}
+	return (len(text) + 3) / 4
 }
 
 // ProviderTrace stores provider-native data for replay/debugging.

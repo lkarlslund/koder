@@ -261,6 +261,7 @@ type ThinkingPreferences struct {
 	ModelID              string `json:"model_id"`
 	UseChatModel         bool   `json:"use_chat_model"`
 	CavemanPrompt        string `json:"caveman_prompt"`
+	CavemanMinTokens     int    `json:"caveman_min_tokens"`
 	CurrentSelectionText string `json:"current_selection_text"`
 }
 

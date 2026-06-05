@@ -31,6 +31,7 @@ type Thinking struct {
 	CavemanModel       string `toml:"caveman_model"`
 	CavemanPrompt      string `toml:"caveman_prompt"`
 	CavemanParallelism int    `toml:"caveman_parallelism,omitempty"`
+	CavemanMinTokens   int    `toml:"caveman_min_tokens,omitempty"`
 }
 
 type Provider struct {
@@ -132,6 +133,7 @@ const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
 const defaultCavemanParallelism = 1
+const DefaultCavemanMinTokens = 64
 const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
 const DefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
@@ -245,6 +247,7 @@ func Default() Config {
 		Thinking: Thinking{
 			CavemanPrompt:      DefaultCavemanThinkingPrompt,
 			CavemanParallelism: defaultCavemanParallelism,
+			CavemanMinTokens:   DefaultCavemanMinTokens,
 		},
 	}
 }
@@ -301,6 +304,9 @@ func (c *Config) applyDefaults() {
 	c.Thinking.CavemanModel = strings.TrimSpace(c.Thinking.CavemanModel)
 	if c.Thinking.CavemanParallelism <= 0 {
 		c.Thinking.CavemanParallelism = defaultCavemanParallelism
+	}
+	if c.Thinking.CavemanMinTokens <= 0 {
+		c.Thinking.CavemanMinTokens = DefaultCavemanMinTokens
 	}
 	switch strings.TrimSpace(c.Thinking.CavemanPrompt) {
 	case "":

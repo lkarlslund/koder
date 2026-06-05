@@ -1031,6 +1031,7 @@ func thinkingPreferencesFromConfig(cfg config.Config) ThinkingPreferences {
 		ModelID:              modelID,
 		UseChatModel:         providerID == "" && modelID == "",
 		CavemanPrompt:        strings.TrimSpace(cfg.Thinking.CavemanPrompt),
+		CavemanMinTokens:     cfg.Thinking.CavemanMinTokens,
 		CurrentSelectionText: text,
 	}
 }
@@ -1271,6 +1272,10 @@ func applyThinkingPreferences(cfg *config.Config, prefs ThinkingPreferences) err
 	cfg.Thinking.CavemanPrompt = strings.TrimSpace(prefs.CavemanPrompt)
 	if cfg.Thinking.CavemanPrompt == "" {
 		cfg.Thinking.CavemanPrompt = config.DefaultCavemanThinkingPrompt
+	}
+	cfg.Thinking.CavemanMinTokens = prefs.CavemanMinTokens
+	if cfg.Thinking.CavemanMinTokens <= 0 {
+		cfg.Thinking.CavemanMinTokens = config.DefaultCavemanMinTokens
 	}
 	if prefs.UseChatModel {
 		cfg.Thinking.CavemanProvider = ""
