@@ -2898,6 +2898,7 @@
           return this.state.sessions || this.state.Sessions || this.sessionState.sessions || [];
         },
         activeSessionID() { return this.currentSessionID(); },
+        currentSession() { return this.state.session || this.state.Session || {}; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
         sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },

@@ -1547,6 +1547,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
 	}
+	if !strings.Contains(fullPage, `title="Edit session title"`) ||
+		!strings.Contains(fullPage, `@click="beginEditSession(currentSession())"`) ||
+		!strings.Contains(fullPage, `currentSession()`) {
+		t.Fatalf("expected top status bar session title edit action")
+	}
 	if !strings.Contains(fullPage, `openSettingsDialog()`) {
 		t.Fatalf("expected top status bar settings dialog button")
 	}

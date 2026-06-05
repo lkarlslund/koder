@@ -5,6 +5,8 @@
     .topbar { grid-column: 1 / 4; }
     .topbar-workspace { max-width: min(34vw, 34rem); }
     .mobile-sidebar-toggle, .mobile-sidebar-header, .mobile-sidebar-backdrop { display: none; }
+    .topbar-session-edit { --bs-btn-padding-x: .2rem; --bs-btn-padding-y: .05rem; line-height: 1; color: var(--bs-secondary-color); text-decoration: none; }
+    .topbar-session-edit:hover, .topbar-session-edit:focus-visible { color: var(--bs-body-color); }
     .restart-needed { color: var(--bs-warning); font-size: 1.05rem; line-height: 1; animation: restart-needed-pulse 1s ease-in-out infinite; }
     .restart-needed.btn-warning, .restart-needed.btn-danger { color: var(--bs-btn-color); }
     @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
