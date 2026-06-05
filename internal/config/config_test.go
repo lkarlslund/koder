@@ -410,6 +410,34 @@ func TestModelConfigHelpersNormalizeAndDefault(t *testing.T) {
 	}
 }
 
+func TestModelConfigResolvesCustomModelSource(t *testing.T) {
+	temperature := 0.2
+	cfg := Default()
+	cfg.Models = []ModelConfig{
+		{
+			ProviderID:       "local",
+			ModelID:          "qwen coding",
+			SourceProviderID: "local",
+			SourceModelID:    "Qwen/Qwen3.6-35B-A3B",
+			ContextWindow:    65536,
+			Temperature:      &temperature,
+		},
+	}
+	cfg.applyDefaults()
+
+	providerID, modelID := cfg.ResolveModel("local", "qwen coding")
+	if providerID != "local" || modelID != "Qwen/Qwen3.6-35B-A3B" {
+		t.Fatalf("resolved model = %s/%s", providerID, modelID)
+	}
+	if got := cfg.ContextWindow("local", "qwen coding"); got != 65536 {
+		t.Fatalf("context window = %d", got)
+	}
+	request := cfg.ModelRequestOptions("local", "qwen coding")
+	if request.ModelID != "Qwen/Qwen3.6-35B-A3B" || request.Temperature == nil || *request.Temperature != 0.2 {
+		t.Fatalf("unexpected request options: %#v", request)
+	}
+}
+
 func TestApplyDefaultsFillsMissingMCPServerDefaults(t *testing.T) {
 	cfg := Default()
 	cfg.MCPServers["docs"] = MCPServer{

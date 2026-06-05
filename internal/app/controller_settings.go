@@ -335,6 +335,7 @@ func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, err
 
 func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
 	seen := map[string]struct{}{}
+	detected := map[string]domain.Model{}
 	options := make([]ModelOption, 0, len(cfg.Providers))
 	add := func(providerID string, providerCfg config.Provider, model domain.Model) {
 		providerID = strings.TrimSpace(providerID)
@@ -347,12 +348,18 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			return
 		}
 		seen[key] = struct{}{}
+		detected[key] = model
 		options = append(options, ModelOption{
-			ProviderID:    providerID,
-			ProviderLabel: providerEntryLabel(providerID, providerCfg),
-			ModelID:       modelID,
-			OwnedBy:       strings.TrimSpace(model.OwnedBy),
-			Current:       providerID == currentProvider && modelID == currentModel,
+			ProviderID:       providerID,
+			ProviderLabel:    providerEntryLabel(providerID, providerCfg),
+			ModelID:          modelID,
+			SourceProviderID: providerID,
+			SourceModelID:    modelID,
+			OwnedBy:          strings.TrimSpace(model.OwnedBy),
+			Detected:         true,
+			BackingDetected:  true,
+			Editable:         false,
+			Current:          providerID == currentProvider && modelID == currentModel,
 		})
 	}
 
@@ -385,9 +392,51 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			add(providerID, providerCfg, model)
 		}
 	}
+	for _, model := range cfg.Models {
+		model.ProviderID = strings.TrimSpace(model.ProviderID)
+		model.ModelID = strings.TrimSpace(model.ModelID)
+		model.SourceProviderID = strings.TrimSpace(model.SourceProviderID)
+		model.SourceModelID = strings.TrimSpace(model.SourceModelID)
+		if model.ProviderID == "" || model.ModelID == "" || model.SourceModelID == "" {
+			continue
+		}
+		sourceProviderID := model.SourceProviderID
+		if sourceProviderID == "" {
+			sourceProviderID = model.ProviderID
+		}
+		providerCfg, ok := cfg.Provider(model.ProviderID)
+		if !ok || providerCfg.Disabled {
+			continue
+		}
+		key := model.ProviderID + "\x00" + model.ModelID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		sourceKey := sourceProviderID + "\x00" + model.SourceModelID
+		source, sourceDetected := detected[sourceKey]
+		options = append(options, ModelOption{
+			ProviderID:       model.ProviderID,
+			ProviderLabel:    providerEntryLabel(model.ProviderID, providerCfg),
+			ModelID:          model.ModelID,
+			SourceProviderID: sourceProviderID,
+			SourceModelID:    model.SourceModelID,
+			OwnedBy:          strings.TrimSpace(source.OwnedBy),
+			Custom:           true,
+			BackingDetected:  sourceDetected,
+			Editable:         true,
+			Current:          model.ProviderID == currentProvider && model.ModelID == currentModel,
+		})
+		seen[key] = struct{}{}
+	}
 	slices.SortFunc(options, func(a, b ModelOption) int {
 		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
 			return cmp
+		}
+		if a.Custom != b.Custom {
+			if a.Custom {
+				return -1
+			}
+			return 1
 		}
 		return strings.Compare(a.ModelID, b.ModelID)
 	})
@@ -422,6 +471,10 @@ func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPrefer
 	if !c.cfg.HasUsableProvider(providerID) {
 		c.mu.Unlock()
 		return ModelConfigPreference{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	if sourceProviderID := strings.TrimSpace(model.SourceProviderID); sourceProviderID != "" && !c.cfg.HasUsableProvider(sourceProviderID) {
+		c.mu.Unlock()
+		return ModelConfigPreference{}, fmt.Errorf("source provider %q is not configured", sourceProviderID)
 	}
 	c.cfg.SetModelConfig(model)
 	if err := c.cfg.Save(); err != nil {
@@ -538,7 +591,8 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		return
 	}
 	c.mu.RLock()
-	providerCfg, providerOK := c.cfg.Provider(providerID)
+	sourceProviderID, sourceModelID := c.cfg.ResolveModel(providerID, modelID)
+	providerCfg, providerOK := c.cfg.Provider(sourceProviderID)
 	existing, existingOK := c.cfg.ModelConfig(providerID, modelID)
 	c.mu.RUnlock()
 	if !providerOK {
@@ -546,7 +600,7 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	}
 	contextWindow := existing.ContextWindow
 	if !existingOK || contextWindow <= 0 || contextWindow == 32768 {
-		if detected, err := provider.DetectContextWindow(ctx, providerID, providerCfg, modelID, nil); err == nil && detected > 0 {
+		if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
 			contextWindow = detected
 		}
 	}
@@ -562,10 +616,12 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	}
 	c.mu.Lock()
 	c.cfg.SetModelConfig(config.ModelConfig{
-		ProviderID:    providerID,
-		ModelID:       modelID,
-		ContextWindow: contextWindow,
-		ModelPreset:   preset,
+		ProviderID:       providerID,
+		ModelID:          modelID,
+		SourceProviderID: existing.SourceProviderID,
+		SourceModelID:    existing.SourceModelID,
+		ContextWindow:    contextWindow,
+		ModelPreset:      preset,
 	})
 	if err := c.cfg.Save(); err == nil && c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
@@ -632,7 +688,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Prompts:      prompts,
 		Providers:    c.providerStateLocked(),
 		Models:       models,
-		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models),
+		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models, models),
 		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
 		Access:       accessPreferencesFromConfig(c.cfg.Access),
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
@@ -674,10 +730,16 @@ func ensureModelOption(options []ModelOption, cfg config.Config, providerID, mod
 	if ok {
 		label = providerEntryLabel(providerID, providerCfg)
 	}
+	sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
+	custom := sourceModelID != "" && (sourceProviderID != providerID || sourceModelID != modelID)
 	options = append(options, ModelOption{
-		ProviderID:    providerID,
-		ProviderLabel: label,
-		ModelID:       modelID,
+		ProviderID:       providerID,
+		ProviderLabel:    label,
+		ModelID:          modelID,
+		SourceProviderID: sourceProviderID,
+		SourceModelID:    sourceModelID,
+		Custom:           custom,
+		Editable:         custom,
 	})
 	slices.SortFunc(options, func(a, b ModelOption) int {
 		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
@@ -688,7 +750,20 @@ func ensureModelOption(options []ModelOption, cfg config.Config, providerID, mod
 	return options
 }
 
-func modelConfigPreferencesFromConfig(src []config.ModelConfig) []ModelConfigPreference {
+func modelConfigPreferencesFromConfig(src []config.ModelConfig, options []ModelOption) []ModelConfigPreference {
+	detected := map[string]bool{}
+	for _, option := range options {
+		if option.Detected {
+			detected[option.ProviderID+"\x00"+option.ModelID] = true
+		}
+		if option.SourceModelID != "" && option.BackingDetected {
+			sourceProviderID := option.SourceProviderID
+			if sourceProviderID == "" {
+				sourceProviderID = option.ProviderID
+			}
+			detected[sourceProviderID+"\x00"+option.SourceModelID] = true
+		}
+	}
 	models := make([]config.ModelConfig, len(src))
 	copy(models, src)
 	slices.SortFunc(models, func(a, b config.ModelConfig) int {
@@ -701,20 +776,32 @@ func modelConfigPreferencesFromConfig(src []config.ModelConfig) []ModelConfigPre
 	for _, model := range models {
 		model.ProviderID = strings.TrimSpace(model.ProviderID)
 		model.ModelID = strings.TrimSpace(model.ModelID)
-		if model.ProviderID == "" || model.ModelID == "" {
+		model.SourceModelID = strings.TrimSpace(model.SourceModelID)
+		if model.ProviderID == "" || model.ModelID == "" || model.SourceModelID == "" {
 			continue
 		}
-		out = append(out, modelConfigPreferenceFromConfig(model))
+		pref := modelConfigPreferenceFromConfig(model)
+		sourceProviderID := pref.SourceProviderID
+		if sourceProviderID == "" {
+			sourceProviderID = pref.ProviderID
+		}
+		pref.BackingDetected = detected[sourceProviderID+"\x00"+pref.SourceModelID]
+		out = append(out, pref)
 	}
 	return out
 }
 
 func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPreference {
+	custom := modelConfigIsCustom(model)
 	return ModelConfigPreference{
 		OriginalProviderID: model.ProviderID,
 		OriginalModelID:    model.ModelID,
 		ProviderID:         model.ProviderID,
 		ModelID:            model.ModelID,
+		SourceProviderID:   strings.TrimSpace(model.SourceProviderID),
+		SourceModelID:      strings.TrimSpace(model.SourceModelID),
+		Custom:             custom,
+		Editable:           custom,
 		ContextWindow:      model.ContextWindow,
 		ModelPreset:        strings.TrimSpace(model.ModelPreset),
 		Temperature:        model.Temperature,
@@ -727,17 +814,32 @@ func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPrefer
 	}
 }
 
+func modelConfigIsCustom(model config.ModelConfig) bool {
+	sourceModelID := strings.TrimSpace(model.SourceModelID)
+	if sourceModelID == "" {
+		return false
+	}
+	sourceProviderID := strings.TrimSpace(model.SourceProviderID)
+	if sourceProviderID == "" {
+		sourceProviderID = strings.TrimSpace(model.ProviderID)
+	}
+	return sourceProviderID != strings.TrimSpace(model.ProviderID) || sourceModelID != strings.TrimSpace(model.ModelID)
+}
+
 func modelConfigForPair(cfg config.Config, providerID, modelID string) config.ModelConfig {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 	model, ok := cfg.ModelConfig(providerID, modelID)
 	if !ok {
+		sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
 		model = config.ModelConfig{
-			ProviderID:    providerID,
-			ModelID:       modelID,
-			ContextWindow: cfg.ContextWindow(providerID, modelID),
-			ModelPreset:   cfg.ModelPreset(providerID, modelID),
-			ThinkingMode:  "auto",
+			ProviderID:       providerID,
+			ModelID:          modelID,
+			SourceProviderID: sourceProviderID,
+			SourceModelID:    sourceModelID,
+			ContextWindow:    cfg.ContextWindow(providerID, modelID),
+			ModelPreset:      cfg.ModelPreset(providerID, modelID),
+			ThinkingMode:     "auto",
 		}
 	}
 	if model.ContextWindow <= 0 {
@@ -1071,6 +1173,9 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 		if err != nil {
 			return err
 		}
+		if sourceProviderID := strings.TrimSpace(model.SourceProviderID); sourceProviderID != "" && !cfg.HasUsableProvider(sourceProviderID) {
+			return fmt.Errorf("source provider %q is not configured", sourceProviderID)
+		}
 		next = append(next, model)
 	}
 	cfg.Models = nil
@@ -1083,6 +1188,11 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, error) {
 	providerID := strings.TrimSpace(pref.ProviderID)
 	modelID := strings.TrimSpace(pref.ModelID)
+	sourceProviderID := strings.TrimSpace(pref.SourceProviderID)
+	sourceModelID := strings.TrimSpace(pref.SourceModelID)
+	if sourceModelID != "" && sourceProviderID == "" {
+		sourceProviderID = providerID
+	}
 	if pref.ContextWindow <= 0 {
 		return config.ModelConfig{}, fmt.Errorf("context window for %s/%s must be greater than zero", providerID, modelID)
 	}
@@ -1103,17 +1213,19 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		return config.ModelConfig{}, fmt.Errorf("thinking budget for %s/%s must not be negative", providerID, modelID)
 	}
 	return config.ModelConfig{
-		ProviderID:     providerID,
-		ModelID:        modelID,
-		ContextWindow:  pref.ContextWindow,
-		ModelPreset:    strings.TrimSpace(pref.ModelPreset),
-		Temperature:    pref.Temperature,
-		TopP:           pref.TopP,
-		MinP:           pref.MinP,
-		TopK:           pref.TopK,
-		RepeatPenalty:  pref.RepeatPenalty,
-		ThinkingMode:   strings.TrimSpace(pref.ThinkingMode),
-		ThinkingBudget: pref.ThinkingBudget,
+		ProviderID:       providerID,
+		ModelID:          modelID,
+		SourceProviderID: sourceProviderID,
+		SourceModelID:    sourceModelID,
+		ContextWindow:    pref.ContextWindow,
+		ModelPreset:      strings.TrimSpace(pref.ModelPreset),
+		Temperature:      pref.Temperature,
+		TopP:             pref.TopP,
+		MinP:             pref.MinP,
+		TopK:             pref.TopK,
+		RepeatPenalty:    pref.RepeatPenalty,
+		ThinkingMode:     strings.TrimSpace(pref.ThinkingMode),
+		ThinkingBudget:   pref.ThinkingBudget,
 	}, nil
 }
 

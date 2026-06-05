@@ -2815,7 +2815,7 @@
           const q = this.modelQuery.trim().toLowerCase();
           const models = this.modelOptions || [];
           if (!q) return models;
-          return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
+          return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.source_provider_id, m.source_model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
         },
         selectModel(model) {
           this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(() => {
@@ -2834,6 +2834,11 @@
             original_model_id: raw.model_id || '',
             provider_id: raw.provider_id || '',
             model_id: raw.model_id || '',
+            source_provider_id: raw.source_provider_id || raw.provider_id || '',
+            source_model_id: raw.source_model_id || raw.model_id || '',
+            custom: !!raw.custom,
+            editable: !!raw.editable,
+            backing_detected: !!raw.backing_detected,
             context_window: raw.context_window || 32768,
             model_preset: raw.model_preset || 'auto',
             temperature: raw.temperature ?? null,
@@ -2844,6 +2849,38 @@
             thinking_mode: raw.thinking_mode || 'auto',
             thinking_budget: raw.thinking_budget || 0,
           }, raw || {});
+        },
+        modelSettingsEditable() {
+          return !!(this.modelSettingsDraft && (this.modelSettingsDraft.editable || this.modelSettingsDraft.custom));
+        },
+        uniqueCustomModelID(providerID, sourceModelID) {
+          const base = String(sourceModelID || 'model').trim() + ' custom';
+          const used = new Set([...(this.modelOptions || []), ...(this.settings?.models || []), ...(this.modelConfigRows() || [])]
+            .filter(item => item.provider_id === providerID)
+            .map(item => String(item.model_id || '').trim())
+            .filter(Boolean));
+          if (!used.has(base)) return base;
+          for (let idx = 2; idx < 1000; idx++) {
+            const next = base + ' ' + idx;
+            if (!used.has(next)) return next;
+          }
+          return base + ' ' + Date.now();
+        },
+        customizeModelSettings() {
+          if (!this.modelSettingsDraft) return;
+          const sourceProviderID = String(this.modelSettingsDraft.source_provider_id || this.modelSettingsDraft.provider_id || '').trim();
+          const sourceModelID = String(this.modelSettingsDraft.source_model_id || this.modelSettingsDraft.model_id || '').trim();
+          this.modelSettingsDraft = Object.assign({}, this.modelSettingsDraft, {
+            original_provider_id: '',
+            original_model_id: '',
+            provider_id: sourceProviderID,
+            model_id: this.uniqueCustomModelID(sourceProviderID, sourceModelID),
+            source_provider_id: sourceProviderID,
+            source_model_id: sourceModelID,
+            custom: true,
+            editable: true,
+          });
+          this.modelSettingsStatus = 'Customize this model under a new name, then save.'; this.modelSettingsStatusKind = 'secondary';
         },
         activeModelSettingsKey() {
           const info = this.activeModelInfo();
@@ -2876,6 +2913,7 @@
           this.rpc('save_model_config', payload).then(result => {
             this.modelSettingsDraft = this.normalizeModelSettingsDraft(result);
             this.modelSettingsStatus = 'Saved model settings'; this.modelSettingsStatusKind = 'success';
+            return this.rpc('set_model', {provider_id: result.provider_id, model_id: result.model_id}).then(() => this.refreshModelOptions());
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
@@ -3107,6 +3145,16 @@
         modelOptionValue(model) {
           return JSON.stringify([model?.provider_id || '', model?.model_id || '']);
         },
+        modelOptionLabel(model) {
+          if (!model) return '';
+          const label = (model.provider_label || model.provider_id || '') + ' / ' + (model.model_id || '');
+          const suffix = [];
+          if (model.custom) suffix.push('custom');
+          if (model.detected) suffix.push('detected');
+          if (model.custom && model.source_model_id) suffix.push('uses ' + (model.source_provider_id || model.provider_id || '') + ' / ' + model.source_model_id);
+          if (model.custom && model.backing_detected === false) suffix.push('source missing');
+          return suffix.length ? label + ' (' + suffix.join(', ') + ')' : label;
+        },
         setCompactionModelValue(value) {
           if (!this.settings?.compaction) return;
           if (value === 'chat') {
@@ -3187,7 +3235,7 @@
         },
         settingsItemSubtitle(kind, item) {
           if (kind === 'providers') return (item.id || '-') + (item.base_url ? ' / ' + item.base_url : '');
-          if (kind === 'models') return (item.provider_id || '-') + ' / ' + (item.context_window || 32768) + ' context' + (item.thinking_mode && item.thinking_mode !== 'auto' ? ' / thinking ' + item.thinking_mode : '');
+          if (kind === 'models') return (item.provider_id || '-') + ' -> ' + ((item.source_provider_id || item.provider_id || '-') + ' / ' + (item.source_model_id || '-')) + ' / ' + (item.context_window || 32768) + ' context' + (item.thinking_mode && item.thinking_mode !== 'auto' ? ' / thinking ' + item.thinking_mode : '');
           if (kind === 'mcp') return (item.id || '-') + (item.url ? ' / ' + item.url : '');
           return '';
         },
@@ -3196,6 +3244,8 @@
           if (kind === 'providers' && item.default) badges.push('default');
           if (kind === 'providers') badges.push(this.promptProgressBadge(item));
           if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
+          if (kind === 'models') badges.push('custom');
+          if (kind === 'models' && item.backing_detected === false) badges.push('source missing');
           if (item.disabled) badges.push('disabled');
           return badges.filter(Boolean);
         },
@@ -3236,7 +3286,8 @@
           const id = String(providerID || '').trim();
           const ids = new Set();
           for (const option of this.settings?.models || []) {
-            if (!id || option.provider_id === id) ids.add(option.model_id);
+            if ((!id || option.provider_id === id) && option.detected) ids.add(option.model_id);
+            if ((!id || option.source_provider_id === id) && option.source_model_id) ids.add(option.source_model_id);
           }
           for (const model of this.providerModelOptions || []) ids.add(model);
           return Array.from(ids).filter(Boolean).sort();
@@ -3250,6 +3301,10 @@
             original_model_id: modelID,
             provider_id: providerID,
             model_id: modelID,
+            source_provider_id: providerID,
+            source_model_id: modelID,
+            custom: true,
+            editable: true,
             context_window: 32768,
             model_preset: 'auto',
             temperature: null,
@@ -3264,8 +3319,10 @@
           this.settings.model_configs.sort((a, b) => (String(a.provider_id || '') + '\0' + String(a.model_id || '')).localeCompare(String(b.provider_id || '') + '\0' + String(b.model_id || '')));
         },
         addModelConfig() {
-          const providerID = this.settings?.general?.default_provider || this.providerIDOptions()[0] || '';
-          this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: ''});
+          const source = (this.settings?.models || []).find(model => model.detected) || {};
+          const providerID = source.provider_id || this.settings?.general?.default_provider || this.providerIDOptions()[0] || '';
+          const sourceModelID = source.model_id || '';
+          this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: this.uniqueCustomModelID(providerID, sourceModelID), source_provider_id: providerID, source_model_id: sourceModelID, custom: true, editable: true});
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
         },
         editModelConfig(key) {
@@ -3285,8 +3342,10 @@
           if (!this.settings || !this.modelConfigDraft) return;
           const providerID = String(this.modelConfigDraft.provider_id || '').trim();
           const modelID = String(this.modelConfigDraft.model_id || '').trim();
-          if (!providerID || !modelID) {
-            this.modelConfigStatus = 'Provider and model are required'; this.modelConfigStatusKind = 'danger';
+          const sourceProviderID = String(this.modelConfigDraft.source_provider_id || providerID).trim();
+          const sourceModelID = String(this.modelConfigDraft.source_model_id || '').trim();
+          if (!providerID || !modelID || !sourceProviderID || !sourceModelID) {
+            this.modelConfigStatus = 'Provider, custom name, and source model are required'; this.modelConfigStatusKind = 'danger';
             return;
           }
           const contextWindow = Number(this.modelConfigDraft.context_window || 0);
@@ -3301,6 +3360,10 @@
             original_model_id: modelID,
             provider_id: providerID,
             model_id: modelID,
+            source_provider_id: sourceProviderID,
+            source_model_id: sourceModelID,
+            custom: true,
+            editable: true,
             context_window: contextWindow,
             model_preset: String(this.modelConfigDraft.model_preset || 'auto').trim() || 'auto',
             temperature: this.blankableNumber(this.modelConfigDraft.temperature),

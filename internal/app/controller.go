@@ -97,17 +97,26 @@ type ChatSidebarStatus struct {
 
 // ModelOption is a selectable provider/model pair exposed to web clients.
 type ModelOption struct {
-	ProviderID    string `json:"provider_id"`
-	ProviderLabel string `json:"provider_label"`
-	ModelID       string `json:"model_id"`
-	OwnedBy       string `json:"owned_by,omitempty"`
-	Current       bool   `json:"current"`
+	ProviderID       string `json:"provider_id"`
+	ProviderLabel    string `json:"provider_label"`
+	ModelID          string `json:"model_id"`
+	SourceProviderID string `json:"source_provider_id,omitempty"`
+	SourceModelID    string `json:"source_model_id,omitempty"`
+	OwnedBy          string `json:"owned_by,omitempty"`
+	Detected         bool   `json:"detected"`
+	Custom           bool   `json:"custom"`
+	BackingDetected  bool   `json:"backing_detected"`
+	Editable         bool   `json:"editable"`
+	Current          bool   `json:"current"`
 }
 
 // ModelInfo describes the active model capabilities shown by web clients.
 type ModelInfo struct {
 	ProviderID        string `json:"provider_id"`
 	ModelID           string `json:"model_id"`
+	SourceProviderID  string `json:"source_provider_id,omitempty"`
+	SourceModelID     string `json:"source_model_id,omitempty"`
+	BackingDetected   bool   `json:"backing_detected"`
 	ContextWindow     int    `json:"context_window"`
 	SupportsTools     bool   `json:"supports_tools"`
 	SupportsImages    bool   `json:"supports_images"`
@@ -190,6 +199,11 @@ type ModelConfigPreference struct {
 	OriginalModelID    string   `json:"original_model_id"`
 	ProviderID         string   `json:"provider_id"`
 	ModelID            string   `json:"model_id"`
+	SourceProviderID   string   `json:"source_provider_id,omitempty"`
+	SourceModelID      string   `json:"source_model_id,omitempty"`
+	Custom             bool     `json:"custom"`
+	Editable           bool     `json:"editable"`
+	BackingDetected    bool     `json:"backing_detected"`
 	ContextWindow      int      `json:"context_window"`
 	ModelPreset        string   `json:"model_preset"`
 	Temperature        *float64 `json:"temperature,omitempty"`
@@ -2390,20 +2404,23 @@ func (c *Controller) contextWindowLocked() int {
 func (c *Controller) modelInfoLocked() ModelInfo {
 	providerID := strings.TrimSpace(c.chat.ProviderID)
 	modelID := strings.TrimSpace(c.chat.ModelID)
-	providerCfg, ok := c.cfg.Provider(providerID)
+	sourceProviderID, sourceModelID := c.cfg.ResolveModel(providerID, modelID)
+	providerCfg, ok := c.cfg.Provider(sourceProviderID)
 	if !ok {
 		providerCfg = config.Provider{}
 	}
 	info := ModelInfo{
-		ProviderID:    providerID,
-		ModelID:       modelID,
-		ContextWindow: c.contextWindowLocked(),
-		SupportsTools: true,
+		ProviderID:       providerID,
+		ModelID:          modelID,
+		SourceProviderID: sourceProviderID,
+		SourceModelID:    sourceModelID,
+		ContextWindow:    c.contextWindowLocked(),
+		SupportsTools:    true,
 	}
-	if modelID == "" {
+	if sourceModelID == "" {
 		return info
 	}
-	enriched, err := provider.NewCapabilityStore(c.cfg.StateDir()).EnrichModel(providerID, providerCfg, domain.Model{ID: modelID})
+	enriched, err := provider.NewCapabilityStore(c.cfg.StateDir()).EnrichModel(sourceProviderID, providerCfg, domain.Model{ID: sourceModelID})
 	if err != nil {
 		return info
 	}
@@ -2448,20 +2465,23 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
-	providerCfg, ok := cfg.Provider(providerID)
+	sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
+	providerCfg, ok := cfg.Provider(sourceProviderID)
 	if !ok {
 		providerCfg = config.Provider{}
 	}
 	info := ModelInfo{
-		ProviderID:    providerID,
-		ModelID:       modelID,
-		ContextWindow: c.contextWindowForChat(chatRecord),
-		SupportsTools: true,
+		ProviderID:       providerID,
+		ModelID:          modelID,
+		SourceProviderID: sourceProviderID,
+		SourceModelID:    sourceModelID,
+		ContextWindow:    c.contextWindowForChat(chatRecord),
+		SupportsTools:    true,
 	}
-	if modelID == "" {
+	if sourceModelID == "" {
 		return info
 	}
-	enriched, err := provider.NewCapabilityStore(cfg.StateDir()).EnrichModel(providerID, providerCfg, domain.Model{ID: modelID})
+	enriched, err := provider.NewCapabilityStore(cfg.StateDir()).EnrichModel(sourceProviderID, providerCfg, domain.Model{ID: sourceModelID})
 	if err != nil {
 		return info
 	}

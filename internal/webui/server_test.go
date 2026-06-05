@@ -1350,7 +1350,10 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `save_model_config`) ||
 		!strings.Contains(fullPage, `modelSettingsDraft.thinking_mode`) ||
-		!strings.Contains(fullPage, `modelSettingsDraft.temperature`) {
+		!strings.Contains(fullPage, `modelSettingsDraft.temperature`) ||
+		!strings.Contains(fullPage, `customizeModelSettings()`) ||
+		!strings.Contains(fullPage, `Auto-detected models are read-only`) ||
+		!strings.Contains(fullPage, `modelSettingsEditable()`) {
 		t.Fatalf("expected model dialog to edit chat model settings")
 	}
 	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
@@ -1603,8 +1606,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `list="model-config-options"`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||
 		!strings.Contains(fullPage, `defaultModelValue()`) ||
-		!strings.Contains(fullPage, `modelConfigDraft.thinking_mode`) {
-		t.Fatalf("expected model settings editor to offer detected model choices, defaults, and model request settings")
+		!strings.Contains(fullPage, `modelConfigDraft.thinking_mode`) ||
+		!strings.Contains(fullPage, `source_model_id`) ||
+		!strings.Contains(fullPage, `modelOptionLabel(model)`) {
+		t.Fatalf("expected model settings editor to offer custom model aliases, detected model choices, defaults, and model request settings")
 	}
 	if !strings.Contains(fullPage, `Chat model`) ||
 		!strings.Contains(fullPage, `settings-prompt`) ||

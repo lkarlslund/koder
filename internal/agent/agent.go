@@ -142,10 +142,11 @@ func chatModel(chat domain.Chat) (string, string, error) {
 }
 
 func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
-	providerID, _, err := chatModel(chat)
+	providerID, modelID, err := chatModel(chat)
 	if err != nil {
 		return nil, err
 	}
+	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
 	providerCfg, ok := e.cfg.Provider(providerID)
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", providerID)
@@ -903,7 +904,8 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 }
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	_, modelID, _ := chatModel(chat)
+	providerID, modelID, _ := chatModel(chat)
+	_, modelID = e.cfg.ResolveModel(providerID, modelID)
 	providerCfg := e.providerConfigForChat(chat)
 	extraBody := provider.RequestExtraBody(providerCfg, e.modelConfigForChat(chat))
 	extraBody = provider.WithLlamaCacheAffinity(extraBody, providerCfg, session.ID, chat.ID)
@@ -929,7 +931,9 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 }
 
 func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
-	cfg, _ := e.cfg.Provider(chat.ProviderID)
+	providerID, modelID, _ := chatModel(chat)
+	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
+	cfg, _ := e.cfg.Provider(providerID)
 	return cfg
 }
 
@@ -972,7 +976,7 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 }
 
 func (e *Engine) modelPresetForChat(chat domain.Chat) string {
-	return e.cfg.ModelPreset(chat.ProviderID, chat.ModelID)
+	return strings.TrimSpace(e.modelConfigForChat(chat).ModelPreset)
 }
 
 func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
@@ -1012,8 +1016,12 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 	if providerID == "" || modelID == "" {
 		return cavemanJob{}, fmt.Errorf("caveman thinking model must be set or use a chat with provider and model")
 	}
+	selectedProviderID := providerID
+	selectedModelID := modelID
+	providerID, modelID = e.cfg.ResolveModel(selectedProviderID, selectedModelID)
 	client := chatClient
-	if providerID != strings.TrimSpace(chat.ProviderID) || client == nil {
+	chatProviderID, chatModelID := e.cfg.ResolveModel(chat.ProviderID, chat.ModelID)
+	if providerID != chatProviderID || modelID != chatModelID || client == nil {
 		providerCfg, ok := e.cfg.Provider(providerID)
 		if !ok {
 			return cavemanJob{}, fmt.Errorf("caveman thinking provider %q is not configured", providerID)
@@ -1164,7 +1172,8 @@ func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
 }
 
 func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
-	return provider.PreserveThinkingEnabled(chat.ModelID, e.modelPresetForChat(chat))
+	_, modelID := e.cfg.ResolveModel(chat.ProviderID, chat.ModelID)
+	return provider.PreserveThinkingEnabled(modelID, e.modelPresetForChat(chat))
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {

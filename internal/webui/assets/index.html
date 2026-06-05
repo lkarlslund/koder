@@ -538,6 +538,11 @@
                   <span x-text="model.provider_label || model.provider_id"></span>
                   <template x-if="model.owned_by"><span x-text="' · ' + model.owned_by"></span></template>
                 </span>
+                <span class="d-flex flex-wrap gap-1 mt-1">
+                  <span class="badge text-bg-info" x-show="model.detected">detected</span>
+                  <span class="badge text-bg-primary" x-show="model.custom">custom</span>
+                  <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
+                </span>
               </span>
               <i class="bi bi-check-lg" x-show="model.current"></i>
             </button>
@@ -549,20 +554,32 @@
               <div class="fw-semibold">Chat settings</div>
               <div class="small text-secondary text-truncate" x-text="modelSettingsDraft ? modelSettingsDraft.provider_id + ' / ' + modelSettingsDraft.model_id : ''"></div>
             </div>
-            <button type="submit" class="btn btn-sm btn-primary" title="Save model settings" :disabled="!modelSettingsDraft || modelSettingsSaving">
+            <button type="button" class="btn btn-sm btn-outline-primary" title="Customize detected model" x-show="modelSettingsDraft && !modelSettingsEditable()" @click="customizeModelSettings()"><i class="bi bi-stars"></i></button>
+            <button type="submit" class="btn btn-sm btn-primary" title="Save model settings" :disabled="!modelSettingsDraft || !modelSettingsEditable() || modelSettingsSaving">
               <span class="spinner-border spinner-border-sm" x-show="modelSettingsSaving"></span>
               <i class="bi bi-check-lg" x-show="!modelSettingsSaving"></i>
             </button>
           </div>
           <template x-if="modelSettingsDraft">
             <div class="row g-3">
+              <div class="col-12" x-show="!modelSettingsEditable()">
+                <div class="alert alert-secondary mb-0">Auto-detected models are read-only. Customize this model to save request settings under a new name.</div>
+              </div>
+              <div class="col-12" x-show="modelSettingsEditable()">
+                <label class="form-label small text-secondary">Custom name</label>
+                <input class="form-control" x-model="modelSettingsDraft.model_id">
+              </div>
+              <div class="col-12" x-show="modelSettingsDraft.source_model_id">
+                <label class="form-label small text-secondary">Uses detected model</label>
+                <input class="form-control" :value="(modelSettingsDraft.source_provider_id || modelSettingsDraft.provider_id) + ' / ' + modelSettingsDraft.source_model_id" disabled>
+              </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Context</label>
-                <input class="form-control" type="number" min="1" x-model.number="modelSettingsDraft.context_window">
+                <input class="form-control" type="number" min="1" x-model.number="modelSettingsDraft.context_window" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Preset</label>
-                <select class="form-select" x-model="modelSettingsDraft.model_preset">
+                <select class="form-select" x-model="modelSettingsDraft.model_preset" :disabled="!modelSettingsEditable()">
                   <option value="auto">auto</option>
                   <option value="default">default</option>
                   <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
@@ -570,27 +587,27 @@
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Temperature</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.temperature">
+                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.temperature" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Top P</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.top_p">
+                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.top_p" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Min P</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.min_p">
+                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.min_p" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Top K</label>
-                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.top_k">
+                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.top_k" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Repeat penalty</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.repeat_penalty">
+                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.repeat_penalty" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-6">
                 <label class="form-label small text-secondary">Thinking</label>
-                <select class="form-select" x-model="modelSettingsDraft.thinking_mode">
+                <select class="form-select" x-model="modelSettingsDraft.thinking_mode" :disabled="!modelSettingsEditable()">
                   <option value="auto">auto</option>
                   <option value="enabled">enabled</option>
                   <option value="disabled">disabled</option>
@@ -598,7 +615,7 @@
               </div>
               <div class="col-12">
                 <label class="form-label small text-secondary">Thinking budget</label>
-                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.thinking_budget">
+                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.thinking_budget" :disabled="!modelSettingsEditable()">
               </div>
               <div class="col-12" x-show="modelSettingsStatus">
                 <div class="alert mb-0" :class="modelSettingsStatusKind === 'success' ? 'alert-success' : (modelSettingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="modelSettingsStatus"></div>
@@ -838,7 +855,7 @@
                   <select class="form-select" :value="compactionModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = compactionModelValue(); })" @change="setCompactionModelValue($event.target.value)">
                     <option value="chat">Chat model</option>
                     <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
                     </template>
                   </select>
                 </div>
@@ -857,7 +874,7 @@
                   <select class="form-select" :value="thinkingModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = thinkingModelValue(); })" @change="setThinkingModelValue($event.target.value)">
                     <option value="chat">Chat model</option>
                     <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
                     </template>
                   </select>
                 </div>
@@ -915,7 +932,7 @@
                   <label class="form-label small text-secondary">Default model for new sessions</label>
                   <select class="form-select" :value="defaultModelValue()" x-effect="settings?.models; $nextTick(() => { ensureDetectedDefaultModel(); $el.value = defaultModelValue(); })" @change="setDefaultModelValue($event.target.value)">
                     <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
                     </template>
                   </select>
                 </div>
@@ -1204,10 +1221,22 @@
               </select>
             </div>
             <div class="col-md-6">
-              <label class="form-label small text-secondary">Model</label>
-              <input class="form-control" x-model="modelConfigDraft.model_id" list="model-config-options" autocomplete="off">
+              <label class="form-label small text-secondary">Custom name</label>
+              <input class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Uses provider</label>
+              <select class="form-select" x-model="modelConfigDraft.source_provider_id">
+                <template x-for="providerID in providerIDOptions()" :key="providerID">
+                  <option :value="providerID" x-text="providerID"></option>
+                </template>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Uses detected model</label>
+              <input class="form-control" x-model="modelConfigDraft.source_model_id" list="model-config-options" autocomplete="off">
               <datalist id="model-config-options">
-                <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.provider_id)" :key="model">
+                <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.source_provider_id || modelConfigDraft.provider_id)" :key="model">
                   <option :value="model"></option>
                 </template>
               </datalist>

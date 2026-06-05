@@ -54,17 +54,19 @@ type Provider struct {
 
 // ModelConfig stores settings for one provider/model pair.
 type ModelConfig struct {
-	ProviderID     string   `toml:"provider_id"`
-	ModelID        string   `toml:"model_id"`
-	ContextWindow  int      `toml:"context_window"`
-	ModelPreset    string   `toml:"model_preset"`
-	Temperature    *float64 `toml:"temperature,omitempty"`
-	TopP           *float64 `toml:"top_p,omitempty"`
-	MinP           *float64 `toml:"min_p,omitempty"`
-	TopK           int      `toml:"top_k,omitempty"`
-	RepeatPenalty  *float64 `toml:"repeat_penalty,omitempty"`
-	ThinkingMode   string   `toml:"thinking_mode,omitempty"`
-	ThinkingBudget int      `toml:"thinking_budget,omitempty"`
+	ProviderID       string   `toml:"provider_id"`
+	ModelID          string   `toml:"model_id"`
+	SourceProviderID string   `toml:"source_provider_id,omitempty"`
+	SourceModelID    string   `toml:"source_model_id,omitempty"`
+	ContextWindow    int      `toml:"context_window"`
+	ModelPreset      string   `toml:"model_preset"`
+	Temperature      *float64 `toml:"temperature,omitempty"`
+	TopP             *float64 `toml:"top_p,omitempty"`
+	MinP             *float64 `toml:"min_p,omitempty"`
+	TopK             int      `toml:"top_k,omitempty"`
+	RepeatPenalty    *float64 `toml:"repeat_penalty,omitempty"`
+	ThinkingMode     string   `toml:"thinking_mode,omitempty"`
+	ThinkingBudget   int      `toml:"thinking_budget,omitempty"`
 }
 
 type MCPServer struct {
@@ -441,6 +443,23 @@ func (c Config) ModelConfig(providerID, modelID string) (ModelConfig, bool) {
 	return ModelConfig{}, false
 }
 
+// ResolveModel returns the provider/model id that should be sent to the provider.
+func (c Config) ResolveModel(providerID, modelID string) (string, string) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if model, ok := c.ModelConfig(providerID, modelID); ok {
+		sourceProviderID := strings.TrimSpace(model.SourceProviderID)
+		sourceModelID := strings.TrimSpace(model.SourceModelID)
+		if sourceProviderID == "" {
+			sourceProviderID = providerID
+		}
+		if sourceModelID != "" {
+			return sourceProviderID, sourceModelID
+		}
+	}
+	return providerID, modelID
+}
+
 // SetModelConfig inserts or replaces settings for a provider/model pair.
 func (c *Config) SetModelConfig(model ModelConfig) {
 	model = normalizeModelConfig(model)
@@ -477,6 +496,13 @@ func (c Config) ModelPreset(providerID, modelID string) string {
 // ModelRequestOptions returns request-level settings for a provider/model pair.
 func (c Config) ModelRequestOptions(providerID, modelID string) ModelConfig {
 	model, _ := c.ModelConfig(providerID, modelID)
+	sourceProviderID, sourceModelID := c.ResolveModel(providerID, modelID)
+	if sourceProviderID != "" {
+		model.ProviderID = sourceProviderID
+	}
+	if sourceModelID != "" {
+		model.ModelID = sourceModelID
+	}
 	return model
 }
 
@@ -508,6 +534,14 @@ func normalizeModelConfigs(src []ModelConfig) []ModelConfig {
 func normalizeModelConfig(model ModelConfig) ModelConfig {
 	model.ProviderID = strings.TrimSpace(model.ProviderID)
 	model.ModelID = strings.TrimSpace(model.ModelID)
+	model.SourceProviderID = strings.TrimSpace(model.SourceProviderID)
+	model.SourceModelID = strings.TrimSpace(model.SourceModelID)
+	if model.SourceProviderID == model.ProviderID {
+		model.SourceProviderID = ""
+	}
+	if model.SourceModelID == model.ModelID && model.SourceProviderID == "" {
+		model.SourceModelID = ""
+	}
 	model.ModelPreset = strings.TrimSpace(model.ModelPreset)
 	if model.ModelPreset == "" {
 		model.ModelPreset = "auto"

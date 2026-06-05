@@ -437,6 +437,13 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 		cfg.Providers = map[string]config.Provider{
 			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
 		}
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:       "test",
+			ModelID:          "fast-qwen",
+			SourceProviderID: "test",
+			SourceModelID:    "z-model",
+			ContextWindow:    65536,
+		})
 	})
 
 	options, err := ctrl.ModelOptions(context.Background())
@@ -447,9 +454,16 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	for _, option := range options {
 		got = append(got, option.ProviderID+"/"+option.ModelID)
 	}
-	want := []string{"test/a-model", "test/z-model"}
+	want := []string{"test/fast-qwen", "test/a-model", "test/z-model"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("expected options %v, got %v", want, got)
+	}
+	custom := options[0]
+	if !custom.Custom || !custom.Editable || !custom.BackingDetected || custom.SourceModelID != "z-model" {
+		t.Fatalf("expected custom option with detected backing model, got %#v", custom)
+	}
+	if options[1].Editable || !options[1].Detected {
+		t.Fatalf("expected detected model to be read-only, got %#v", options[1])
 	}
 }
 
