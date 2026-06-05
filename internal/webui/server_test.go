@@ -786,6 +786,34 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	}
 }
 
+func TestWebSocketChatUpdateCanReplaceTimeline(t *testing.T) {
+	item := domain.TimelineItem{
+		ID:      "019aa000-0000-7000-8000-000000000042",
+		ChatID:  "chat-7",
+		Seq:     1,
+		Content: domain.UserMessage{Text: "kept"},
+	}
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+			Timeline: []domain.TimelineItem{item},
+			Status:   chat.StatusIdle,
+			Active:   true,
+		},
+		ReplaceTimeline: true,
+	}
+	delta := chatDeltaFromUpdate(update)
+	if !delta.ReplaceTimeline {
+		t.Fatal("expected replace timeline flag")
+	}
+	if delta.Item != nil {
+		t.Fatalf("expected no single item patch for replace, got %#v", delta.Item)
+	}
+	if len(delta.Timeline) != 1 || delta.Timeline[0].ID != item.ID {
+		t.Fatalf("expected replacement timeline, got %#v", delta.Timeline)
+	}
+}
+
 func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
 	itemID := id.ID("019aa000-0000-7000-8000-000000000043")
 	emptyEventItem := domain.TimelineItem{
@@ -1149,6 +1177,14 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
+	}
+	if !strings.Contains(fullPage, `rollback_chat`) ||
+		!strings.Contains(fullPage, `fork_chat`) ||
+		!strings.Contains(fullPage, `timelineAction.open`) ||
+		!strings.Contains(fullPage, `openTimelineRollback(item)`) ||
+		!strings.Contains(fullPage, `openTimelineFork(item)`) ||
+		!strings.Contains(fullPage, `replace_timeline`) {
+		t.Fatalf("expected transcript rollback/fork controls with html modals and timeline replacement")
 	}
 	if !strings.Contains(fullPage, `const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim()`) {
 		t.Fatalf("expected browser chat deltas to keep UUID chat ids as strings")

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -378,6 +379,27 @@ func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]doma
 		}
 	})
 	return items, nil
+}
+
+func cloneTimelineItemForChat(item domain.TimelineItem, chatID id.ID, seq int64, now time.Time) (domain.TimelineItem, error) {
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return domain.TimelineItem{}, fmt.Errorf("clone timeline item %s: %w", item.ID, err)
+	}
+	var cloned domain.TimelineItem
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return domain.TimelineItem{}, fmt.Errorf("clone timeline item %s: %w", item.ID, err)
+	}
+	itemTime := now.Add(time.Duration(seq-1) * time.Nanosecond)
+	cloned.ID = id.NewAt(itemTime)
+	cloned.ChatID = chatID
+	cloned.Seq = seq
+	cloned.CreatedAt = itemTime
+	cloned.UpdatedAt = itemTime
+	if !cloned.SealedAt.IsZero() {
+		cloned.SealedAt = itemTime
+	}
+	return cloned, nil
 }
 
 func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {

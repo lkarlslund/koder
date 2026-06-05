@@ -729,6 +729,32 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		selection.ChatID = chatRecord.ID
 		s.setClientSelection(clientID, selection)
 		return s.stateForClient(ctx, clientID)
+	case "rollback_chat":
+		var in struct {
+			ChatID       id.ID `json:"chat_id"`
+			AnchorItemID id.ID `json:"anchor_item_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.RollbackChatForSelection(ctx, s.appSelection(clientID), in.ChatID, in.AnchorItemID)
+	case "fork_chat":
+		var in struct {
+			ChatID       id.ID  `json:"chat_id"`
+			AnchorItemID id.ID  `json:"anchor_item_id"`
+			Title        string `json:"title"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		chatRecord, err := s.controller.ForkChatForSelection(ctx, s.appSelection(clientID), in.ChatID, in.AnchorItemID, in.Title)
+		if err != nil {
+			return nil, err
+		}
+		selection := s.clientSelection(clientID)
+		selection.ChatID = chatRecord.ID
+		s.setClientSelection(clientID, selection)
+		return s.stateForClient(ctx, clientID)
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
 	case "switch_session":
@@ -1214,23 +1240,25 @@ type stateDelta struct {
 }
 
 type chatDelta struct {
-	ChatID            id.ID                `json:"chat_id"`
-	Chat              any                  `json:"chat,omitempty"`
-	Item              *domain.TimelineItem `json:"item,omitempty"`
-	Approvals         any                  `json:"approvals,omitempty"`
-	Queue             any                  `json:"queue,omitempty"`
-	ExecProcesses     any                  `json:"exec_processes,omitempty"`
-	Context           any                  `json:"context,omitempty"`
-	TokenUsage        any                  `json:"token_usage,omitempty"`
-	Status            string               `json:"status,omitempty"`
-	StatusText        string               `json:"status_text,omitempty"`
-	Active            bool                 `json:"active"`
-	TranscriptChanged bool                 `json:"transcript_changed,omitempty"`
-	QueueChanged      bool                 `json:"queue_changed,omitempty"`
-	StatusChanged     bool                 `json:"status_changed,omitempty"`
-	ContextChanged    bool                 `json:"context_changed,omitempty"`
-	ApprovalsChanged  bool                 `json:"approvals_changed,omitempty"`
-	Error             string               `json:"error,omitempty"`
+	ChatID            id.ID                 `json:"chat_id"`
+	Chat              any                   `json:"chat,omitempty"`
+	Item              *domain.TimelineItem  `json:"item,omitempty"`
+	Timeline          []domain.TimelineItem `json:"timeline,omitempty"`
+	Approvals         any                   `json:"approvals,omitempty"`
+	Queue             any                   `json:"queue,omitempty"`
+	ExecProcesses     any                   `json:"exec_processes,omitempty"`
+	Context           any                   `json:"context,omitempty"`
+	TokenUsage        any                   `json:"token_usage,omitempty"`
+	Status            string                `json:"status,omitempty"`
+	StatusText        string                `json:"status_text,omitempty"`
+	Active            bool                  `json:"active"`
+	TranscriptChanged bool                  `json:"transcript_changed,omitempty"`
+	ReplaceTimeline   bool                  `json:"replace_timeline,omitempty"`
+	QueueChanged      bool                  `json:"queue_changed,omitempty"`
+	StatusChanged     bool                  `json:"status_changed,omitempty"`
+	ContextChanged    bool                  `json:"context_changed,omitempty"`
+	ApprovalsChanged  bool                  `json:"approvals_changed,omitempty"`
+	Error             string                `json:"error,omitempty"`
 }
 
 func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
@@ -1267,6 +1295,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		StatusText:        snapshot.StatusText,
 		Active:            snapshot.Active,
 		TranscriptChanged: update.TranscriptChanged,
+		ReplaceTimeline:   update.ReplaceTimeline,
 		QueueChanged:      update.QueueChanged,
 		StatusChanged:     update.StatusChanged,
 		ContextChanged:    update.ContextChanged,
@@ -1284,7 +1313,9 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 	if update.Event != nil && update.Event.Err != nil {
 		delta.Error = update.Event.Err.Error()
 	}
-	if item, ok := changedTimelineItem(update); ok {
+	if update.ReplaceTimeline {
+		delta.Timeline = snapshot.Timeline
+	} else if item, ok := changedTimelineItem(update); ok {
 		delta.Item = &item
 	}
 	return delta

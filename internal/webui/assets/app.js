@@ -623,6 +623,7 @@
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
+        timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
@@ -1178,7 +1179,14 @@
           if (delta.status !== undefined) next.Status = delta.status;
           if (delta.status_text !== undefined) next.StatusText = delta.status_text;
           if (delta.active !== undefined) next.Active = delta.active;
-          if (delta.item) next.Timeline = this.patchTimelineItem(next.Timeline || next.timeline || [], delta.item);
+          if (delta.replace_timeline || delta.ReplaceTimeline) {
+            next.Timeline = Array.isArray(delta.timeline || delta.Timeline) ? (delta.timeline || delta.Timeline) : [];
+            next.TimelineHasMore = false;
+            next.TimelineLoadedAll = true;
+            next.TimelineBefore = next.Timeline.length ? this.timelineItemID(next.Timeline[0]) : '';
+          } else if (delta.item) {
+            next.Timeline = this.patchTimelineItem(next.Timeline || next.timeline || [], delta.item);
+          }
           snapshots[id] = next;
           snapshots[String(id)] = next;
           this.state.snapshots = snapshots;
@@ -1619,6 +1627,70 @@
           return status === 'streaming_response' || status === 'streaming_thoughts' || status === 'waiting_llm';
         },
         timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
+        timelineItemActionLabel(item) {
+          const kind = String(item?.kind || item?.Kind || item?.content?.kind || '').trim();
+          const time = this.formatItemTime(item);
+          return [kind || 'item', time].filter(Boolean).join(' at ');
+        },
+        timelineActionAvailable(item) {
+          return !!this.timelineItemID(item);
+        },
+        openTimelineRollback(item) {
+          const itemID = this.timelineItemID(item);
+          if (!itemID) return;
+          this.timelineAction = {open: true, mode: 'rollback', itemID, itemLabel: this.timelineItemActionLabel(item), forkTitle: '', busy: false, error: ''};
+        },
+        openTimelineFork(item) {
+          const itemID = this.timelineItemID(item);
+          if (!itemID) return;
+          const chat = this.activeChat();
+          const title = String(chat?.Title || chat?.title || 'Chat').trim() || 'Chat';
+          this.timelineAction = {open: true, mode: 'fork', itemID, itemLabel: this.timelineItemActionLabel(item), forkTitle: title + ' - fork', busy: false, error: ''};
+          this.$nextTick(() => {
+            const el = this.$refs.timelineForkTitle;
+            if (el) {
+              el.focus();
+              el.select();
+            }
+          });
+        },
+        closeTimelineAction() {
+          if (this.timelineAction.busy) return;
+          this.timelineAction = {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''};
+        },
+        saveTimelineAction() {
+          if (!this.timelineAction.open || this.timelineAction.busy) return;
+          const chatID = this.activeChatID();
+          const itemID = String(this.timelineAction.itemID || '').trim();
+          if (!chatID || !itemID) return;
+          const mode = this.timelineAction.mode;
+          this.timelineAction.busy = true;
+          this.timelineAction.error = '';
+          if (mode === 'rollback') {
+            this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(() => {
+              this.closeTimelineAction();
+            }).catch(err => {
+              this.timelineAction.busy = false;
+              this.timelineAction.error = err.message || 'rollback failed';
+            });
+            return;
+          }
+          if (mode === 'fork') {
+            const title = String(this.timelineAction.forkTitle || '').trim();
+            if (!title) {
+              this.timelineAction.busy = false;
+              this.timelineAction.error = 'Chat name is required.';
+              return;
+            }
+            this.rpc('fork_chat', {chat_id: chatID, anchor_item_id: itemID, title}).then(s => {
+              this.applyState(s, {scrollToBottom: true});
+              this.closeTimelineAction();
+            }).catch(err => {
+              this.timelineAction.busy = false;
+              this.timelineAction.error = err.message || 'fork failed';
+            });
+          }
+        },
         itemTimestamp(item) {
           return String(item?.created_at || item?.CreatedAt || item?.createdAt || item?.timestamp || '').trim();
         },

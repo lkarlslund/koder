@@ -301,6 +301,99 @@ func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string)
 	return s.createChat(ctx, session, chatRecord)
 }
 
+// ForkChatAt creates a sibling chat containing transcript items from the source
+// chat start through anchorItemID, inclusive.
+func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.ID, title string) (*chatpkg.Chat, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	if sourceChatID == "" {
+		return nil, fmt.Errorf("source chat id is required")
+	}
+	if anchorItemID == "" {
+		return nil, fmt.Errorf("anchor item id is required")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Fork"
+	}
+	s.mu.RLock()
+	session := s.session
+	source, ok := chatByID(s.chats, sourceChatID)
+	position := len(s.chats)
+	s.mu.RUnlock()
+	if session.ID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if !ok {
+		return nil, fmt.Errorf("chat %s not found", sourceChatID)
+	}
+	if source.Archived {
+		return nil, fmt.Errorf("cannot fork archived chat %s", sourceChatID)
+	}
+	sourceRuntime, err := s.Chat(ctx, sourceChatID)
+	if err != nil {
+		return nil, err
+	}
+	if err := sourceRuntime.EnsureTimeline(ctx); err != nil {
+		return nil, err
+	}
+	sourceSnapshot := sourceRuntime.Snapshot()
+	sourceTimeline := sourceSnapshot.Timeline
+	anchorIdx := slices.IndexFunc(sourceTimeline, func(item domain.TimelineItem) bool {
+		return item.ID == anchorItemID
+	})
+	if anchorIdx < 0 {
+		return nil, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, sourceChatID)
+	}
+	parentID := sourceChatID
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                     id.NewAt(now),
+		SessionID:              session.ID,
+		ParentChatID:           &parentID,
+		Title:                  title,
+		WorkflowRole:           source.WorkflowRole,
+		ProviderID:             strings.TrimSpace(source.ProviderID),
+		ModelID:                strings.TrimSpace(source.ModelID),
+		PermissionProfile:      source.PermissionProfile,
+		ToolStates:             cloneToolStateMap(source.ToolStates),
+		ActiveMilestoneRef:     source.ActiveMilestoneRef,
+		AssignedTodoBucketRef:  source.AssignedTodoBucketRef,
+		AssignedTodoRef:        source.AssignedTodoRef,
+		LastKnownContextTokens: 0,
+		ContextTokensKnown:     false,
+		TokenUsage:             domain.Usage{},
+		Position:               position,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+		LastMessage:            "",
+	}
+	if err := putChat(ctx, s.store, chatRecord); err != nil {
+		return nil, err
+	}
+	for idx, item := range sourceTimeline[:anchorIdx+1] {
+		copied, err := cloneTimelineItemForChat(item, chatRecord.ID, int64(idx+1), now)
+		if err != nil {
+			return nil, err
+		}
+		if err := chatpkg.PutTimelineItem(ctx, s.store, copied); err != nil {
+			return nil, err
+		}
+	}
+	rt, err := s.chatLoader(ctx, session, chatRecord)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	s.trackRuntimeLocked(chatRecord.ID, rt)
+	snapshot := rt.Snapshot()
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventChatAdded, SessionID: session.ID, Chat: chatRecord, Snapshot: snapshot})
+	return rt, nil
+}
+
 // AddPreparedChat adds an already validated chat record to the live session.
 func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (*chatpkg.Chat, error) {
 	if s == nil {

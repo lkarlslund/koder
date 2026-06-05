@@ -526,13 +526,74 @@ func (c *Controller) RewindLiveChat(ctx context.Context, sessionID, chatID, anch
 	}
 	c.mu.Unlock()
 	c.broadcast("chat_delta", chat.Update{
-		Snapshot:   snapshot,
-		Status:     snapshot.Status,
-		StatusText: snapshot.StatusText,
-		Context:    snapshot.Context,
-		Active:     snapshot.Active,
+		Snapshot:        snapshot,
+		Status:          snapshot.Status,
+		StatusText:      snapshot.StatusText,
+		Context:         snapshot.Context,
+		Active:          snapshot.Active,
+		ReplaceTimeline: true,
 	})
 	return result, nil
+}
+
+// RollbackChatForSelection removes transcript items from anchorItemID through
+// the end of the selected chat.
+func (c *Controller) RollbackChatForSelection(ctx context.Context, selection Selection, chatID, anchorItemID id.ID) (any, error) {
+	if selection.SessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if chatID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	if anchorItemID == "" {
+		return nil, fmt.Errorf("anchor item id is required")
+	}
+	return c.RewindLiveChat(ctx, selection.SessionID, chatID, anchorItemID)
+}
+
+// ForkChatForSelection creates a new chat from the selected chat transcript
+// start through anchorItemID, inclusive.
+func (c *Controller) ForkChatForSelection(ctx context.Context, selection Selection, chatID, anchorItemID id.ID, title string) (domain.Chat, error) {
+	if c == nil {
+		return domain.Chat{}, fmt.Errorf("controller is nil")
+	}
+	if c.agent == nil {
+		return domain.Chat{}, fmt.Errorf("no chat agent")
+	}
+	if selection.SessionID == "" {
+		return domain.Chat{}, fmt.Errorf("session id is required")
+	}
+	if chatID == "" {
+		return domain.Chat{}, fmt.Errorf("chat id is required")
+	}
+	if anchorItemID == "" {
+		return domain.Chat{}, fmt.Errorf("anchor item id is required")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	rt, err := owner.ForkChatAt(ctx, chatID, anchorItemID, title)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	snapshot := rt.Snapshot()
+	status := sidebarStatusFromSnapshot(snapshot)
+	c.mu.Lock()
+	if c.runtimes == nil {
+		c.runtimes = map[id.ID]*chat.Chat{}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[id.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[id.ID]ChatSidebarStatus{}
+	}
+	c.runtimes[snapshot.Chat.ID] = rt
+	c.snapshots[snapshot.Chat.ID] = snapshot
+	c.statuses[snapshot.Chat.ID] = status
+	c.mu.Unlock()
+	return snapshot.Chat, nil
 }
 
 func (c *Controller) populateStateSnapshotsLocked(state *State) {

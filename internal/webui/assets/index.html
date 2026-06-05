@@ -91,7 +91,11 @@
                   <span class="turn-source-label">user</span>
                   <span class="turn-source-qualifier" x-show="userMessageSourceQualifier(item)" x-text="userMessageSourceQualifier(item)"></span>
                 </div>
-                <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                <div class="turn-header-actions">
+                  <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                  <button type="button" class="timeline-action-button" title="Rollback chat to before this item" @click="openTimelineRollback(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                  <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
+                </div>
               </div>
               <template x-if="(item.content?.attachments || []).length > 0">
                 <div class="attachment-strip mb-2">
@@ -112,7 +116,11 @@
             <div class="turn assistant-turn">
               <div class="turn-header">
                 <div class="turn-header-title"><i class="bi bi-robot"></i><span class="turn-source-label">agent</span></div>
-                <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                <div class="turn-header-actions">
+                  <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                  <button type="button" class="timeline-action-button" title="Rollback chat to before this item" @click="openTimelineRollback(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                  <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
+                </div>
               </div>
               <template x-if="item.content?.reasoning?.text">
                 <details class="reasoning mb-2">
@@ -156,7 +164,11 @@
                       <span x-text="noticeText(item.content || {})"></span>
                       <span class="text-secondary" x-show="noticeDetail(item.content || {})" x-text="noticeDetail(item.content || {})"></span>
                     </div>
-                    <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                    <div class="turn-header-actions">
+                      <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                      <button type="button" class="timeline-action-button" title="Rollback chat to before this item" @click="openTimelineRollback(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                      <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -164,7 +176,11 @@
                 <div class="lint-message">
                   <div class="turn-header">
                     <div class="turn-header-title"><i class="bi bi-bug"></i><span>lint</span><span class="turn-source-qualifier" x-show="lintFiles(item.content || {})" x-text="lintFiles(item.content || {})"></span></div>
-                    <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                    <div class="turn-header-actions">
+                      <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                      <button type="button" class="timeline-action-button" title="Rollback chat to before this item" @click="openTimelineRollback(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                      <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
+                    </div>
                   </div>
                   <pre x-text="lintText(item.content || {})"></pre>
                 </div>
@@ -454,6 +470,38 @@
         </div>
       </div>
     </form>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="timelineAction.open" x-transition @keydown.escape.window="closeTimelineAction()" style="display: none;">
+    <section class="model-dialog timeline-action-modal bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold" x-text="timelineAction.mode === 'fork' ? 'Fork chat' : 'Rollback chat'"></div>
+          <div class="small text-secondary" x-text="timelineAction.itemLabel"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm" :class="timelineAction.mode === 'rollback' ? 'btn-danger' : 'btn-primary'" :disabled="timelineAction.busy" :title="timelineAction.mode === 'fork' ? 'Create fork' : 'Rollback chat'" @click="saveTimelineAction()">
+            <span class="spinner-border spinner-border-sm" x-show="timelineAction.busy" aria-hidden="true"></span>
+            <i class="bi" :class="timelineAction.mode === 'fork' ? 'bi-diagram-2' : 'bi-arrow-counterclockwise'" x-show="!timelineAction.busy"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" :disabled="timelineAction.busy" @click="closeTimelineAction()"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </header>
+      <div class="p-3 d-grid gap-3">
+        <template x-if="timelineAction.mode === 'rollback'">
+          <div class="alert alert-danger mb-0">
+            This removes this item and everything after it from the current chat.
+          </div>
+        </template>
+        <template x-if="timelineAction.mode === 'fork'">
+          <label class="form-label mb-0">
+            <span class="small text-secondary">New chat name</span>
+            <input class="form-control mt-1" x-ref="timelineForkTitle" x-model="timelineAction.forkTitle" autocomplete="off" @keydown.enter.prevent="saveTimelineAction()">
+          </label>
+        </template>
+        <div class="alert alert-danger py-2 mb-0" x-show="timelineAction.error" x-text="timelineAction.error" style="display: none;"></div>
+      </div>
+    </section>
   </div>
 
   <div class="modal-backdrop-lite" x-show="showModels" x-transition @keydown.escape.window="closeModelDialog()" style="display: none;">

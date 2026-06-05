@@ -139,3 +139,67 @@ func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 		t.Fatalf("expected second chat to hydrate during session load, got loads=%#v", loads)
 	}
 }
+
+func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats, err := ListChats(ctx, st, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) != 1 {
+		t.Fatalf("expected initial chat, got %#v", chats)
+	}
+	source := chats[0]
+	if _, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.AssistantMessage{Text: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "third"}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := Load(ctx, st, func(_ context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
+		return chatpkg.Load(ctx, session, chatRecord, chatpkg.Deps{Store: st}, nil)
+	}, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, err := owner.ForkChatAt(ctx, source.ID, anchor.ID, "forked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkedTimeline, err := chatpkg.TimelineForChat(ctx, st, fork.Snapshot().Chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forkedTimeline) != 2 {
+		t.Fatalf("expected two forked items, got %#v", forkedTimeline)
+	}
+	if forkedTimeline[0].ChatID != fork.Snapshot().Chat.ID || forkedTimeline[1].ChatID != fork.Snapshot().Chat.ID {
+		t.Fatalf("forked items have wrong chat id: %#v", forkedTimeline)
+	}
+	if forkedTimeline[0].ID == anchor.ID || forkedTimeline[1].ID == anchor.ID {
+		t.Fatalf("expected copied timeline items to get new ids, got %#v", forkedTimeline)
+	}
+	if got := forkedTimeline[1].Content.(domain.AssistantMessage).Text; got != "second" {
+		t.Fatalf("expected copied anchor content, got %q", got)
+	}
+	sourceTimeline, err := chatpkg.TimelineForChat(ctx, st, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceTimeline) != 3 {
+		t.Fatalf("expected source timeline to remain intact, got %#v", sourceTimeline)
+	}
+}

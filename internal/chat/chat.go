@@ -89,6 +89,7 @@ type Update struct {
 	TokenUsage        domain.Usage
 	Active            bool
 	TranscriptChanged bool
+	ReplaceTimeline   bool
 	QueueChanged      bool
 	StatusChanged     bool
 	ContextChanged    bool
@@ -1204,7 +1205,9 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 	if err := UpdateChat(ctx, st, chatRecord); err != nil {
 		return LiveRewindResult{}, err
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, true))
+	update := r.snapshotUpdateFlags(nil, false, false, true, true, true)
+	update.ReplaceTimeline = true
+	r.broadcast(update)
 	return result, nil
 }
 
