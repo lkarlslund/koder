@@ -44,20 +44,22 @@ import (
 )
 
 type Engine struct {
-	cfg        config.Config
-	store      *store.Store
-	debug      *debugsrv.Recorder
-	files      *attachment.Manager
-	caps       *provider.CapabilityStore
-	agents     *agents.Manager
-	mcp        *mcp.Manager
-	exec       *execruntime.Manager
-	envMu      sync.Mutex
-	envPrompts map[id.ID]string
-	caveman    *cavemanService
-	sessionMu  sync.RWMutex
-	sessions   map[id.ID]*sessionpkg.Session
-	retryPause func(context.Context, time.Duration, func(time.Duration)) error
+	cfg         config.Config
+	store       *store.Store
+	debug       *debugsrv.Recorder
+	files       *attachment.Manager
+	caps        *provider.CapabilityStore
+	agents      *agents.Manager
+	mcp         *mcp.Manager
+	exec        *execruntime.Manager
+	envMu       sync.Mutex
+	envPrompts  map[id.ID]string
+	caveman     *cavemanService
+	cavemanMu   sync.Mutex
+	cavemanJobs map[id.ID]cavemanJob
+	sessionMu   sync.RWMutex
+	sessions    map[id.ID]*sessionpkg.Session
+	retryPause  func(context.Context, time.Duration, func(time.Duration)) error
 }
 
 const (
@@ -77,17 +79,18 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		mcpManager = mcpManagers[0]
 	}
 	return &Engine{
-		cfg:        cfg,
-		store:      st,
-		debug:      debug,
-		files:      attachment.NewManager(cfg.StateDir()),
-		caps:       provider.NewCapabilityStore(cfg.StateDir()),
-		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
-		mcp:        mcpManager,
-		exec:       execruntime.NewManager(),
-		caveman:    newCavemanService(cfg.Thinking.CavemanParallelism),
-		sessions:   map[id.ID]*sessionpkg.Session{},
-		retryPause: waitForRetry,
+		cfg:         cfg,
+		store:       st,
+		debug:       debug,
+		files:       attachment.NewManager(cfg.StateDir()),
+		caps:        provider.NewCapabilityStore(cfg.StateDir()),
+		agents:      agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
+		mcp:         mcpManager,
+		exec:        execruntime.NewManager(),
+		caveman:     newCavemanService(cfg.Thinking.CavemanParallelism),
+		cavemanJobs: map[id.ID]cavemanJob{},
+		sessions:    map[id.ID]*sessionpkg.Session{},
+		retryPause:  waitForRetry,
 	}
 }
 
@@ -441,6 +444,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	chat := turn.Chat()
 	client, err := e.clientForChat(chat)
 	if err != nil {
+		return chatpkg.TurnStepResult{}, err
+	}
+	if err := e.awaitOutstandingCaveman(ctx, chat.ID, out); err != nil {
 		return chatpkg.TurnStepResult{}, err
 	}
 	e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
@@ -1013,6 +1019,7 @@ func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Ch
 		return result, nil
 	}
 	caveman, err := job.Await(ctx)
+	e.clearOutstandingCaveman(chat.ID, job)
 	if err != nil {
 		return domain.ReasoningContent{}, fmt.Errorf("convert reasoning to caveman: %w", err)
 	}
@@ -1062,13 +1069,63 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 	if e.caveman == nil {
 		e.caveman = newCavemanService(e.cfg.Thinking.CavemanParallelism)
 	}
-	return e.caveman.Submit(ctx, func(jobCtx context.Context) (string, error) {
+	job := e.caveman.Submit(ctx, func(jobCtx context.Context) (string, error) {
 		resp, err := e.completeCavemanThinking(jobCtx, providerID, client, req, events)
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(resp.Text), nil
-	}), nil
+	})
+	e.setOutstandingCaveman(chat.ID, job)
+	return job, nil
+}
+
+func (e *Engine) setOutstandingCaveman(chatID id.ID, job cavemanJob) {
+	if e == nil || chatID == "" || !job.Valid() {
+		return
+	}
+	e.cavemanMu.Lock()
+	if e.cavemanJobs == nil {
+		e.cavemanJobs = map[id.ID]cavemanJob{}
+	}
+	e.cavemanJobs[chatID] = job
+	e.cavemanMu.Unlock()
+}
+
+func (e *Engine) clearOutstandingCaveman(chatID id.ID, job cavemanJob) {
+	if e == nil || chatID == "" || !job.Valid() {
+		return
+	}
+	e.cavemanMu.Lock()
+	if existing, ok := e.cavemanJobs[chatID]; ok && existing.state == job.state {
+		delete(e.cavemanJobs, chatID)
+	}
+	e.cavemanMu.Unlock()
+}
+
+func (e *Engine) awaitOutstandingCaveman(ctx context.Context, chatID id.ID, out chan<- domain.Event) error {
+	if e == nil || chatID == "" {
+		return nil
+	}
+	e.cavemanMu.Lock()
+	job := e.cavemanJobs[chatID]
+	e.cavemanMu.Unlock()
+	if !job.Valid() {
+		return nil
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Waiting for caveman thinking...",
+			Meta: map[string]string{"caveman": "started"},
+		}
+	}
+	_, err := job.Await(ctx)
+	e.clearOutstandingCaveman(chatID, job)
+	if err != nil {
+		return fmt.Errorf("wait for outstanding caveman: %w", err)
+	}
+	return nil
 }
 
 func (e *Engine) shouldCavemanThinking(reasoning string) bool {
@@ -1749,6 +1806,11 @@ func (e *Engine) chatWithRetry(ctx context.Context, session domain.Session, chat
 	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
 	promptProgressRetried := false
 	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			if err := e.awaitOutstandingCaveman(ctx, chat.ID, out); err != nil {
+				return provider.ChatResponse{}, false, cavemanJob{}, err
+			}
+		}
 		var (
 			resp           provider.ChatResponse
 			err            error
