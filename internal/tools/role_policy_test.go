@@ -18,7 +18,7 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 	for _, def := range defs {
 		names[def.Function.Name] = true
 	}
-	for _, name := range []string{domain.ToolKindChatPoll.String(), domain.ToolKindChatStart.String(), domain.ToolKindMilestoneAdd.String(), domain.ToolKindMilestonePlan.String()} {
+	for _, name := range []string{domain.ToolKindChatSend.String(), domain.ToolKindChatStart.String(), domain.ToolKindMilestoneAdd.String(), domain.ToolKindMilestonePlan.String()} {
 		if names[name] {
 			t.Fatalf("execution definitions exposed forbidden tool %q", name)
 		}

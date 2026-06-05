@@ -37,8 +37,12 @@ const (
 	ToolKindTasksUpdate
 	ToolKindChatList
 	ToolKindChatStart
+	ToolKindChatSend
+	ToolKindChatCancel
+	ToolKindChatArchive
+	ToolKindChatRename
+	// Legacy value kept for stored data that may still be present.
 	ToolKindChatPoll
-	ToolKindChatUpdate
 	ToolKindSkill
 	ToolKindWebFetch
 	ToolKindWebSearch

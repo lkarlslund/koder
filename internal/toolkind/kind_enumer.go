@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-const _KindName = "file_readview_imageshow_imagefile_globfile_grepcode_searchlintbashexec_commandexec_statusexec_listexec_write_stdinexec_resizeexec_terminateexec_cleanupfile_editfile_writetaskquestionupdate_planmilestone_listmilestone_addmilestone_updatemilestone_planmilestone_writetask_listtask_add_itemstask_update_itemtask_fetch_nexttasks_addtasks_updatechat_listchat_startchat_pollchat_updateskillweb_fetchweb_searchmcpchat_start_decompositionchat_start_execution"
+const _KindName = "file_readview_imageshow_imagefile_globfile_grepcode_searchlintbashexec_commandexec_statusexec_listexec_write_stdinexec_resizeexec_terminateexec_cleanupfile_editfile_writetaskquestionupdate_planmilestone_listmilestone_addmilestone_updatemilestone_planmilestone_writetask_listtask_add_itemstask_update_itemtask_fetch_nexttasks_addtasks_updatechat_listchat_startchat_sendchat_cancelchat_archivechat_renamechat_pollskillweb_fetchweb_searchmcpchat_start_decompositionchat_start_execution"
 
-var _KindIndex = [...]uint16{0, 9, 19, 29, 38, 47, 58, 62, 66, 78, 89, 98, 114, 125, 139, 151, 160, 170, 174, 182, 193, 207, 220, 236, 250, 265, 274, 288, 304, 319, 328, 340, 349, 359, 368, 379, 384, 393, 403, 406, 430, 450}
+var _KindIndex = [...]uint16{0, 9, 19, 29, 38, 47, 58, 62, 66, 78, 89, 98, 114, 125, 139, 151, 160, 170, 174, 182, 193, 207, 220, 236, 250, 265, 274, 288, 304, 319, 328, 340, 349, 359, 368, 379, 391, 402, 411, 416, 425, 435, 438, 462, 482}
 
-const _KindLowerName = "file_readview_imageshow_imagefile_globfile_grepcode_searchlintbashexec_commandexec_statusexec_listexec_write_stdinexec_resizeexec_terminateexec_cleanupfile_editfile_writetaskquestionupdate_planmilestone_listmilestone_addmilestone_updatemilestone_planmilestone_writetask_listtask_add_itemstask_update_itemtask_fetch_nexttasks_addtasks_updatechat_listchat_startchat_pollchat_updateskillweb_fetchweb_searchmcpchat_start_decompositionchat_start_execution"
+const _KindLowerName = "file_readview_imageshow_imagefile_globfile_grepcode_searchlintbashexec_commandexec_statusexec_listexec_write_stdinexec_resizeexec_terminateexec_cleanupfile_editfile_writetaskquestionupdate_planmilestone_listmilestone_addmilestone_updatemilestone_planmilestone_writetask_listtask_add_itemstask_update_itemtask_fetch_nexttasks_addtasks_updatechat_listchat_startchat_sendchat_cancelchat_archivechat_renamechat_pollskillweb_fetchweb_searchmcpchat_start_decompositionchat_start_execution"
 
 func (i Kind) String() string {
 	i -= 1
@@ -63,17 +63,20 @@ func _KindNoOp() {
 	_ = x[ToolKindTasksUpdate-(31)]
 	_ = x[ToolKindChatList-(32)]
 	_ = x[ToolKindChatStart-(33)]
-	_ = x[ToolKindChatPoll-(34)]
-	_ = x[ToolKindChatUpdate-(35)]
-	_ = x[ToolKindSkill-(36)]
-	_ = x[ToolKindWebFetch-(37)]
-	_ = x[ToolKindWebSearch-(38)]
-	_ = x[ToolKindMCP-(39)]
-	_ = x[ToolKindChatStartDecomposition-(40)]
-	_ = x[ToolKindChatStartExecution-(41)]
+	_ = x[ToolKindChatSend-(34)]
+	_ = x[ToolKindChatCancel-(35)]
+	_ = x[ToolKindChatArchive-(36)]
+	_ = x[ToolKindChatRename-(37)]
+	_ = x[ToolKindChatPoll-(38)]
+	_ = x[ToolKindSkill-(39)]
+	_ = x[ToolKindWebFetch-(40)]
+	_ = x[ToolKindWebSearch-(41)]
+	_ = x[ToolKindMCP-(42)]
+	_ = x[ToolKindChatStartDecomposition-(43)]
+	_ = x[ToolKindChatStartExecution-(44)]
 }
 
-var _KindValues = []Kind{ToolKindFileRead, ToolKindViewImage, ToolKindShowImage, ToolKindFileGlob, ToolKindFileGrep, ToolKindCodeSearch, ToolKindLint, ToolKindBash, ToolKindExecCommand, ToolKindExecStatus, ToolKindExecList, ToolKindExecWriteStdin, ToolKindExecResize, ToolKindExecTerminate, ToolKindExecCleanup, ToolKindFileEdit, ToolKindFileWrite, ToolKindTask, ToolKindQuestion, ToolKindUpdatePlan, ToolKindMilestoneList, ToolKindMilestoneAdd, ToolKindMilestoneUpdate, ToolKindMilestonePlan, ToolKindMilestoneWrite, ToolKindTaskList, ToolKindTaskAddItems, ToolKindTaskUpdateItem, ToolKindTaskFetchNext, ToolKindTasksAdd, ToolKindTasksUpdate, ToolKindChatList, ToolKindChatStart, ToolKindChatPoll, ToolKindChatUpdate, ToolKindSkill, ToolKindWebFetch, ToolKindWebSearch, ToolKindMCP, ToolKindChatStartDecomposition, ToolKindChatStartExecution}
+var _KindValues = []Kind{ToolKindFileRead, ToolKindViewImage, ToolKindShowImage, ToolKindFileGlob, ToolKindFileGrep, ToolKindCodeSearch, ToolKindLint, ToolKindBash, ToolKindExecCommand, ToolKindExecStatus, ToolKindExecList, ToolKindExecWriteStdin, ToolKindExecResize, ToolKindExecTerminate, ToolKindExecCleanup, ToolKindFileEdit, ToolKindFileWrite, ToolKindTask, ToolKindQuestion, ToolKindUpdatePlan, ToolKindMilestoneList, ToolKindMilestoneAdd, ToolKindMilestoneUpdate, ToolKindMilestonePlan, ToolKindMilestoneWrite, ToolKindTaskList, ToolKindTaskAddItems, ToolKindTaskUpdateItem, ToolKindTaskFetchNext, ToolKindTasksAdd, ToolKindTasksUpdate, ToolKindChatList, ToolKindChatStart, ToolKindChatSend, ToolKindChatCancel, ToolKindChatArchive, ToolKindChatRename, ToolKindChatPoll, ToolKindSkill, ToolKindWebFetch, ToolKindWebSearch, ToolKindMCP, ToolKindChatStartDecomposition, ToolKindChatStartExecution}
 
 var _KindNameToValueMap = map[string]Kind{
 	_KindName[0:9]:          ToolKindFileRead,
@@ -142,22 +145,28 @@ var _KindNameToValueMap = map[string]Kind{
 	_KindLowerName[340:349]: ToolKindChatList,
 	_KindName[349:359]:      ToolKindChatStart,
 	_KindLowerName[349:359]: ToolKindChatStart,
-	_KindName[359:368]:      ToolKindChatPoll,
-	_KindLowerName[359:368]: ToolKindChatPoll,
-	_KindName[368:379]:      ToolKindChatUpdate,
-	_KindLowerName[368:379]: ToolKindChatUpdate,
-	_KindName[379:384]:      ToolKindSkill,
-	_KindLowerName[379:384]: ToolKindSkill,
-	_KindName[384:393]:      ToolKindWebFetch,
-	_KindLowerName[384:393]: ToolKindWebFetch,
-	_KindName[393:403]:      ToolKindWebSearch,
-	_KindLowerName[393:403]: ToolKindWebSearch,
-	_KindName[403:406]:      ToolKindMCP,
-	_KindLowerName[403:406]: ToolKindMCP,
-	_KindName[406:430]:      ToolKindChatStartDecomposition,
-	_KindLowerName[406:430]: ToolKindChatStartDecomposition,
-	_KindName[430:450]:      ToolKindChatStartExecution,
-	_KindLowerName[430:450]: ToolKindChatStartExecution,
+	_KindName[359:368]:      ToolKindChatSend,
+	_KindLowerName[359:368]: ToolKindChatSend,
+	_KindName[368:379]:      ToolKindChatCancel,
+	_KindLowerName[368:379]: ToolKindChatCancel,
+	_KindName[379:391]:      ToolKindChatArchive,
+	_KindLowerName[379:391]: ToolKindChatArchive,
+	_KindName[391:402]:      ToolKindChatRename,
+	_KindLowerName[391:402]: ToolKindChatRename,
+	_KindName[402:411]:      ToolKindChatPoll,
+	_KindLowerName[402:411]: ToolKindChatPoll,
+	_KindName[411:416]:      ToolKindSkill,
+	_KindLowerName[411:416]: ToolKindSkill,
+	_KindName[416:425]:      ToolKindWebFetch,
+	_KindLowerName[416:425]: ToolKindWebFetch,
+	_KindName[425:435]:      ToolKindWebSearch,
+	_KindLowerName[425:435]: ToolKindWebSearch,
+	_KindName[435:438]:      ToolKindMCP,
+	_KindLowerName[435:438]: ToolKindMCP,
+	_KindName[438:462]:      ToolKindChatStartDecomposition,
+	_KindLowerName[438:462]: ToolKindChatStartDecomposition,
+	_KindName[462:482]:      ToolKindChatStartExecution,
+	_KindLowerName[462:482]: ToolKindChatStartExecution,
 }
 
 var _KindNames = []string{
@@ -196,12 +205,15 @@ var _KindNames = []string{
 	_KindName[349:359],
 	_KindName[359:368],
 	_KindName[368:379],
-	_KindName[379:384],
-	_KindName[384:393],
-	_KindName[393:403],
-	_KindName[403:406],
-	_KindName[406:430],
-	_KindName[430:450],
+	_KindName[379:391],
+	_KindName[391:402],
+	_KindName[402:411],
+	_KindName[411:416],
+	_KindName[416:425],
+	_KindName[425:435],
+	_KindName[435:438],
+	_KindName[438:462],
+	_KindName[462:482],
 }
 
 // KindString retrieves an enum value from the enum constants string name.

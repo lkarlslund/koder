@@ -41,14 +41,15 @@ func TestRoleAllowsTool(t *testing.T) {
 		tool toolkind.Kind
 		want bool
 	}{
-		{"legacy decomposition allows orchestrator tools", Role("decomposition"), toolkind.ToolKindChatPoll, true},
+		{"legacy decomposition allows orchestrator tools", Role("decomposition"), toolkind.ToolKindChatSend, true},
 		{"execution allows edit", Execution, toolkind.ToolKindFileEdit, true},
 		{"execution rejects chat start", Execution, toolkind.ToolKindChatStart, false},
+		{"execution rejects chat send", Execution, toolkind.ToolKindChatSend, false},
 		{"execution rejects milestone add", Execution, toolkind.ToolKindMilestoneAdd, false},
 		{"execution allows milestone update", Execution, toolkind.ToolKindMilestoneUpdate, true},
-		{"orchestrator allows chat poll", Orchestrator, toolkind.ToolKindChatPoll, true},
+		{"orchestrator allows chat send", Orchestrator, toolkind.ToolKindChatSend, true},
 		{"compaction rejects read", Compaction, toolkind.ToolKindFileRead, false},
-		{"compaction rejects chat poll", Compaction, toolkind.ToolKindChatPoll, false},
+		{"compaction rejects chat send", Compaction, toolkind.ToolKindChatSend, false},
 		{"unknown rejects read", Role("unknown"), toolkind.ToolKindFileRead, false},
 	}
 	for _, tt := range tests {

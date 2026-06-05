@@ -50,21 +50,13 @@ func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]tools.ChatSt
 	snapshot := owner.Snapshot()
 	statuses := make([]tools.ChatStatus, 0, len(snapshot.Chats))
 	for _, item := range snapshot.Chats {
-		status, err := owner.PollChat(ctx, item.ID)
+		status, err := owner.ChatStatus(ctx, item.ID)
 		if err != nil {
 			return nil, err
 		}
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
-}
-
-func (e *Engine) PollChat(ctx context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
-	owner, err := e.LoadSession(ctx, sessionID)
-	if err != nil {
-		return tools.ChatStatus{}, err
-	}
-	return owner.PollChat(ctx, chatID)
 }
 
 func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
@@ -188,7 +180,7 @@ func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID 
 		return tools.ChatStatus{}, err
 	}
 	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
-		return tools.ChatStatus{}, fmt.Errorf("chat_update cannot send a message to its own chat; target a direct child chat instead")
+		return tools.ChatStatus{}, fmt.Errorf("chat_send cannot send a message to its own chat; target a direct child chat instead")
 	}
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		rt, err := owner.Chat(ctx, chatID)
@@ -211,7 +203,7 @@ func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID 
 		}
 	}
 	if update.Archived == nil && strings.TrimSpace(update.Title) == "" {
-		return owner.PollChat(ctx, chatID)
+		return owner.ChatStatus(ctx, chatID)
 	}
 	status, _, err := owner.UpdateChat(ctx, chatID, update)
 	return status, err

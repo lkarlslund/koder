@@ -8,7 +8,7 @@ import (
 func TestToolStatesUnmarshalAcceptsPersistedSnakeCaseKeys(t *testing.T) {
 	var states ToolStates
 	err := json.Unmarshal([]byte(`{
-		"chat_update": false,
+		"chat_send": false,
 		"exec_write_stdin": false,
 		"exec_cleanup_background": false,
 		"milestone_add_items": false,
@@ -19,7 +19,7 @@ func TestToolStatesUnmarshalAcceptsPersistedSnakeCaseKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range []ToolKind{
-		ToolKindChatUpdate,
+		ToolKindChatSend,
 		ToolKindExecWriteStdin,
 		ToolKindExecCleanup,
 		ToolKindMilestoneAdd,

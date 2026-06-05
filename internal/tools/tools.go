@@ -67,7 +67,6 @@ type ChatUpdateRequest struct {
 type ChatControl interface {
 	ListChats(context.Context, id.ID) ([]ChatStatus, error)
 	StartChat(context.Context, id.ID, id.ID, ChatStartRequest) (ChatStatus, error)
-	PollChat(context.Context, id.ID, id.ID) (ChatStatus, error)
 	UpdateChat(context.Context, id.ID, id.ID, id.ID, ChatUpdateRequest) (ChatStatus, error)
 }
 

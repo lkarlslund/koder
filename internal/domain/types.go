@@ -74,8 +74,11 @@ const (
 	ToolKindTasksUpdate            = toolkind.ToolKindTasksUpdate
 	ToolKindChatList               = toolkind.ToolKindChatList
 	ToolKindChatStart              = toolkind.ToolKindChatStart
+	ToolKindChatSend               = toolkind.ToolKindChatSend
+	ToolKindChatCancel             = toolkind.ToolKindChatCancel
+	ToolKindChatArchive            = toolkind.ToolKindChatArchive
+	ToolKindChatRename             = toolkind.ToolKindChatRename
 	ToolKindChatPoll               = toolkind.ToolKindChatPoll
-	ToolKindChatUpdate             = toolkind.ToolKindChatUpdate
 	ToolKindSkill                  = toolkind.ToolKindSkill
 	ToolKindWebFetch               = toolkind.ToolKindWebFetch
 	ToolKindWebSearch              = toolkind.ToolKindWebSearch

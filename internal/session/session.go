@@ -807,7 +807,7 @@ func newestSessionChat(chats []domain.Chat) domain.Chat {
 	return best
 }
 
-func (s *Session) PollChat(ctx context.Context, chatID id.ID) (tools.ChatStatus, error) {
+func (s *Session) ChatStatus(ctx context.Context, chatID id.ID) (tools.ChatStatus, error) {
 	if s == nil {
 		return tools.ChatStatus{}, fmt.Errorf("session is required")
 	}

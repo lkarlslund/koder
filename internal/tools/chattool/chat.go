@@ -24,44 +24,60 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or task_ref to scope what the child chat can see. A task_ref scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will report back when it becomes idle, including task or milestone progress.",
+		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or task_ref to scope what the child chat can see. A task_ref scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
 		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"task_ref":{"type":"string","description":"Optional task UUID to scope the child chat to one task"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
-	tools.Register(pollTool{}, tools.ToolSpec{
-		Title:       "Poll chat",
-		Description: "Read the latest runtime state for one chat.",
-		Usage:       "Read the latest runtime state for one chat by id, including whether it is running, waiting for approval, completed, or failed.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to inspect, as returned by chat_list"}},"required":["chat_id"],"additionalProperties":false}`,
+	tools.Register(sendTool{}, tools.ToolSpec{
+		Title:       "Send chat message",
+		Description: "Send a message to a direct child chat.",
+		Usage:       "Send work instructions only to a direct child chat you own. Do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy child chat; otherwise it is queued as the next user turn.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Direct child chat UUID to message"},"message":{"type":"string","description":"Message to queue for the child chat"},"steer":{"type":"boolean","description":"Deliver as a turn-boundary steer instead of the next user turn"}},"required":["chat_id","message"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
-	tools.Register(updateTool{}, tools.ToolSpec{
-		Title:       "Update chat",
-		Description: "Update a chat, send a message to an owned child chat, or interrupt it.",
-		Usage:       "Update chat metadata by id. Use archived=true for completed or no-longer-needed chats, archived=false to restore an archived chat, and title to rename a chat. Use message to send work instructions only to a direct child chat you own; do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy child chat; otherwise it is queued as the next user turn. Use interrupt=true to ask a current or direct child chat to stop; pass hard=true only when it must cancel active streaming/tools immediately. If you need to find archived chats first, call chat_list with archived=true.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to update; defaults to the current chat when omitted"},"archived":{"type":"boolean","description":"Set archived visibility state. true hides the chat; false restores it."},"title":{"type":"string","description":"Optional replacement title"},"message":{"type":"string","description":"Optional message to queue for a direct child chat owned by the current chat. This cannot target the current chat."},"steer":{"type":"boolean","description":"When message is set, deliver it as a turn-boundary steer instead of the next user turn."},"interrupt":{"type":"boolean","description":"Ask the target chat to stop. The target must be the current chat or a direct child chat owned by the current chat."},"hard":{"type":"boolean","description":"With interrupt=true, immediately cancel active streaming or tools instead of stopping after the current turn."}},"additionalProperties":false}`,
+	tools.Register(cancelTool{}, tools.ToolSpec{
+		Title:       "Cancel chat",
+		Description: "Ask the current chat or a direct child chat to stop.",
+		Usage:       "Ask the current chat or a direct child chat you own to stop. Omit chat_id to cancel the current chat. Pass hard=true only when it must cancel active streaming or tools immediately; otherwise it stops after the current turn.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to cancel; defaults to the current chat when omitted"},"hard":{"type":"boolean","description":"Immediately cancel active streaming or tools instead of stopping after the current turn"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(archiveTool{}, tools.ToolSpec{
+		Title:       "Archive chat",
+		Description: "Archive or restore a chat.",
+		Usage:       "Set archived=true for completed or no-longer-needed chats, archived=false to restore an archived chat. Omit chat_id to target the current chat. Only idle chats can be archived. If you need to find archived chats first, call chat_list with archived=true.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to archive or restore; defaults to the current chat when omitted"},"archived":{"type":"boolean","description":"true hides the chat; false restores it"}},"required":["archived"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(renameTool{}, tools.ToolSpec{
+		Title:       "Rename chat",
+		Description: "Rename a chat.",
+		Usage:       "Rename the current chat or a direct child chat you own. Omit chat_id to target the current chat.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to rename; defaults to the current chat when omitted"},"title":{"type":"string","description":"Replacement title"}},"required":["title"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
 
 type listTool struct{}
 type startTool struct{}
-type pollTool struct{}
-type updateTool struct{}
+type sendTool struct{}
+type cancelTool struct{}
+type archiveTool struct{}
+type renameTool struct{}
 
-func (listTool) Kind() domain.ToolKind  { return domain.ToolKindChatList }
-func (startTool) Kind() domain.ToolKind { return domain.ToolKindChatStart }
-func (pollTool) Kind() domain.ToolKind  { return domain.ToolKindChatPoll }
-func (updateTool) Kind() domain.ToolKind {
-	return domain.ToolKindChatUpdate
-}
+func (listTool) Kind() domain.ToolKind    { return domain.ToolKindChatList }
+func (startTool) Kind() domain.ToolKind   { return domain.ToolKindChatStart }
+func (sendTool) Kind() domain.ToolKind    { return domain.ToolKindChatSend }
+func (cancelTool) Kind() domain.ToolKind  { return domain.ToolKindChatCancel }
+func (archiveTool) Kind() domain.ToolKind { return domain.ToolKindChatArchive }
+func (renameTool) Kind() domain.ToolKind  { return domain.ToolKindChatRename }
 
-func (listTool) BypassesPermission() bool  { return true }
-func (startTool) BypassesPermission() bool { return true }
-func (pollTool) BypassesPermission() bool  { return true }
-func (updateTool) BypassesPermission() bool {
-	return true
-}
+func (listTool) BypassesPermission() bool    { return true }
+func (startTool) BypassesPermission() bool   { return true }
+func (sendTool) BypassesPermission() bool    { return true }
+func (cancelTool) BypassesPermission() bool  { return true }
+func (archiveTool) BypassesPermission() bool { return true }
+func (renameTool) BypassesPermission() bool  { return true }
 
 func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	switch runtime.ChatRole {
@@ -104,35 +120,16 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	return out, nil
 }
 
-func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	id := strings.TrimSpace(tools.FirstArg(args, "chat_id", "id"))
-	id = strings.TrimPrefix(id, "#")
-	if id == "" {
+func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	chatID := requiredChatID(args)
+	if chatID == "" {
 		return nil, errors.New("chat_id is required")
 	}
-	return map[string]string{"chat_id": id}, nil
-}
-
-func (updateTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	out := map[string]string{}
-	id := strings.TrimSpace(tools.FirstArg(args, "chat_id", "id"))
-	id = strings.TrimPrefix(id, "#")
-	if id != "" {
-		out["chat_id"] = id
+	message := strings.TrimSpace(tools.FirstArg(args, "message", "text"))
+	if message == "" {
+		return nil, errors.New("message is required")
 	}
-	if archived := strings.TrimSpace(tools.FirstArg(args, "archived")); archived != "" {
-		value, err := strconv.ParseBool(archived)
-		if err != nil {
-			return nil, fmt.Errorf("archived: %w", err)
-		}
-		out["archived"] = strconv.FormatBool(value)
-	}
-	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
-		out["title"] = title
-	}
-	if message := strings.TrimSpace(tools.FirstArg(args, "message", "text")); message != "" {
-		out["message"] = message
-	}
+	out := map[string]string{"chat_id": chatID, "message": message}
 	if steer := strings.TrimSpace(tools.FirstArg(args, "steer")); steer != "" {
 		value, err := strconv.ParseBool(steer)
 		if err != nil {
@@ -140,13 +137,11 @@ func (updateTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 		}
 		out["steer"] = strconv.FormatBool(value)
 	}
-	if interrupt := strings.TrimSpace(tools.FirstArg(args, "interrupt")); interrupt != "" {
-		value, err := strconv.ParseBool(interrupt)
-		if err != nil {
-			return nil, fmt.Errorf("interrupt: %w", err)
-		}
-		out["interrupt"] = strconv.FormatBool(value)
-	}
+	return out, nil
+}
+
+func (cancelTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out := optionalChatIDArg(args)
 	if hard := strings.TrimSpace(tools.FirstArg(args, "hard")); hard != "" {
 		value, err := strconv.ParseBool(hard)
 		if err != nil {
@@ -154,37 +149,43 @@ func (updateTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 		}
 		out["hard"] = strconv.FormatBool(value)
 	}
-	if _, ok := out["archived"]; !ok && out["title"] == "" && out["message"] == "" && out["interrupt"] == "" {
-		return nil, errors.New("archived, title, message, or interrupt is required")
-	}
 	return out, nil
 }
 
-func (listTool) Preview(req tools.Request) string  { return "List chats" }
-func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
-func (pollTool) Preview(req tools.Request) string  { return "Poll chat " + req.Args["chat_id"] }
-func (updateTool) Preview(req tools.Request) string {
-	var action string
-	switch req.Args["archived"] {
-	case "true":
-		action = "Archive"
-	case "false":
-		action = "Restore"
-	case "":
-		if req.Args["interrupt"] == "true" {
-			action = "Interrupt"
-		} else if strings.TrimSpace(req.Args["message"]) != "" {
-			action = "Message"
-		} else {
-			action = "Update"
-		}
-	default:
-		action = "Update"
+func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out := optionalChatIDArg(args)
+	archived := strings.TrimSpace(tools.FirstArg(args, "archived"))
+	if archived == "" {
+		return nil, errors.New("archived is required")
 	}
-	if strings.TrimSpace(req.Args["chat_id"]) == "" {
-		return action + " current chat"
+	value, err := strconv.ParseBool(archived)
+	if err != nil {
+		return nil, fmt.Errorf("archived: %w", err)
 	}
-	return action + " chat " + req.Args["chat_id"]
+	out["archived"] = strconv.FormatBool(value)
+	return out, nil
+}
+
+func (renameTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out := optionalChatIDArg(args)
+	title := strings.TrimSpace(tools.FirstArg(args, "title"))
+	if title == "" {
+		return nil, errors.New("title is required")
+	}
+	out["title"] = title
+	return out, nil
+}
+
+func requiredChatID(args map[string]string) string {
+	return strings.TrimPrefix(strings.TrimSpace(tools.FirstArg(args, "chat_id", "id")), "#")
+}
+
+func optionalChatIDArg(args map[string]string) map[string]string {
+	out := map[string]string{}
+	if chatID := requiredChatID(args); chatID != "" {
+		out["chat_id"] = chatID
+	}
+	return out
 }
 
 func normalizeOptionalBool(args map[string]string, key string) (map[string]string, error) {
@@ -199,6 +200,29 @@ func normalizeOptionalBool(args map[string]string, key string) (map[string]strin
 	return map[string]string{key: strconv.FormatBool(value)}, nil
 }
 
+func (listTool) Preview(tools.Request) string      { return "List chats" }
+func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
+func (sendTool) Preview(req tools.Request) string  { return "Message chat " + req.Args["chat_id"] }
+func (cancelTool) Preview(req tools.Request) string {
+	return targetPreview("Cancel", req.Args["chat_id"])
+}
+func (archiveTool) Preview(req tools.Request) string {
+	if req.Args["archived"] == "false" {
+		return targetPreview("Restore", req.Args["chat_id"])
+	}
+	return targetPreview("Archive", req.Args["chat_id"])
+}
+func (renameTool) Preview(req tools.Request) string {
+	return targetPreview("Rename", req.Args["chat_id"])
+}
+
+func targetPreview(action, chatID string) string {
+	if strings.TrimSpace(chatID) == "" {
+		return action + " current chat"
+	}
+	return action + " chat " + chatID
+}
+
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireChatControl(runtime)
 	if err != nil {
@@ -211,9 +235,10 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if req.Args["archived"] != "true" {
 		statuses = filterArchivedChats(statuses)
 	}
+	stored := tools.ChatListStored(statuses)
 	return tools.Result{
-		Output: tools.DisplayTextForStored(domain.ToolKindChatList, tools.ChatListStored(statuses)),
-		Stored: tools.ChatListStored(statuses),
+		Output: tools.DisplayTextForStored(domain.ToolKindChatList, stored),
+		Stored: stored,
 	}, nil
 }
 
@@ -244,76 +269,94 @@ func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.R
 	}
 	stored := tools.ChatListStored([]tools.ChatStatus{status})
 	return tools.Result{
-		Output: tools.DisplayTextForStored(req.Tool, stored),
+		Output: childReportGuidance(tools.DisplayTextForStored(req.Tool, stored)),
 		Stored: stored,
 	}, nil
 }
 
-func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	control, err := tools.RequireChatControl(runtime)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	chatID := strings.TrimSpace(req.Args["chat_id"])
-	status, err := control.PollChat(ctx, runtime.SessionID, chatID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	stored := tools.ChatListStored([]tools.ChatStatus{status})
-	return tools.Result{
-		Output: appendPollGuidance(tools.DisplayTextForStored(domain.ToolKindChatPoll, stored), status),
-		Stored: stored,
-	}, nil
+func childReportGuidance(output string) string {
+	return strings.TrimSpace(output + "\nThe child chat will report back automatically when it becomes idle, including task or milestone progress. Do not poll it.")
 }
 
-func appendPollGuidance(output string, status tools.ChatStatus) string {
-	if status.Busy || status.State == tools.ChatRunStateRunning || status.State == tools.ChatRunStateWaitingApproval {
-		return strings.TrimSpace(output + "\nDo not repeatedly poll this chat. Busy chats report back to their parent chat when they become idle, including task or milestone progress.")
-	}
-	return strings.TrimSpace(output + "\nDo not poll this chat again unless new work is queued or the user explicitly asks. This poll result is current.")
-}
-
-func (updateTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	control, err := tools.RequireChatControl(runtime)
+func (sendTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
+		Message: req.Args["message"],
+		Steer:   req.Args["steer"] == "true",
+	})
 	if err != nil {
 		return tools.Result{}, err
+	}
+	return chatResult(req.Tool, status)
+}
+
+func (cancelTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
+		Interrupt: true,
+		Hard:      req.Args["hard"] == "true",
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return chatResult(req.Tool, status)
+}
+
+func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	archived := req.Args["archived"] == "true"
+	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Archived: &archived})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return chatResult(req.Tool, status)
+}
+
+func (renameTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Title: req.Args["title"]})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return chatResult(req.Tool, status)
+}
+
+func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+	control, err := tools.RequireChatControl(runtime)
+	if err != nil {
+		return tools.ChatStatus{}, err
 	}
 	chatID := id.ID(strings.TrimSpace(req.Args["chat_id"]))
 	if chatID == "" {
 		chatID = runtime.ChatID
 	}
-	update := tools.ChatUpdateRequest{Title: req.Args["title"]}
-	if raw, ok := req.Args["archived"]; ok {
-		value := raw == "true"
-		update.Archived = &value
-	}
-	update.Message = req.Args["message"]
-	update.Steer = req.Args["steer"] == "true"
-	update.Interrupt = req.Args["interrupt"] == "true"
-	update.Hard = req.Args["hard"] == "true"
-	status, err := control.UpdateChat(ctx, runtime.SessionID, runtime.ChatID, chatID, update)
-	if err != nil {
-		return tools.Result{}, err
-	}
+	return control.UpdateChat(ctx, runtime.SessionID, runtime.ChatID, chatID, update)
+}
+
+func chatResult(tool domain.ToolKind, status tools.ChatStatus) (tools.Result, error) {
 	stored := tools.ChatListStored([]tools.ChatStatus{status})
 	return tools.Result{
-		Output: tools.DisplayTextForStored(domain.ToolKindChatUpdate, stored),
+		Output: tools.DisplayTextForStored(tool, stored),
 		Stored: stored,
 	}, nil
 }
 
-func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+func (listTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
 	return "Listed chats", result.Output
 }
 
-func (startTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+func (startTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
 	return "Started chat", result.Output
 }
 
-func (pollTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Polled chat", result.Output
+func (sendTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Sent chat message", result.Output
 }
 
-func (updateTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Updated chat", result.Output
+func (cancelTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Cancelled chat", result.Output
+}
+
+func (archiveTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Archived chat", result.Output
+}
+
+func (renameTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Renamed chat", result.Output
 }

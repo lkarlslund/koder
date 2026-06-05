@@ -179,7 +179,7 @@ func TestDisplayTextForPartIgnoresLegacyMetaJSON(t *testing.T) {
 }
 
 func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
-	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindChatPoll, tools.StoredResultStatusOK, "", tools.ChatListStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindChatList, tools.StoredResultStatusOK, "", tools.ChatListStoredResult{
 		Items: []tools.ChatStoredItem{{
 			ID:           "chat-1",
 			Title:        "Queued child",

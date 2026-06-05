@@ -1092,7 +1092,7 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 
 func hideToolDefault(kind domain.ToolKind) bool {
 	switch kind {
-	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindChatPoll, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
 		return true
 	default:
 		return false
@@ -1107,7 +1107,7 @@ func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 		return "web", "Web"
 	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecList, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate, domain.ToolKindExecCleanup:
 		return "exec", "Exec"
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatPoll, domain.ToolKindChatUpdate, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatSend, domain.ToolKindChatCancel, domain.ToolKindChatArchive, domain.ToolKindChatRename, domain.ToolKindChatPoll, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
 		return "chat", "Chat"
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
 		return "milestone", "Milestone"

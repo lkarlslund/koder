@@ -34,11 +34,6 @@ func (f *fakeChatControl) StartChat(_ context.Context, sessionID, parentChatID i
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) PollChat(_ context.Context, _ id.ID, chatID id.ID) (tools.ChatStatus, error) {
-	f.lastChatID = chatID
-	return f.statuses[0], nil
-}
-
 func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
 	if f.updateErr != nil {
 		return tools.ChatStatus{}, f.updateErr
@@ -66,7 +61,7 @@ func testRuntime(control tools.ChatControl) tools.Runtime {
 	}
 }
 
-func TestNormalizeStartAndPollArgs(t *testing.T) {
+func TestNormalizeArgs(t *testing.T) {
 	listArgs, err := (listTool{}).NormalizeArgs(map[string]string{"archived": "true"})
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +69,7 @@ func TestNormalizeStartAndPollArgs(t *testing.T) {
 	if listArgs["archived"] != "true" {
 		t.Fatalf("unexpected list args: %#v", listArgs)
 	}
+
 	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "ref": " alpha ", "title": "Worker", "task_id": "task-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -87,35 +83,46 @@ func TestNormalizeStartAndPollArgs(t *testing.T) {
 	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "execution"}); err == nil || !strings.Contains(err.Error(), "objective") {
 		t.Fatalf("expected objective error, got %v", err)
 	}
-	pollArgs, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": " #019e2831-cbf8-79f6-9e6d-3ec97db3d9f9 "})
+
+	sendArgs, err := (sendTool{}).NormalizeArgs(map[string]string{"chat_id": " #child ", "message": " continue this ", "steer": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pollArgs["chat_id"] != "019e2831-cbf8-79f6-9e6d-3ec97db3d9f9" {
-		t.Fatalf("unexpected poll args: %#v", pollArgs)
+	if sendArgs["chat_id"] != "child" || sendArgs["message"] != "continue this" || sendArgs["steer"] != "true" {
+		t.Fatalf("unexpected send args: %#v", sendArgs)
 	}
-	if _, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": "   "}); err == nil {
-		t.Fatal("expected empty chat id error")
+	if _, err := (sendTool{}).NormalizeArgs(map[string]string{"chat_id": "child"}); err == nil || !strings.Contains(err.Error(), "message") {
+		t.Fatalf("expected message error, got %v", err)
 	}
-	updateArgs, err := (updateTool{}).NormalizeArgs(map[string]string{"chat_id": " #019e2831-cbf8-79f6-9e6d-3ec97db3d9f9 ", "archived": "false", "title": " Restored "})
+
+	cancelArgs, err := (cancelTool{}).NormalizeArgs(map[string]string{"hard": "false"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updateArgs["chat_id"] != "019e2831-cbf8-79f6-9e6d-3ec97db3d9f9" || updateArgs["archived"] != "false" || updateArgs["title"] != "Restored" {
-		t.Fatalf("unexpected update args: %#v", updateArgs)
+	if cancelArgs["hard"] != "false" {
+		t.Fatalf("unexpected cancel args: %#v", cancelArgs)
 	}
-	if _, err := (updateTool{}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("expected update field error")
+
+	archiveArgs, err := (archiveTool{}).NormalizeArgs(map[string]string{"chat_id": " #child ", "archived": "false"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := (updateTool{}).NormalizeArgs(map[string]string{"archived": "maybe"}); err == nil {
+	if archiveArgs["chat_id"] != "child" || archiveArgs["archived"] != "false" {
+		t.Fatalf("unexpected archive args: %#v", archiveArgs)
+	}
+	if _, err := (archiveTool{}).NormalizeArgs(map[string]string{"archived": "maybe"}); err == nil {
 		t.Fatal("expected archived bool error")
 	}
-	messageArgs, err := (updateTool{}).NormalizeArgs(map[string]string{"chat_id": "child", "message": " continue this ", "steer": "true", "interrupt": "true", "hard": "false"})
+
+	renameArgs, err := (renameTool{}).NormalizeArgs(map[string]string{"title": " Restored "})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if messageArgs["chat_id"] != "child" || messageArgs["message"] != "continue this" || messageArgs["steer"] != "true" || messageArgs["interrupt"] != "true" || messageArgs["hard"] != "false" {
-		t.Fatalf("unexpected message args: %#v", messageArgs)
+	if renameArgs["title"] != "Restored" {
+		t.Fatalf("unexpected rename args: %#v", renameArgs)
+	}
+	if _, err := (renameTool{}).NormalizeArgs(map[string]string{}); err == nil || !strings.Contains(err.Error(), "title") {
+		t.Fatalf("expected title error, got %v", err)
 	}
 }
 
@@ -153,7 +160,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 }
 
-func TestStartUsesControl(t *testing.T) {
+func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
 		Chat:       domain.Chat{ID: "chat-9", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateRunning,
@@ -169,8 +176,8 @@ func TestStartUsesControl(t *testing.T) {
 	if control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneRef != "alpha" || control.lastStart.Title != "Worker" || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
 		t.Fatalf("unexpected control call: %#v", control)
 	}
-	if !strings.Contains(result.Output, "Worker") {
-		t.Fatalf("expected chat output, got %q", result.Output)
+	if !strings.Contains(result.Output, "Worker") || !strings.Contains(result.Output, "will report back automatically") || !strings.Contains(result.Output, "Do not poll") {
+		t.Fatalf("expected chat output with reporting guidance, got %q", result.Output)
 	}
 }
 
@@ -187,107 +194,62 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 	}
 }
 
-func TestPollExecuteReturnsStatus(t *testing.T) {
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-11", Title: "Worker", WorkflowRole: chatrole.Execution},
-		State:      tools.ChatRunStateCompleted,
-		StatusText: "Completed",
-	}}}
-	result, err := (pollTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatPoll,
-		Args: map[string]string{"chat_id": "chat-11"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if control.lastChatID != "chat-11" {
-		t.Fatalf("expected poll chat id chat-11, got %q", control.lastChatID)
-	}
-	if !strings.Contains(result.Output, "Completed") {
-		t.Fatalf("expected poll output to include status, got %q", result.Output)
-	}
-	if !strings.Contains(result.Output, "Do not poll this chat again") || !strings.Contains(result.Output, "This poll result is current") {
-		t.Fatalf("expected completed poll output to include final poll guidance, got %q", result.Output)
-	}
-}
-
-func TestPollExecuteHintsAgainstRepeatedBusyPolls(t *testing.T) {
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-12", Title: "Worker", WorkflowRole: chatrole.Execution},
-		State:      tools.ChatRunStateRunning,
-		Busy:       true,
-		StatusText: "Running tools",
-	}}}
-	result, err := (pollTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatPoll,
-		Args: map[string]string{"chat_id": "chat-12"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result.Output, "Do not repeatedly poll this chat") || !strings.Contains(result.Output, "report back") {
-		t.Fatalf("expected busy poll output to include polling guidance, got %q", result.Output)
-	}
-}
-
-func TestUpdateExecuteUpdatesCurrentChatByDefault(t *testing.T) {
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-20", Title: "Worker", WorkflowRole: chatrole.Execution},
-		State:      tools.ChatRunStateIdle,
-		StatusText: "Idle",
-	}}}
-	result, err := (updateTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatUpdate,
-		Args: map[string]string{"archived": "false", "title": "Restored"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if control.lastSessionID != "session-10" || control.lastChatID != "chat-20" {
-		t.Fatalf("unexpected update target: %#v", control)
-	}
-	if control.lastOwnerChatID != "chat-20" {
-		t.Fatalf("expected owner chat id chat-20, got %q", control.lastOwnerChatID)
-	}
-	if !strings.Contains(result.Output, "Restored") {
-		t.Fatalf("expected update output to include chat, got %q", result.Output)
-	}
-}
-
-func TestUpdateExecuteCanMessageAndInterruptChildChat(t *testing.T) {
+func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
 		Chat:       domain.Chat{ID: "child-chat", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
-	result, err := (updateTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatUpdate,
-		Args: map[string]string{
-			"chat_id":   "child-chat",
-			"message":   "Use jadx output",
-			"steer":     "true",
-			"interrupt": "true",
-			"hard":      "true",
-		},
+
+	_, err := (sendTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatSend,
+		Args: map[string]string{"chat_id": "child-chat", "message": "Use jadx output", "steer": "true"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastOwnerChatID != "chat-20" || control.lastChatID != "child-chat" {
-		t.Fatalf("unexpected update target: %#v", control)
+	if control.lastOwnerChatID != "chat-20" || control.lastChatID != "child-chat" || control.lastUpdate.Message != "Use jadx output" || !control.lastUpdate.Steer {
+		t.Fatalf("unexpected send request: %#v", control)
 	}
-	if control.lastUpdate.Message != "Use jadx output" || !control.lastUpdate.Steer || !control.lastUpdate.Interrupt || !control.lastUpdate.Hard {
-		t.Fatalf("unexpected update request: %#v", control.lastUpdate)
+
+	_, err = (cancelTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatCancel,
+		Args: map[string]string{"chat_id": "child-chat", "hard": "true"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Worker") {
-		t.Fatalf("expected update output to include chat, got %q", result.Output)
+	if !control.lastUpdate.Interrupt || !control.lastUpdate.Hard {
+		t.Fatalf("unexpected cancel request: %#v", control.lastUpdate)
+	}
+
+	_, err = (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatArchive,
+		Args: map[string]string{"archived": "false"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.lastChatID != "chat-20" || control.lastUpdate.Archived == nil || *control.lastUpdate.Archived {
+		t.Fatalf("unexpected archive request: %#v", control)
+	}
+
+	result, err := (renameTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatRename,
+		Args: map[string]string{"chat_id": "child-chat", "title": "Renamed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.lastUpdate.Title != "Renamed" || !strings.Contains(result.Output, "Renamed") {
+		t.Fatalf("unexpected rename result: update=%#v output=%q", control.lastUpdate, result.Output)
 	}
 }
 
-func TestUpdateExecuteSurfacesArchiveRuleErrors(t *testing.T) {
+func TestArchiveExecuteSurfacesArchiveRuleErrors(t *testing.T) {
 	control := &fakeChatControl{updateErr: errors.New("cannot archive chat chat-20 while it is not idle")}
-	_, err := (updateTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
-		Tool: domain.ToolKindChatUpdate,
+	_, err := (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatArchive,
 		Args: map[string]string{"archived": "true"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "not idle") {

@@ -1203,14 +1203,6 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	return c.agent.StartChat(ctx, sessionID, parentChatID, req)
 }
 
-// PollChat returns the current status for a live chat.
-func (c *Controller) PollChat(ctx context.Context, sessionID, chatID id.ID) (tools.ChatStatus, error) {
-	if c.agent == nil {
-		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
-	}
-	return c.agent.PollChat(ctx, sessionID, chatID)
-}
-
 func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID id.ID) (planning.Plan, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {

@@ -75,7 +75,10 @@ Focus only on the assigned milestone and task list.
 			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
 				toolkind.ToolKindChatStart,
-				toolkind.ToolKindChatPoll,
+				toolkind.ToolKindChatSend,
+				toolkind.ToolKindChatCancel,
+				toolkind.ToolKindChatArchive,
+				toolkind.ToolKindChatRename,
 				toolkind.ToolKindMilestoneAdd,
 				toolkind.ToolKindMilestonePlan,
 				toolkind.ToolKindMilestoneWrite,
