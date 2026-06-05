@@ -217,6 +217,7 @@ type ChatStoredItem struct {
 	Role               string `json:"role,omitempty"`
 	State              string `json:"state,omitempty"`
 	Archived           bool   `json:"archived,omitempty"`
+	QueuedInputs       int    `json:"queued_inputs,omitempty"`
 	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
 	AssignedTodoRef    id.ID  `json:"assigned_todo_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`
@@ -1140,6 +1141,9 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 		}
 		if state := strings.TrimSpace(item.State); state != "" {
 			line += " {" + state + "}"
+		}
+		if item.QueuedInputs > 0 {
+			line += fmt.Sprintf(" {queued_inputs:%d}", item.QueuedInputs)
 		}
 		if item.Archived {
 			line += " {archived}"

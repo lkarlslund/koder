@@ -200,6 +200,7 @@ type ChatStoredItem struct {
 	Title              string `json:"title"`
 	Role               string `json:"role,omitempty"`
 	State              string `json:"state,omitempty"`
+	QueuedInputs       int    `json:"queued_inputs,omitempty"`
 	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
 	AssignedTodoRef    ID     `json:"assigned_todo_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`

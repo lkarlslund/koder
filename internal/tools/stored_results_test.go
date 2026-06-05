@@ -178,6 +178,24 @@ func TestDisplayTextForPartIgnoresLegacyMetaJSON(t *testing.T) {
 	}
 }
 
+func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindChatPoll, tools.StoredResultStatusOK, "", tools.ChatListStoredResult{
+		Items: []tools.ChatStoredItem{{
+			ID:           "chat-1",
+			Title:        "Queued child",
+			State:        "idle",
+			QueuedInputs: 1,
+			StatusText:   "Idle",
+		}},
+	}))
+	if !ok {
+		t.Fatal("expected display text")
+	}
+	if !strings.Contains(text, "{idle} {queued_inputs:1}") {
+		t.Fatalf("expected queued input count, got %q", text)
+	}
+}
+
 func toolOutputPart(tool domain.ToolKind, status tools.StoredResultStatus, text string, result any) domain.Part {
 	return domain.Part{
 		Kind: domain.PartKindToolOutput,

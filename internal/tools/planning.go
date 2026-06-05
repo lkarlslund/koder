@@ -158,6 +158,7 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 			Role:               string(status.Chat.WorkflowRole),
 			State:              string(status.State),
 			Archived:           status.Chat.Archived,
+			QueuedInputs:       status.QueuedInputs,
 			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
 			AssignedTodoRef:    status.Chat.AssignedTodoRef,
 			StatusText:         status.StatusText,

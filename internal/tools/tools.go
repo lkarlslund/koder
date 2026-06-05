@@ -41,6 +41,7 @@ type ChatStatus struct {
 	State            ChatRunState
 	Status           string
 	Busy             bool
+	QueuedInputs     int
 	PendingApprovals int
 	LastError        string
 	StatusText       string

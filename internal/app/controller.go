@@ -89,6 +89,7 @@ type ChatSidebarStatus struct {
 	ChatID           id.ID  `json:"chat_id"`
 	Status           string `json:"status"`
 	Busy             bool   `json:"busy"`
+	QueuedInputs     int    `json:"queued_inputs,omitempty"`
 	PendingApprovals int    `json:"pending_approvals,omitempty"`
 	StatusText       string `json:"status_text,omitempty"`
 	LastError        string `json:"last_error,omitempty"`
@@ -2176,6 +2177,7 @@ func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) too
 		State:            state,
 		Status:           string(state),
 		Busy:             status.Busy,
+		QueuedInputs:     status.QueuedInputs,
 		PendingApprovals: status.PendingApprovals,
 		StatusText:       status.StatusText,
 		LastError:        status.LastError,
@@ -2213,6 +2215,7 @@ func sidebarStatusFromSnapshot(snapshot chat.Snapshot) ChatSidebarStatus {
 		ChatID:           snapshot.Chat.ID,
 		Status:           value,
 		Busy:             snapshot.Active || value == string(chat.StatusRunningTools) || value == string(chat.StatusWaitingLLM) || value == string(chat.StatusStreamingResponse) || value == string(chat.StatusStreamingThoughts) || value == string(chat.StatusWaitingApproval),
+		QueuedInputs:     len(snapshot.QueuedInputs),
 		PendingApprovals: len(snapshot.Approvals),
 		StatusText:       text,
 	}

@@ -1183,10 +1183,12 @@ func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 	statusText := string(chatpkg.StatusIdle)
 	busy := false
 	pending := 0
+	queuedInputs := len(chatRecord.QueuedInputs)
 	if rt := s.runtimes[chatID]; rt != nil {
 		snapshot := rt.Snapshot()
 		chatRecord = snapshot.Chat
 		pending = len(snapshot.Approvals)
+		queuedInputs = len(snapshot.QueuedInputs)
 		statusText = snapshot.StatusText
 		switch snapshot.Status {
 		case chatpkg.StatusWaitingApproval:
@@ -1214,6 +1216,7 @@ func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 		State:            status,
 		Status:           string(status),
 		Busy:             busy,
+		QueuedInputs:     queuedInputs,
 		PendingApprovals: pending,
 		StatusText:       statusText,
 	}

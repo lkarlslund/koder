@@ -661,7 +661,7 @@ func TestRuntimeArchiveRequiresEmptyQueue(t *testing.T) {
 	}
 
 	archived := true
-	if _, err := rt.UpdateMetadata(context.Background(), MetadataUpdate{Archived: &archived}); err == nil || !strings.Contains(err.Error(), "not idle") {
+	if _, err := rt.UpdateMetadata(context.Background(), MetadataUpdate{Archived: &archived}); err == nil || !strings.Contains(err.Error(), "1 queued input(s)") {
 		t.Fatalf("expected queued archive error, got %v", err)
 	}
 }

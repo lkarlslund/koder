@@ -1266,8 +1266,9 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 	title := strings.TrimSpace(update.Title)
 	r.mu.Lock()
 	if update.Archived != nil && *update.Archived && !r.chat.Archived && !r.canArchiveLocked() {
+		blockers := strings.Join(r.archiveBlockersLocked(), ", ")
 		r.mu.Unlock()
-		return domain.Chat{}, fmt.Errorf("cannot archive chat %s while it is not idle", r.chat.ID)
+		return domain.Chat{}, fmt.Errorf("cannot archive chat %s while it is not idle: %s", r.chat.ID, blockers)
 	}
 	shouldDispatchAfterUpdate := update.Archived != nil && !*update.Archived && r.chat.Archived
 	if update.Archived != nil {
@@ -1303,11 +1304,27 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 }
 
 func (r *Chat) canArchiveLocked() bool {
-	return !r.draining &&
-		!r.active &&
-		r.status == StatusIdle &&
-		len(r.queue) == 0 &&
-		len(r.running) == 0
+	return len(r.archiveBlockersLocked()) == 0
+}
+
+func (r *Chat) archiveBlockersLocked() []string {
+	var blockers []string
+	if r.draining {
+		blockers = append(blockers, "shutdown or restart is draining")
+	}
+	if r.active {
+		blockers = append(blockers, "turn is active")
+	}
+	if r.status != StatusIdle {
+		blockers = append(blockers, fmt.Sprintf("status is %s", r.status))
+	}
+	if len(r.queue) > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d queued input(s)", len(r.queue)))
+	}
+	if len(r.running) > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d running tool call(s)", len(r.running)))
+	}
+	return blockers
 }
 
 func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolCallID string, args map[string]string, result domain.ToolResult) (domain.TimelineItem, error) {
