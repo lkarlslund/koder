@@ -1632,7 +1632,7 @@
           const time = this.formatItemTime(item);
           return [kind || 'item', time].filter(Boolean).join(' at ');
         },
-        timelineActionAvailable(item) {
+        timelineItemActionAvailable(item) {
           return !!this.timelineItemID(item);
         },
         openTimelineRollback(item) {

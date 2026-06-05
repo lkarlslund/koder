@@ -1184,6 +1184,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `rollback_chat`) ||
 		!strings.Contains(fullPage, `fork_chat`) ||
 		!strings.Contains(fullPage, `timelineAction.open`) ||
+		!strings.Contains(fullPage, `timelineItemActionAvailable(item)`) ||
 		!strings.Contains(fullPage, `openTimelineRollback(item)`) ||
 		!strings.Contains(fullPage, `openTimelineFork(item)`) ||
 		!strings.Contains(fullPage, `replace_timeline`) {
