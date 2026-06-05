@@ -1036,13 +1036,12 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 			return cavemanJob{}, err
 		}
 	}
-	prompt := cavemanThinkingPrompt(e.cfg.Thinking.CavemanPrompt, reasoning)
 	providerCfg, _ := e.cfg.Provider(providerID)
 	req := provider.ChatRequest{
 		SessionID: chat.SessionID,
 		ChatID:    chat.ID,
 		Model:     modelID,
-		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
+		Messages:  cavemanThinkingMessages(e.cfg.Thinking.CavemanPrompt, reasoning),
 		Stream:    true,
 		ExtraBody: cavemanThinkingExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
 	}
@@ -1159,16 +1158,27 @@ func cavemanThinkingExtraBody(cfg config.Provider, model config.ModelConfig) map
 	return body
 }
 
-func cavemanThinkingPrompt(prompt, reasoning string) string {
+func cavemanThinkingMessages(prompt, reasoning string) []provider.Message {
+	system := cavemanSystemPrompt(prompt)
+	user := strings.TrimSpace(reasoning)
+	if user != "" {
+		user = "MODEL_THINKING:\n" + user
+	}
+	return []provider.Message{
+		{Role: provider.RoleSystem, Content: system},
+		{Role: provider.RoleUser, Content: user},
+	}
+}
+
+func cavemanSystemPrompt(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		prompt = config.DefaultCavemanThinkingPrompt
+		return config.DefaultCavemanThinkingPrompt
 	}
-	reasoning = strings.TrimSpace(reasoning)
 	if strings.Contains(prompt, "{{thinking}}") {
-		return strings.ReplaceAll(prompt, "{{thinking}}", reasoning)
+		prompt = strings.ReplaceAll(prompt, "{{thinking}}", "The MODEL_THINKING payload is provided in the user message.")
 	}
-	return prompt + "\n\nThinking:\n" + reasoning
+	return strings.TrimSpace(prompt)
 }
 
 func modelConfigForRequest(cfg config.Config, providerID, modelID string) config.ModelConfig {

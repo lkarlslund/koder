@@ -2651,6 +2651,7 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 
 func readMessage(t *testing.T, ctx context.Context, conn *websocket.Conn) []byte {
 	t.Helper()
+	conn.SetReadLimit(1 << 20)
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, data, err := conn.Read(readCtx)

@@ -3785,6 +3785,18 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 			if err := json.Unmarshal(body, &payload); err != nil {
 				t.Fatalf("decode caveman request: %v", err)
 			}
+			messages, ok := payload["messages"].([]any)
+			if !ok || len(messages) != 2 {
+				t.Fatalf("expected caveman system and user messages, got %s", string(body))
+			}
+			systemMsg, _ := messages[0].(map[string]any)
+			userMsg, _ := messages[1].(map[string]any)
+			if systemMsg["role"] != "system" || !strings.Contains(fmt.Sprint(systemMsg["content"]), "Caveman rewrite only") {
+				t.Fatalf("expected caveman instruction as system message, got %s", string(body))
+			}
+			if userMsg["role"] != "user" || !strings.Contains(fmt.Sprint(userMsg["content"]), "MODEL_THINKING") || !strings.Contains(fmt.Sprint(userMsg["content"]), "inspect the files carefully") {
+				t.Fatalf("expected model thinking as user message, got %s", string(body))
+			}
 			if payload["max_tokens"] != float64(256) {
 				t.Fatalf("expected caveman max_tokens cap, got %s", string(body))
 			}

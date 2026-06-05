@@ -136,7 +136,7 @@ const defaultCavemanParallelism = 1
 const DefaultCavemanMinTokens = 64
 const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
-const DefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
+const previousDefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
 
 Rules:
 - Output only the rewritten notes.
@@ -148,6 +148,15 @@ Rules:
 
 MODEL_THINKING:
 {{thinking}}`
+const DefaultCavemanThinkingPrompt = `Compress hidden model thinking into terse notes for future context replay.
+
+Rules:
+- Output only notes; no headings, markdown, labels, preamble, or explanation.
+- Use short blunt caveman-style phrases.
+- Keep only durable facts, constraints, decisions, plan, blockers, and next action.
+- Drop self-talk, uncertainty filler, restated instructions, apologies, and scaffolding.
+- If nothing durable remains, output nothing.
+- Be much shorter than input; prefer 1-6 short lines.`
 
 func Load() (Config, error) {
 	cfg := Default()
@@ -311,7 +320,7 @@ func (c *Config) applyDefaults() {
 	switch strings.TrimSpace(c.Thinking.CavemanPrompt) {
 	case "":
 		c.Thinking.CavemanPrompt = def.Thinking.CavemanPrompt
-	case oldDefaultCavemanThinkingPrompt:
+	case oldDefaultCavemanThinkingPrompt, previousDefaultCavemanThinkingPrompt:
 		c.Thinking.CavemanPrompt = DefaultCavemanThinkingPrompt
 	}
 	fallbackProvider := providerDefaults()
