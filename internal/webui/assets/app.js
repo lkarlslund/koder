@@ -626,7 +626,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -2378,6 +2378,7 @@
         execProcessID(process) { return process?.process_id || process?.ProcessID || ''; },
         execProcessCommand(process) { return process?.command || process?.Command || ''; },
         execProcessState(process) { return String(process?.state || process?.State || '').toLowerCase(); },
+        execProcessTerminable(process) { return this.execProcessState(process) === 'running'; },
         execProcessExitCode(process) {
           const value = process?.exit_code ?? process?.ExitCode;
           return value === undefined || value === null ? '' : String(value);
@@ -2412,6 +2413,31 @@
           const bytes = process?.output_bytes || process?.OutputBytes || 0;
           if (bytes) lines.push(String(bytes) + ' output bytes captured');
           return lines.filter(Boolean).join('\n');
+        },
+        showExecProcessTooltip(process, event) {
+          this.execHover = {...this.execHover, open: true, title: this.execProcessTooltip(process), output: this.execProcessOutput(process)};
+          this.positionExecProcessTooltip(event);
+        },
+        positionExecProcessTooltip(event) {
+          if (!event) return;
+          const rect = event.currentTarget?.getBoundingClientRect ? event.currentTarget.getBoundingClientRect() : null;
+          const x = rect ? rect.left - 12 : event.clientX;
+          const y = rect ? rect.top : event.clientY;
+          this.execHover = {...this.execHover, x: Math.max(8, x), y: Math.max(8, y)};
+        },
+        hideExecProcessTooltip() {
+          this.execHover = {...this.execHover, open: false};
+        },
+        execHoverStyle() {
+          const width = Math.min(672, Math.max(280, window.innerWidth - 24));
+          const left = Math.max(8, Math.min(this.execHover.x - width, window.innerWidth - width - 8));
+          const top = Math.max(8, Math.min(this.execHover.y, window.innerHeight - 120));
+          return 'left: ' + left + 'px; top: ' + top + 'px; width: ' + width + 'px;';
+        },
+        terminateExecProcess(process) {
+          const processID = this.execProcessID(process);
+          if (!processID || !this.execProcessTerminable(process)) return;
+          this.rpc('terminate_exec_process', {chat_id: this.activeChatID(), process_id: processID}).catch(err => this.showToast(err.message || 'terminate process failed'));
         },
         noticeIcon(content) { return noticeIcon(content); },
         noticeLevel(content) { return noticeLevel(content); },

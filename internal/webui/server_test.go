@@ -1165,9 +1165,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `showAllExecProcesses`) ||
 		!strings.Contains(fullPage, `execProcessState(process) === 'running'`) ||
 		!strings.Contains(fullPage, `exec-process-tooltip`) ||
+		!strings.Contains(fullPage, `execHoverStyle()`) ||
+		!strings.Contains(fullPage, `terminate_exec_process`) ||
+		!strings.Contains(fullPage, `terminateExecProcess(process)`) ||
 		!strings.Contains(fullPage, `execProcessTimeout(process)`) ||
 		!strings.Contains(fullPage, `execProcessOutput(process)`) {
-		t.Fatalf("expected current chat exec processes to render with running/default filtering and console-output hover tooltips")
+		t.Fatalf("expected current chat exec processes to render with filtering, overlay tooltips, and termination controls")
 	}
 	if !strings.Contains(fullPage, `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(fullPage, `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")

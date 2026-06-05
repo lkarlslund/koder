@@ -847,6 +847,23 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"reordered": true}, nil
+	case "terminate_exec_process":
+		var in struct {
+			ChatID    id.ID  `json:"chat_id"`
+			ProcessID string `json:"process_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		selection := s.appSelection(clientID)
+		if in.ChatID != "" {
+			selection.ChatID = in.ChatID
+		}
+		process, err := s.controller.TerminateExecProcessForSelection(ctx, selection, in.ProcessID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"process": process}, nil
 	case "approve":
 		var in struct {
 			ToolCallID string `json:"tool_call_id"`

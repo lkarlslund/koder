@@ -268,14 +268,11 @@
         </div>
         <div class="exec-process-list">
           <template x-for="process in execProcesses()" :key="execProcessID(process)">
-            <div class="exec-process-row">
+            <div class="exec-process-row" @mouseenter="showExecProcessTooltip(process, $event)" @mousemove="positionExecProcessTooltip($event)" @mouseleave="hideExecProcessTooltip()" @focusin="showExecProcessTooltip(process, $event)" @focusout="hideExecProcessTooltip()">
               <i class="bi bi-terminal"></i>
               <span class="exec-process-command text-truncate" :title="execProcessTooltip(process)" x-text="execProcessCommand(process)"></span>
               <span class="badge exec-process-state" :class="execProcessClass(process)" x-text="execProcessLabel(process)"></span>
-              <div class="exec-process-tooltip shadow">
-                <div class="exec-process-tooltip-title" x-text="execProcessTooltip(process)"></div>
-                <pre x-text="execProcessOutput(process)"></pre>
-              </div>
+              <button type="button" class="exec-process-action" title="Terminate process" :disabled="!execProcessTerminable(process)" @click.stop="terminateExecProcess(process)"><i class="bi bi-x-octagon"></i></button>
             </div>
           </template>
         </div>
@@ -470,6 +467,11 @@
         </div>
       </div>
     </form>
+  </div>
+
+  <div class="exec-process-tooltip shadow" x-show="execHover.open" :style="execHoverStyle()" style="display: none;">
+    <div class="exec-process-tooltip-title" x-text="execHover.title"></div>
+    <pre x-text="execHover.output"></pre>
   </div>
 
   <div class="modal-backdrop-lite" x-show="timelineAction.open" x-transition @keydown.escape.window="closeTimelineAction()" style="display: none;">

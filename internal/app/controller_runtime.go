@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -78,6 +79,66 @@ func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []domain.ExecP
 		})
 	}
 	return out
+}
+
+// TerminateExecProcessForSelection stops a running exec process owned by the selected chat.
+func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selection Selection, processID string) (domain.ExecProcess, error) {
+	if c == nil {
+		return domain.ExecProcess{}, fmt.Errorf("controller is nil")
+	}
+	processID = strings.TrimSpace(processID)
+	if processID == "" {
+		return domain.ExecProcess{}, fmt.Errorf("process id is required")
+	}
+	if selection.SessionID == "" {
+		return domain.ExecProcess{}, fmt.Errorf("session id is required")
+	}
+	if selection.ChatID == "" {
+		return domain.ExecProcess{}, fmt.Errorf("chat id is required")
+	}
+	c.mu.Lock()
+	manager := c.execManagerLocked()
+	c.mu.Unlock()
+	if manager == nil {
+		return domain.ExecProcess{}, fmt.Errorf("exec manager is unavailable")
+	}
+	snap, err := manager.Terminate(ctx, execruntime.TerminateRequest{
+		SessionID: selection.SessionID,
+		ChatID:    selection.ChatID,
+		ProcessID: processID,
+		MaxBytes:  16 * 1024,
+	})
+	if err != nil {
+		return domain.ExecProcess{}, err
+	}
+	processes := execProcessesFromSnapshots([]execruntime.Snapshot{snap})
+	process := domain.ExecProcess{}
+	if len(processes) > 0 {
+		process = processes[0]
+	}
+	c.mu.Lock()
+	snapshot, ok := c.snapshots[selection.ChatID]
+	if !ok || snapshot.Chat.ID == "" {
+		if rt := c.runtimes[selection.ChatID]; rt != nil {
+			snapshot = rt.Snapshot()
+			ok = true
+		}
+	}
+	if ok && snapshot.Chat.ID != "" {
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
+		c.snapshots[selection.ChatID] = snapshot
+	}
+	c.mu.Unlock()
+	if ok && snapshot.Chat.ID != "" {
+		c.broadcast("chat_delta", chat.Update{
+			Snapshot:   snapshot,
+			Status:     snapshot.Status,
+			StatusText: snapshot.StatusText,
+			Context:    snapshot.Context,
+			Active:     snapshot.Active,
+		})
+	}
+	return process, nil
 }
 
 func (c *Controller) forwardExecRuntime(chatID id.ID, events <-chan execruntime.Event) {
