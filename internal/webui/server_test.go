@@ -1179,10 +1179,14 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `case 'exec_command': return command ? 'Start exec ' + command : 'Start exec'`) ||
 		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
 		!strings.Contains(fullPage, `if (timeout) lines.push('timeout: ' + timeout)`) ||
-		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
+		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) ||
+		!strings.Contains(fullPage, `function execStartResultLines(data, fallback)`) ||
+		!strings.Contains(fullPage, `compactLines(output, 1, 2)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
-	if !strings.Contains(fullPage, `tool-result-body-mono`) || !strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
+	if !strings.Contains(fullPage, `tool-result-body-mono`) ||
+		!strings.Contains(fullPage, `renderCompactBlock('Started', execStartResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) ||
+		!strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
 		t.Fatalf("expected exec output to render with monospace result styling")
 	}
 	if !strings.Contains(fullPage, `function renderImagePreviewBlock`) ||

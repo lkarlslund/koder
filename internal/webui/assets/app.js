@@ -541,6 +541,26 @@
       if (exitCode !== '') lines.push('exit_code: ' + exitCode);
       return lines.length ? lines : fallback;
     }
+    function execStartResultLines(data, fallback) {
+      const lines = [];
+      const processID = firstValue(data, ['process_id', 'ProcessID']);
+      const timeout = timeoutLabel(firstValue(data, ['timeout_ms', 'TimeoutMS']));
+      const state = firstValue(data, ['state', 'State']);
+      const exitCode = firstValue(data, ['exit_code', 'ExitCode']);
+      const output = firstValue(data, ['output', 'Output']);
+      if (processID) lines.push('process_id: ' + processID);
+      if (timeout) lines.push('timeout: ' + timeout);
+      if (state) lines.push('state: ' + state);
+      if (exitCode !== '') lines.push('exit_code: ' + exitCode);
+      if (output) {
+        const compact = compactLines(output, 1, 2).map(line => line.text);
+        if (compact.length) {
+          if (lines.length) lines.push('');
+          lines.push(...compact);
+        }
+      }
+      return lines.length ? lines : fallback;
+    }
     function timeoutLabel(value) {
       const ms = Number(value || 0);
       if (!Number.isFinite(ms) || ms <= 0) return '';
@@ -578,6 +598,9 @@
       }
       if (kind === 'bash') {
         return renderCompactBlock('Output', firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      }
+      if (kind === 'exec_command') {
+        return renderCompactBlock('Started', execStartResultLines(data, toolResultText(tool)), 'tool-result-body-mono');
       }
       if (kind.startsWith('exec_')) {
         return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono');
