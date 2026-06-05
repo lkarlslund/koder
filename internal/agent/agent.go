@@ -69,6 +69,8 @@ const (
 	cavemanThinkingMaxTokens  = 256
 )
 
+const afterToolResultContinuationPrompt = "Continue from the latest tool result. If you learned a meaningful fact or changed direction, include one short visible progress sentence before the next tool call. Do not expose hidden reasoning. Either produce a visible answer for the user or make the next tool call."
+
 func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
 	var mcpManager *mcp.Manager
 	if len(mcpManagers) > 0 {
@@ -513,7 +515,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
 			if len(calls) == 0 {
-				return chatpkg.TurnStepResult{Continue: true}, nil
+				return chatpkg.TurnStepResult{
+					Continue:  true,
+					Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+				}, nil
 			}
 			if pause, ok := l.tracker.trackCalls(calls); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
@@ -529,7 +534,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			if chatpkg.ShouldStop(ctx) {
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
-			return chatpkg.TurnStepResult{Continue: true}, nil
+			return chatpkg.TurnStepResult{
+				Continue:  true,
+				Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+			}, nil
 		}
 	}
 	if len(resp.ToolCallErrors) > 0 {
@@ -542,7 +550,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			return chatpkg.TurnStepResult{}, err
 		}
 		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
-		return chatpkg.TurnStepResult{Continue: true}, nil
+		return chatpkg.TurnStepResult{
+			Continue:  true,
+			Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+		}, nil
 	}
 
 	call, plain := parseToolCall(text)
@@ -572,7 +583,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		if chatpkg.ShouldStop(ctx) {
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
-		return chatpkg.TurnStepResult{Continue: true}, nil
+		return chatpkg.TurnStepResult{
+			Continue:  true,
+			Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+		}, nil
 	}
 	l.tracker.reset()
 
@@ -580,7 +594,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		if strings.TrimSpace(reasoning) != "" {
 			return chatpkg.TurnStepResult{
 				Continue:  true,
-				Transient: transientTurnMessages("", "Continue from the latest tool result. Do not stop at hidden reasoning. Either produce a visible answer for the user or make the next tool call."),
+				Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
 			}, nil
 		}
 		e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{

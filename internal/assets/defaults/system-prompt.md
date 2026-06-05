@@ -62,6 +62,16 @@ Rules:
 - If an exec session is already running, use `exec_status` or `exec_list` instead of rerunning the command.
 - When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
 
+# Progress while using tools
+
+Tool calls are useful, but the browser transcript should not become a long run of hidden thinking and tool cards with no explanation.
+
+- When you continue with another tool after a meaningful tool result, include one short visible progress sentence before the next tool call.
+- Make progress notes specific and factual, for example what you found, what changed, or what you are checking next.
+- Do not expose hidden reasoning or chain-of-thought. Summarize observable facts and decisions only.
+- Avoid empty status text such as "I'll investigate" when the tool call itself already shows that. Prefer "Found X; checking Y next."
+- For long investigations, leave a concise visible update at phase changes or after several tool-only steps, even if the final answer is not ready.
+
 # Editing rules
 
 - Paths are relative to the current workspace unless a tool requires otherwise.

@@ -574,6 +574,19 @@ func TestSystemPromptMentionsBrowserMarkdownAndDiagrams(t *testing.T) {
 	}
 }
 
+func TestSystemPromptGuidesVisibleProgressDuringToolUse(t *testing.T) {
+	data, err := assets.DefaultContent("system-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(data)
+	for _, want := range []string{"Progress while using tools", "one short visible progress sentence", "Do not expose hidden reasoning"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected system prompt to mention %q", want)
+		}
+	}
+}
+
 func TestEngineSystemPromptUsesManagedUserAsset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -7206,7 +7219,7 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 	}
 	var sawContinuationInstruction bool
 	for _, req := range requests {
-		if strings.Contains(req, "Do not stop at hidden reasoning") {
+		if strings.Contains(req, "one short visible progress sentence") && strings.Contains(req, "Do not expose hidden reasoning") {
 			sawContinuationInstruction = true
 			break
 		}
