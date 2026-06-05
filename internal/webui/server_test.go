@@ -1365,6 +1365,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `topbar-workspace`) {
 		t.Fatalf("expected workspace to render in the top status bar instead of the sidebar")
 	}
+	if !strings.Contains(fullPage, `sessionTitle(currentSession())`) ||
+		!strings.Contains(fullPage, `workspaceTitleSuffix()`) ||
+		!strings.Contains(fullPage, "return root ? `(${root})` : '';") {
+		t.Fatalf("expected top status bar to render session title followed by parenthesized workspace")
+	}
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
 	}

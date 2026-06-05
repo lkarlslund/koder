@@ -2901,6 +2901,10 @@
         currentSession() { return this.state.session || this.state.Session || {}; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
+        workspaceTitleSuffix() {
+          const root = String(this.state.project_root || this.state.ProjectRoot || '').trim();
+          return root ? `(${root})` : '';
+        },
         sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },
         switchSession(id) {
           if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
