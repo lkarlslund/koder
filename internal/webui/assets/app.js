@@ -2028,6 +2028,13 @@
           this.hiddenMilestoneStatuses = {...this.hiddenMilestoneStatuses, [key]: !this.hiddenMilestoneStatuses[key]};
           writeJSONPreference('hiddenMilestoneStatuses', this.hiddenMilestoneStatuses);
         },
+        milestoneStatusFilterClass(status) {
+          const key = String(status || 'pending');
+          return {
+            ['status-filter-' + key.replaceAll('_', '-')]: true,
+            active: this.milestoneStatusFilterEnabled(key),
+          };
+        },
         milestoneStatusFilterTitle(filter) {
           return (this.milestoneStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' milestones';
         },

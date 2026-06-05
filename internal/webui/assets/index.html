@@ -334,7 +334,7 @@
         </div>
         <div class="status-filter-row" x-show="milestoneStatusFilterOptions().length > 0">
           <template x-for="filter in milestoneStatusFilterOptions()" :key="filter.status">
-            <button type="button" class="status-filter-button" :class="['status-filter-' + filter.status.replaceAll('_', '-'), {'active': milestoneStatusFilterEnabled(filter.status)}]" :title="milestoneStatusFilterTitle(filter)" @click="toggleMilestoneStatusFilter(filter.status)">
+            <button type="button" class="status-filter-button" :class="milestoneStatusFilterClass(filter.status)" :title="milestoneStatusFilterTitle(filter)" @click="toggleMilestoneStatusFilter(filter.status)">
               <i class="bi" :class="filter.icon"></i>
               <span x-text="filter.label"></span>
               <span class="status-filter-count" x-text="filter.count"></span>

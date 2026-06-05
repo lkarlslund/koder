@@ -1382,6 +1382,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `flattenedMilestones()`) ||
 		!strings.Contains(fullPage, `milestoneDependsOnRef`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterOptions()`) ||
+		!strings.Contains(fullPage, `milestoneStatusFilterClass(filter.status)`) ||
 		!strings.Contains(fullPage, `toggleMilestoneStatusFilter(filter.status)`) ||
 		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
 		t.Fatalf("expected sidebar to filter milestones by status")
