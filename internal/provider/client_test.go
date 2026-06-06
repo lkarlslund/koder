@@ -43,13 +43,12 @@ func TestListModels(t *testing.T) {
 	}
 }
 
-func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *testing.T) {
+func TestSerializePromptEnvelopeUsesSingleLeadingSystemMessage(t *testing.T) {
 	env := PromptEnvelope{
 		Instructions: []InstructionBlock{
 			{Kind: InstructionKindBaseSystem, Text: "Base prompt"},
 			{Kind: InstructionKindProjectInstructions, Text: "Project instructions"},
 			{Kind: InstructionKindSkills, Text: "Skills"},
-			{Kind: InstructionKindSessionNote, Text: "Session update:\nPermission mode changed", Ephemeral: true},
 		},
 		Items: []Message{
 			{Role: RoleUser, Content: "hello"},
@@ -58,7 +57,7 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 
 	got := SerializePromptEnvelope(env)
 	if len(got) != 2 {
-		t.Fatalf("expected one system message plus user item, got %#v", got)
+		t.Fatalf("expected system message and user item, got %#v", got)
 	}
 	if got[0].Role != RoleSystem {
 		t.Fatalf("expected leading system message, got %#v", got)
@@ -66,7 +65,7 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 	if strings.Contains(got[0].Content, "\n\n\n") {
 		t.Fatalf("expected normalized system join, got %q", got[0].Content)
 	}
-	for _, want := range []string{"Base prompt", "Project instructions", "Skills", "Session update:\nPermission mode changed"} {
+	for _, want := range []string{"Base prompt", "Project instructions", "Skills"} {
 		if !strings.Contains(got[0].Content, want) {
 			t.Fatalf("expected %q in joined system prompt, got %q", want, got[0].Content)
 		}

@@ -1272,10 +1272,19 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sawAutoResume bool
 	for _, item := range timeline {
-		if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceAutoResume {
-			t.Fatalf("did not expect auto-resume user message, got %#v", user)
+		user, ok := item.Content.(domain.UserMessage)
+		if !ok || user.Source != domain.UserMessageSourceAutoResume {
+			continue
 		}
+		if user.Text != "Continue from where you left off." {
+			t.Fatalf("unexpected auto-resume user message, got %#v", user)
+		}
+		sawAutoResume = true
+	}
+	if !sawAutoResume {
+		t.Fatalf("expected visible auto-resume user message, got %#v", timeline)
 	}
 	chatRecord, err = chatpkg.GetChat(ctx, st, chatRecord.ID)
 	if err != nil {

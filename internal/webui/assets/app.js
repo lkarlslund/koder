@@ -397,6 +397,7 @@
         case 'auto_generated': return 'auto-generated';
         case 'auto_resume': return 'auto-resume';
         case 'subchat': return 'subchat';
+        case 'turn_instruction': return 'turn instruction';
         default: return 'user';
       }
     }
@@ -412,6 +413,7 @@
         case 'auto_generated': return 'bi-stars';
         case 'auto_resume': return 'bi-arrow-clockwise';
         case 'subchat': return 'bi-diagram-3';
+        case 'turn_instruction': return 'bi-signpost-split';
         default: return 'bi-person-circle';
       }
     }

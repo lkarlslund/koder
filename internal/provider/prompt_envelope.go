@@ -16,9 +16,8 @@ const (
 )
 
 type InstructionBlock struct {
-	Kind      InstructionKind
-	Text      string
-	Ephemeral bool
+	Kind InstructionKind
+	Text string
 }
 
 type PromptEnvelope struct {

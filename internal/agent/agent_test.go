@@ -2166,21 +2166,21 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if req.Model != "test-model" {
 		t.Fatalf("expected model in preview request, got %#v", req)
 	}
-	if len(req.Messages) != 3 {
-		t.Fatalf("expected single system prompt plus saved prompt and unsent draft, got %#v", req.Messages)
+	if len(req.Messages) != 4 {
+		t.Fatalf("expected system prompt, saved prompt, visible session update, and unsent draft, got %#v", req.Messages)
 	}
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != provider.RoleUser || last.Content != "unsent draft" {
 		t.Fatalf("expected unsent draft as final user message, got %#v", last)
 	}
-	if req.Messages[len(req.Messages)-2].Content != "saved prompt" {
+	if req.Messages[len(req.Messages)-3].Content != "saved prompt" {
 		t.Fatalf("expected stored conversation before draft, got %#v", req.Messages)
 	}
-	if req.Messages[0].Role != provider.RoleSystem || !strings.Contains(req.Messages[0].Content, "Permission mode changed") {
-		t.Fatalf("expected transient note folded into leading system prompt, got %#v", req.Messages)
+	if req.Messages[len(req.Messages)-2].Role != provider.RoleUser || req.Messages[len(req.Messages)-2].Content != "Session update:\nPermission mode changed" {
+		t.Fatalf("expected visible session update before draft, got %#v", req.Messages)
 	}
-	if got := strings.Count(req.Messages[0].Content, "Session update:\nPermission mode changed"); got != 1 {
-		t.Fatalf("expected exactly one session update block in system prompt, got %q", req.Messages[0].Content)
+	if strings.Contains(req.Messages[0].Content, "Permission mode changed") {
+		t.Fatalf("expected session update outside system prompt, got %q", req.Messages[0].Content)
 	}
 }
 
@@ -2218,13 +2218,16 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(req.Messages) != 2 {
-		t.Fatalf("expected one system and one user message, got %#v", req.Messages)
+	if len(req.Messages) != 3 {
+		t.Fatalf("expected one system message, visible session update, and user message, got %#v", req.Messages)
 	}
 	if req.Messages[0].Role != provider.RoleSystem {
 		t.Fatalf("expected leading system message, got %#v", req.Messages)
 	}
-	if req.Messages[1].Role != provider.RoleUser {
+	if req.Messages[1].Role != provider.RoleUser || req.Messages[1].Content != "Session update:\nPermission mode changed" {
+		t.Fatalf("expected visible session update after system message, got %#v", req.Messages)
+	}
+	if req.Messages[2].Role != provider.RoleUser {
 		t.Fatalf("expected trailing user message, got %#v", req.Messages)
 	}
 	for _, want := range []string{
@@ -2233,11 +2236,13 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 		"Current working directory: " + repo,
 		"Resolved project AGENTS.md instructions:\nFollow repository instructions.",
 		"$skill-name",
-		"Session update:\nPermission mode changed",
 	} {
 		if !strings.Contains(req.Messages[0].Content, want) {
 			t.Fatalf("expected %q in leading system message, got %q", want, req.Messages[0].Content)
 		}
+	}
+	if strings.Contains(req.Messages[0].Content, "Session update:\nPermission mode changed") {
+		t.Fatalf("expected session update outside system prompt, got %q", req.Messages[0].Content)
 	}
 }
 
@@ -6201,7 +6206,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	}
 }
 
-func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
+func TestRunPromptIncludesVisibleTurnInstruction(t *testing.T) {
 	t.Parallel()
 
 	var requests []string
@@ -6245,15 +6250,35 @@ func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
 		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
 	})
 	if len(requests) == 0 || !strings.Contains(requests[0], `Session update:\nPermission mode changed to ask.`) {
-		t.Fatalf("expected transient session note in request, got %v", requests)
+		t.Fatalf("expected visible turn instruction in request, got %v", requests)
+	}
+	if strings.Contains(requests[0], `system","content":"Session update`) {
+		t.Fatalf("expected session note as visible user message, got %s", requests[0])
 	}
 	waitForChatInactive(t, rt)
-	messages, _, err := timelineTranscriptForSession(t, st, session.ID)
+	chatRecord, err = sessionpkg.DefaultChat(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) == 0 || messages[0].Summary != "hello" {
-		t.Fatalf("expected persisted user prompt only, got %#v", messages)
+	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawPrompt, sawInstruction bool
+	for _, item := range timeline {
+		user, ok := item.Content.(domain.UserMessage)
+		if !ok {
+			continue
+		}
+		switch {
+		case user.Text == "hello" && user.Source == domain.UserMessageSourceUser:
+			sawPrompt = true
+		case user.Text == "Session update:\nPermission mode changed to ask." && user.Source == domain.UserMessageSourceTurnInstruction:
+			sawInstruction = true
+		}
+	}
+	if !sawPrompt || !sawInstruction {
+		t.Fatalf("expected persisted prompt and visible turn instruction, got %#v", timeline)
 	}
 }
 
@@ -6293,7 +6318,31 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 		t.Fatalf("expected continue instruction in request, got %v", requests)
 	}
 	if !strings.Contains(requests[0], "Permission mode changed to write / ask.") {
-		t.Fatalf("expected transient note in continue request, got %v", requests)
+		t.Fatalf("expected visible turn instruction in continue request, got %v", requests)
+	}
+	chatRecord, err := sessionpkg.DefaultChat(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawNote, sawResume bool
+	for _, item := range timeline {
+		user, ok := item.Content.(domain.UserMessage)
+		if !ok {
+			continue
+		}
+		switch {
+		case user.Text == "Session update:\nPermission mode changed to write / ask." && user.Source == domain.UserMessageSourceTurnInstruction:
+			sawNote = true
+		case user.Text == "Continue from where you left off." && user.Source == domain.UserMessageSourceAutoResume:
+			sawResume = true
+		}
+	}
+	if !sawNote || !sawResume {
+		t.Fatalf("expected visible continue instructions, got %#v", timeline)
 	}
 }
 
@@ -7219,7 +7268,9 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 	}
 	var sawContinuationInstruction bool
 	for _, req := range requests {
-		if strings.Contains(req, "one short visible progress sentence") && strings.Contains(req, "Do not expose hidden reasoning") {
+		if strings.Contains(req, "one short visible progress sentence") &&
+			strings.Contains(req, "Do not expose hidden reasoning") &&
+			!strings.Contains(req, `system","content":"Continue from the latest tool result`) {
 			sawContinuationInstruction = true
 			break
 		}

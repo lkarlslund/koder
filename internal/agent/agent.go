@@ -219,7 +219,7 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
-	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, transientTurnMessages(note, ""))
+	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, turnInstructionBlocks(note, ""))
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
@@ -260,7 +260,7 @@ func (e *Engine) PreparePromptTurn(ctx context.Context, turn *chatpkg.TurnState,
 	turn.SetSession(session)
 	chat = turn.Chat()
 	e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
-	return transientTurnMessages(note, ""), nil
+	return turnInstructionBlocks(note, ""), nil
 }
 
 func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnState, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
@@ -286,7 +286,7 @@ func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnStat
 	} else {
 		e.recordLifecycle(session.ID, "continue", "", nil)
 	}
-	return transientTurnMessages(note, "Continue from where you left off."), nil
+	return turnInstructionBlocks(note, "Continue from where you left off."), nil
 }
 
 func (e *Engine) NewTurnLoop(turn *chatpkg.TurnState) chatpkg.TurnLoop {
@@ -432,7 +432,7 @@ func (l *engineTurnLoop) PauseLimit(ctx context.Context, turn *chatpkg.TurnState
 	}, out)
 }
 
-func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, steps int, transient []provider.InstructionBlock, out chan<- domain.Event) (chatpkg.TurnStepResult, error) {
+func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, steps int, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) (chatpkg.TurnStepResult, error) {
 	e := l.e
 	if turn == nil {
 		return chatpkg.TurnStepResult{}, fmt.Errorf("turn state is required")
@@ -450,7 +450,10 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		return chatpkg.TurnStepResult{}, err
 	}
 	e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, transient)
+	if err := e.materializeTurnInstructions(ctx, turn, turnInstructions, out); err != nil {
+		return chatpkg.TurnStepResult{}, err
+	}
+	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, turnInstructions)
 	if buildErr != nil {
 		return chatpkg.TurnStepResult{}, buildErr
 	}
@@ -470,8 +473,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			turn.SetSession(session)
 			l.skipAutoCompactOnce = true
 			return chatpkg.TurnStepResult{
-				Continue:  true,
-				Transient: transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result."),
+				Continue:         true,
+				TurnInstructions: turnInstructionBlocks("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result."),
 			}, nil
 		}
 	}
@@ -522,8 +525,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			if len(calls) == 0 {
 				return chatpkg.TurnStepResult{
-					Continue:  true,
-					Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+					Continue:         true,
+					TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 				}, nil
 			}
 			if pause, ok := l.tracker.trackCalls(calls); ok {
@@ -541,8 +544,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
 			return chatpkg.TurnStepResult{
-				Continue:  true,
-				Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+				Continue:         true,
+				TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 			}, nil
 		}
 	}
@@ -557,8 +560,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		}
 		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
 		return chatpkg.TurnStepResult{
-			Continue:  true,
-			Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+			Continue:         true,
+			TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 		}, nil
 	}
 
@@ -590,8 +593,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 		return chatpkg.TurnStepResult{
-			Continue:  true,
-			Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+			Continue:         true,
+			TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 		}, nil
 	}
 	l.tracker.reset()
@@ -599,8 +602,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
 		if strings.TrimSpace(reasoning) != "" {
 			return chatpkg.TurnStepResult{
-				Continue:  true,
-				Transient: transientTurnMessages("", afterToolResultContinuationPrompt),
+				Continue:         true,
+				TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 			}, nil
 		}
 		e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
@@ -613,8 +616,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		l.autoContinuedBadStop = true
 		e.recordLifecycle(session.ID, "auto_continue_bad_stop", strings.TrimSpace(text), map[string]string{"step": strconv.Itoa(steps + 1)})
 		return chatpkg.TurnStepResult{
-			Continue:  true,
-			Transient: transientTurnMessages("", "Continue by issuing the tool call now. Do not describe intent. If no tool call is needed, provide the final user-facing answer instead."),
+			Continue:         true,
+			TurnInstructions: turnInstructionBlocks("", "Continue by issuing the tool call now. Do not describe intent. If no tool call is needed, provide the final user-facing answer instead."),
 		}, nil
 	}
 	assistant := domain.AssistantMessage{Text: text}
@@ -982,7 +985,12 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 	providerCfg.PromptProgressMode = config.NormalizePromptProgressMode(providerCfg.PromptProgressMode)
 	providerCfg.PromptProgressProbed = true
 	providerCfg.PromptProgressSupported = supported
-	cfg.Providers[id] = providerCfg
+	providers := make(map[string]config.Provider, len(cfg.Providers))
+	for key, value := range cfg.Providers {
+		providers[key] = value
+	}
+	providers[id] = providerCfg
+	cfg.Providers = providers
 	e.cfg = cfg
 	if strings.TrimSpace(cfg.Path()) == "" {
 		return
@@ -2005,23 +2013,48 @@ func roundRetryDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-func transientTurnMessages(note string, continuePrompt string) []provider.InstructionBlock {
+func turnInstructionBlocks(note string, continuePrompt string) []provider.InstructionBlock {
 	var out []provider.InstructionBlock
 	if strings.TrimSpace(note) != "" {
 		out = append(out, provider.InstructionBlock{
-			Kind:      provider.InstructionKindSessionNote,
-			Text:      "Session update:\n" + strings.TrimSpace(note),
-			Ephemeral: true,
+			Kind: provider.InstructionKindSessionNote,
+			Text: "Session update:\n" + strings.TrimSpace(note),
 		})
 	}
 	if strings.TrimSpace(continuePrompt) != "" {
 		out = append(out, provider.InstructionBlock{
-			Kind:      provider.InstructionKindContinuation,
-			Text:      strings.TrimSpace(continuePrompt),
-			Ephemeral: true,
+			Kind: provider.InstructionKindContinuation,
+			Text: strings.TrimSpace(continuePrompt),
 		})
 	}
 	return out
+}
+
+func (e *Engine) materializeTurnInstructions(ctx context.Context, turn *chatpkg.TurnState, blocks []provider.InstructionBlock, out chan<- domain.Event) error {
+	for _, block := range blocks {
+		user, ok := turnInstructionUserMessage(block)
+		if !ok {
+			continue
+		}
+		item, err := turn.AppendUserMessage(ctx, user)
+		if err != nil {
+			return err
+		}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Turn instruction added", Item: item}
+	}
+	return nil
+}
+
+func turnInstructionUserMessage(block provider.InstructionBlock) (domain.UserMessage, bool) {
+	text := strings.TrimSpace(block.Text)
+	if text == "" {
+		return domain.UserMessage{}, false
+	}
+	source := domain.UserMessageSourceTurnInstruction
+	if block.Kind == provider.InstructionKindContinuation && text == "Continue from where you left off." {
+		source = domain.UserMessageSourceAutoResume
+	}
+	return domain.UserMessage{Text: text, Source: source}, true
 }
 
 func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID) ([]provider.Message, error) {
@@ -2032,20 +2065,20 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID)
 	return e.buildConversationPreview(ctx, session, chatID, "", nil, nil, nil)
 }
 
-func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
-	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, prompt, drafts, refs, transient)
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
+	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, prompt, drafts, refs, turnInstructions)
 	if err != nil {
 		return nil, err
 	}
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, transient []provider.InstructionBlock) ([]provider.Message, error) {
+func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
 	if turn == nil {
-		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
+		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, turnInstructions)
 	}
 	timeline := filterQueuedTimelineItems(turn.Timeline())
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, transient)
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2098,7 +2131,7 @@ func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat d
 	return len(payload) / 4, nil
 }
 
-func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	chat := domain.Chat{WorkflowRole: chatrole.General}
 	if chatID != "" {
 		stored, err := chatpkg.GetChat(ctx, e.store, chatID)
@@ -2116,10 +2149,10 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 	}
 	timeline = filterQueuedTimelineItems(timeline)
-	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, transient)
+	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
-func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	baseInstructions := e.baseInstructionsForChat(session, chat)
 	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
 	segmentStart := 0
@@ -2149,7 +2182,9 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 		}
 		envelope.Items = appendTimelinePromptMessages(envelope.Items, item, messages...)
 	}
-	envelope.Instructions = append(envelope.Instructions, transient...)
+	for _, msg := range previewTurnInstructionMessages(turnInstructions) {
+		envelope.Items = append(envelope.Items, msg)
+	}
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
 		msg, ok, err := e.previewUserMessage(session, prompt, drafts, refs)
 		if err != nil {
@@ -2160,6 +2195,18 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 		}
 	}
 	return envelope, nil
+}
+
+func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provider.Message {
+	var out []provider.Message
+	for _, block := range blocks {
+		user, ok := turnInstructionUserMessage(block)
+		if !ok {
+			continue
+		}
+		out = append(out, provider.Message{Role: provider.RoleUser, Content: user.Text})
+	}
+	return out
 }
 
 func appendTimelinePromptMessages(items []provider.Message, item domain.TimelineItem, messages ...provider.Message) []provider.Message {

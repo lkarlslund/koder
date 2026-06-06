@@ -177,10 +177,10 @@ type streamEventCmd struct {
 type streamClosedCmd struct{}
 
 type TurnStepResult struct {
-	Continue        bool
-	WaitingApproval bool
-	Done            bool
-	Transient       []provider.InstructionBlock
+	Continue         bool
+	WaitingApproval  bool
+	Done             bool
+	TurnInstructions []provider.InstructionBlock
 }
 
 type TurnLoop interface {
@@ -2313,8 +2313,8 @@ func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *T
 	go func() {
 		defer close(out)
 		var (
-			transient []provider.InstructionBlock
-			err       error
+			turnInstructions []provider.InstructionBlock
+			err              error
 		)
 		promptService := r.deps.Prompt
 		if promptService == nil {
@@ -2323,20 +2323,20 @@ func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *T
 		}
 		switch domain.DeliveryForQueuedInput(item) {
 		case domain.QueuedInputDeliveryContinue:
-			transient, err = promptService.PrepareContinueTurn(ctx, turn, note, out)
+			turnInstructions, err = promptService.PrepareContinueTurn(ctx, turn, note, out)
 		default:
-			transient, err = promptService.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
+			turnInstructions, err = promptService.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
 		}
 		if err != nil {
 			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
-		r.continueTurnLoop(ctx, service, turn, transient, out)
+		r.continueTurnLoop(ctx, service, turn, turnInstructions, out)
 	}()
 	r.forwardTurnEvents(out)
 }
 
-func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, transient []provider.InstructionBlock, out chan<- domain.Event) {
+func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) {
 	loop := service.NewTurnLoop(turn)
 	if loop == nil {
 		r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
@@ -2350,7 +2350,7 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 				return
 			}
 			if applied {
-				transient = nil
+				turnInstructions = nil
 				out <- domain.Event{
 					Kind: domain.EventKindStatus,
 					Text: "Applying queued steer...",
@@ -2359,7 +2359,7 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 				}
 			}
 		}
-		result, err := loop.Step(ctx, turn, step, transient, out)
+		result, err := loop.Step(ctx, turn, step, turnInstructions, out)
 		if err != nil {
 			r.handleTurnError(ctx, turn, out, err)
 			return
@@ -2370,7 +2370,7 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 		if !result.Continue {
 			return
 		}
-		transient = result.Transient
+		turnInstructions = result.TurnInstructions
 	}
 	loop.PauseLimit(ctx, turn, out)
 }
