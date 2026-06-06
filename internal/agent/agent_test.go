@@ -7214,6 +7214,72 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	t.Fatal("expected persisted provider-refusal pause notice")
 }
 
+func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"final answer"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected ordinary tool continuation, got %#v", evt)
+		}
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected tool request and final-answer request, got %d", len(requests))
+	}
+	if strings.Contains(requests[1], afterToolResultContinuationPrompt) {
+		t.Fatalf("did not expect synthetic after-tool instruction in continuation request: %s", requests[1])
+	}
+
+	chat := defaultChatForSession(t, st, session.ID)
+	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		user, ok := item.Content.(domain.UserMessage)
+		if ok && user.Text == afterToolResultContinuationPrompt {
+			t.Fatalf("did not expect persisted after-tool instruction, got %#v", item)
+		}
+	}
+}
+
 func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.T) {
 	t.Parallel()
 

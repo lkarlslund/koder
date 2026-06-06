@@ -525,8 +525,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			if len(calls) == 0 {
 				return chatpkg.TurnStepResult{
-					Continue:         true,
-					TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
+					Continue: true,
 				}, nil
 			}
 			if pause, ok := l.tracker.trackCalls(calls); ok {
@@ -544,8 +543,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
 			return chatpkg.TurnStepResult{
-				Continue:         true,
-				TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
+				Continue: true,
 			}, nil
 		}
 	}
@@ -560,8 +558,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		}
 		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
 		return chatpkg.TurnStepResult{
-			Continue:         true,
-			TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
+			Continue: true,
 		}, nil
 	}
 
@@ -593,8 +590,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 		return chatpkg.TurnStepResult{
-			Continue:         true,
-			TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
+			Continue: true,
 		}, nil
 	}
 	l.tracker.reset()
