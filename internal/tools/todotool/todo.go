@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -47,10 +46,10 @@ type addItemsTool struct{}
 type updateItemTool struct{}
 type fetchNextTool struct{}
 
-func (listTool) ID() tools.ID       { return domain.ToolKindTaskList }
-func (addItemsTool) ID() tools.ID   { return domain.ToolKindTasksAdd }
-func (updateItemTool) ID() tools.ID { return domain.ToolKindTasksUpdate }
-func (fetchNextTool) ID() tools.ID  { return domain.ToolKindTaskFetchNext }
+func (listTool) ID() tools.ID       { return tools.TaskList }
+func (addItemsTool) ID() tools.ID   { return tools.TasksAdd }
+func (updateItemTool) ID() tools.ID { return tools.TasksUpdate }
+func (fetchNextTool) ID() tools.ID  { return tools.TaskFetchNext }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }

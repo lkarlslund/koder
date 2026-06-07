@@ -27,7 +27,7 @@ type StoredResultPayload interface {
 type storedResultEnvelope struct {
 	Version  int                `json:"version"`
 	PartKind domain.PartKind    `json:"part_kind"`
-	Tool     domain.ToolKind    `json:"tool,omitempty"`
+	Tool     ID                 `json:"tool,omitempty"`
 	Status   StoredResultStatus `json:"status"`
 	Payload  json.RawMessage    `json:"payload,omitempty"`
 }
@@ -417,23 +417,23 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), ok
 	}
 	switch env.Tool {
-	case domain.ToolKindFileRead:
+	case FileRead:
 		return decodeAndFormat[ReadStoredResult](env.Payload, func(result ReadStoredResult) string {
 			return compactReadStoredResult(result, limits)
 		})
-	case domain.ToolKindBash:
+	case Bash:
 		return decodeAndFormat[BashStoredResult](env.Payload, func(result BashStoredResult) string {
 			return compactBashStoredResult(result, limits)
 		})
-	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
+	case ExecCommand, ExecStatus, ExecWriteStdin, ExecResize, ExecTerminate:
 		return decodeAndFormat[ExecStoredResult](env.Payload, func(result ExecStoredResult) string {
 			return compactExecStoredResult(result, limits)
 		})
-	case domain.ToolKindViewImage:
+	case ViewImage:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
-	case domain.ToolKindShowImage:
+	case ShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, compactShowImageStoredResult)
-	case domain.ToolKindFileEdit, domain.ToolKindFileWrite, domain.ToolKindLint:
+	case FileEdit, FileWrite, Lint:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
 			return "", false
@@ -608,7 +608,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindFileEdit, domain.ToolKindFileWrite:
+	case FileEdit, FileWrite:
 		return false
 	default:
 		return true
@@ -627,7 +627,7 @@ func DisplayTextForPart(part domain.Part) (string, bool) {
 	return text, true
 }
 
-func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultStatus, bool) {
+func StoredResultInfoForPart(part domain.Part) (ID, StoredResultStatus, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok {
 		return "", "", false
@@ -635,7 +635,7 @@ func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultSta
 	return env.Tool, env.Status, true
 }
 
-func DisplayTextForStored(tool domain.ToolKind, payload any) string {
+func DisplayTextForStored(tool ID, payload any) string {
 	raw, err := marshalStoredResult(domain.PartKindToolOutput, tool, StoredResultStatusOK, payload)
 	if err != nil {
 		return ""
@@ -650,7 +650,7 @@ func DisplayTextForStored(tool domain.ToolKind, payload any) string {
 
 func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
-	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindViewImage {
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ViewImage {
 		return ViewImageStoredResult{}, false
 	}
 	var result ViewImageStoredResult
@@ -662,7 +662,7 @@ func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool
 
 func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
-	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindShowImage {
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ShowImage {
 		return ShowImageStoredResult{}, false
 	}
 	var result ShowImageStoredResult
@@ -674,7 +674,7 @@ func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool
 
 func EditStoredResultForPart(part domain.Part) (EditStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
-	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindFileEdit {
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != FileEdit {
 		return EditStoredResult{}, false
 	}
 	var result EditStoredResult
@@ -684,7 +684,7 @@ func EditStoredResultForPart(part domain.Part) (EditStoredResult, bool) {
 	return result, true
 }
 
-func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload any) (string, error) {
+func marshalStoredResult(partKind domain.PartKind, tool ID, status StoredResultStatus, payload any) (string, error) {
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -724,7 +724,7 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 		return storedResultEnvelope{
 			Version:  2,
 			PartKind: domain.PartKindTaskUpdate,
-			Tool:     domain.ToolKindTask,
+			Tool:     Task,
 			Status:   StoredResultStatusOK,
 			Payload:  raw,
 		}, true
@@ -740,7 +740,7 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 		return storedResultEnvelope{
 			Version:  2,
 			PartKind: domain.PartKindPlanUpdate,
-			Tool:     domain.ToolKindUpdatePlan,
+			Tool:     UpdatePlan,
 			Status:   StoredResultStatusOK,
 			Payload:  raw,
 		}, true
@@ -774,65 +774,65 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	}
 	switch env.Tool {
-	case domain.ToolKindFileRead:
+	case FileRead:
 		return decodeAndFormat[ReadStoredResult](env.Payload, formatReadStoredResult)
-	case domain.ToolKindBash:
+	case Bash:
 		return decodeAndFormat[BashStoredResult](env.Payload, func(result BashStoredResult) string {
 			return strings.TrimSpace(result.Output)
 		})
-	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
+	case ExecCommand, ExecStatus, ExecWriteStdin, ExecResize, ExecTerminate:
 		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
-	case domain.ToolKindExecList, domain.ToolKindExecCleanup:
+	case ExecList, ExecCleanup:
 		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
-	case domain.ToolKindFileEdit:
+	case FileEdit:
 		return decodeAndFormat[EditStoredResult](env.Payload, func(result EditStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
-	case domain.ToolKindFileWrite:
+	case FileWrite:
 		return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForModel)
-	case domain.ToolKindLint:
+	case Lint:
 		return decodeAndFormat[LintStoredResult](env.Payload, func(result LintStoredResult) string {
 			if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
 				return diagnostics
 			}
 			return strings.TrimSpace(result.Summary)
 		})
-	case domain.ToolKindFileGlob:
+	case FileGlob:
 		return decodeAndFormat[GlobStoredResult](env.Payload, formatGlobStoredResult)
-	case domain.ToolKindFileGrep:
+	case FileGrep:
 		return decodeAndFormat[GrepStoredResult](env.Payload, func(result GrepStoredResult) string {
 			return strings.TrimSpace(result.Output)
 		})
-	case domain.ToolKindQuestion:
+	case Question:
 		return decodeAndFormat[QuestionStoredResult](env.Payload, func(result QuestionStoredResult) string {
 			return strings.TrimSpace(result.Question)
 		})
-	case domain.ToolKindSkill:
+	case Skill:
 		return decodeAndFormat[SkillStoredResult](env.Payload, func(result SkillStoredResult) string {
 			return strings.TrimSpace(result.Content)
 		})
-	case domain.ToolKindWebFetch:
+	case WebFetch:
 		return decodeAndFormat[WebFetchStoredResult](env.Payload, func(result WebFetchStoredResult) string {
 			return strings.TrimSpace(result.Body)
 		})
-	case domain.ToolKindWebSearch:
+	case WebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
-	case domain.ToolKindViewImage:
+	case ViewImage:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
-	case domain.ToolKindShowImage:
+	case ShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
-	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
+	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneWrite, MilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatSend, domain.ToolKindChatCancel, domain.ToolKindChatArchive, domain.ToolKindChatRename:
+	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
-	case domain.ToolKindTaskList, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindTaskFetchNext, domain.ToolKindTasksAdd, domain.ToolKindTasksUpdate:
+	case TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext, TasksAdd, TasksUpdate:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
 	default:
 		return "", false
 	}
 }
 
-func formatErrorStoredResult(tool domain.ToolKind, message string) string {
+func formatErrorStoredResult(tool ID, message string) string {
 	message = strings.TrimSpace(message)
 	if tool == "" || message == "" {
 		return message
@@ -866,13 +866,13 @@ func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {
 	}
 	switch env.PartKind {
 	case domain.PartKindToolOutput:
-		if env.Tool == domain.ToolKindFileEdit {
+		if env.Tool == FileEdit {
 			return decodeAndFormat[EditStoredResult](env.Payload, formatEditStoredResultForDisplay)
 		}
-		if env.Tool == domain.ToolKindFileWrite {
+		if env.Tool == FileWrite {
 			return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForDisplay)
 		}
-		if env.Tool == domain.ToolKindLint {
+		if env.Tool == Lint {
 			return decodeAndFormat[LintStoredResult](env.Payload, formatLintStoredResultForDisplay)
 		}
 		return formatStoredToolOutput(env)

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -25,7 +24,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindSkill }
+func (tool) ID() tools.ID             { return tools.Skill }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	spec.Usage = skills.ToolDescription(spec.Usage, runtime.Workdir)

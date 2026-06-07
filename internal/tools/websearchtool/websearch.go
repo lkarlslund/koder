@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -36,7 +35,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindWebSearch }
+func (tool) ID() tools.ID             { return tools.WebSearch }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	query := strings.TrimSpace(tools.FirstArg(args, "query", "q", "search"))

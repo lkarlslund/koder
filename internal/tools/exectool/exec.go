@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -78,13 +77,13 @@ type resizeTool struct{}
 type terminateTool struct{}
 type cleanupTool struct{}
 
-func (commandTool) ID() tools.ID    { return domain.ToolKindExecCommand }
-func (statusTool) ID() tools.ID     { return domain.ToolKindExecStatus }
-func (listTool) ID() tools.ID       { return domain.ToolKindExecList }
-func (writeStdinTool) ID() tools.ID { return domain.ToolKindExecWriteStdin }
-func (resizeTool) ID() tools.ID     { return domain.ToolKindExecResize }
-func (terminateTool) ID() tools.ID  { return domain.ToolKindExecTerminate }
-func (cleanupTool) ID() tools.ID    { return domain.ToolKindExecCleanup }
+func (commandTool) ID() tools.ID    { return tools.ExecCommand }
+func (statusTool) ID() tools.ID     { return tools.ExecStatus }
+func (listTool) ID() tools.ID       { return tools.ExecList }
+func (writeStdinTool) ID() tools.ID { return tools.ExecWriteStdin }
+func (resizeTool) ID() tools.ID     { return tools.ExecResize }
+func (terminateTool) ID() tools.ID  { return tools.ExecTerminate }
+func (cleanupTool) ID() tools.ID    { return tools.ExecCleanup }
 
 func (commandTool) BypassesPermission() bool    { return false }
 func (statusTool) BypassesPermission() bool     { return true }
@@ -424,7 +423,7 @@ func execResult(stored tools.ExecStoredResult) tools.Result {
 		meta["exit_code"] = strconv.Itoa(*stored.ExitCode)
 	}
 	return tools.Result{
-		Output: tools.DisplayTextForStored(domain.ToolKindExecStatus, stored),
+		Output: tools.DisplayTextForStored(tools.ExecStatus, stored),
 		Meta:   meta,
 		Stored: stored,
 	}

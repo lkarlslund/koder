@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/attachment"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -28,7 +27,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindShowImage }
+func (tool) ID() tools.ID             { return tools.ShowImage }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

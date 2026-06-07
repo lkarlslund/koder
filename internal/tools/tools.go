@@ -286,11 +286,11 @@ func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) 
 
 func checkRuntimeAccess(runtime Runtime, req Request) error {
 	switch req.Tool {
-	case domain.ToolKindWebFetch, domain.ToolKindWebSearch, domain.ToolKindMCP:
+	case WebFetch, WebSearch, MCP:
 		return runtime.CheckNetworkAccess()
-	case domain.ToolKindFileWrite, domain.ToolKindFileEdit:
+	case FileWrite, FileEdit:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
-	case domain.ToolKindFileRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindFileGlob, domain.ToolKindFileGrep, domain.ToolKindCodeSearch, domain.ToolKindLint:
+	case FileRead, ViewImage, ShowImage, FileGlob, FileGrep, CodeSearch, Lint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:
 		return nil
@@ -409,9 +409,9 @@ func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 
 func ArgumentByteLimits() map[string]int {
 	return map[string]int{
-		domain.ToolKindFileWrite.String(): 64 * 1024,
-		domain.ToolKindFileEdit.String():  32 * 1024,
-		domain.ToolKindBash.String():      8 * 1024,
+		FileWrite.String(): 64 * 1024,
+		FileEdit.String():  32 * 1024,
+		Bash.String():      8 * 1024,
 	}
 }
 

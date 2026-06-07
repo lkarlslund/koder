@@ -65,12 +65,12 @@ type cancelTool struct{}
 type archiveTool struct{}
 type renameTool struct{}
 
-func (listTool) ID() tools.ID    { return domain.ToolKindChatList }
-func (startTool) ID() tools.ID   { return domain.ToolKindChatStart }
-func (sendTool) ID() tools.ID    { return domain.ToolKindChatSend }
-func (cancelTool) ID() tools.ID  { return domain.ToolKindChatCancel }
-func (archiveTool) ID() tools.ID { return domain.ToolKindChatArchive }
-func (renameTool) ID() tools.ID  { return domain.ToolKindChatRename }
+func (listTool) ID() tools.ID    { return tools.ChatList }
+func (startTool) ID() tools.ID   { return tools.ChatStart }
+func (sendTool) ID() tools.ID    { return tools.ChatSend }
+func (cancelTool) ID() tools.ID  { return tools.ChatCancel }
+func (archiveTool) ID() tools.ID { return tools.ChatArchive }
+func (renameTool) ID() tools.ID  { return tools.ChatRename }
 
 func (listTool) BypassesPermission() bool    { return true }
 func (startTool) BypassesPermission() bool   { return true }
@@ -237,7 +237,7 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}
 	stored := tools.ChatListStored(statuses)
 	return tools.Result{
-		Output: tools.DisplayTextForStored(domain.ToolKindChatList, stored),
+		Output: tools.DisplayTextForStored(tools.ChatList, stored),
 		Stored: stored,
 	}, nil
 }

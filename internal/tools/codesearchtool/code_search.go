@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -558,7 +557,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindCodeSearch }
+func (tool) ID() tools.ID             { return tools.CodeSearch }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

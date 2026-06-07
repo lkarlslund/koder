@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -27,7 +26,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindFileGlob }
+func (tool) ID() tools.ID             { return tools.FileGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))

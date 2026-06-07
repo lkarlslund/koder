@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -25,7 +24,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindUpdatePlan }
+func (tool) ID() tools.ID             { return tools.UpdatePlan }
 func (tool) BypassesPermission() bool { return true }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	plan := strings.TrimSpace(tools.FirstArg(args, "plan", "steps"))

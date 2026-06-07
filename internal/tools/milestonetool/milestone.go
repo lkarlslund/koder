@@ -47,10 +47,10 @@ type addItemsTool struct{}
 type updateItemTool struct{}
 type writeTool struct{}
 
-func (listTool) ID() tools.ID       { return domain.ToolKindMilestoneList }
-func (addItemsTool) ID() tools.ID   { return domain.ToolKindMilestoneAdd }
-func (updateItemTool) ID() tools.ID { return domain.ToolKindMilestoneUpdate }
-func (writeTool) ID() tools.ID      { return domain.ToolKindMilestoneWrite }
+func (listTool) ID() tools.ID       { return tools.MilestoneList }
+func (addItemsTool) ID() tools.ID   { return tools.MilestoneAdd }
+func (updateItemTool) ID() tools.ID { return tools.MilestoneUpdate }
+func (writeTool) ID() tools.ID      { return tools.MilestoneWrite }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }

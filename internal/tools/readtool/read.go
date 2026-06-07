@@ -14,7 +14,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -35,7 +34,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindFileRead }
+func (tool) ID() tools.ID             { return tools.FileRead }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	for _, key := range []string{"file", "file_path", "filepath", "start", "line", "offset", "end", "limit", "lines", "max_lines"} {
@@ -116,7 +115,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			HasMore:        page.HasMore,
 			Truncated:      page.HasMore || page.ByteCapped,
 		}
-		body := tools.DisplayTextForStored(domain.ToolKindFileRead, stored)
+		body := tools.DisplayTextForStored(tools.FileRead, stored)
 		return tools.Result{
 			Output: body,
 			Meta: map[string]string{
@@ -182,7 +181,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		HasMore:        page.HasMore,
 		Truncated:      page.HasMore || page.ByteCapped,
 	}
-	text := tools.DisplayTextForStored(domain.ToolKindFileRead, stored)
+	text := tools.DisplayTextForStored(tools.FileRead, stored)
 	charCount := utf8.RuneCountInString(text)
 	if charCount > tools.DefaultReadOutputCharLimit {
 		return tools.Result{}, fmt.Errorf("read produced %d characters which exceeds the 100000 character limit; use start_line and end_line to read a smaller range", charCount)

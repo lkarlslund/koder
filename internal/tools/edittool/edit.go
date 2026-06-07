@@ -10,7 +10,6 @@ import (
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -50,7 +49,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindFileEdit }
+func (tool) ID() tools.ID             { return tools.FileEdit }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))

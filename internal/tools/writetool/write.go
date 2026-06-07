@@ -11,7 +11,6 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -27,7 +26,7 @@ func init() {
 	})
 }
 
-func (tool) ID() tools.ID             { return domain.ToolKindFileWrite }
+func (tool) ID() tools.ID             { return tools.FileWrite }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
