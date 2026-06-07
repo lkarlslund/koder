@@ -680,7 +680,6 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 			DefaultProvider:  strings.TrimSpace(c.cfg.DefaultProvider),
 			DefaultModel:     strings.TrimSpace(c.cfg.DefaultModel),
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
-			StoreBackend:     strings.TrimSpace(c.cfg.Store.Backend),
 		},
 		UI:           browserPreferencesFromConfig(c.cfg.UI),
 		Compaction:   compactionPreferencesFromConfig(c.cfg),
@@ -694,9 +693,6 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
 	}
 	repairPreferencesDefaultModel(&state, liveModels)
-	if c.cfg.Store.Backend != config.Default().Store.Backend {
-		state.RestartKeys = append(state.RestartKeys, "store.backend")
-	}
 	return state, nil
 }
 
@@ -1132,9 +1128,6 @@ func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error
 		return fmt.Errorf("max tool loop steps must be greater than zero")
 	}
 	cfg.MaxToolLoopSteps = prefs.MaxToolLoopSteps
-	if backend := strings.TrimSpace(prefs.StoreBackend); backend != "" {
-		cfg.Store.Backend = backend
-	}
 	return nil
 }
 
