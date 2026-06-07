@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/lkarlslund/koder/internal/chat"
-	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -62,8 +61,12 @@ func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats 
 	}
 	c.clearedStartupRunningTools = true
 	c.mu.Unlock()
-	for _, chatRecord := range chats {
-		if _, err := chatpkg.FailRunningToolCalls(ctx, c.store, chatRecord.ID, processStartupRunningToolFailure); err != nil {
+	for sessionID, chatIDs := range groupChatIDsBySession(chats, false) {
+		owner, err := c.agent.LoadSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if _, err := owner.FailRunningToolCalls(ctx, chatIDs, processStartupRunningToolFailure); err != nil {
 			return err
 		}
 	}
@@ -71,14 +74,30 @@ func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats 
 }
 
 func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats []domain.Chat) error {
-	for _, chatRecord := range chats {
-		if chatRecord.AutoRestart {
-			if _, err := chatpkg.FailInterruptedToolCalls(ctx, c.store, chatRecord.ID, processRestartToolFailure); err != nil {
-				return err
-			}
+	for sessionID, chatIDs := range groupChatIDsBySession(chats, true) {
+		owner, err := c.agent.LoadSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if _, err := owner.FailInterruptedToolCalls(ctx, chatIDs, processRestartToolFailure); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func groupChatIDsBySession(chats []domain.Chat, autoRestartOnly bool) map[id.ID][]id.ID {
+	grouped := map[id.ID][]id.ID{}
+	for _, chatRecord := range chats {
+		if chatRecord.SessionID == "" || chatRecord.ID == "" {
+			continue
+		}
+		if autoRestartOnly && !chatRecord.AutoRestart {
+			continue
+		}
+		grouped[chatRecord.SessionID] = append(grouped[chatRecord.SessionID], chatRecord.ID)
+	}
+	return grouped
 }
 
 func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {

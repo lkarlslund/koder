@@ -828,6 +828,45 @@ func (s *Session) Shutdown(ctx context.Context, reason chatpkg.CancelReason) err
 	return s.shutdownRuntimes(ctx, reason)
 }
 
+// FailRunningToolCalls marks running tool calls failed for the selected chats.
+func (s *Session) FailRunningToolCalls(ctx context.Context, chatIDs []id.ID, message string) (int, error) {
+	return s.failToolCalls(ctx, chatIDs, message, func(rt *chatpkg.Chat) (int, error) {
+		return rt.FailRunningToolCalls(ctx, message)
+	})
+}
+
+// FailInterruptedToolCalls marks pending or running tool calls failed for the selected chats.
+func (s *Session) FailInterruptedToolCalls(ctx context.Context, chatIDs []id.ID, message string) (int, error) {
+	return s.failToolCalls(ctx, chatIDs, message, func(rt *chatpkg.Chat) (int, error) {
+		return rt.FailInterruptedToolCalls(ctx, message)
+	})
+}
+
+func (s *Session) failToolCalls(ctx context.Context, chatIDs []id.ID, _ string, fail func(*chatpkg.Chat) (int, error)) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("session is required")
+	}
+	if fail == nil {
+		return 0, nil
+	}
+	total := 0
+	for _, chatID := range chatIDs {
+		if chatID == "" {
+			continue
+		}
+		rt, err := s.Chat(ctx, chatID)
+		if err != nil {
+			return total, err
+		}
+		count, err := fail(rt)
+		total += count
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
 func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelReason) error {
 	if s == nil {
 		return nil

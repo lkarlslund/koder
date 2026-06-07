@@ -2064,6 +2064,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	}
 	c.replaceWorkspaceWatcher(session.ID, session.ProjectRoot)
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
+	for _, loaded := range runtimes {
+		loaded.Kick()
+	}
 	c.broadcast("snapshot", c.State())
 	return nil
 }

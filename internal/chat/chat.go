@@ -320,11 +320,7 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		c.inbox <- resumePendingToolsCmd{}
 		resuming = true
 	}
-	if !c.timelineLoaded && c.chat.AutoRestart {
-		c.inbox <- resumePendingToolsCmd{}
-		resuming = true
-	}
-	if !resuming {
+	if !resuming && c.timelineLoaded {
 		c.inbox <- struct{}{}
 	}
 	return c, nil
@@ -835,6 +831,14 @@ func (r *Chat) Enqueue(item QueueItem) {
 	}
 	slog.Info("chat queue item received", "chat_id", chatID, "session_id", sessionID, "kind", item.Kind, "text_bytes", len(item.Text), "attachments", len(item.Attachments))
 	r.inbox <- enqueueCmd{item: item}
+}
+
+// Kick asks the chat loop to dispatch queued work if it is idle.
+func (r *Chat) Kick() {
+	if r == nil {
+		return
+	}
+	r.inbox <- struct{}{}
 }
 
 func (r *Chat) ReorderQueue(ids []id.ID) {
@@ -1566,6 +1570,90 @@ func (r *Chat) AttachToolApproval(ctx context.Context, toolCallID string, approv
 		call.Status = domain.ToolStatusAwaitingApproval
 		return nil
 	})
+}
+
+// FailRunningToolCalls marks currently running tool calls as failed.
+func (r *Chat) FailRunningToolCalls(ctx context.Context, message string) (int, error) {
+	return r.failToolCallsMatching(ctx, message, func(status domain.ToolStatus) bool {
+		return status == domain.ToolStatusRunning
+	})
+}
+
+// FailInterruptedToolCalls marks pending or running tool calls as failed.
+func (r *Chat) FailInterruptedToolCalls(ctx context.Context, message string) (int, error) {
+	return r.failToolCallsMatching(ctx, message, interruptedToolStatus)
+}
+
+func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match func(domain.ToolStatus) bool) (int, error) {
+	if r == nil {
+		return 0, fmt.Errorf("chat runtime is required")
+	}
+	if match == nil {
+		return 0, nil
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return 0, err
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "Tool execution failed because koder restarted before the tool completed."
+	}
+	now := time.Now().UTC()
+	var changed []domain.TimelineItem
+	r.mu.Lock()
+	if r.state == nil {
+		r.mu.Unlock()
+		return 0, nil
+	}
+	count := 0
+	for _, record := range r.state.Timeline() {
+		if record == nil {
+			continue
+		}
+		assistant, ok := record.Item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		itemChanged := false
+		for idx := range assistant.Tools {
+			call := &assistant.Tools[idx]
+			if !match(call.Status) || call.Result != nil || call.Error != nil {
+				continue
+			}
+			call.Status = domain.ToolStatusErrored
+			call.Error = &domain.ToolError{Message: message, Code: domain.NoticeReasonProcessRestart}
+			call.Approval = nil
+			call.ApprovalID = ""
+			if call.CompletedAt.IsZero() {
+				call.CompletedAt = now
+			}
+			itemChanged = true
+			count++
+		}
+		if !itemChanged {
+			continue
+		}
+		record.Item.Content = assistant
+		record.Item.UpdatedAt = now
+		changed = append(changed, record.Item)
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if count == 0 {
+		return 0, nil
+	}
+	if r.deps.Store != nil {
+		for _, item := range changed {
+			if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+				return count, err
+			}
+		}
+		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return count, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
+	return count, nil
 }
 
 func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update func(*domain.ToolCall) error) (domain.TimelineItem, error) {
@@ -2850,6 +2938,12 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {
+	for idx, item := range items {
+		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue {
+			continue
+		}
+		return idx
+	}
 	for idx, item := range items {
 		if item.Held {
 			continue
