@@ -3,16 +3,18 @@ package chatrole
 import (
 	"fmt"
 	"strings"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
-type Role string
+type Role = domain.WorkflowRole
 
 const (
-	General      Role = "general"
-	Orchestrator Role = "orchestrator"
-	Planning     Role = "planning"
-	Execution    Role = "execution"
-	Compaction   Role = "compaction"
+	General      Role = domain.WorkflowRoleGeneral
+	Orchestrator Role = domain.WorkflowRoleOrchestrator
+	Planning     Role = domain.WorkflowRolePlanning
+	Execution    Role = domain.WorkflowRoleExecution
+	Compaction   Role = domain.WorkflowRoleCompaction
 )
 
 // Spec describes a chat role's behavior contract.

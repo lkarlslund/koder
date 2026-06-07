@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/chatrole"
 )
 
 //go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -trimprefix=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -transform=snake -json -text -values -output=messagerole_enumer.go
@@ -264,7 +263,19 @@ type Session struct {
 	LastMessage       string
 }
 
-type WorkflowRole = chatrole.Role
+type WorkflowRole string
+
+const (
+	WorkflowRoleGeneral      WorkflowRole = "general"
+	WorkflowRoleOrchestrator WorkflowRole = "orchestrator"
+	WorkflowRolePlanning     WorkflowRole = "planning"
+	WorkflowRoleExecution    WorkflowRole = "execution"
+	WorkflowRoleCompaction   WorkflowRole = "compaction"
+)
+
+func (r WorkflowRole) String() string {
+	return string(r)
+}
 
 type Chat struct {
 	ID                     ID
