@@ -20,7 +20,6 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 type APIError struct {
@@ -1003,8 +1002,8 @@ func providerToolCallDeltaEvent(raw string, currentToolCalls []ToolCall) domain.
 	}
 	call := currentToolCalls[len(currentToolCalls)-1]
 	evt.ToolCallID = strings.TrimSpace(call.ID)
-	if tk, err := toolkind.KindString(strings.TrimSpace(call.Function.Name)); err == nil {
-		evt.Tool = tk
+	if name := strings.TrimSpace(call.Function.Name); name != "" {
+		evt.Tool = domain.ToolKind(name)
 	}
 	meta := map[string]string{}
 	if args := strings.TrimSpace(call.Function.Arguments); args != "" {

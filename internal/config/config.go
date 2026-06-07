@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
-	"github.com/lkarlslund/koder/internal/toolkind"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -86,7 +86,7 @@ type PermissionRules = permissionprofile.Rules
 type PermissionProfile = permissionprofile.Profile
 type PermissionRule = permissionprofile.Rule
 
-type ToolDefaults map[toolkind.Kind]bool
+type ToolDefaults map[domain.ToolKind]bool
 
 type Config struct {
 	DefaultProvider         string                  `toml:"default_provider"`
@@ -208,11 +208,12 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
-	toolDefaults := make(ToolDefaults, len(toolkind.KindValues()))
-	for _, kind := range toolkind.KindValues() {
+	builtinToolKinds := domain.BuiltinToolKinds()
+	toolDefaults := make(ToolDefaults, len(builtinToolKinds))
+	for _, kind := range builtinToolKinds {
 		toolDefaults[kind] = true
 	}
-	toolDefaults[toolkind.ToolKindBash] = false
+	toolDefaults[domain.ToolKindBash] = false
 	return Config{
 		DefaultProvider:         "",
 		MaxToolLoopSteps:        defaultMaxToolLoopSteps,
@@ -280,7 +281,7 @@ func (c *Config) applyDefaults() {
 		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
 	}
 	pruneToolDefaults(c.ToolDefaults)
-	for _, kind := range toolkind.KindValues() {
+	for _, kind := range domain.BuiltinToolKinds() {
 		if _, ok := c.ToolDefaults[kind]; !ok {
 			c.ToolDefaults[kind] = def.ToolDefaults[kind]
 		}
@@ -650,8 +651,9 @@ func cloneToolDefaults(src ToolDefaults) ToolDefaults {
 }
 
 func pruneToolDefaults(defaults ToolDefaults) {
-	known := make(map[toolkind.Kind]struct{}, len(toolkind.KindValues()))
-	for _, kind := range toolkind.KindValues() {
+	builtinToolKinds := domain.BuiltinToolKinds()
+	known := make(map[domain.ToolKind]struct{}, len(builtinToolKinds))
+	for _, kind := range builtinToolKinds {
 		known[kind] = struct{}{}
 	}
 	for kind := range defaults {
@@ -661,30 +663,31 @@ func pruneToolDefaults(defaults ToolDefaults) {
 	}
 }
 
-var toolDefaultKindAliases = map[string]toolkind.Kind{
-	"execcleanupbackground":     toolkind.ToolKindExecCleanup,
-	"milestoneadditems":         toolkind.ToolKindMilestoneAdd,
-	"milestoneplananddecompose": toolkind.ToolKindMilestonePlan,
-	"milestoneupdateitem":       toolkind.ToolKindMilestoneUpdate,
-	"todoadditems":              toolkind.ToolKindTasksAdd,
-	"todoupdateitem":            toolkind.ToolKindTasksUpdate,
+var toolDefaultKindAliases = map[string]domain.ToolKind{
+	"execcleanupbackground":     domain.ToolKindExecCleanup,
+	"milestoneadditems":         domain.ToolKindMilestoneAdd,
+	"milestoneplananddecompose": domain.ToolKindMilestonePlan,
+	"milestoneupdateitem":       domain.ToolKindMilestoneUpdate,
+	"todoadditems":              domain.ToolKindTasksAdd,
+	"todoupdateitem":            domain.ToolKindTasksUpdate,
 }
 
-func parseToolDefaultKind(name string) (toolkind.Kind, error) {
-	if kind, err := toolkind.KindString(name); err == nil {
-		return kind, nil
-	}
+func parseToolDefaultKind(name string) (domain.ToolKind, error) {
+	trimmed := strings.TrimSpace(name)
 	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
 	if kind, ok := toolDefaultKindAliases[normalized]; ok {
 		return kind, nil
 	}
-	for _, kind := range toolkind.KindValues() {
+	for _, kind := range domain.BuiltinToolKinds() {
+		if kind.String() == trimmed {
+			return kind, nil
+		}
 		canonical := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(kind.String()))
 		if canonical == normalized {
 			return kind, nil
 		}
 	}
-	return 0, fmt.Errorf("unknown tool default %q", name)
+	return "", fmt.Errorf("unknown tool default %q", name)
 }
 
 func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {

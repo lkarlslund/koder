@@ -630,7 +630,7 @@ func DisplayTextForPart(part domain.Part) (string, bool) {
 func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultStatus, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok {
-		return 0, "", false
+		return "", "", false
 	}
 	return env.Tool, env.Status, true
 }
@@ -834,7 +834,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 
 func formatErrorStoredResult(tool domain.ToolKind, message string) string {
 	message = strings.TrimSpace(message)
-	if tool == 0 || message == "" {
+	if tool == "" || message == "" {
 		return message
 	}
 	messageLower := strings.ToLower(message)

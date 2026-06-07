@@ -18,7 +18,6 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 type chatIDContextKey struct{}
@@ -226,7 +225,7 @@ func Register(tool Tool, spec ToolSpec) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	kind := tool.Kind()
-	if kind == 0 {
+	if kind == "" {
 		panic("tools: empty tool kind")
 	}
 	if _, exists := registry[kind]; exists {
@@ -262,6 +261,12 @@ func Info(kind domain.ToolKind) ToolSpec {
 		return spec
 	}
 	return normalizeToolSpec(kind, ToolSpec{})
+}
+
+func RegisteredKinds() []domain.ToolKind {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return slices.Clone(order)
 }
 
 func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) {
@@ -343,7 +348,7 @@ func EnsureSessionTmpDir(settings accesssettings.Settings) error {
 }
 
 func FinalizeResult(ctx context.Context, runtime Runtime, req Request, result Result) (domain.ToolResult, string, error) {
-	if req.Tool == 0 {
+	if req.Tool == "" {
 		return domain.ToolResult{}, "", errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)
@@ -415,10 +420,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if name == "" {
 		return Request{}, fmt.Errorf("provider tool call missing function name")
 	}
-	kind, err := toolkind.KindString(name)
-	if err != nil {
-		return Request{}, fmt.Errorf("unknown tool %q", name)
-	}
+	kind := domain.ToolKind(name)
 	req := Request{
 		Tool:       kind,
 		ToolCallID: strings.TrimSpace(call.ID),
@@ -483,10 +485,7 @@ func RequestFromMetaMap(raw map[string]string) (Request, error) {
 	if toolName == "" {
 		return Request{}, fmt.Errorf("tool name is empty")
 	}
-	kind, err := toolkind.KindString(toolName)
-	if err != nil {
-		return Request{}, fmt.Errorf("unknown tool %q", toolName)
-	}
+	kind := domain.ToolKind(toolName)
 	req := Request{
 		Tool:       kind,
 		ToolCallID: strings.TrimSpace(raw["tool_call_id"]),
@@ -540,7 +539,7 @@ func normalizeToolSpec(kind domain.ToolKind, spec ToolSpec) ToolSpec {
 	spec.Usage = strings.TrimSpace(spec.Usage)
 	spec.Parameters = strings.TrimSpace(spec.Parameters)
 	if spec.Title == "" {
-		if kind == 0 {
+		if kind == "" {
 			spec.Title = "Tool"
 		} else {
 			spec.Title = strings.ReplaceAll(kind.String(), "_", " ")
@@ -641,7 +640,7 @@ func EmitOnce(evt domain.Event) <-chan domain.Event {
 }
 
 func normalizeRequest(req Request) (Request, Tool, error) {
-	if req.Tool == 0 {
+	if req.Tool == "" {
 		return req, nil, errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)

@@ -2133,7 +2133,7 @@ func analyzeTranscriptItem(item domain.TimelineItem) analyzedTranscriptMessage {
 		}
 		for _, tool := range content.Tools {
 			out.hasToolCall = true
-			if tool.Tool != 0 {
+			if tool.Tool != "" {
 				out.toolNames = append(out.toolNames, tool.Tool.DisplayName())
 			}
 		}

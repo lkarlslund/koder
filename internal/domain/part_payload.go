@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 // PartPayload is the typed content stored by a message part.
@@ -76,10 +74,7 @@ func (p *ToolCallPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(encoded.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(encoded.Tool))
 	*p = ToolCallPayload{Tool: tool, ToolCallID: encoded.ToolCallID, Args: encoded.Args}
 	return nil
 }
@@ -156,12 +151,10 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(encoded.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(encoded.Tool))
 	var result ToolResultPayload
-	if tool != 0 {
+	if tool != "" {
+		var err error
 		result, err = decodeToolResultPayload(tool, encoded.Status, encoded.Result)
 		if err != nil {
 			return err
@@ -278,10 +271,7 @@ func (p *ApprovalRequestPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(encoded.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(encoded.Tool))
 	*p = ApprovalRequestPayload{
 		ApprovalID: encoded.ApprovalID,
 		Tool:       tool,
@@ -391,10 +381,7 @@ func (p *EventNoticePayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(encoded.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(encoded.Tool))
 	*p = EventNoticePayload{
 		Text:       encoded.Text,
 		Kind:       encoded.Kind,

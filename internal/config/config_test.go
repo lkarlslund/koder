@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/toolkind"
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 func TestLoadWritesDefaultConfig(t *testing.T) {
@@ -56,10 +56,10 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
-	if cfg.ToolDefaults[toolkind.ToolKindBash] {
+	if cfg.ToolDefaults[domain.ToolKindBash] {
 		t.Fatal("expected bash disabled by default")
 	}
-	if !cfg.ToolDefaults[toolkind.ToolKindExecCommand] {
+	if !cfg.ToolDefaults[domain.ToolKindExecCommand] {
 		t.Fatal("expected exec_command enabled by default")
 	}
 	if len(cfg.Providers) != 0 {
@@ -215,19 +215,19 @@ milestone_update_item = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []toolkind.Kind{
-		toolkind.ToolKindBash,
-		toolkind.ToolKindExecWriteStdin,
-		toolkind.ToolKindExecCleanup,
-		toolkind.ToolKindMilestoneAdd,
-		toolkind.ToolKindMilestonePlan,
-		toolkind.ToolKindMilestoneUpdate,
+	for _, kind := range []domain.ToolKind{
+		domain.ToolKindBash,
+		domain.ToolKindExecWriteStdin,
+		domain.ToolKindExecCleanup,
+		domain.ToolKindMilestoneAdd,
+		domain.ToolKindMilestonePlan,
+		domain.ToolKindMilestoneUpdate,
 	} {
 		if cfg.ToolDefaults[kind] {
 			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.ToolDefaults)
 		}
 	}
-	if !cfg.ToolDefaults[toolkind.ToolKindFileRead] {
+	if !cfg.ToolDefaults[domain.ToolKindFileRead] {
 		t.Fatal("expected missing tool default to be backfilled enabled")
 	}
 }
@@ -256,12 +256,12 @@ file_read = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ToolDefaults[toolkind.ToolKindFileRead] {
+	if cfg.ToolDefaults[domain.ToolKindFileRead] {
 		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.ToolDefaults)
 	}
-	for _, kind := range toolkind.KindValues() {
-		if !kind.IsAKind() {
-			t.Fatalf("loaded invalid tool kind %d", kind)
+	for _, kind := range domain.BuiltinToolKinds() {
+		if kind.String() == "" {
+			t.Fatalf("loaded invalid tool kind %q", kind)
 		}
 	}
 }
@@ -288,10 +288,10 @@ file_read = true
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ToolDefaults[toolkind.ToolKindBash] {
+	if cfg.ToolDefaults[domain.ToolKindBash] {
 		t.Fatalf("expected missing bash default to backfill disabled: %#v", cfg.ToolDefaults)
 	}
-	if !cfg.ToolDefaults[toolkind.ToolKindExecCommand] {
+	if !cfg.ToolDefaults[domain.ToolKindExecCommand] {
 		t.Fatalf("expected missing exec_command default to backfill enabled: %#v", cfg.ToolDefaults)
 	}
 }

@@ -3,8 +3,6 @@ package chatrole
 import (
 	"fmt"
 	"strings"
-
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 type Role string
@@ -23,19 +21,23 @@ type Spec struct {
 	Name         Role
 	DisplayName  string
 	SystemPrompt string
-	AllowTools   map[toolkind.Kind]bool
-	DenyTools    map[toolkind.Kind]bool
+	AllowTools   map[string]bool
+	DenyTools    map[string]bool
 }
 
 // AllowsTool reports whether this role may expose or execute a tool.
-func (s Spec) AllowsTool(kind toolkind.Kind) bool {
+func (s Spec) AllowsTool(kind fmt.Stringer) bool {
+	tool := strings.TrimSpace(kind.String())
+	if tool == "" {
+		return false
+	}
 	if !s.Registered {
 		return false
 	}
 	if s.AllowTools != nil {
-		return s.AllowTools[kind]
+		return s.AllowTools[tool]
 	}
-	if len(s.DenyTools) > 0 && s.DenyTools[kind] {
+	if len(s.DenyTools) > 0 && s.DenyTools[tool] {
 		return false
 	}
 	return true
@@ -72,14 +74,14 @@ Focus only on the assigned milestone and task list.
 - Keep task status updated as you progress.
 			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
-				toolkind.ToolKindChatStart,
-				toolkind.ToolKindChatSend,
-				toolkind.ToolKindChatCancel,
-				toolkind.ToolKindChatArchive,
-				toolkind.ToolKindChatRename,
-				toolkind.ToolKindMilestoneAdd,
-				toolkind.ToolKindMilestonePlan,
-				toolkind.ToolKindMilestoneWrite,
+				"chat_start",
+				"chat_send",
+				"chat_cancel",
+				"chat_archive",
+				"chat_rename",
+				"milestone_add",
+				"milestone_plan",
+				"milestone_write",
 			),
 		},
 	}}
@@ -107,12 +109,12 @@ func SpecFor(role Role) Spec {
 }
 
 // AllowsTool reports whether role may expose or execute kind.
-func AllowsTool(role Role, kind toolkind.Kind) bool {
+func AllowsTool(role Role, kind fmt.Stringer) bool {
 	return SpecFor(role).AllowsTool(kind)
 }
 
 // CheckToolAllowed returns an error when role cannot execute kind.
-func CheckToolAllowed(role Role, kind toolkind.Kind) error {
+func CheckToolAllowed(role Role, kind fmt.Stringer) error {
 	if AllowsTool(role, kind) {
 		return nil
 	}
@@ -150,10 +152,13 @@ You may discuss, ask clarifying questions, manage milestones, decompose work inl
 	}
 }
 
-func toolSet(kinds ...toolkind.Kind) map[toolkind.Kind]bool {
-	out := make(map[toolkind.Kind]bool, len(kinds))
+func toolSet(kinds ...string) map[string]bool {
+	out := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {
-		out[kind] = true
+		kind = strings.TrimSpace(kind)
+		if kind != "" {
+			out[kind] = true
+		}
 	}
 	return out
 }

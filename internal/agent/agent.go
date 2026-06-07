@@ -37,7 +37,6 @@ import (
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
-	"github.com/lkarlslund/koder/internal/toolkind"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
@@ -344,7 +343,7 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 			Kind: domain.EventKindStatus,
 			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
 			Meta: map[string]string{
-				"permission_tool":    next.Tool.String(),
+				"permission_tool":    next.Tool,
 				"permission_pattern": next.Pattern,
 			},
 		}
@@ -1487,7 +1486,7 @@ type toolLoopTracker struct {
 
 func (t *toolLoopTracker) reset() {
 	t.lastSignature = ""
-	t.lastTool = 0
+	t.lastTool = ""
 	t.repeatCount = 0
 }
 
@@ -1579,7 +1578,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID id.ID,
 func continuationPauseSubtitle(pause continuationPause) string {
 	switch pause.Reason {
 	case continuationPauseReasonRepeatedTool:
-		if pause.Tool != 0 {
+		if pause.Tool != "" {
 			return fmt.Sprintf("Repeated identical %s calls", pause.Tool.DisplayName())
 		}
 		return "Repeated identical tool calls"
@@ -1605,9 +1604,7 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 	}
 	var noticeTool domain.ToolKind
 	if meta.Tool != "" {
-		if tk, err := toolkind.KindString(meta.Tool); err == nil {
-			noticeTool = tk
-		}
+		noticeTool = domain.ToolKind(strings.TrimSpace(meta.Tool))
 	}
 	rt, err := e.chatOwner(ctx, sessionID, chatID)
 	if err != nil {
@@ -2702,7 +2699,7 @@ func parseToolCall(text string) (*tools.Request, string) {
 		return nil, text
 	}
 	call, err := tools.RequestFromMeta(match[1])
-	if err != nil || call.Tool == 0 {
+	if err != nil || call.Tool == "" {
 		return nil, text
 	}
 	plain := strings.TrimSpace(re.ReplaceAllString(text, ""))
@@ -3634,7 +3631,7 @@ func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) 
 		return domain.ToolCall{}, false
 	}
 	req := callErr.Request
-	if req.Tool == 0 || strings.TrimSpace(req.ToolCallID) == "" {
+	if req.Tool == "" || strings.TrimSpace(req.ToolCallID) == "" {
 		return domain.ToolCall{}, false
 	}
 	now := time.Now().UTC()
@@ -3650,7 +3647,7 @@ func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) 
 
 func (e *Engine) failedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
 	call := callErr.ToolCall
-	kind, _ := toolkind.KindString(strings.TrimSpace(call.Function.Name))
+	kind := domain.ToolKind(strings.TrimSpace(call.Function.Name))
 	now := time.Now().UTC()
 	toolCallID := strings.TrimSpace(call.ID)
 	if toolCallID == "" {
@@ -4070,8 +4067,9 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 }
 
 func (e *Engine) effectiveToolStates(session domain.Session) map[domain.ToolKind]bool {
-	out := make(map[domain.ToolKind]bool, len(toolkind.KindValues()))
-	for _, kind := range toolkind.KindValues() {
+	registered := tools.RegisteredKinds()
+	out := make(map[domain.ToolKind]bool, len(registered))
+	for _, kind := range registered {
 		out[kind] = toolEnabledForSession(e.cfg, session, kind)
 	}
 	return out

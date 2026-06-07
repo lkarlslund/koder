@@ -1,12 +1,13 @@
 package domain
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 //go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -trimprefix=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -transform=snake -json -text -values -output=messagerole_enumer.go
@@ -38,55 +39,153 @@ const (
 	PartKindEventNotice
 )
 
-type ToolKind = toolkind.Kind
+type ToolKind string
 
 const (
-	ToolKindFileRead        = toolkind.ToolKindFileRead
-	ToolKindViewImage       = toolkind.ToolKindViewImage
-	ToolKindShowImage       = toolkind.ToolKindShowImage
-	ToolKindFileGlob        = toolkind.ToolKindFileGlob
-	ToolKindFileGrep        = toolkind.ToolKindFileGrep
-	ToolKindCodeSearch      = toolkind.ToolKindCodeSearch
-	ToolKindLint            = toolkind.ToolKindLint
-	ToolKindBash            = toolkind.ToolKindBash
-	ToolKindExecCommand     = toolkind.ToolKindExecCommand
-	ToolKindExecStatus      = toolkind.ToolKindExecStatus
-	ToolKindExecList        = toolkind.ToolKindExecList
-	ToolKindExecWriteStdin  = toolkind.ToolKindExecWriteStdin
-	ToolKindExecResize      = toolkind.ToolKindExecResize
-	ToolKindExecTerminate   = toolkind.ToolKindExecTerminate
-	ToolKindExecCleanup     = toolkind.ToolKindExecCleanup
-	ToolKindFileEdit        = toolkind.ToolKindFileEdit
-	ToolKindFileWrite       = toolkind.ToolKindFileWrite
-	ToolKindTask            = toolkind.ToolKindTask
-	ToolKindQuestion        = toolkind.ToolKindQuestion
-	ToolKindUpdatePlan      = toolkind.ToolKindUpdatePlan
-	ToolKindMilestoneList   = toolkind.ToolKindMilestoneList
-	ToolKindMilestoneAdd    = toolkind.ToolKindMilestoneAdd
-	ToolKindMilestoneUpdate = toolkind.ToolKindMilestoneUpdate
-	ToolKindMilestonePlan   = toolkind.ToolKindMilestonePlan
-	ToolKindMilestoneWrite  = toolkind.ToolKindMilestoneWrite
-	ToolKindTaskList        = toolkind.ToolKindTaskList
-	ToolKindTaskAddItems    = toolkind.ToolKindTaskAddItems
-	ToolKindTaskUpdateItem  = toolkind.ToolKindTaskUpdateItem
-	ToolKindTaskFetchNext   = toolkind.ToolKindTaskFetchNext
-	ToolKindTasksAdd        = toolkind.ToolKindTasksAdd
-	ToolKindTasksUpdate     = toolkind.ToolKindTasksUpdate
-	ToolKindChatList        = toolkind.ToolKindChatList
-	ToolKindChatStart       = toolkind.ToolKindChatStart
-	ToolKindChatSend        = toolkind.ToolKindChatSend
-	ToolKindChatCancel      = toolkind.ToolKindChatCancel
-	ToolKindChatArchive     = toolkind.ToolKindChatArchive
-	ToolKindChatRename      = toolkind.ToolKindChatRename
-	ToolKindSkill           = toolkind.ToolKindSkill
-	ToolKindWebFetch        = toolkind.ToolKindWebFetch
-	ToolKindWebSearch       = toolkind.ToolKindWebSearch
-	ToolKindMCP             = toolkind.ToolKindMCP
+	ToolKindFileRead        ToolKind = "file_read"
+	ToolKindViewImage       ToolKind = "view_image"
+	ToolKindShowImage       ToolKind = "show_image"
+	ToolKindFileGlob        ToolKind = "file_glob"
+	ToolKindFileGrep        ToolKind = "file_grep"
+	ToolKindCodeSearch      ToolKind = "code_search"
+	ToolKindLint            ToolKind = "lint"
+	ToolKindBash            ToolKind = "bash"
+	ToolKindExecCommand     ToolKind = "exec_command"
+	ToolKindExecStatus      ToolKind = "exec_status"
+	ToolKindExecList        ToolKind = "exec_list"
+	ToolKindExecWriteStdin  ToolKind = "exec_write_stdin"
+	ToolKindExecResize      ToolKind = "exec_resize"
+	ToolKindExecTerminate   ToolKind = "exec_terminate"
+	ToolKindExecCleanup     ToolKind = "exec_cleanup"
+	ToolKindFileEdit        ToolKind = "file_edit"
+	ToolKindFileWrite       ToolKind = "file_write"
+	ToolKindTask            ToolKind = "task"
+	ToolKindQuestion        ToolKind = "question"
+	ToolKindUpdatePlan      ToolKind = "update_plan"
+	ToolKindMilestoneList   ToolKind = "milestone_list"
+	ToolKindMilestoneAdd    ToolKind = "milestone_add"
+	ToolKindMilestoneUpdate ToolKind = "milestone_update"
+	ToolKindMilestonePlan   ToolKind = "milestone_plan"
+	ToolKindMilestoneWrite  ToolKind = "milestone_write"
+	ToolKindTaskList        ToolKind = "task_list"
+	ToolKindTaskAddItems    ToolKind = "task_add_items"
+	ToolKindTaskUpdateItem  ToolKind = "task_update_item"
+	ToolKindTaskFetchNext   ToolKind = "task_fetch_next"
+	ToolKindTasksAdd        ToolKind = "tasks_add"
+	ToolKindTasksUpdate     ToolKind = "tasks_update"
+	ToolKindChatList        ToolKind = "chat_list"
+	ToolKindChatStart       ToolKind = "chat_start"
+	ToolKindChatSend        ToolKind = "chat_send"
+	ToolKindChatCancel      ToolKind = "chat_cancel"
+	ToolKindChatArchive     ToolKind = "chat_archive"
+	ToolKindChatRename      ToolKind = "chat_rename"
+	ToolKindSkill           ToolKind = "skill"
+	ToolKindWebFetch        ToolKind = "web_fetch"
+	ToolKindWebSearch       ToolKind = "web_search"
+	ToolKindMCP             ToolKind = "mcp"
 )
 
 type PermissionOverride = accesssettings.PermissionOverride
 
-type ToolStates = toolkind.States
+type ToolStates map[ToolKind]bool
+
+var builtinToolKinds = []ToolKind{
+	ToolKindFileRead,
+	ToolKindViewImage,
+	ToolKindShowImage,
+	ToolKindFileGlob,
+	ToolKindFileGrep,
+	ToolKindCodeSearch,
+	ToolKindLint,
+	ToolKindBash,
+	ToolKindExecCommand,
+	ToolKindExecStatus,
+	ToolKindExecList,
+	ToolKindExecWriteStdin,
+	ToolKindExecResize,
+	ToolKindExecTerminate,
+	ToolKindExecCleanup,
+	ToolKindFileEdit,
+	ToolKindFileWrite,
+	ToolKindTask,
+	ToolKindQuestion,
+	ToolKindUpdatePlan,
+	ToolKindMilestoneList,
+	ToolKindMilestoneAdd,
+	ToolKindMilestoneUpdate,
+	ToolKindMilestonePlan,
+	ToolKindMilestoneWrite,
+	ToolKindTaskList,
+	ToolKindTaskAddItems,
+	ToolKindTaskUpdateItem,
+	ToolKindTaskFetchNext,
+	ToolKindTasksAdd,
+	ToolKindTasksUpdate,
+	ToolKindChatList,
+	ToolKindChatStart,
+	ToolKindChatSend,
+	ToolKindChatCancel,
+	ToolKindChatArchive,
+	ToolKindChatRename,
+	ToolKindSkill,
+	ToolKindWebFetch,
+	ToolKindWebSearch,
+	ToolKindMCP,
+}
+
+func BuiltinToolKinds() []ToolKind {
+	return slices.Clone(builtinToolKinds)
+}
+
+func IsBuiltinToolKind(kind ToolKind) bool {
+	for _, known := range builtinToolKinds {
+		if known == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (k ToolKind) String() string {
+	return string(k)
+}
+
+func (k ToolKind) DisplayName() string {
+	name := strings.TrimSpace(k.String())
+	if name == "" {
+		return ""
+	}
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-'
+	})
+	for idx, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[idx] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, "")
+}
+
+func (s *ToolStates) UnmarshalJSON(data []byte) error {
+	var raw map[string]bool
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	states := make(ToolStates, len(raw))
+	for name, enabled := range raw {
+		kind := ToolKind(strings.TrimSpace(name))
+		if kind == "" {
+			continue
+		}
+		if !IsBuiltinToolKind(kind) {
+			continue
+		}
+		states[kind] = enabled
+	}
+	*s = states
+	return nil
+}
 
 type ApprovalStatus uint8
 

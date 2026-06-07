@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
 // TimelineContent is the typed payload stored by a timeline item.
@@ -301,12 +299,9 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(in.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(in.Tool))
 	var result *ToolResult
-	if in.Result != nil && tool != 0 {
+	if in.Result != nil && tool != "" {
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	status := in.Status
@@ -387,12 +382,9 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(in.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(in.Tool))
 	var result *ToolResult
-	if in.Result != nil && tool != 0 {
+	if in.Result != nil && tool != "" {
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	*e = ToolExecution{Tool: tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
@@ -462,10 +454,7 @@ func (n *Notice) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &encoded); err != nil {
 		return err
 	}
-	tool, err := toolkind.ParsePersisted(encoded.Tool)
-	if err != nil {
-		tool = 0
-	}
+	tool := ToolKind(strings.TrimSpace(encoded.Tool))
 	*n = Notice{
 		Level:      encoded.Level,
 		Text:       encoded.Text,

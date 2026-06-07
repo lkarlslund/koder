@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
-	"github.com/lkarlslund/koder/internal/toolkind"
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 const (
@@ -39,7 +39,7 @@ type Profile struct {
 
 // Rule grants, asks, or denies a tool matching a pattern.
 type Rule struct {
-	Tool    toolkind.Kind                 `toml:"tool"`
+	Tool    domain.ToolKind               `toml:"tool"`
 	Pattern string                        `toml:"pattern"`
 	Action  accesssettings.PermissionMode `toml:"action"`
 }
@@ -71,7 +71,7 @@ type ProfileOption struct {
 
 // Request describes the permission-sensitive operation being evaluated.
 type Request struct {
-	Tool           toolkind.Kind
+	Tool           domain.ToolKind
 	Access         AccessKind
 	Pattern        string
 	ProjectRoot    string
@@ -112,7 +112,7 @@ func Evaluate(cfg Rules, profileName string, overrides []accesssettings.Permissi
 	}
 
 	for _, rule := range slices.Backward(profile.Rules) {
-		if !toolMatches(rule.Tool, req.Tool) {
+		if !toolMatches(rule.Tool.String(), req.Tool) {
 			continue
 		}
 		if wildcardMatch(rule.Pattern, pattern) {
@@ -352,11 +352,12 @@ func (req Request) targetsProjectOnly() bool {
 	return true
 }
 
-func toolMatches(ruleTool, reqTool toolkind.Kind) bool {
-	if strings.TrimSpace(ruleTool.String()) == "" {
+func toolMatches(ruleTool string, reqTool domain.ToolKind) bool {
+	ruleTool = strings.TrimSpace(ruleTool)
+	if ruleTool == "" {
 		return false
 	}
-	return wildcardMatch(ruleTool.String(), reqTool.String())
+	return wildcardMatch(ruleTool, reqTool.String())
 }
 
 func (req Request) reason(fallback string) string {

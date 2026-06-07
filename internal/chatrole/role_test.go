@@ -3,9 +3,11 @@ package chatrole
 import (
 	"strings"
 	"testing"
-
-	"github.com/lkarlslund/koder/internal/toolkind"
 )
+
+type testTool string
+
+func (t testTool) String() string { return string(t) }
 
 func TestDefaultRegistryRoleSpecs(t *testing.T) {
 	tests := []struct {
@@ -38,18 +40,18 @@ func TestRoleAllowsTool(t *testing.T) {
 	tests := []struct {
 		name string
 		role Role
-		tool toolkind.Kind
+		tool testTool
 		want bool
 	}{
-		{"execution allows edit", Execution, toolkind.ToolKindFileEdit, true},
-		{"execution rejects chat start", Execution, toolkind.ToolKindChatStart, false},
-		{"execution rejects chat send", Execution, toolkind.ToolKindChatSend, false},
-		{"execution rejects milestone add", Execution, toolkind.ToolKindMilestoneAdd, false},
-		{"execution allows milestone update", Execution, toolkind.ToolKindMilestoneUpdate, true},
-		{"orchestrator allows chat send", Orchestrator, toolkind.ToolKindChatSend, true},
-		{"compaction rejects read", Compaction, toolkind.ToolKindFileRead, false},
-		{"compaction rejects chat send", Compaction, toolkind.ToolKindChatSend, false},
-		{"unknown rejects read", Role("unknown"), toolkind.ToolKindFileRead, false},
+		{"execution allows edit", Execution, testTool("file_edit"), true},
+		{"execution rejects chat start", Execution, testTool("chat_start"), false},
+		{"execution rejects chat send", Execution, testTool("chat_send"), false},
+		{"execution rejects milestone add", Execution, testTool("milestone_add"), false},
+		{"execution allows milestone update", Execution, testTool("milestone_update"), true},
+		{"orchestrator allows chat send", Orchestrator, testTool("chat_send"), true},
+		{"compaction rejects read", Compaction, testTool("file_read"), false},
+		{"compaction rejects chat send", Compaction, testTool("chat_send"), false},
+		{"unknown rejects read", Role("unknown"), testTool("file_read"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
