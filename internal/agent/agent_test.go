@@ -40,6 +40,173 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func testChatCollection(st *store.Store) store.Collection[domain.Chat] {
+	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
+		Namespace: "chats",
+		GetID:     func(v domain.Chat) string { return v.ID },
+		SetID:     func(v *domain.Chat, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.Chat]{
+			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
+		},
+	})
+}
+
+func testTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
+	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
+		Namespace: "timeline",
+		GetID:     func(v domain.TimelineItem) string { return v.ID },
+		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.TimelineItem]{
+			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
+		},
+	})
+}
+
+func testGetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
+	return testChatCollection(st).Get(ctx, chatID)
+}
+
+func testUpdateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+	return testChatCollection(st).Put(ctx, chatRecord)
+}
+
+func testSetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
+	chatRecord, err := testGetChat(ctx, st, chatID)
+	if err != nil {
+		return err
+	}
+	chatRecord.QueuedInputs = slices.Clone(items)
+	chatRecord.UpdatedAt = time.Now().UTC()
+	return testUpdateChat(ctx, st, chatRecord)
+}
+
+func testTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
+	items, err := testTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
+}
+
+func testAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+	items, err := testTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	return testTimelineCollection(st).Insert(ctx, domain.TimelineItem{
+		ChatID:    chatID,
+		Seq:       int64(len(items) + 1),
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
+
+func testPutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
+	return testTimelineCollection(st).Put(ctx, item)
+}
+
+func testAppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	assistant := domain.AssistantMessage{Text: text}
+	for _, call := range calls {
+		if err := assistant.AddToolCall(call); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
+		assistant.Usage = &usage
+	}
+	item, err := testAppendTimeline(ctx, st, chatID, assistant)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(time.Now().UTC())
+	if err := testPutTimelineItem(ctx, st, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
+}
+
+func testAttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+	items, err := testTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		item := items[idx]
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
+		if call == nil {
+			continue
+		}
+		call.Result = &result
+		call.Error = nil
+		call.Status = domain.ToolStatusDone
+		if result.Status == domain.ToolResultStatusDenied {
+			call.Status = domain.ToolStatusDenied
+		}
+		if call.CompletedAt.IsZero() {
+			call.CompletedAt = time.Now().UTC()
+		}
+		item.Content = assistant
+		item.UpdatedAt = time.Now().UTC()
+		return item, testPutTimelineItem(ctx, st, item)
+	}
+	return domain.TimelineItem{}, fmt.Errorf("tool call %q not found", toolCallID)
+}
+
+func testPendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]chatpkg.Approval, error) {
+	chatRecord, err := testGetChat(ctx, st, chatID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := testTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return nil, err
+	}
+	var approvals []chatpkg.Approval
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusAwaitingApproval {
+				continue
+			}
+			approvals = append(approvals, chatpkg.Approval{
+				ID:         chatpkg.SyntheticApprovalID(string(call.ToolCallID)),
+				SessionID:  chatRecord.SessionID,
+				ChatID:     chatRecord.ID,
+				Tool:       call.Tool,
+				ToolCallID: string(call.ToolCallID),
+				Status:     domain.ApprovalStatusPending,
+				CreatedAt:  item.UpdatedAt,
+			})
+		}
+	}
+	return approvals, nil
+}
+
 func TestParseToolCall(t *testing.T) {
 	call, plain := parseToolCall("I will inspect the repo.\n<koder_tool>\n{\"tool\":\"bash\",\"command\":\"pwd\"}\n</koder_tool>")
 	if call == nil {
@@ -271,12 +438,12 @@ func appendUserTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text st
 
 func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID id.ID, text string, attachments []domain.Attachment) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.UserMessage{Text: text, Attachments: attachments})
+	item, err := testAppendTimeline(context.Background(), st, chatID, domain.UserMessage{Text: text, Attachments: attachments})
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := testPutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -284,7 +451,7 @@ func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID
 
 func appendSteerTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text string) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.UserMessage{
+	item, err := testAppendTimeline(context.Background(), st, chatID, domain.UserMessage{
 		Text:     text,
 		Source:   domain.UserMessageSourceSteer,
 		Delivery: domain.QueuedInputDeliveryTurnBoundary,
@@ -293,7 +460,7 @@ func appendSteerTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text s
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := testPutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -301,12 +468,12 @@ func appendSteerTimelineItem(t *testing.T, st *store.Store, chatID id.ID, text s
 
 func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID id.ID, msg domain.AssistantMessage) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, msg)
+	item, err := testAppendTimeline(context.Background(), st, chatID, msg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := testPutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -314,12 +481,12 @@ func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID id.ID, ms
 
 func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID id.ID, notice domain.Notice) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, notice)
+	item, err := testAppendTimeline(context.Background(), st, chatID, notice)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := testPutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -327,7 +494,7 @@ func appendNoticeTimelineItem(t *testing.T, st *store.Store, chatID id.ID, notic
 
 func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendAssistantToolCalls(context.Background(), st, chatID, []domain.ToolCall{{
+	item, err := testAppendAssistantToolCalls(context.Background(), st, chatID, []domain.ToolCall{{
 		ToolCallID: domain.ToolCallID(req.ToolCallID),
 		Tool:       req.Tool,
 		Args:       req.Args,
@@ -341,7 +508,7 @@ func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID id.ID
 
 func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AttachToolResult(context.Background(), st, chatID, req.ToolCallID, domain.ToolResult{
+	item, err := testAttachToolResult(context.Background(), st, chatID, req.ToolCallID, domain.ToolResult{
 		Text:   text,
 		Data:   data,
 		Status: domain.ToolResultStatusOK,
@@ -370,7 +537,7 @@ func waitForTimelineCondition(t *testing.T, st *store.Store, chatID id.ID, want 
 	var items []domain.TimelineItem
 	for time.Now().Before(deadline) {
 		var err error
-		items, err = chatpkg.TimelineForChat(context.Background(), st, chatID)
+		items, err = testTimelineForChat(context.Background(), st, chatID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +565,7 @@ func waitForChatInactive(t *testing.T, rt *chatpkg.Chat) {
 
 func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, st *store.Store, chatID id.ID) []domain.Event {
 	t.Helper()
-	pending, err := chatpkg.PendingApprovalsForChat(context.Background(), st, chatID)
+	pending, err := testPendingApprovalsForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +588,7 @@ func assertToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID st
 
 func currentToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string) domain.ToolStatus {
 	t.Helper()
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chatID)
+	items, err := testTimelineForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +608,7 @@ func currentToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID s
 
 func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID id.ID, summary string, firstKeptItemID string) domain.TimelineItem {
 	t.Helper()
-	item, err := chatpkg.AppendTimeline(context.Background(), st, chatID, domain.Compaction{
+	item, err := testAppendTimeline(context.Background(), st, chatID, domain.Compaction{
 		Summary:         summary,
 		Status:          "completed",
 		FirstKeptItemID: firstKeptItemID,
@@ -450,7 +617,7 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID id.ID, s
 		t.Fatal(err)
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(context.Background(), st, item); err != nil {
+	if err := testPutTimelineItem(context.Background(), st, item); err != nil {
 		t.Fatal(err)
 	}
 	return item
@@ -467,7 +634,7 @@ func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID id.ID
 
 func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[id.ID][]domain.Part, error) {
 	t.Helper()
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -539,7 +706,7 @@ func testTranscriptItem(sessionID id.ID, item domain.TimelineItem) (domain.Messa
 
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID id.ID) []domain.Notice {
 	t.Helper()
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chatID)
+	items, err := testTimelineForChat(context.Background(), st, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +1113,7 @@ func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	got, err := chatpkg.GetChat(context.Background(), st, parent.ID)
+	got, err := testGetChat(context.Background(), st, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1016,7 +1183,7 @@ func TestConsumeChatUpdatesSummarizesPartialMilestoneProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	child.ActiveMilestoneRef = "alpha"
-	if err := chatpkg.UpdateChat(context.Background(), st, child); err != nil {
+	if err := testUpdateChat(context.Background(), st, child); err != nil {
 		t.Fatal(err)
 	}
 	if err := sessionpkg.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}}}); err != nil {
@@ -1073,7 +1240,7 @@ func TestConsumeChatUpdatesSummarizesCompletedMilestoneTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	child.ActiveMilestoneRef = "alpha"
-	if err := chatpkg.UpdateChat(context.Background(), st, child); err != nil {
+	if err := testUpdateChat(context.Background(), st, child); err != nil {
 		t.Fatal(err)
 	}
 	todos, err := sessionpkg.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"first", "second"})
@@ -1137,7 +1304,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	if !status.Chat.Archived || status.Chat.Title != "Renamed child" {
 		t.Fatalf("expected archived status, got %#v", status.Chat)
 	}
-	reloaded, err := chatpkg.GetChat(context.Background(), st, child.ID)
+	reloaded, err := testGetChat(context.Background(), st, child.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1152,7 +1319,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	if status.Chat.Archived {
 		t.Fatalf("expected restored status, got %#v", status.Chat)
 	}
-	reloaded, err = chatpkg.GetChat(context.Background(), st, child.ID)
+	reloaded, err = testGetChat(context.Background(), st, child.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1250,7 +1417,7 @@ func TestStartChatRejectsArchivedParent(t *testing.T) {
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parent.Archived = true
-	if err := chatpkg.UpdateChat(context.Background(), st, parent); err != nil {
+	if err := testUpdateChat(context.Background(), st, parent); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1278,7 +1445,7 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.WorkflowRole = chatrole.Execution
-	if err := chatpkg.UpdateChat(context.Background(), st, chat); err != nil {
+	if err := testUpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
@@ -1372,7 +1539,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		t.Fatalf("expected persisted timeline item, got %#v", item)
 	}
 
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1424,7 +1591,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1666,7 +1833,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1725,7 +1892,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	tailItem := appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1791,7 +1958,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 		Output:    strings.Join(lines, "\n"),
 	})
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1839,7 +2006,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	latestToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", domain.BashStoredResult{Command: "go test", Output: "ok"})
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2750,7 +2917,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
-	pendingBefore, err := chatpkg.PendingApprovalsForChat(context.Background(), st, chatRecord.ID)
+	pendingBefore, err := testPendingApprovalsForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2799,7 +2966,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if len(chats) != 1 {
 		t.Fatalf("expected one chat, got %d", len(chats))
 	}
-	pending, err := chatpkg.PendingApprovalsForChat(context.Background(), st, chats[0].ID)
+	pending, err := testPendingApprovalsForChat(context.Background(), st, chats[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3110,7 +3277,7 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 		Source:    domain.UserMessageSourceUser,
 		CreatedAt: time.Now().UTC(),
 	}}
-	if err := chatpkg.SetChatQueuedInputs(context.Background(), st, chat.ID, chat.QueuedInputs); err != nil {
+	if err := testSetChatQueuedInputs(context.Background(), st, chat.ID, chat.QueuedInputs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3266,7 +3433,7 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	assertToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusDenied)
-	pending, err := chatpkg.PendingApprovalsForChat(context.Background(), st, chat.ID)
+	pending, err := testPendingApprovalsForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3619,7 +3786,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 		t.Fatalf("expected second request to include tool error feedback, got %s", requests[1])
 	}
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4724,7 +4891,7 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.LastKnownContextTokens = 850
 	chat.ContextTokensKnown = true
-	if err := chatpkg.UpdateChat(context.Background(), st, chat); err != nil {
+	if err := testUpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	appendUserTimelineItem(t, st, chat.ID, "previous work")
@@ -5131,7 +5298,7 @@ func TestRunPromptIgnoresUnknownContextUsageAfterCompaction(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.LastKnownContextTokens = 850
 	chat.ContextTokensKnown = false
-	if err := chatpkg.UpdateChat(context.Background(), st, chat); err != nil {
+	if err := testUpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	appendCompactionTimelineItem(t, st, chat.ID, "compact summary", "")
@@ -5225,7 +5392,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 		t.Fatalf("expected compaction lifecycle refresh events, got start=%v done=%v", sawRefreshStart, sawRefreshDone)
 	}
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5383,7 +5550,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 		t.Fatalf("expected preserved tail to be excluded from compaction request, got %s", requestBodies[0])
 	}
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5460,7 +5627,7 @@ func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	old := appendUserTimelineItem(t, st, chat.ID, "old item before valid compaction")
-	valid, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+	valid, err := testAppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
 		Summary:         "valid compact summary",
 		Status:          "completed",
 		FirstKeptItemID: old.ID,
@@ -5469,14 +5636,14 @@ func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendUserTimelineItem(t, st, chat.ID, "real tail that must survive")
-	if _, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+	if _, err := testAppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
 		Status:          "failed",
 		Trigger:         "manual",
 		FirstKeptItemID: valid.ID,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := chatpkg.AppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
+	if _, err := testAppendTimeline(context.Background(), st, chat.ID, domain.Compaction{
 		Summary:         "invalid compact summary",
 		Status:          "completed",
 		FirstKeptItemID: old.ID,
@@ -5706,7 +5873,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 		t.Fatal("expected compaction request to stream")
 	}
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5952,7 +6119,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6032,7 +6199,7 @@ func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 	chat.LastKnownContextTokens = 1000
 	chat.ContextTokensKnown = false
-	if err := chatpkg.UpdateChat(context.Background(), st, chat); err != nil {
+	if err := testUpdateChat(context.Background(), st, chat); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := engine.Chat(context.Background(), session, chat)
@@ -6047,7 +6214,7 @@ func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stored, err := chatpkg.GetChat(context.Background(), st, chat.ID)
+	stored, err := testGetChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6204,7 +6371,7 @@ func TestRunPromptIncludesVisibleTurnInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6268,7 +6435,7 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6427,7 +6594,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatalf("unexpected task update event: %#v", evt)
 	}
 
-	items, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	items, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6947,7 +7114,7 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	if chatTitle != want {
 		t.Fatalf("expected chat title event %q, got %q", want, chatTitle)
 	}
-	updated, err := chatpkg.GetChat(context.Background(), st, chat.ID)
+	updated, err := testGetChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7016,7 +7183,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7212,7 +7379,7 @@ func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

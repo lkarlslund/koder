@@ -233,7 +233,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		return nil, fmt.Errorf("chat id is required")
 	}
 	if chatRecord.SessionID == "" {
-		loaded, err := GetChat(ctx, deps.Store, chatRecord.ID)
+		loaded, err := getChat(ctx, deps.Store, chatRecord.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -242,7 +242,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 	var timeline []domain.TimelineItem
 	if loadTimeline {
 		var err error
-		timeline, err = TimelineForChat(ctx, deps.Store, chatRecord.ID)
+		timeline, err = timelineForChat(ctx, deps.Store, chatRecord.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +251,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 			return nil, err
 		}
 	}
-	approvals, err := PendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
+	approvals, err := pendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +264,7 @@ func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRe
 		if !chatRecord.ContextTokensKnown && chatRecord.LastKnownContextTokens != 0 {
 			chatRecord.LastKnownContextTokens = 0
 			if st != nil {
-				if err := UpdateChat(ctx, st, chatRecord); err != nil {
+				if err := updateChat(ctx, st, chatRecord); err != nil {
 					return domain.Chat{}, err
 				}
 			}
@@ -277,7 +277,7 @@ func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRe
 	chatRecord.LastKnownContextTokens = anchorTokens
 	chatRecord.ContextTokensKnown = true
 	if st != nil {
-		if err := UpdateChat(ctx, st, chatRecord); err != nil {
+		if err := updateChat(ctx, st, chatRecord); err != nil {
 			return domain.Chat{}, err
 		}
 	}
@@ -481,10 +481,10 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
-		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -564,10 +564,10 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
-		if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -663,13 +663,13 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
-		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
-		if err := SetChatQueuedInputs(ctx, r.deps.Store, chatID, queue); err != nil {
+		if err := setChatQueuedInputs(ctx, r.deps.Store, chatID, queue); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
 	}
@@ -831,12 +831,12 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if r.state == nil {
 		r.mu.RUnlock()
 		slog.Info("chat persist", "chat_id", chatRecord.ID, "session_id", chatRecord.SessionID, "timeline_items", 0, "queued_inputs", len(chatRecord.QueuedInputs), "state_loaded", false)
-		return UpdateChat(ctx, st, chatRecord)
+		return updateChat(ctx, st, chatRecord)
 	}
 	timeline := r.state.SnapshotTimeline()
 	r.mu.RUnlock()
 
-	persisted, err := TimelineForChat(ctx, st, chatRecord.ID)
+	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		return r.markPersistError(err)
 	}
@@ -851,18 +851,18 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 			item.ChatID = chatRecord.ID
 		}
 		if _, ok := itemIDs[item.ID]; ok {
-			if err := PutTimelineItem(ctx, st, item); err != nil {
+			if err := putTimelineItem(ctx, st, item); err != nil {
 				return r.markPersistError(err)
 			}
 			continue
 		}
-		if _, err := InsertTimelineItem(ctx, st, item); err != nil {
+		if _, err := insertTimelineItem(ctx, st, item); err != nil {
 			return r.markPersistError(err)
 		}
 		changed = true
 	}
 	chatRecord.QueuedInputs = cloneQueuedInputs(r.snapshotQueue())
-	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := updateChat(ctx, st, chatRecord); err != nil {
 		return r.markPersistError(err)
 	}
 	slog.Info("chat persist",
@@ -1112,7 +1112,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 		"auto_restart", autoRestart,
 	)
 	if autoRestartChat.ID != "" && r.deps.Store != nil {
-		if err := UpdateChat(context.Background(), r.deps.Store, autoRestartChat); err != nil {
+		if err := updateChat(context.Background(), r.deps.Store, autoRestartChat); err != nil {
 			return err
 		}
 	}
@@ -1267,11 +1267,11 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	if st == nil {
 		return fmt.Errorf("store is required")
 	}
-	timeline, err := TimelineForChat(ctx, st, chatRecord.ID)
+	timeline, err := timelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		return r.markPersistError(err)
 	}
-	approvals, err := PendingApprovalsForChat(ctx, st, chatRecord.ID)
+	approvals, err := pendingApprovalsForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		return r.markPersistError(err)
 	}
@@ -1364,7 +1364,7 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 		return LiveRewindResult{}, fmt.Errorf("store is required")
 	}
 	for _, item := range removed {
-		if err := DeleteTimelineItem(ctx, st, item.ID); err != nil {
+		if err := deleteTimelineItem(ctx, st, item.ID); err != nil {
 			return LiveRewindResult{}, err
 		}
 	}
@@ -1394,7 +1394,7 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 		RemainingCount: len(next),
 	}
 	r.mu.Unlock()
-	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := updateChat(ctx, st, chatRecord); err != nil {
 		return LiveRewindResult{}, err
 	}
 	update := r.snapshotUpdateFlags(nil, false, false, true, true, true)
@@ -1442,7 +1442,7 @@ func (r *Chat) ClearAutoRestart(ctx context.Context) error {
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return err
 		}
 	}
@@ -1484,7 +1484,7 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.Chat{}, err
 		}
 	}
@@ -1531,9 +1531,9 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 	now := time.Now().UTC()
 	if r.deps.Store != nil {
 		if strings.TrimSpace(toolCallID) != "" {
-			item, err = AttachToolResult(ctx, r.deps.Store, r.chat.ID, toolCallID, result)
+			item, err = attachToolResult(ctx, r.deps.Store, r.chat.ID, toolCallID, result)
 		} else {
-			item, err = AppendTimeline(ctx, r.deps.Store, r.chat.ID, domain.ToolExecution{
+			item, err = appendTimeline(ctx, r.deps.Store, r.chat.ID, domain.ToolExecution{
 				Tool:      tool,
 				Args:      args,
 				Result:    &result,
@@ -1542,7 +1542,7 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 			})
 			if err == nil {
 				item.Seal(now)
-				err = PutTimelineItem(ctx, r.deps.Store, item)
+				err = putTimelineItem(ctx, r.deps.Store, item)
 			}
 		}
 		if err != nil {
@@ -1576,7 +1576,7 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -1620,10 +1620,10 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -1681,12 +1681,12 @@ func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.Timelin
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if r.deps.Store != nil {
-		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
-			if putErr := PutTimelineItem(ctx, r.deps.Store, item); putErr != nil {
+		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
+			if putErr := putTimelineItem(ctx, r.deps.Store, item); putErr != nil {
 				return domain.TimelineItem{}, err
 			}
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -1859,11 +1859,11 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 	}
 	if r.deps.Store != nil {
 		for _, item := range changed {
-			if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+			if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 				return count, err
 			}
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return count, err
 		}
 	}
@@ -1927,10 +1927,10 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
 	}
 	if r.deps.Store != nil {
-		if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -2576,7 +2576,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if metadataChanged && r.deps.Store != nil {
-		_ = UpdateChat(context.Background(), r.deps.Store, chatRecord)
+		_ = updateChat(context.Background(), r.deps.Store, chatRecord)
 	}
 	if tokenUsageChanged && r.deps.Store != nil {
 		_, _ = updateStoredChatUsage(context.Background(), r.deps.Store, chatRecord.ID, chatRecord)
@@ -2602,7 +2602,7 @@ func discardEventDuringHardCancel(evt domain.Event) bool {
 }
 
 func updateStoredChatUsage(ctx context.Context, st *store.Store, chatID id.ID, update domain.Chat) (domain.Chat, error) {
-	stored, err := GetChat(ctx, st, chatID)
+	stored, err := getChat(ctx, st, chatID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -2610,7 +2610,7 @@ func updateStoredChatUsage(ctx context.Context, st *store.Store, chatID id.ID, u
 	stored.ContextTokensKnown = update.ContextTokensKnown
 	stored.TokenUsage = update.TokenUsage.Normalized()
 	stored.UpdatedAt = time.Now().UTC()
-	if err := PutChat(ctx, st, stored); err != nil {
+	if err := putChat(ctx, st, stored); err != nil {
 		return domain.Chat{}, err
 	}
 	return stored, nil
@@ -2620,7 +2620,7 @@ func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, boo
 	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue || r.deps.Store == nil {
 		return nil, false, nil
 	}
-	chat, err := GetChat(context.Background(), r.deps.Store, r.chat.ID)
+	chat, err := getChat(context.Background(), r.deps.Store, r.chat.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("refresh queued inputs: %w", err)
 	}
@@ -2940,7 +2940,7 @@ func (r *Chat) persistQueue() error {
 	r.mu.RLock()
 	items := cloneQueuedInputs(r.queue)
 	r.mu.RUnlock()
-	return SetChatQueuedInputs(context.Background(), r.deps.Store, r.chat.ID, items)
+	return setChatQueuedInputs(context.Background(), r.deps.Store, r.chat.ID, items)
 }
 
 func (r *Chat) markPersistError(err error) error {
@@ -3111,12 +3111,12 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 	var item domain.TimelineItem
 	var err error
 	if r.deps.Store != nil {
-		item, err = AppendTimeline(ctx, r.deps.Store, r.chat.ID, notice)
+		item, err = appendTimeline(ctx, r.deps.Store, r.chat.ID, notice)
 		if err != nil {
 			return err
 		}
 		item.Seal(now)
-		if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+		if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return err
 		}
 	} else {

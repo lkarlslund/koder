@@ -4,13 +4,31 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
+
+func testAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+	items, err := timelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	return timelineCollection(st).Insert(ctx, domain.TimelineItem{
+		ID:        id.New(),
+		ChatID:    chatID,
+		Seq:       int64(len(items) + 1),
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
 
 func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	ctx := context.Background()
@@ -159,14 +177,14 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 		t.Fatalf("expected initial chat, got %#v", chats)
 	}
 	source := chats[0]
-	if _, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "first"}); err != nil {
+	if _, err := testAppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "first"}); err != nil {
 		t.Fatal(err)
 	}
-	anchor, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.AssistantMessage{Text: "second"})
+	anchor, err := testAppendTimeline(ctx, st, source.ID, domain.AssistantMessage{Text: "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := chatpkg.AppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "third"}); err != nil {
+	if _, err := testAppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "third"}); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := Load(ctx, st, func(_ context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
@@ -179,7 +197,7 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkedTimeline, err := chatpkg.TimelineForChat(ctx, st, fork.Snapshot().Chat.ID)
+	forkedTimeline, err := timelineForChat(ctx, st, fork.Snapshot().Chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +213,7 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	if got := forkedTimeline[1].Content.(domain.AssistantMessage).Text; got != "second" {
 		t.Fatalf("expected copied anchor content, got %q", got)
 	}
-	sourceTimeline, err := chatpkg.TimelineForChat(ctx, st, source.ID)
+	sourceTimeline, err := timelineForChat(ctx, st, source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

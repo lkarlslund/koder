@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
-	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -30,6 +30,109 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
+
+func testChatCollection(st *store.Store) store.Collection[domain.Chat] {
+	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
+		Namespace: "chats",
+		GetID:     func(v domain.Chat) string { return v.ID },
+		SetID:     func(v *domain.Chat, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.Chat]{
+			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
+		},
+	})
+}
+
+func testTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
+	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
+		Namespace: "timeline",
+		GetID:     func(v domain.TimelineItem) string { return v.ID },
+		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[domain.TimelineItem]{
+			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
+		},
+	})
+}
+
+func testGetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
+	return testChatCollection(st).Get(ctx, chatID)
+}
+
+func testUpdateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+	return testChatCollection(st).Put(ctx, chatRecord)
+}
+
+func testSetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
+	chatRecord, err := testGetChat(ctx, st, chatID)
+	if err != nil {
+		return err
+	}
+	chatRecord.QueuedInputs = slices.Clone(items)
+	chatRecord.UpdatedAt = time.Now().UTC()
+	return testUpdateChat(ctx, st, chatRecord)
+}
+
+func testTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
+	items, err := testTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
+}
+
+func testAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+	items, err := testTimelineForChat(ctx, st, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	return testTimelineCollection(st).Insert(ctx, domain.TimelineItem{
+		ChatID:    chatID,
+		Seq:       int64(len(items) + 1),
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
+
+func testPutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
+	return testTimelineCollection(st).Put(ctx, item)
+}
+
+func testAppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	assistant := domain.AssistantMessage{Text: text}
+	for _, call := range calls {
+		if err := assistant.AddToolCall(call); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
+		assistant.Usage = &usage
+	}
+	item, err := testAppendTimeline(ctx, st, chatID, assistant)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(time.Now().UTC())
+	if err := testPutTimelineItem(ctx, st, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
+}
 
 func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
 	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
@@ -237,7 +340,7 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 	if got := state.ActiveChatID; got != active {
 		t.Fatalf("expected active chat to stay %s, got %s", active, got)
 	}
-	archived, err := chatpkg.GetChat(ctx, st, side)
+	archived, err := testGetChat(ctx, st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +365,7 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	if got := state.ActiveChatID; got != first {
 		t.Fatalf("expected active chat to switch to %s, got %s", first, got)
 	}
-	archived, err := chatpkg.GetChat(ctx, st, side)
+	archived, err := testGetChat(ctx, st, side)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +913,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if state.ModelInfo.ProviderID != "test" || state.ModelInfo.ModelID != "next-model" || state.ModelInfo.ContextWindow != 12345 || !state.ModelInfo.SupportsTools {
 		t.Fatalf("unexpected model info: %#v", state.ModelInfo)
 	}
-	chatRecord, err := chatpkg.GetChat(ctx, st, state.Snapshot.Chat.ID)
+	chatRecord, err := testGetChat(ctx, st, state.Snapshot.Chat.ID)
 	if err != nil {
 		t.Fatalf("get chat: %v", err)
 	}
@@ -1130,10 +1233,10 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		t.Fatalf("default chat: %v", err)
 	}
 	chatRecord.AutoRestart = true
-	if err := chatpkg.UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := testUpdateChat(ctx, st, chatRecord); err != nil {
 		t.Fatalf("mark auto restart: %v", err)
 	}
-	if _, err := chatpkg.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := testAppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "printf resumed-tool"},
@@ -1149,7 +1252,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if got := ctrl.State().Session.ID; got != session.ID {
 		t.Fatalf("expected restart interrupted session %s, got %s", session.ID, got)
 	}
-	timeline, err := chatpkg.TimelineForChat(ctx, st, chatRecord.ID)
+	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1280,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if strings.Contains(bodies[0], "Session update:") || strings.Contains(bodies[0], "process was restarting") {
 		t.Fatalf("expected restart continuation without interruption note, got %s", bodies[0])
 	}
-	chatRecord, err = chatpkg.GetChat(ctx, st, chatRecord.ID)
+	chatRecord, err = testGetChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,10 +1334,10 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 		t.Fatalf("default chat: %v", err)
 	}
 	chatRecord.AutoRestart = true
-	if err := chatpkg.UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := testUpdateChat(ctx, st, chatRecord); err != nil {
 		t.Fatalf("mark auto restart: %v", err)
 	}
-	if err := chatpkg.SetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
+	if err := testSetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
 		ID:        id.New(),
 		Kind:      domain.QueuedInputKindQueued,
 		Delivery:  domain.QueuedInputDeliveryNextTurn,
@@ -1268,7 +1371,7 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 	if !strings.Contains(body, "run the user request") {
 		t.Fatalf("expected queued user request in provider request, got %s", body)
 	}
-	timeline, err := chatpkg.TimelineForChat(ctx, st, chatRecord.ID)
+	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1389,7 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 	if !sawAutoResume {
 		t.Fatalf("expected visible auto-resume user message, got %#v", timeline)
 	}
-	chatRecord, err = chatpkg.GetChat(ctx, st, chatRecord.ID)
+	chatRecord, err = testGetChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1318,7 +1421,7 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if _, err := chatpkg.AppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := testAppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_exec",
 		Tool:       domain.ToolKindExecCommand,
 		Args:       map[string]string{"cmd": "sleep 60"},
@@ -1332,7 +1435,7 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	timeline, err := chatpkg.TimelineForChat(ctx, st, chatRecord.ID)
+	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1383,7 +1486,7 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 		t.Fatalf("create side chat: %v", err)
 	}
 	defaultChat.UpdatedAt = time.Now().UTC().Add(time.Hour)
-	if err := chatpkg.UpdateChat(ctx, st, defaultChat); err != nil {
+	if err := testUpdateChat(ctx, st, defaultChat); err != nil {
 		t.Fatalf("mark default chat last used: %v", err)
 	}
 
@@ -1610,6 +1713,7 @@ func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execru
 	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	return ctrl, st, execManager
 }
 
@@ -1641,6 +1745,7 @@ func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Cont
 	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	return ctrl, st
 }
 

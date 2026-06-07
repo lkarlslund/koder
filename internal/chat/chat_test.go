@@ -1111,7 +1111,7 @@ func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	if got := runner.promptCallCount(); got != 1 {
 		t.Fatalf("expected drain to leave queued work undispatched, got %d prompt calls", got)
 	}
-	reloaded, err := GetChat(context.Background(), st, chatRecord.ID)
+	reloaded, err := getChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1138,7 +1138,7 @@ func waitForDrainUpdate(t *testing.T, updates <-chan Update) {
 func TestLoadResumesPendingToolCalls(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "README.md"},
@@ -1182,7 +1182,7 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 func TestResumePendingToolsDispatchesQueuedUserBeforeAutoContinue(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "README.md"},
@@ -1243,7 +1243,7 @@ func TestResumePendingToolsDispatchesQueuedUserBeforeAutoContinue(t *testing.T) 
 func TestLoadDoesNotResumeWhenLatestAssistantHasNoPendingToolCalls(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "old_pending",
 		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "README.md"},
@@ -1251,7 +1251,7 @@ func TestLoadDoesNotResumeWhenLatestAssistantHasNoPendingToolCalls(t *testing.T)
 	}}, "", domain.Usage{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AppendTimeline(context.Background(), st, chatRecord.ID, domain.AssistantMessage{
+	if _, err := appendTimeline(context.Background(), st, chatRecord.ID, domain.AssistantMessage{
 		Text: "done",
 	}); err != nil {
 		t.Fatal(err)
@@ -1274,12 +1274,12 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 	_, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
 	for i := 0; i < 6; i++ {
-		if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %d", i+1)}); err != nil {
+		if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %d", i+1)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	tail, err := TimelinePageForChat(ctx, st, chatRecord.ID, "", 3, false)
+	tail, err := timelinePageForChat(ctx, st, chatRecord.ID, "", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1290,7 +1290,7 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 		t.Fatalf("unexpected tail page: %#v", tail)
 	}
 
-	older, err := TimelinePageForChat(ctx, st, chatRecord.ID, tail.Before, 2, false)
+	older, err := timelinePageForChat(ctx, st, chatRecord.ID, tail.Before, 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1301,7 +1301,7 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 		t.Fatalf("unexpected older page: %#v", older)
 	}
 
-	all, err := TimelinePageForChat(ctx, st, chatRecord.ID, "", 2, true)
+	all, err := timelinePageForChat(ctx, st, chatRecord.ID, "", 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1317,7 +1317,7 @@ func TestLoadMetadataDefersTimelineUntilNeeded(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "loaded later"}); err != nil {
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "loaded later"}); err != nil {
 		t.Fatal(err)
 	}
 	rt, err := LoadMetadata(ctx, session, chatRecord, Deps{Store: st}, nil)
@@ -1347,24 +1347,24 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	keep, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "keep"})
+	keep, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "keep"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	compacted, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 456})
+	compacted, err := appendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "completed", Summary: "summary", AfterContextTokens: 456})
 	if err != nil {
 		t.Fatal(err)
 	}
-	anchor, err := AppendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
+	anchor, err := appendTimeline(ctx, st, chatRecord.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "remove"}); err != nil {
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "remove"}); err != nil {
 		t.Fatal(err)
 	}
 	chatRecord.LastKnownContextTokens = 1234
 	chatRecord.ContextTokensKnown = true
-	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := updateChat(ctx, st, chatRecord); err != nil {
 		t.Fatal(err)
 	}
 	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
@@ -1380,14 +1380,14 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	if len(snapshot.Timeline) != 2 || snapshot.Timeline[0].ID != keep.ID || snapshot.Timeline[1].ID != compacted.ID {
 		t.Fatalf("live timeline was not truncated: %#v", snapshot.Timeline)
 	}
-	persisted, err := TimelineForChat(ctx, st, chatRecord.ID)
+	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(persisted) != 2 || persisted[0].ID != keep.ID || persisted[1].ID != compacted.ID {
 		t.Fatalf("stored timeline was not truncated: %#v", persisted)
 	}
-	updated, err := GetChat(ctx, st, chatRecord.ID)
+	updated, err := getChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1403,15 +1403,15 @@ func TestLoadRepairsMissingContextCacheFromTimeline(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
 		t.Fatal(err)
 	}
 	chatRecord.LastKnownContextTokens = 0
 	chatRecord.ContextTokensKnown = false
-	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := updateChat(ctx, st, chatRecord); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1425,7 +1425,7 @@ func TestLoadRepairsMissingContextCacheFromTimeline(t *testing.T) {
 	if snapshot.Chat.LastKnownContextTokens != 7102 || snapshot.Context.AnchorTokens != 7102 {
 		t.Fatalf("expected context anchor repaired from timeline, got chat=%#v context=%#v", snapshot.Chat, snapshot.Context)
 	}
-	stored, err := GetChat(ctx, st, chatRecord.ID)
+	stored, err := getChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1438,12 +1438,12 @@ func TestLoadMetadataKeepsContextCacheLazy(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	ctx := context.Background()
-	if _, err := AppendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "done", Usage: &domain.Usage{PromptTokens: 7102, CompletionTokens: 12, TotalTokens: 7114}}); err != nil {
 		t.Fatal(err)
 	}
 	chatRecord.LastKnownContextTokens = 0
 	chatRecord.ContextTokensKnown = false
-	if err := UpdateChat(ctx, st, chatRecord); err != nil {
+	if err := updateChat(ctx, st, chatRecord); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1463,7 +1463,7 @@ func TestLoadMetadataKeepsContextCacheLazy(t *testing.T) {
 	if snapshot.Context.AnchorTokens != 0 || snapshot.Context.TotalTokens != 0 {
 		t.Fatalf("expected metadata context usage to remain unknown, got %#v", snapshot.Context)
 	}
-	stored, err := GetChat(ctx, st, chatRecord.ID)
+	stored, err := getChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1557,7 +1557,7 @@ func TestAppendTimelineSerializesSequenceAssignment(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %02d", idx)})
+			_, err := appendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("message %02d", idx)})
 			errs <- err
 		}()
 	}
@@ -1568,7 +1568,7 @@ func TestAppendTimelineSerializesSequenceAssignment(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	items, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	items, err := timelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1914,12 +1914,12 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 func TestRuntimeContinueTurnUsesLiveTimelineNotStorageSideChannel(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	seed, err := AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "loaded"})
+	seed, err := appendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "loaded"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed.Seal(time.Now().UTC())
-	if err := PutTimelineItem(context.Background(), st, seed); err != nil {
+	if err := putTimelineItem(context.Background(), st, seed); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1929,12 +1929,12 @@ func TestRuntimeContinueTurnUsesLiveTimelineNotStorageSideChannel(t *testing.T) 
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	side, err := AppendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "storage-only"})
+	side, err := appendTimeline(context.Background(), st, chatRecord.ID, domain.UserMessage{Text: "storage-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	side.Seal(time.Now().UTC())
-	if err := PutTimelineItem(context.Background(), st, side); err != nil {
+	if err := putTimelineItem(context.Background(), st, side); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1985,7 +1985,7 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_approval",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "echo hi"},
@@ -2028,7 +2028,7 @@ func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	if _, err := AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_approval",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "echo hi"},
@@ -2231,7 +2231,7 @@ func TestRuntimeHardCancelRemovesPartialAssistantResponse(t *testing.T) {
 	if assistantTextInSnapshot(rt.Snapshot(), "partial answer") || assistantTextInSnapshot(rt.Snapshot(), "late text") {
 		t.Fatalf("partial assistant remained in snapshot: %#v", rt.Snapshot().Timeline)
 	}
-	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := timelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2294,7 +2294,7 @@ func TestRuntimeInterruptAndCloseDoesNotPersistNoticeForStreamingInterrupt(t *te
 		t.Fatal("timed out waiting for interrupt close")
 	}
 
-	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := timelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2345,7 +2345,7 @@ func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testi
 		t.Fatal("timed out waiting for drain close")
 	}
 
-	chatRecord, err := GetChat(context.Background(), st, chatRecord.ID)
+	chatRecord, err := getChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2354,7 +2354,7 @@ func TestRuntimeDrainAndCloseWithRestartQueuesContinuationWithoutNotice(t *testi
 		domain.UserMessageSourceForQueuedInput(chatRecord.QueuedInputs[0]) != domain.UserMessageSourceAutoResume {
 		t.Fatalf("expected persisted auto-resume continuation, got %#v", chatRecord.QueuedInputs)
 	}
-	timeline, err := TimelineForChat(context.Background(), st, chatRecord.ID)
+	timeline, err := timelineForChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2408,7 +2408,7 @@ func TestRuntimeRestartShutdownMarksAutoRestart(t *testing.T) {
 		t.Fatal("timed out waiting for shutdown")
 	}
 
-	chatRecord, err := GetChat(context.Background(), st, chatRecord.ID)
+	chatRecord, err := getChat(context.Background(), st, chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2544,7 +2544,7 @@ func TestRuntimeAccumulatesTokenUsageSinceCompaction(t *testing.T) {
 			if got.PromptTokens != 180 || got.CompletionTokens != 45 || got.CachedTokens != 100 || got.TotalTokens != 225 {
 				t.Fatalf("unexpected token usage: %#v", got)
 			}
-			stored, err := GetChat(context.Background(), st, chatRecord.ID)
+			stored, err := getChat(context.Background(), st, chatRecord.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

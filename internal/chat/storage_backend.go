@@ -23,7 +23,7 @@ type Approval struct {
 	CreatedAt  time.Time
 }
 
-func TimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
+func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
 		Namespace: "timeline",
 		GetID:     func(v domain.TimelineItem) string { return v.ID },
@@ -34,7 +34,7 @@ func TimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	})
 }
 
-func ApprovalCollection(st *store.Store) store.Collection[Approval] {
+func approvalCollection(st *store.Store) store.Collection[Approval] {
 	return store.NewCollection(st, store.CollectionSpec[Approval]{
 		Namespace: "approvals",
 		GetID:     func(v Approval) string { return v.ID },
@@ -47,7 +47,7 @@ func ApprovalCollection(st *store.Store) store.Collection[Approval] {
 	})
 }
 
-func ChatCollection(st *store.Store) store.Collection[domain.Chat] {
+func chatCollection(st *store.Store) store.Collection[domain.Chat] {
 	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
 		Namespace: "chats",
 		GetID:     func(v domain.Chat) string { return v.ID },
@@ -58,39 +58,39 @@ func ChatCollection(st *store.Store) store.Collection[domain.Chat] {
 	})
 }
 
-func GetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
-	return ChatCollection(st).Get(ctx, chatID)
+func getChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
+	return chatCollection(st).Get(ctx, chatID)
 }
 
-func PutChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+func putChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
 	if chatRecord.ID == "" {
 		return fmt.Errorf("put chat: id is required")
 	}
 	if chatRecord.SessionID == "" {
 		return fmt.Errorf("put chat: session id is required")
 	}
-	return ChatCollection(st).Put(ctx, chatRecord)
+	return chatCollection(st).Put(ctx, chatRecord)
 }
 
-func UpdateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
-	existing, err := GetChat(ctx, st, chatRecord.ID)
+func updateChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+	existing, err := getChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		return err
 	}
 	if chatRecord.Position == 0 && existing.Position != 0 && chatRecord.UpdatedAt.After(existing.UpdatedAt) {
 		chatRecord.Position = existing.Position
 	}
-	return PutChat(ctx, st, chatRecord)
+	return putChat(ctx, st, chatRecord)
 }
 
-func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
-	chatRecord, err := GetChat(ctx, st, chatID)
+func setChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, items []domain.QueuedInput) error {
+	chatRecord, err := getChat(ctx, st, chatID)
 	if err != nil {
 		return err
 	}
 	chatRecord.QueuedInputs = storageCloneQueuedInputs(items)
 	chatRecord.UpdatedAt = time.Now().UTC()
-	return PutChat(ctx, st, chatRecord)
+	return putChat(ctx, st, chatRecord)
 }
 
 func storageCloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
@@ -107,12 +107,12 @@ func storageCloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
 	return dst
 }
 
-func TimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
-	items, err := TimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
+func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
+	items, err := timelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
 	if err != nil {
 		return nil, err
 	}
-	SortTimeline(items)
+	sortTimeline(items)
 	return items, nil
 }
 
@@ -124,8 +124,8 @@ type TimelinePage struct {
 	Total     int
 }
 
-func TimelinePageForChat(ctx context.Context, st *store.Store, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
-	items, err := TimelineForChat(ctx, st, chatID)
+func timelinePageForChat(ctx context.Context, st *store.Store, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
+	items, err := timelineForChat(ctx, st, chatID)
 	if err != nil {
 		return TimelinePage{}, err
 	}
@@ -162,7 +162,7 @@ func timelinePage(items []domain.TimelineItem, hasMore, loadedAll bool, total in
 	return page
 }
 
-func SortTimeline(items []domain.TimelineItem) {
+func sortTimeline(items []domain.TimelineItem) {
 	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
 		switch {
 		case a.Seq < b.Seq:
@@ -179,19 +179,19 @@ func SortTimeline(items []domain.TimelineItem) {
 	})
 }
 
-func PutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
-	return TimelineCollection(st).Put(ctx, item)
+func putTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
+	return timelineCollection(st).Put(ctx, item)
 }
 
-func DeleteTimelineItem(ctx context.Context, st *store.Store, itemID id.ID) error {
-	return TimelineCollection(st).Delete(ctx, itemID)
+func deleteTimelineItem(ctx context.Context, st *store.Store, itemID id.ID) error {
+	return timelineCollection(st).Delete(ctx, itemID)
 }
 
-func InsertTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) (domain.TimelineItem, error) {
-	return TimelineCollection(st).Insert(ctx, item)
+func insertTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) (domain.TimelineItem, error) {
+	return timelineCollection(st).Insert(ctx, item)
 }
 
-func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
+func appendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	if chatID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("append timeline: chat id is required")
 	}
@@ -200,7 +200,7 @@ func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content 
 	}
 	unlock := store.LockTimelineMutation()
 	defer unlock()
-	items, err := TimelineForChat(ctx, st, chatID)
+	items, err := timelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
@@ -212,10 +212,10 @@ func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content 
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	return InsertTimelineItem(ctx, st, item)
+	return insertTimelineItem(ctx, st, item)
 }
 
-func AttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+func attachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Result = &result
 		call.Error = nil
@@ -233,7 +233,7 @@ func AttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCa
 	})
 }
 
-func AttachToolError(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+func attachToolError(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Error = &toolErr
 		call.Result = nil
@@ -247,11 +247,11 @@ func AttachToolError(ctx context.Context, st *store.Store, chatID id.ID, toolCal
 	})
 }
 
-func FailInterruptedToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
+func failInterruptedToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
 	return failToolCallsMatching(ctx, st, chatID, message, interruptedToolStatus)
 }
 
-func FailRunningToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
+func failRunningToolCalls(ctx context.Context, st *store.Store, chatID id.ID, message string) (int, error) {
 	return failToolCallsMatching(ctx, st, chatID, message, func(status domain.ToolStatus) bool {
 		return status == domain.ToolStatusRunning
 	})
@@ -267,7 +267,7 @@ func failToolCallsMatching(ctx context.Context, st *store.Store, chatID id.ID, m
 	}
 	unlock := store.LockTimelineMutation()
 	defer unlock()
-	items, err := TimelineForChat(ctx, st, chatID)
+	items, err := timelineForChat(ctx, st, chatID)
 	if err != nil {
 		return 0, err
 	}
@@ -299,7 +299,7 @@ func failToolCallsMatching(ctx context.Context, st *store.Store, chatID id.ID, m
 		}
 		item.Content = assistant
 		item.UpdatedAt = now
-		if err := PutTimelineItem(ctx, st, item); err != nil {
+		if err := putTimelineItem(ctx, st, item); err != nil {
 			return count, err
 		}
 	}
@@ -310,7 +310,7 @@ func interruptedToolStatus(status domain.ToolStatus) bool {
 	return status == domain.ToolStatusPending || status == domain.ToolStatusRunning
 }
 
-func AttachToolApproval(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
+func attachToolApproval(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
 	_ = approval
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Approval = nil
@@ -320,7 +320,7 @@ func AttachToolApproval(ctx context.Context, st *store.Store, chatID id.ID, tool
 	})
 }
 
-func MarkToolRunning(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string) (domain.TimelineItem, error) {
+func markToolRunning(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string) (domain.TimelineItem, error) {
 	return updateToolCall(ctx, st, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Status = domain.ToolStatusRunning
 		call.Approval = nil
@@ -342,7 +342,7 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCall
 	}
 	unlock := store.LockTimelineMutation()
 	defer unlock()
-	items, err := TimelineForChat(ctx, st, chatID)
+	items, err := timelineForChat(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
@@ -361,7 +361,7 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCall
 		}
 		item.Content = assistant
 		item.UpdatedAt = time.Now().UTC()
-		if err := PutTimelineItem(ctx, st, item); err != nil {
+		if err := putTimelineItem(ctx, st, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
 		return item, nil
@@ -369,11 +369,11 @@ func updateToolCall(ctx context.Context, st *store.Store, chatID id.ID, toolCall
 	return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
 }
 
-func AppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	return AppendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, domain.ReasoningContent{}, usage)
+func appendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	return appendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, domain.ReasoningContent{}, usage)
 }
 
-func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+func appendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	if len(calls) == 0 && strings.TrimSpace(text) == "" {
 		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
 	}
@@ -389,7 +389,7 @@ func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 	}
 	if item.ID == "" {
 		var err error
-		item, err = AppendTimeline(ctx, st, chatID, assistant)
+		item, err = appendTimeline(ctx, st, chatID, assistant)
 		if err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -401,7 +401,7 @@ func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 			item.ChatID = chatID
 		}
 		if item.Seq == 0 {
-			items, err := TimelineForChat(ctx, st, chatID)
+			items, err := timelineForChat(ctx, st, chatID)
 			if err != nil {
 				return domain.TimelineItem{}, err
 			}
@@ -412,23 +412,23 @@ func AppendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 		}
 		item.UpdatedAt = now
 		item.Content = assistant
-		if _, err := InsertTimelineItem(ctx, st, item); err != nil {
+		if _, err := insertTimelineItem(ctx, st, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
 	item.Seal(time.Now().UTC())
-	if err := PutTimelineItem(ctx, st, item); err != nil {
+	if err := putTimelineItem(ctx, st, item); err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil
 }
 
-func PendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]Approval, error) {
-	chatRecord, err := GetChat(ctx, st, chatID)
+func pendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]Approval, error) {
+	chatRecord, err := getChat(ctx, st, chatID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := TimelineForChat(ctx, st, chatID)
+	items, err := timelineForChat(ctx, st, chatID)
 	if err != nil {
 		return nil, err
 	}
