@@ -35,7 +35,7 @@ func init() {
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileRead }
+func (tool) ID() domain.ToolKind      { return domain.ToolKindFileRead }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	for _, key := range []string{"file", "file_path", "filepath", "start", "line", "offset", "end", "limit", "lines", "max_lines"} {

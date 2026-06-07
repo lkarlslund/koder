@@ -25,7 +25,7 @@ func init() {
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindBash }
+func (tool) ID() domain.ToolKind      { return domain.ToolKindBash }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	command := strings.TrimSpace(tools.FirstArg(args, "command", "cmd"))

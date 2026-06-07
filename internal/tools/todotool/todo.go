@@ -47,10 +47,10 @@ type addItemsTool struct{}
 type updateItemTool struct{}
 type fetchNextTool struct{}
 
-func (listTool) Kind() domain.ToolKind       { return domain.ToolKindTaskList }
-func (addItemsTool) Kind() domain.ToolKind   { return domain.ToolKindTasksAdd }
-func (updateItemTool) Kind() domain.ToolKind { return domain.ToolKindTasksUpdate }
-func (fetchNextTool) Kind() domain.ToolKind  { return domain.ToolKindTaskFetchNext }
+func (listTool) ID() domain.ToolKind       { return domain.ToolKindTaskList }
+func (addItemsTool) ID() domain.ToolKind   { return domain.ToolKindTasksAdd }
+func (updateItemTool) ID() domain.ToolKind { return domain.ToolKindTasksUpdate }
+func (fetchNextTool) ID() domain.ToolKind  { return domain.ToolKindTaskFetchNext }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }

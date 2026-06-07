@@ -27,7 +27,7 @@ func init() {
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileWrite }
+func (tool) ID() domain.ToolKind      { return domain.ToolKindFileWrite }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))

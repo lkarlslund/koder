@@ -182,7 +182,7 @@ func (r Runtime) TouchFile(ctx context.Context, path, content string) {
 }
 
 type Tool interface {
-	Kind() domain.ToolKind
+	ID() domain.ToolKind
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	Preview(req Request) string
@@ -224,16 +224,16 @@ var (
 func Register(tool Tool, spec ToolSpec) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	kind := tool.Kind()
-	if kind == "" {
-		panic("tools: empty tool kind")
+	toolID := tool.ID()
+	if toolID == "" {
+		panic("tools: empty tool id")
 	}
-	if _, exists := registry[kind]; exists {
-		panic(fmt.Sprintf("tools: duplicate tool registration %q", kind))
+	if _, exists := registry[toolID]; exists {
+		panic(fmt.Sprintf("tools: duplicate tool registration %q", toolID))
 	}
-	registry[kind] = tool
-	specs[kind] = normalizeToolSpec(kind, spec)
-	order = append(order, kind)
+	registry[toolID] = tool
+	specs[toolID] = normalizeToolSpec(toolID, spec)
+	order = append(order, toolID)
 }
 
 func Lookup(kind domain.ToolKind) (Tool, bool) {
@@ -263,7 +263,7 @@ func Info(kind domain.ToolKind) ToolSpec {
 	return normalizeToolSpec(kind, ToolSpec{})
 }
 
-func RegisteredKinds() []domain.ToolKind {
+func RegisteredIDs() []domain.ToolKind {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	return slices.Clone(order)

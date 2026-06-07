@@ -1065,7 +1065,7 @@ func accessPreferencesFromConfig(src accesssettings.Settings) AccessPreferences 
 }
 
 func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
-	kinds := tools.RegisteredKinds()
+	kinds := tools.RegisteredIDs()
 	out := make([]ToolDefaultPreference, 0, len(kinds))
 	for _, kind := range kinds {
 		if hideToolDefault(kind) {
@@ -1336,7 +1336,7 @@ func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreferen
 	for _, item := range prefs {
 		next[item.Tool] = item.Enabled
 	}
-	for _, kind := range tools.RegisteredKinds() {
+	for _, kind := range tools.RegisteredIDs() {
 		if _, ok := next[kind]; !ok {
 			next[kind] = true
 		}

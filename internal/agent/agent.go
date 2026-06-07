@@ -4067,7 +4067,7 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 }
 
 func (e *Engine) effectiveToolStates(session domain.Session) map[domain.ToolKind]bool {
-	registered := tools.RegisteredKinds()
+	registered := tools.RegisteredIDs()
 	out := make(map[domain.ToolKind]bool, len(registered))
 	for _, kind := range registered {
 		out[kind] = toolEnabledForSession(e.cfg, session, kind)

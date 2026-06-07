@@ -19,7 +19,7 @@ func init() {
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindTask }
+func (tool) ID() domain.ToolKind      { return domain.ToolKindTask }
 func (tool) BypassesPermission() bool { return true }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	body := strings.TrimSpace(args["body"])

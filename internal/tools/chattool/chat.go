@@ -65,12 +65,12 @@ type cancelTool struct{}
 type archiveTool struct{}
 type renameTool struct{}
 
-func (listTool) Kind() domain.ToolKind    { return domain.ToolKindChatList }
-func (startTool) Kind() domain.ToolKind   { return domain.ToolKindChatStart }
-func (sendTool) Kind() domain.ToolKind    { return domain.ToolKindChatSend }
-func (cancelTool) Kind() domain.ToolKind  { return domain.ToolKindChatCancel }
-func (archiveTool) Kind() domain.ToolKind { return domain.ToolKindChatArchive }
-func (renameTool) Kind() domain.ToolKind  { return domain.ToolKindChatRename }
+func (listTool) ID() domain.ToolKind    { return domain.ToolKindChatList }
+func (startTool) ID() domain.ToolKind   { return domain.ToolKindChatStart }
+func (sendTool) ID() domain.ToolKind    { return domain.ToolKindChatSend }
+func (cancelTool) ID() domain.ToolKind  { return domain.ToolKindChatCancel }
+func (archiveTool) ID() domain.ToolKind { return domain.ToolKindChatArchive }
+func (renameTool) ID() domain.ToolKind  { return domain.ToolKindChatRename }
 
 func (listTool) BypassesPermission() bool    { return true }
 func (startTool) BypassesPermission() bool   { return true }
