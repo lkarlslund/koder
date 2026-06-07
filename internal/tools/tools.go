@@ -637,13 +637,6 @@ func DefaultSummarizeResult(req Request, result Result) (string, string) {
 	return defaultSummary(req.Tool, result)
 }
 
-func EmitOnce(evt domain.Event) <-chan domain.Event {
-	out := make(chan domain.Event, 1)
-	out <- evt
-	close(out)
-	return out
-}
-
 func normalizeRequest(req Request) (Request, Tool, error) {
 	if req.Tool == "" {
 		return req, nil, errors.New("tool is empty")

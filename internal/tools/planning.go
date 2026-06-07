@@ -208,7 +208,7 @@ func FormatMilestoneOutput(result MilestonePlanStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
 		Kind: domain.PartKindToolOutput,
 		Payload: domain.ToolOutputPayload{
-			Tool:   domain.ToolKindMilestoneList,
+			Tool:   MilestoneList,
 			Status: domain.ToolResultStatusOK,
 			Result: result,
 		},
@@ -220,7 +220,7 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
 		Kind: domain.PartKindToolOutput,
 		Payload: domain.ToolOutputPayload{
-			Tool:   domain.ToolKindTaskList,
+			Tool:   TaskList,
 			Status: domain.ToolResultStatusOK,
 			Result: result,
 		},
