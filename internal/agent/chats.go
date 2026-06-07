@@ -369,12 +369,12 @@ func (e *Engine) consumeChatUpdates(chatID id.ID, updates <-chan chatpkg.Update,
 		case chatpkg.StatusWaitingApproval:
 			if !notifiedIdle {
 				notifiedIdle = true
-				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is waiting for approval: %s", chatID, strings.TrimSpace(update.StatusText)))
+				e.notifyParentChat(context.Background(), update.Snapshot.Chat, fmt.Sprintf("Chat %s is waiting for approval: %s", chatID, strings.TrimSpace(update.StatusText)))
 			}
 		case chatpkg.StatusErrored:
 			if !notifiedIdle {
 				notifiedIdle = true
-				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s failed: %s", chatID, strings.TrimSpace(update.StatusText)))
+				e.notifyParentChat(context.Background(), update.Snapshot.Chat, fmt.Sprintf("Chat %s failed: %s", chatID, strings.TrimSpace(update.StatusText)))
 			}
 		default:
 			if update.Active {
@@ -386,17 +386,16 @@ func (e *Engine) consumeChatUpdates(chatID id.ID, updates <-chan chatpkg.Update,
 		}
 		if !update.Active && sawActive && !notifiedIdle {
 			notifiedIdle = true
-			e.notifyParentChat(context.Background(), chatID, e.childIdleNotification(context.Background(), update.Snapshot.Chat, chatID, statusText))
+			e.notifyParentChat(context.Background(), update.Snapshot.Chat, e.childIdleNotification(context.Background(), update.Snapshot.Chat, chatID, statusText))
 		}
 	}
 }
 
-func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID id.ID, text string) {
-	source, err := chatpkg.GetChat(ctx, e.store, sourceChatID)
-	if err != nil || source.ParentChatID == nil || strings.TrimSpace(text) == "" {
+func (e *Engine) notifyParentChat(ctx context.Context, source domain.Chat, text string) {
+	if source.ParentChatID == nil || source.SessionID == "" || strings.TrimSpace(text) == "" {
 		return
 	}
-	e.enqueueSteer(ctx, *source.ParentChatID, text)
+	e.enqueueSteer(ctx, source.SessionID, *source.ParentChatID, text)
 }
 
 func (e *Engine) childIdleNotification(ctx context.Context, chatRecord domain.Chat, chatID id.ID, statusText string) string {
@@ -446,16 +445,12 @@ func (e *Engine) todosForNotification(ctx context.Context, sessionID id.ID, mile
 	return sessionpkg.ListTodos(ctx, e.store, sessionID, milestoneRef)
 }
 
-func (e *Engine) enqueueSteer(ctx context.Context, chatID id.ID, text string) {
+func (e *Engine) enqueueSteer(ctx context.Context, sessionID, chatID id.ID, text string) {
 	text = strings.TrimSpace(text)
-	if chatID == "" || text == "" {
+	if sessionID == "" || chatID == "" || text == "" {
 		return
 	}
-	chatRecord, err := chatpkg.GetChat(ctx, e.store, chatID)
-	if err != nil {
-		return
-	}
-	owner, err := e.LoadSession(ctx, chatRecord.SessionID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return
 	}
