@@ -29,7 +29,7 @@ func TestGlobSupportsRecursivePatternsAndLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: root}, req)
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: root}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}

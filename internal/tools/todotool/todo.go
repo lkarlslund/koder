@@ -125,7 +125,8 @@ func (fetchNextTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_ref"], "Fetch next task")
 }
 
-func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -141,7 +142,8 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	return tools.TodoBucketResult(plan, ref, tools.ScopedTodos(runtime, todos), ""), nil
 }
 
-func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	if tools.AssignedTodoRef(runtime) != "" {
 		return tools.Result{}, fmt.Errorf("chat is scoped to task %q", tools.AssignedTodoRef(runtime))
 	}
@@ -182,7 +184,8 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	return tools.TodoBucketResultWithTitle(ref, title, todos, ""), nil
 }
 
-func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -235,7 +238,8 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	return tools.Result{}, fmt.Errorf("task %s not found", id)
 }
 
-func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err

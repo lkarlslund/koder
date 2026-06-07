@@ -41,9 +41,9 @@ func TestNormalizeArgsValidatesCommandAndTimeout(t *testing.T) {
 
 func TestExecuteRunsCommandAndCapturesMetadata(t *testing.T) {
 	dir := t.TempDir()
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{"command": "printf ok", "timeout_ms": "500"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,12 +58,12 @@ func TestExecuteRunsCommandAndCapturesMetadata(t *testing.T) {
 func TestExecuteTimeoutKillsBackgroundChildHoldingOutputPipe(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Now()
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"command":    "sleep 5 &",
 			"timeout_ms": "100",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout error, got %v", err)
 	}

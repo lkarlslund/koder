@@ -59,7 +59,8 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["query"] }
-func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	client := runtime.HTTPClient
 	if client == nil {
 		client = &http.Client{}

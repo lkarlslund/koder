@@ -208,7 +208,8 @@ func (resizeTool) Preview(req tools.Request) string    { return "Resize " + req.
 func (terminateTool) Preview(req tools.Request) string { return "Terminate " + req.Args["process_id"] }
 func (cleanupTool) Preview(req tools.Request) string   { return "Cleanup exec sessions" }
 
-func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -261,7 +262,8 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	}, nil
 }
 
-func (statusTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -279,7 +281,8 @@ func (statusTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.
 	return execResult(stored), nil
 }
 
-func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -301,7 +304,8 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}, nil
 }
 
-func (writeStdinTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (writeStdinTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -326,7 +330,8 @@ func (writeStdinTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	return execResult(stored), nil
 }
 
-func (resizeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (resizeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -347,7 +352,8 @@ func (resizeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.
 	return execResult(stored), nil
 }
 
-func (terminateTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (terminateTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -365,7 +371,8 @@ func (terminateTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	return execResult(stored), nil
 }
 
-func (cleanupTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (cleanupTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err

@@ -31,9 +31,9 @@ func TestExecuteAllowsAbsolutePathOutsideWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": target},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,9 +51,9 @@ func TestExecuteTouchesReadFileForCodeIntel(t *testing.T) {
 		t.Fatal(err)
 	}
 	tracker := &recordingFileTracker{}
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace, FileTracker: tracker}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, FileTracker: tracker}, Request: tools.Request{
 		Args: map[string]string{"path": "main.go"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +65,9 @@ func TestExecuteTouchesReadFileForCodeIntel(t *testing.T) {
 func TestExecuteDoesNotTouchDirectoriesForCodeIntel(t *testing.T) {
 	workspace := t.TempDir()
 	tracker := &recordingFileTracker{}
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace, FileTracker: tracker}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, FileTracker: tracker}, Request: tools.Request{
 		Args: map[string]string{"path": "."},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,9 +113,9 @@ func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "long.txt"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +147,12 @@ func TestExecuteReadsSecondPageAndReportsEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "long.txt",
 			"start_line": "2001",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,13 +177,13 @@ func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "limited.txt",
 			"start_line": "1",
 			"end_line":   "10",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,13 +206,13 @@ func TestExecuteRejectsOutOfRangeStartLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "small.txt",
 			"start_line": "4",
 			"end_line":   "8",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "start_line 4 is out of range for this file (3 lines)") {
 		t.Fatalf("expected out-of-range file error, got %v", err)
 	}
@@ -225,9 +225,9 @@ func TestExecuteHandlesEmptyFileStartLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "empty.txt"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,12 +235,12 @@ func TestExecuteHandlesEmptyFileStartLines(t *testing.T) {
 		t.Fatalf("expected empty-file eof footer, got %q", result.Output)
 	}
 
-	_, err = tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	_, err = tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "empty.txt",
 			"start_line": "2",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "start_line 2 is out of range for this file (0 lines)") {
 		t.Fatalf("expected out-of-range empty-file error, got %v", err)
 	}
@@ -262,13 +262,13 @@ func TestExecutePagesDirectories(t *testing.T) {
 	}
 	slices.Sort(names)
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "entries",
 			"start_line": "6",
 			"end_line":   "10",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,13 +288,13 @@ func TestExecutePagesDirectories(t *testing.T) {
 		t.Fatalf("expected directory continuation footer %q, got %q", wantFooter, result.Output)
 	}
 
-	finalPage, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	finalPage, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "entries",
 			"start_line": "11",
 			"end_line":   "15",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,9 +320,9 @@ func TestExecuteRejectsOutputOverCharacterLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "wide.txt"},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "exceeds the 100000 character limit") {
 		t.Fatalf("expected character-limit error, got %v", err)
 	}
@@ -347,12 +347,12 @@ func TestExecutePagesDirectoriesInStableSortedOrder(t *testing.T) {
 		}
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{
 			"path":     "sorted",
 			"end_line": "4",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

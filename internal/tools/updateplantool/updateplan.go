@@ -47,7 +47,8 @@ func (tool) Preview(req tools.Request) string {
 	}
 	return steps[0].Step
 }
-func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	req := opts.Request
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
 		return tools.Result{}, err

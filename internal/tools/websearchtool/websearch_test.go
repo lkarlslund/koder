@@ -46,10 +46,10 @@ func TestWebSearchDomainFilteringAndURLNormalization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		Workdir:    t.TempDir(),
 		HTTPClient: client,
-	}, req)
+	}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}

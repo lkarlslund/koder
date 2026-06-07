@@ -16,7 +16,7 @@ func TestNormalizeAndExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{}, tools.Request{Args: req})
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{Args: req}})
 	if err != nil {
 		t.Fatal(err)
 	}

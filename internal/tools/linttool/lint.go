@@ -61,7 +61,8 @@ func (tool) Preview(req tools.Request) string {
 	return req.Args["path"]
 }
 
-func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err

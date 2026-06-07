@@ -171,6 +171,11 @@ type Runtime struct {
 	AccessSettings        accesssettings.Settings
 }
 
+type Options struct {
+	Runtime Runtime
+	Request Request
+}
+
 type MCPExecutor interface {
 	ExecuteTool(context.Context, string, string, map[string]any) (Result, error)
 }
@@ -191,7 +196,7 @@ type Tool interface {
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	Preview(req Request) string
-	Execute(ctx context.Context, runtime Runtime, req Request) (Result, error)
+	Call(ctx context.Context, options Options) (Result, error)
 }
 
 type Presenter interface {
@@ -274,7 +279,8 @@ func RegisteredIDs() []ID {
 	return slices.Clone(order)
 }
 
-func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) {
+func Call(ctx context.Context, options Options) (Result, error) {
+	runtime, req := options.Runtime, options.Request
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
 		return Result{}, err
@@ -286,7 +292,7 @@ func Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) 
 	if err := checkRuntimeAccess(runtime, req); err != nil {
 		return Result{}, err
 	}
-	return tool.Execute(ctx, runtime, req)
+	return tool.Call(ctx, Options{Runtime: runtime, Request: req})
 }
 
 func checkRuntimeAccess(runtime Runtime, req Request) error {

@@ -222,7 +222,8 @@ func targetPreview(action, chatID string) string {
 	return action + " chat " + chatID
 }
 
-func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireChatControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -251,7 +252,8 @@ func filterArchivedChats(statuses []tools.ChatStatus) []tools.ChatStatus {
 	return out
 }
 
-func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireChatControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -277,7 +279,8 @@ func childReportGuidance(output string) string {
 	return strings.TrimSpace(output + "\nThe child chat will report back automatically when it becomes idle, including task or milestone progress. Do not poll it.")
 }
 
-func (sendTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
 		Message: req.Args["message"],
 		Steer:   req.Args["steer"] == "true",
@@ -288,7 +291,8 @@ func (sendTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	return chatResult(req.Tool, status)
 }
 
-func (cancelTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (cancelTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
 		Interrupt: true,
 		Hard:      req.Args["hard"] == "true",
@@ -299,7 +303,8 @@ func (cancelTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.
 	return chatResult(req.Tool, status)
 }
 
-func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	archived := req.Args["archived"] == "true"
 	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Archived: &archived})
 	if err != nil {
@@ -308,7 +313,8 @@ func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	return chatResult(req.Tool, status)
 }
 
-func (renameTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (renameTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Title: req.Args["title"]})
 	if err != nil {
 		return tools.Result{}, err

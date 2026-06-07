@@ -33,10 +33,10 @@ func TestWebFetchMarkdownAndRedirectMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		Workdir:    t.TempDir(),
 		HTTPClient: server.Client(),
-	}, req)
+	}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestWebFetchTextAndHTMLFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	textResult, err := tool{}.Execute(context.Background(), runtime, textReq)
+	textResult, err := tool{}.Call(context.Background(), tools.Options{Runtime: runtime, Request: textReq})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestWebFetchTextAndHTMLFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	htmlResult, err := tool{}.Execute(context.Background(), runtime, htmlReq)
+	htmlResult, err := tool{}.Call(context.Background(), tools.Options{Runtime: runtime, Request: htmlReq})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,10 +111,10 @@ func TestWebFetchMaxCharsLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		Workdir:    t.TempDir(),
 		HTTPClient: server.Client(),
-	}, req)
+	}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}

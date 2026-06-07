@@ -142,7 +142,8 @@ func (addItemsTool) Preview(req tools.Request) string   { return "Add milestone 
 func (updateItemTool) Preview(req tools.Request) string { return "Update milestone " + req.Args["ref"] }
 func (writeTool) Preview(req tools.Request) string      { return "Replace milestones" }
 
-func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -228,7 +229,8 @@ func todoSummary(todos []planning.TodoItem) string {
 	return "tasks: " + strings.Join(parts, ", ")
 }
 
-func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	if tools.AssignedMilestoneRef(runtime) != "" {
 		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneRef(runtime))
 	}
@@ -260,7 +262,8 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	}), nil
 }
 
-func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -284,7 +287,8 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated)), nil
 }
 
-func (writeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (writeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	milestones, err := planning.ParseMilestones(req.Args["milestones"])
 	if err != nil {
 		return tools.Result{}, err

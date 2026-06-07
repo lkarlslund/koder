@@ -127,7 +127,7 @@ func TestNormalizeArgs(t *testing.T) {
 }
 
 func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
-	_, err := (listTool{}).Execute(context.Background(), tools.Runtime{}, tools.Request{})
+	_, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{}})
 	if err == nil || !strings.Contains(err.Error(), "active persisted chat") {
 		t.Fatalf("expected active chat error, got %v", err)
 	}
@@ -146,7 +146,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 		State:      tools.ChatRunStateIdle,
 		StatusText: "Idle",
 	}}}
-	result, err := (listTool{}).Execute(context.Background(), testRuntime(control), tools.Request{Tool: domain.ToolKindChatList})
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{Tool: domain.ToolKindChatList}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	if strings.Contains(result.Output, "Archived") {
 		t.Fatalf("expected archived chat hidden by default, got %q", result.Output)
 	}
-	result, err = (listTool{}).Execute(context.Background(), testRuntime(control), tools.Request{Tool: domain.ToolKindChatList, Args: map[string]string{"archived": "true"}})
+	result, err = (listTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{Tool: domain.ToolKindChatList, Args: map[string]string{"archived": "true"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,10 +173,10 @@ func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
-	result, err := (startTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	result, err := (startTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatStart,
 		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_ref": "alpha", "title": "Worker"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +210,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		StatusText: "Running",
 	}}}
 
-	_, err := (sendTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	_, err := (sendTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatSend,
 		Args: map[string]string{"chat_id": "child-chat", "message": "Use jadx output", "steer": "true"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,10 +221,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		t.Fatalf("unexpected send request: %#v", control)
 	}
 
-	_, err = (cancelTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	_, err = (cancelTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatCancel,
 		Args: map[string]string{"chat_id": "child-chat", "hard": "true"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,10 +232,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		t.Fatalf("unexpected cancel request: %#v", control.lastUpdate)
 	}
 
-	_, err = (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	_, err = (archiveTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatArchive,
 		Args: map[string]string{"archived": "false"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,10 +243,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		t.Fatalf("unexpected archive request: %#v", control)
 	}
 
-	result, err := (renameTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	result, err := (renameTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatRename,
 		Args: map[string]string{"chat_id": "child-chat", "title": "Renamed"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,10 +257,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 
 func TestArchiveExecuteSurfacesArchiveRuleErrors(t *testing.T) {
 	control := &fakeChatControl{updateErr: errors.New("cannot archive chat chat-20 while it is not idle")}
-	_, err := (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+	_, err := (archiveTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatArchive,
 		Args: map[string]string{"archived": "true"},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "not idle") {
 		t.Fatalf("expected archive rule error, got %v", err)
 	}

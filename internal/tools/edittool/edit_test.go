@@ -29,13 +29,13 @@ func TestExecuteEditsSingleOccurrence(t *testing.T) {
 	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "beta",
 			"new_string": "gamma",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +57,13 @@ func TestExecuteRejectsMultipleOccurrencesWithoutReplaceAll(t *testing.T) {
 	if err := os.WriteFile(path, []byte("beta\nbeta\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "beta",
 			"new_string": "gamma",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "replace_all") {
 		t.Fatalf("expected replace_all guidance, got %v", err)
 	}
@@ -75,13 +75,13 @@ func TestExecuteEditLineEndings(t *testing.T) {
 	if err := os.WriteFile(path, []byte("alpha\r\nbeta\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "alpha\nbeta\n",
 			"new_string": "alpha\ngamma\n",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,13 +103,13 @@ func TestExecuteEditUnicodeNormalized(t *testing.T) {
 	if err := os.WriteFile(path, []byte("title = “hello”\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "title = \"hello\"\n",
 			"new_string": "title = \"bye\"\n",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,13 +131,13 @@ func TestExecuteEditIndentationFlexible(t *testing.T) {
 	if err := os.WriteFile(path, []byte("func demo() {\n    beta\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "func demo() {\nbeta\n}",
 			"new_string": "func demo() {\ngamma\n}",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,13 +153,13 @@ func TestExecuteEditContextAware(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "alpha\none\ntwo\nomega",
 			"new_string": "alpha\none\ntwo final\nomega",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +175,13 @@ func TestExecuteEditTabsVsSpaces(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
 			"old_string": "type Handler struct {\n    cfg *config.Config\n    tmpl *template.Template\n}",
 			"new_string": "type Handler struct {\n\tcfg *config.Config\n\ttmpl map[string]*template.Template\n}",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,14 +203,14 @@ func TestExecuteEditReplaceAllFuzzyMatches(t *testing.T) {
 	if err := os.WriteFile(path, []byte("foo\tbar\nfoo  bar\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":        "file.txt",
 			"old_string":  "foo bar",
 			"new_string":  "baz",
 			"replace_all": "true",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,13 +232,13 @@ func TestExecuteEditInlineWhitespaceNormalized(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n\nvar value = call(foo,\tbar)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
 			"old_string": "call(foo, bar)",
 			"new_string": "call(foo, baz)",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,13 +260,13 @@ func TestExecuteEditInlineUnicodeNormalizedExpandedRune(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n\nvar msg = \"a — b\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
 			"old_string": "\"a -- b\"",
 			"new_string": "\"a - b\"",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,13 +288,13 @@ func TestExecuteEditDefersDiagnosticsToLintMessage(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {\n\tprintln(\"ok\")\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
 			"old_string": "println(\"ok\")",
 			"new_string": "println(",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,13 +340,13 @@ func TestExecuteEditDoesNotInlineStructuredFileDiagnostics(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.before), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+			result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 				Args: map[string]string{
 					"path":       tt.file,
 					"old_string": tt.oldString,
 					"new_string": tt.newString,
 				},
-			})
+			}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -371,13 +371,13 @@ func TestExecuteEditVerifiesWritePersisted(t *testing.T) {
 	writeTextFile = func(string, string, fs.FileMode) error { return nil }
 	t.Cleanup(func() { writeTextFile = oldWriteTextFile })
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.txt",
 			"old_string": "beta",
 			"new_string": "gamma",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "post-write verification failed") {
 		t.Fatalf("expected verification failure, got %v", err)
 	}
@@ -389,13 +389,13 @@ func TestExecuteEditNoMatchShowsClosestSections(t *testing.T) {
 	if err := os.WriteFile(path, []byte("func alpha() {\n\treturn\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
 			"old_string": "func alpah() {\n\tmissing",
 			"new_string": "func beta() {\n\treturn\n}",
 		},
-	})
+	}})
 	if err == nil {
 		t.Fatal("expected edit failure")
 	}

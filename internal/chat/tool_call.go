@@ -33,7 +33,7 @@ func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools
 			})
 		}
 	}
-	result, err := tools.Execute(ctx, runtime, req)
+	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 	if err != nil {
 		if isInterruptedToolError(err) {
 			return nil, err

@@ -51,10 +51,10 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{"path": "."},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,13 +204,13 @@ func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
 func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	dir := t.TempDir()
 
-	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
 			"timeout_ms": "0",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,14 +227,14 @@ func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
 		result: tools.Result{Output: "mcp ok"},
 	}
 
-	result, err := tools.Execute(context.Background(), tools.Runtime{MCP: fake}, tools.Request{
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{MCP: fake}, Request: tools.Request{
 		Tool: domain.ToolKindMCP,
 		Args: map[string]string{
 			"server":        "exa",
 			"tool":          "web_search_exa",
 			"arguments_raw": `{"query":"golang"}`,
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,13 +252,13 @@ func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
 func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 	dir := t.TempDir()
 
-	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
 			"timeout_ms": "60000.00000",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,13 +273,13 @@ func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 func TestBashFractionalTimeoutStillFails(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
 			"command":    "printf ok",
 			"timeout_ms": "60000.5",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "timeout_ms must be a positive integer") {
 		t.Fatalf("expected positive integer error, got %v", err)
 	}
@@ -292,14 +292,14 @@ func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":       "file.txt",
 			"start_line": "3.00000",
 			"end_line":   "4.00000",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,13 +327,13 @@ func TestReadFractionalStartLineFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":       "file.txt",
 			"start_line": "3.5",
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "start_line must be a positive integer") {
 		t.Fatalf("expected positive integer error, got %v", err)
 	}

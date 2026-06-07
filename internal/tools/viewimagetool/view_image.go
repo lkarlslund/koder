@@ -44,7 +44,8 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
-func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err

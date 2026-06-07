@@ -28,7 +28,8 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return map[string]string{"body": body}, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["body"] }
-func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	req := opts.Request
 	return tools.Result{Output: req.Args["body"]}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {

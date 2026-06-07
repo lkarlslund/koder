@@ -59,7 +59,8 @@ func (tool) Preview(req tools.Request) string {
 	}
 }
 
-func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	if runtime.MCP == nil {
 		return tools.Result{}, errors.New("mcp manager is unavailable")
 	}

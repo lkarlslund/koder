@@ -28,10 +28,10 @@ func TestExecuteReportsDetectedLanguagesAndAvailability(t *testing.T) {
 	writeFile(t, workdir, "go.mod", "module example.com/test\n")
 	installFakeServer(t, "gopls")
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{"action": actionLanguages},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute languages: %v", err)
 	}
@@ -47,10 +47,10 @@ func TestExecuteQueriesWorkspaceSymbolsThroughLSP(t *testing.T) {
 	installFakeServer(t, "gopls")
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{"query": "Target"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute workspace symbol: %v", err)
 	}
@@ -70,10 +70,10 @@ func TestExecuteReusesWarmLanguageServer(t *testing.T) {
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
 	for i := 0; i < 2; i++ {
-		result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+		result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 			Tool: domain.ToolKindCodeSearch,
 			Args: map[string]string{"query": "Target"},
-		})
+		}})
 		if err != nil {
 			t.Fatalf("execute workspace symbol %d: %v", i, err)
 		}
@@ -96,10 +96,10 @@ func TestIdleReaperShutsDownWarmLanguageServer(t *testing.T) {
 	t.Setenv("KODER_FAKE_LSP_COUNTER", counter)
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	_, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	_, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{"query": "Target"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute workspace symbol: %v", err)
 	}
@@ -117,10 +117,10 @@ func TestExecuteRetriesAfterBrokenLanguageServer(t *testing.T) {
 	t.Setenv("KODER_FAKE_LSP_FAIL_FIRST_WORKSPACE_SYMBOL", "1")
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{"query": "Target"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute workspace symbol: %v", err)
 	}
@@ -137,10 +137,10 @@ func TestExecuteWarnsAboutDetectedMissingLanguageServer(t *testing.T) {
 	writeFile(t, workdir, "go.mod", "module example.com/test\n")
 	t.Setenv("PATH", t.TempDir())
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{"action": actionLanguages},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute languages: %v", err)
 	}
@@ -215,13 +215,13 @@ func TestExecuteQueriesDocumentSymbolsThroughLSP(t *testing.T) {
 	installFakeServer(t, "gopls")
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{
 			"action": actionDocumentSymbols,
 			"path":   "main.go",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute document symbols: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestExecuteQueriesDefinitionThroughLSP(t *testing.T) {
 	installFakeServer(t, "gopls")
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{
 			"action":    actionDefinition,
@@ -245,7 +245,7 @@ func TestExecuteQueriesDefinitionThroughLSP(t *testing.T) {
 			"line":      "2",
 			"character": "8",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute definition: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestExecuteQueriesReferencesThroughLSP(t *testing.T) {
 	installFakeServer(t, "gopls")
 	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindCodeSearch,
 		Args: map[string]string{
 			"action":    actionReferences,
@@ -269,7 +269,7 @@ func TestExecuteQueriesReferencesThroughLSP(t *testing.T) {
 			"line":      "2",
 			"character": "8",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute references: %v", err)
 	}

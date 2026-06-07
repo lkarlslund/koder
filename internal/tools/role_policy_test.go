@@ -30,14 +30,14 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 }
 
 func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
-	_, err := tools.Execute(context.Background(), tools.Runtime{
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		ChatRole:  chatrole.Execution,
-	}, tools.Request{
+	}, Request: tools.Request{
 		Tool: domain.ToolKindChatStart,
 		Args: map[string]string{"profile": string(chatrole.Execution), "objective": "no"},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "not available to execution chats") {
 		t.Fatalf("expected role denial, got %v", err)
 	}

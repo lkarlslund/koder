@@ -30,9 +30,9 @@ func TestExecuteAcceptsImageAndStoresRenderablePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "screen.png"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,9 +55,9 @@ func TestExecuteRejectsNonImageFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "note.txt"},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported image type") {
 		t.Fatalf("expected non-image rejection, got %v", err)
 	}

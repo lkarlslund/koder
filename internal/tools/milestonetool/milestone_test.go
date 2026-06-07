@@ -146,7 +146,7 @@ func TestMilestoneAddRejectsDuplicateTitle(t *testing.T) {
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{"ref": "beta", "title": "  alpha  "},
 	}
-	_, err := tools.Execute(context.Background(), runtime, req)
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: req})
 	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
 		t.Fatalf("expected duplicate milestone title error, got %v", err)
 	}
@@ -297,7 +297,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (listTool{}).Execute(context.Background(), runtime, tools.Request{Tool: domain.ToolKindMilestoneList})
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindMilestoneList}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,20 +305,20 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 		t.Fatalf("expected scoped milestone list, got %q", result.Output)
 	}
 
-	result, err = (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+	result, err = (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "beta", "status": "completed"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(result.Output, "Alpha") || !strings.Contains(result.Output, "Beta") {
 		t.Fatalf("expected scoped milestone update output, got %q", result.Output)
 	}
-	if _, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+	if _, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "alpha", "status": "completed"},
-	}); err == nil || !strings.Contains(err.Error(), `scoped to milestone "beta"`) {
+	}}); err == nil || !strings.Contains(err.Error(), `scoped to milestone "beta"`) {
 		t.Fatalf("expected scoped milestone error, got %v", err)
 	}
 
@@ -341,10 +341,10 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+	_, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "alpha", "status": "completed"},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
 		t.Fatalf("expected completion guard error, got %v", err)
 	}
@@ -368,10 +368,10 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+	result, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "alpha", "status": "completed"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestListAndAddExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (listTool{}).Execute(context.Background(), runtime, tools.Request{Tool: domain.ToolKindMilestoneList})
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindMilestoneList}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,10 +414,10 @@ func TestListAndAddExecute(t *testing.T) {
 		t.Fatalf("expected indented gamma task summary, got %q", result.Output)
 	}
 
-	result, err = (listTool{}).Execute(context.Background(), runtime, tools.Request{
+	result, err = (listTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneList,
 		Args: map[string]string{"completed": "true"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,20 +425,20 @@ func TestListAndAddExecute(t *testing.T) {
 		t.Fatalf("expected completed=true list output to include completed milestone, got %q", result.Output)
 	}
 
-	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
+	result, err = (addItemsTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{"ref": "delta", "title": "Delta", "depends_on_ref": "beta"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(result.Output, "Delta") || !strings.Contains(result.Output, "  - [pending] Delta") {
 		t.Fatalf("expected add output to contain new milestone, got %q", result.Output)
 	}
-	if _, err := (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
+	if _, err := (addItemsTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{"ref": "epsilon", "title": "Epsilon", "depends_on_ref": "missing"},
-	}); err == nil || !strings.Contains(err.Error(), "unknown milestone") {
+	}}); err == nil || !strings.Contains(err.Error(), "unknown milestone") {
 		t.Fatalf("expected unknown dependency error, got %v", err)
 	}
 }

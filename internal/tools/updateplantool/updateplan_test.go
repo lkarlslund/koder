@@ -32,12 +32,12 @@ func TestNormalizeArgsValidatesPlan(t *testing.T) {
 }
 
 func TestExecuteFormatsPlan(t *testing.T) {
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{
 		Args: map[string]string{
 			"explanation": "Do the work",
 			"plan":        `[{"step":"Inspect","status":"completed"},{"step":"Implement","status":"in_progress"}]`,
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

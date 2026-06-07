@@ -109,10 +109,10 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	next, err := tools.Execute(ctx, runtime, tools.Request{
+	next, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTaskFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,10 +146,10 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	done, err := tools.Execute(ctx, runtime, tools.Request{
+	done, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTaskFetchNext,
 		Args: map[string]string{"milestone_ref": "implement"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 			"items":         `[{"content":"Write tests"},{"content":"Fix bug"}]`,
 		},
 	}
-	result, err := tools.Execute(ctx, runtime, req)
+	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,13 +211,13 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	}
 	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
-	_, err = tools.Execute(ctx, runtime, tools.Request{
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{
 			"milestone_ref": "implement",
 			"items":         `[{"content":"  write   tests "}]`,
 		},
-	})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate task content") {
 		t.Fatalf("expected duplicate task content error, got %v", err)
 	}
@@ -246,7 +246,7 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 				"items":         `[{"content":"Reopen work"}]`,
 			},
 		}
-		_, err := tools.Execute(ctx, runtime, req)
+		_, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 		if err == nil {
 			t.Fatalf("expected closed milestone error for %s", ref)
 		}
@@ -334,10 +334,10 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		SessionControl:        tooltest.NewSessionControl(st),
 	}
 
-	listed, err := tools.Execute(ctx, runtime, tools.Request{
+	listed, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTaskList,
 		Args: map[string]string{"milestone_ref": "implement"},
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,16 +345,16 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		t.Fatalf("expected single scoped task, got %q", listed.Output)
 	}
 
-	if _, err := tools.Execute(ctx, runtime, tools.Request{
+	if _, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"id": string(todos[1].ID), "status": planning.TodoStatusCompleted.String(), "note": "Tried to complete scoped task."},
-	}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+	}}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
 		t.Fatalf("expected scoped task error, got %v", err)
 	}
-	if _, err := tools.Execute(ctx, runtime, tools.Request{
+	if _, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTasksAdd,
 		Args: map[string]string{"milestone_ref": "implement", "items": `[{"content":"Third"}]`},
-	}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+	}}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
 		t.Fatalf("expected add task scoped error, got %v", err)
 	}
 }
@@ -388,7 +388,7 @@ func openPlanningTestStore(t *testing.T) *store.Store {
 
 func executeAndPersist(ctx context.Context, t *testing.T, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	t.Helper()
-	result, err := tools.Execute(ctx, runtime, req)
+	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 	if err != nil {
 		return tools.Result{}, err
 	}

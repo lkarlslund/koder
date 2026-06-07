@@ -27,7 +27,8 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return map[string]string{"question": question}, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["question"] }
-func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	req := opts.Request
 	return tools.Result{
 		Output: req.Args["question"],
 		Stored: tools.QuestionStoredResult{Question: req.Args["question"]},

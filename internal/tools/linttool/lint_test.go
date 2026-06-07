@@ -17,10 +17,10 @@ func TestExecuteReportsSyntaxDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindLint,
 		Args: map[string]string{"path": "main.go", "mode": "syntax"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute lint: %v", err)
 	}

@@ -634,7 +634,8 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 	return tools.Presentation{Title: "Search code", Subtitle: preview, Preview: preview}
 }
 
-func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
 	options, err := optionsFromRequest(req)
 	if err != nil {
 		return tools.Result{}, err

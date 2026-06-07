@@ -74,13 +74,13 @@ func TestExecuteSearchesSingleFilePath(t *testing.T) {
 		t.Fatalf("write sibling file: %v", err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "pkg/file.go",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute grep on file path: %v", err)
 	}
@@ -104,13 +104,13 @@ func TestExecuteSearchesDirectoryPath(t *testing.T) {
 		t.Fatalf("write b.go: %v", err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "pkg",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute grep on directory path: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestExecuteFilesWithMatchesMode(t *testing.T) {
 		t.Fatalf("write b.txt: %v", err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "needle",
@@ -157,7 +157,7 @@ func TestExecuteFilesWithMatchesMode(t *testing.T) {
 			"output_mode": "files_with_matches",
 			"type":        "go",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute grep files_with_matches: %v", err)
 	}
@@ -175,14 +175,14 @@ func TestExecuteCountMode(t *testing.T) {
 		t.Fatalf("write a.go: %v", err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "needle",
 			"path":        "pkg",
 			"output_mode": "count",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute grep count mode: %v", err)
 	}
@@ -202,14 +202,14 @@ func TestExecuteFallsBackWithoutRipgrep(t *testing.T) {
 		t.Fatalf("write target file: %v", err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "alpha|needle",
 			"path":        "pkg/file.go",
 			"ignore_case": "true",
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute fallback grep on file path: %v", err)
 	}
@@ -234,12 +234,12 @@ func TestExecuteReturnsErrorWhenRipgrepFails(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir)
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 		},
-	})
+	}})
 	if err == nil {
 		t.Fatal("expected ripgrep failure to be returned")
 	}
@@ -259,13 +259,13 @@ func TestExecuteFallbackReturnsErrorForInvalidIncludeGlob(t *testing.T) {
 		t.Fatalf("write target file: %v", err)
 	}
 
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workdir}, Request: tools.Request{
 		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"include": "[",
 		},
-	})
+	}})
 	if err == nil {
 		t.Fatal("expected invalid include glob error")
 	}

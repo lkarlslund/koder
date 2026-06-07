@@ -19,7 +19,7 @@ func TestNormalizeArgsValidatesPath(t *testing.T) {
 func TestExecuteCreatesFileWithoutForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "hello\n"}}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestExecuteRefusesExistingFileWithoutForceOverwrite(t *testing.T) {
 	}
 
 	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n"}}
-	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req})
 	if err == nil {
 		t.Fatal("expected overwrite refusal")
 	}
@@ -68,7 +68,7 @@ func TestExecuteRefusesExistingFileWithFalseForceOverwrite(t *testing.T) {
 	}
 
 	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n", "force_overwrite": "false"}}
-	if _, err := (tool{}).Execute(context.Background(), tools.Runtime{Workdir: dir}, req); err == nil {
+	if _, err := (tool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req}); err == nil {
 		t.Fatal("expected overwrite refusal")
 	}
 }
@@ -81,7 +81,7 @@ func TestExecuteOverwritesFileWithForceOverwrite(t *testing.T) {
 	}
 
 	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n", "force_overwrite": "true"}}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestExecuteOverwritesFileWithForceOverwrite(t *testing.T) {
 func TestExecuteDefersWrittenFileDiagnosticsToLintMessage(t *testing.T) {
 	dir := t.TempDir()
 	req := tools.Request{Args: map[string]string{"path": "bad.json", "content": "{"}}
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}

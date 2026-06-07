@@ -375,7 +375,7 @@ func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime
 			*messages = append(*messages, provider.Message{Role: provider.RoleTool, ToolCallID: strings.TrimSpace(call.ID), Content: "Error: " + err.Error()})
 			continue
 		}
-		result, err := tools.Execute(ctx, runtime, req)
+		result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 		content := strings.TrimSpace(result.Output)
 		if err != nil {
 			content = "Error: " + err.Error()

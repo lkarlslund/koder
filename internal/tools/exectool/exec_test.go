@@ -45,14 +45,14 @@ func TestCommandNormalizeArgs(t *testing.T) {
 func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 	root := t.TempDir()
 	control := &recordingExecControl{}
-	result, err := (commandTool{}).Execute(context.Background(), tools.Runtime{
+	result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		Workdir:   root,
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		Exec:      control,
-	}, tools.Request{
+	}, Request: tools.Request{
 		Args: map[string]string{"cmd": "pwd"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -77,14 +77,14 @@ func TestCommandExecuteResolvesWorkdirRelativeToSessionProjectRoot(t *testing.T)
 		t.Fatalf("create subdir: %v", err)
 	}
 	control := &recordingExecControl{}
-	_, err := (commandTool{}).Execute(context.Background(), tools.Runtime{
+	_, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		Workdir:   root,
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		Exec:      control,
-	}, tools.Request{
+	}, Request: tools.Request{
 		Args: map[string]string{"cmd": "pwd", "workdir": "sub"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -128,13 +128,13 @@ func TestYieldTimeRejectsZero(t *testing.T) {
 
 func TestWriteStdinExecuteDefaultsToTenSecondYield(t *testing.T) {
 	control := &recordingExecControl{}
-	_, err := (writeStdinTool{}).Execute(context.Background(), tools.Runtime{
+	_, err := (writeStdinTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		Exec:      control,
-	}, tools.Request{
+	}, Request: tools.Request{
 		Args: map[string]string{"process_id": "exec_1", "chars": ""},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -145,13 +145,13 @@ func TestWriteStdinExecuteDefaultsToTenSecondYield(t *testing.T) {
 
 func TestWriteStdinExecuteDoesNotAllowZeroYield(t *testing.T) {
 	control := &recordingExecControl{}
-	_, err := (writeStdinTool{}).Execute(context.Background(), tools.Runtime{
+	_, err := (writeStdinTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		Exec:      control,
-	}, tools.Request{
+	}, Request: tools.Request{
 		Args: map[string]string{"process_id": "exec_1", "chars": "", "yield_time_ms": "0"},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
