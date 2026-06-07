@@ -7864,11 +7864,18 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
-	events, err := engine.persistToolResult(context.Background(), chat.ID, session.ID, tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
+	loaded, err := engine.LoadSession(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt := <-events
+	rt, err := loaded.Chat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt, err := rt.FinalizeToolResult(context.Background(), engine.toolRuntime(session, chat), tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if evt.Kind != domain.EventKindToolResult || !strings.Contains(evt.Text, "completed with no output") {
 		t.Fatalf("unexpected tool result event: %#v", evt)
 	}
