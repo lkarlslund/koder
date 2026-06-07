@@ -5,20 +5,8 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/modeltest"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
-
-func openQuestionStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
-}
 
 func TestNormalizeAndExecute(t *testing.T) {
 	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {
@@ -37,13 +25,8 @@ func TestNormalizeAndExecute(t *testing.T) {
 	}
 }
 
-func TestPersistResult(t *testing.T) {
-	st := openQuestionStore(t)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err := tools.PersistResult(context.Background(), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
+func TestFinalizeResult(t *testing.T) {
+	result, body, err := tools.FinalizeResult(context.Background(), tools.Runtime{}, tools.Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, tools.Result{
@@ -53,26 +36,10 @@ func TestPersistResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt := <-events
-	if evt.Kind != domain.EventKindToolResult {
-		t.Fatalf("unexpected event: %#v", evt)
+	if body != "What next?" || result.Text != "What next?" {
+		t.Fatalf("unexpected result body=%q result=%#v", body, result)
 	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("unexpected stored output: %#v", items)
-	}
-	exec, ok := items[0].Content.(domain.ToolExecution)
-	if !ok || exec.Tool != domain.ToolKindQuestion || exec.Result == nil {
-		t.Fatalf("expected question tool execution, got %#v", items[0])
-	}
-	if _, ok := exec.Result.Data.(domain.QuestionStoredResult); !ok {
-		t.Fatalf("expected typed question tool payload, got %#v", exec.Result.Data)
+	if _, ok := result.Data.(domain.QuestionStoredResult); !ok {
+		t.Fatalf("expected typed question tool payload, got %#v", result.Data)
 	}
 }

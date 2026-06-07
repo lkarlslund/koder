@@ -7,7 +7,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
@@ -31,13 +30,7 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 }
 
 func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	_, err = tools.Execute(context.Background(), tools.Runtime{
-		Store:     st,
+	_, err := tools.Execute(context.Background(), tools.Runtime{
 		SessionID: "session-1",
 		ChatID:    "chat-1",
 		ChatRole:  chatrole.Execution,

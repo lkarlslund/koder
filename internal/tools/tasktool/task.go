@@ -35,22 +35,18 @@ func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tool
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "task", req.Args["body"]
 }
-func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (tool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireTaskControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], planning.TaskStatusPending)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	result.Stored = tools.TaskStoredResult{
 		Body:   task.Body,
 		Status: task.Status,
 	}
-	events, err := tools.PersistStandardResult(ctx, runtime, req, result)
-	if err != nil {
-		return nil, err
-	}
-	return events, nil
+	return result, nil
 }

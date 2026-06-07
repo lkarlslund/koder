@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -19,7 +18,6 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/toolkind"
 )
 
@@ -158,7 +156,6 @@ type Presentation struct {
 type Runtime struct {
 	Workdir               string
 	HTTPClient            *http.Client
-	Store                 *store.Store
 	SessionID             id.ID
 	ChatID                id.ID
 	ChatRole              domain.WorkflowRole
@@ -173,14 +170,6 @@ type Runtime struct {
 	MCP                   MCPExecutor
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
-	Timeline              TimelineRecorder
-}
-
-type TimelineRecorder interface {
-	AppendTimelineContent(context.Context, domain.TimelineContent) (domain.TimelineItem, error)
-	AttachToolResult(context.Context, string, domain.ToolResult) (domain.TimelineItem, error)
-	AttachToolError(context.Context, string, domain.ToolError) (domain.TimelineItem, error)
-	AttachToolApproval(context.Context, string, domain.ApprovalRequest) (domain.TimelineItem, error)
 }
 
 type MCPExecutor interface {
@@ -227,8 +216,8 @@ type resultSummarizer interface {
 	SummarizeResult(req Request, result Result) (summary string, body string)
 }
 
-type resultPersister interface {
-	PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error)
+type resultFinalizer interface {
+	FinalizeResult(ctx context.Context, runtime Runtime, req Request, result Result) (Result, error)
 }
 
 var (
@@ -335,140 +324,6 @@ func normalizeRuntime(runtime Runtime) Runtime {
 	return runtime
 }
 
-func defaultChatForToolResult(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
-	chats, err := toolChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
-	if err != nil {
-		return domain.Chat{}, err
-	}
-	slices.SortFunc(chats, func(a, b domain.Chat) int {
-		switch {
-		case a.Position < b.Position:
-			return -1
-		case a.Position > b.Position:
-			return 1
-		case a.CreatedAt.Before(b.CreatedAt):
-			return -1
-		case a.CreatedAt.After(b.CreatedAt):
-			return 1
-		case a.ID < b.ID:
-			return -1
-		case a.ID > b.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	for _, chat := range chats {
-		if chat.ParentChatID == nil {
-			return chat, nil
-		}
-	}
-	if len(chats) > 0 {
-		return chats[0], nil
-	}
-	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
-}
-
-func toolChatCollection(st *store.Store) store.Collection[domain.Chat] {
-	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
-		Namespace: "chats",
-		GetID:     func(v domain.Chat) string { return v.ID },
-		SetID:     func(v *domain.Chat, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[domain.Chat]{
-			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
-		},
-	})
-}
-
-func toolTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
-	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
-		Namespace: "timeline",
-		GetID:     func(v domain.TimelineItem) string { return v.ID },
-		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[domain.TimelineItem]{
-			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
-		},
-	})
-}
-
-func toolTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
-	items, err := toolTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
-		switch {
-		case a.Seq < b.Seq:
-			return -1
-		case a.Seq > b.Seq:
-			return 1
-		case a.ID < b.ID:
-			return -1
-		case a.ID > b.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return items, nil
-}
-
-func toolAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	unlock := store.LockTimelineMutation()
-	defer unlock()
-	items, err := toolTimelineForChat(ctx, st, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	now := time.Now().UTC()
-	return toolTimelineCollection(st).Insert(ctx, domain.TimelineItem{
-		ChatID:    chatID,
-		Seq:       int64(len(items) + 1),
-		Content:   content,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-}
-
-func toolAttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
-	unlock := store.LockTimelineMutation()
-	defer unlock()
-	items, err := toolTimelineForChat(ctx, st, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		item := items[idx]
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		call := assistant.ToolByID(domain.ToolCallID(strings.TrimSpace(toolCallID)))
-		if call == nil {
-			continue
-		}
-		call.Result = &result
-		call.Error = nil
-		call.Approval = nil
-		call.ApprovalID = ""
-		if result.Status == domain.ToolResultStatusDenied {
-			call.Status = domain.ToolStatusDenied
-		} else {
-			call.Status = domain.ToolStatusDone
-		}
-		if call.CompletedAt.IsZero() {
-			call.CompletedAt = time.Now().UTC()
-		}
-		item.Content = assistant
-		item.UpdatedAt = time.Now().UTC()
-		if err := toolTimelineCollection(st).Put(ctx, item); err != nil {
-			return domain.TimelineItem{}, err
-		}
-		return item, nil
-	}
-	return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
-}
-
 func (r Runtime) CheckNetworkAccess() error {
 	return accesssettings.Allows(r.AccessSettings, accesssettings.Request{Kind: accesssettings.AccessNetwork})
 }
@@ -492,23 +347,26 @@ func EnsureSessionTmpDir(settings accesssettings.Settings) error {
 	return os.MkdirAll(settings.TmpDir, 0o700)
 }
 
-func PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
+func FinalizeResult(ctx context.Context, runtime Runtime, req Request, result Result) (domain.ToolResult, string, error) {
 	if req.Tool == 0 {
-		return nil, errors.New("tool is empty")
+		return domain.ToolResult{}, "", errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)
 	if !ok {
-		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
+		return domain.ToolResult{}, "", fmt.Errorf("unsupported tool %q", req.Tool)
 	}
 	if req.Args == nil {
 		req.Args = map[string]string{}
 	}
 	runtime = normalizeRuntime(runtime)
-	ctx = WithChatID(ctx, runtime.ChatID)
-	if persister, ok := tool.(resultPersister); ok {
-		return persister.PersistResult(ctx, runtime, req, result)
+	if finalizer, ok := tool.(resultFinalizer); ok {
+		var err error
+		result, err = finalizer.FinalizeResult(ctx, runtime, req, result)
+		if err != nil {
+			return domain.ToolResult{}, "", err
+		}
 	}
-	return PersistStandardResult(ctx, runtime, req, result)
+	return BuildToolResult(req, result)
 }
 
 func Definitions(runtime Runtime) []provider.ToolDefinition {
@@ -733,24 +591,11 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 	}
 }
 
-func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
+func BuildToolResult(req Request, result Result) (domain.ToolResult, string, error) {
 	_, body := SummarizeResult(req, result)
-	st := runtime.Store
-	sessionID := runtime.SessionID
-	if st == nil && runtime.Timeline == nil {
-		return nil, errors.New("persist tool result requires a chat runtime")
-	}
-	chatID, ok := ChatIDFromContext(ctx)
-	if (!ok || chatID == "") && runtime.Timeline == nil {
-		chat, err := defaultChatForToolResult(ctx, st, sessionID)
-		if err != nil {
-			return nil, err
-		}
-		chatID = chat.ID
-	}
 	stored, err := domainToolResultPayload(req.Tool, domain.ToolResultStatusOK, result.Stored)
 	if err != nil {
-		return nil, err
+		return domain.ToolResult{}, "", err
 	}
 	toolResult := domain.ToolResult{
 		Text:   body,
@@ -758,29 +603,7 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 		Data:   stored,
 		Status: domain.ToolResultStatusOK,
 	}
-	var item domain.TimelineItem
-	if strings.TrimSpace(req.ToolCallID) == "" {
-		content := domain.ToolExecution{
-			Tool:   req.Tool,
-			Args:   req.Meta(),
-			Result: &toolResult,
-		}
-		if runtime.Timeline != nil {
-			item, err = runtime.Timeline.AppendTimelineContent(ctx, content)
-		} else {
-			item, err = toolAppendTimeline(ctx, st, chatID, content)
-		}
-	} else {
-		if runtime.Timeline != nil {
-			item, err = runtime.Timeline.AttachToolResult(ctx, req.ToolCallID, toolResult)
-		} else {
-			item, err = toolAttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Item: item}), nil
+	return toolResult, body, nil
 }
 
 func domainToolResultPayload(tool domain.ToolKind, status domain.ToolResultStatus, stored any) (domain.ToolResultPayload, error) {

@@ -1,13 +1,9 @@
 package tools
 
 import (
-	"context"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/modeltest"
-	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 type badStoredResult struct {
@@ -16,24 +12,8 @@ type badStoredResult struct {
 
 func (badStoredResult) storedResultPayload() {}
 
-func openToolsStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
-}
-
-func TestPersistStandardResultReturnsStoredMarshalError(t *testing.T) {
-	st := openToolsStore(t)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = PersistStandardResult(context.Background(), Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}, Request{
+func TestBuildToolResultReturnsStoredMarshalError(t *testing.T) {
+	_, _, err := BuildToolResult(Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, Result{

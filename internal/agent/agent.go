@@ -1422,13 +1422,58 @@ func (e *Engine) persistToolResultForTurn(ctx context.Context, turn *chatpkg.Tur
 			return nil, err
 		}
 	}
-	events, err := tools.PersistResult(ctx, e.toolRuntimeForTurn(session, chat, turn), req, result)
+	toolResult, body, err := tools.FinalizeResult(ctx, e.toolRuntimeForTurn(session, chat, turn), req, result)
+	if err != nil {
+		return nil, err
+	}
+	var item domain.TimelineItem
+	if strings.TrimSpace(req.ToolCallID) != "" {
+		if turn != nil {
+			item, err = turn.AttachToolResult(ctx, req.ToolCallID, toolResult)
+		} else {
+			rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+			if ownerErr != nil {
+				return nil, ownerErr
+			}
+			item, err = rt.AttachToolResult(ctx, req.ToolCallID, toolResult)
+		}
+	} else {
+		now := time.Now().UTC()
+		content := domain.ToolExecution{
+			Tool:      req.Tool,
+			Args:      req.Meta(),
+			Result:    &toolResult,
+			StartedAt: now,
+			EndedAt:   now,
+		}
+		if turn != nil {
+			item, err = turn.AppendTimelineContent(ctx, content)
+		} else {
+			rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+			if ownerErr != nil {
+				return nil, ownerErr
+			}
+			item, err = rt.AppendTimelineContent(ctx, content)
+		}
+		if err == nil {
+			item.Seal(now)
+			if turn != nil {
+				item, err = turn.UpsertTimelineItem(ctx, item)
+			} else {
+				rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+				if ownerErr != nil {
+					return nil, ownerErr
+				}
+				item, err = rt.UpsertTimelineItem(ctx, item)
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
 	summary, _ := tools.SummarizeResult(req, result)
 	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": req.Tool.String()})
-	return events, nil
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Item: item}), nil
 }
 
 func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {
@@ -2488,7 +2533,6 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
 	runtime := tools.Runtime{
 		Workdir:               sessionProjectRoot(session),
-		Store:                 e.store,
 		SessionID:             session.ID,
 		ChatID:                chat.ID,
 		ChatRole:              chat.WorkflowRole,
@@ -2511,9 +2555,6 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 
 func (e *Engine) toolRuntimeForTurn(session domain.Session, chat domain.Chat, turn *chatpkg.TurnState) tools.Runtime {
 	runtime := e.toolRuntime(session, chat)
-	if turn != nil {
-		runtime.Timeline = turn
-	}
 	return runtime
 }
 

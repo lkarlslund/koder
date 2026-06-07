@@ -1,35 +1,16 @@
 package tools_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
-	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
-
-func openToolsTestStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = st.Close()
-	})
-	return st
-}
 
 func TestRequestJSONRoundTrip(t *testing.T) {
 	original := tools.Request{
@@ -167,27 +148,8 @@ func TestRequireChatControlRequiresActiveChat(t *testing.T) {
 	}
 }
 
-func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
-	st := openToolsTestStore(t)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = modeltest.AppendAssistantToolCalls(context.Background(), st, chat.ID, []domain.ToolCall{{
-		ToolCallID: "call_write",
-		Tool:       domain.ToolKindFileWrite,
-		Args:       map[string]string{"path": "notes.txt"},
-		Status:     domain.ToolStatusPending,
-	}}, "", domain.Usage{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}, tools.Request{
+func TestBuildToolResultPreservesPayloadAndDiff(t *testing.T) {
+	result, _, err := tools.BuildToolResult(tools.Request{
 		Tool:       domain.ToolKindFileWrite,
 		ToolCallID: "call_write",
 		Args:       map[string]string{"path": "notes.txt"},
@@ -204,106 +166,11 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt := <-events
-	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindFileWrite {
-		t.Fatalf("unexpected event: %#v", evt)
+	if strings.TrimSpace(result.Diff) == "" {
+		t.Fatalf("expected diff on tool result, got %#v", result)
 	}
-
-	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected one stored item, got %d", len(items))
-	}
-	assistant, ok := items[0].Content.(domain.AssistantMessage)
-	if !ok || len(assistant.Tools) != 1 || assistant.Tools[0].Result == nil {
-		t.Fatalf("expected tool result child, got %#v", items[0].Content)
-	}
-	if strings.TrimSpace(assistant.Tools[0].Result.Diff) == "" {
-		t.Fatalf("expected diff on tool result, got %#v", assistant.Tools[0].Result)
-	}
-	payload, ok := assistant.Tools[0].Result.Data.(domain.WriteStoredResult)
+	payload, ok := result.Data.(domain.WriteStoredResult)
 	if !ok || payload.Path != "notes.txt" {
-		t.Fatalf("expected typed write payload, got %#v", assistant.Tools[0].Result.Data)
-	}
-}
-
-func TestPersistStandardResultPreservesParallelToolResults(t *testing.T) {
-	st := openToolsTestStore(t)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const count = 12
-	calls := make([]domain.ToolCall, 0, count)
-	for idx := 0; idx < count; idx++ {
-		calls = append(calls, domain.ToolCall{
-			ToolCallID: domain.ToolCallID("call_" + strconv.Itoa(idx)),
-			Tool:       domain.ToolKindFileGrep,
-			Args:       map[string]string{"pattern": "needle"},
-			Status:     domain.ToolStatusPending,
-		})
-	}
-	if _, err := modeltest.AppendAssistantToolCalls(context.Background(), st, chat.ID, calls, "", domain.Usage{}); err != nil {
-		t.Fatal(err)
-	}
-
-	var wg sync.WaitGroup
-	errs := make(chan error, count)
-	for idx := 0; idx < count; idx++ {
-		idx := idx
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			callID := "call_" + strconv.Itoa(idx)
-			events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
-				Tool:       domain.ToolKindFileGrep,
-				ToolCallID: callID,
-				Args:       map[string]string{"pattern": "needle"},
-			}, tools.Result{
-				Output: "match " + strconv.Itoa(idx),
-				Stored: domain.GrepStoredResult{
-					Pattern: "needle",
-					Output:  "match " + strconv.Itoa(idx),
-				},
-			})
-			if err != nil {
-				errs <- err
-				return
-			}
-			evt := <-events
-			if evt.Kind != domain.EventKindToolResult || evt.ToolCallID != callID || evt.Item.ID == "" {
-				errs <- fmt.Errorf("unexpected event for %s: %#v", callID, evt)
-			}
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	items, err := modeltest.TimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected one assistant item, got %d", len(items))
-	}
-	assistant, ok := items[0].Content.(domain.AssistantMessage)
-	if !ok || len(assistant.Tools) != count {
-		t.Fatalf("expected assistant with %d tools, got %#v", count, items[0].Content)
-	}
-	for _, call := range assistant.Tools {
-		if call.Status != domain.ToolStatusDone || call.Result == nil {
-			t.Fatalf("expected all parallel tool calls done, got %#v", assistant.Tools)
-		}
+		t.Fatalf("expected typed write payload, got %#v", result.Data)
 	}
 }

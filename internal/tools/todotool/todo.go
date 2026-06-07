@@ -280,70 +280,68 @@ func (fetchNextTool) SummarizeResult(req tools.Request, result tools.Result) (st
 	return "Fetched next task", result.Output
 }
 
-func (listTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, "")
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
-func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	items, err := planning.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	if err := ensureMilestoneAcceptsTodos(plan, req.Args["milestone_ref"]); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	existing, err := control.ListTodos(ctx, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	if err := planning.ValidateNoDuplicateTodoContent(existing, items); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_ref"], items)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	stored := tools.TodoStoredResult(plan, req.Args["milestone_ref"], created, "")
 	result.Stored = stored
 	result.Output = tools.FormatTodoOutput(stored)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
-func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	id, _ := planning.ParseTodoID(req.Args["id"])
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	for _, milestone := range plan.Milestones {
 		todos, err := control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 		if err != nil {
-			return nil, err
+			return tools.Result{}, err
 		}
 		todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
 		if err != nil {
-			return nil, fmt.Errorf("invalid task status %q", req.Args["status"])
+			return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
 		}
 		for idx := range todos {
 			if todos[idx].ID != id {
@@ -354,49 +352,47 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 				todos[idx].Content = content
 			}
 			if err := planning.ValidateTodoProgress(todos); err != nil {
-				return nil, err
+				return tools.Result{}, err
 			}
 			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
-				return nil, err
+				return tools.Result{}, err
 			}
 			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 			if err != nil {
-				return nil, err
+				return tools.Result{}, err
 			}
 			result.Stored = tools.TodoStoredResult(plan, milestone.Ref, todos, "")
-			return tools.PersistStandardResult(ctx, runtime, req, result)
+			return result, nil
 		}
 	}
-	return nil, fmt.Errorf("task %s not found", id)
+	return tools.Result{}, fmt.Errorf("task %s not found", id)
 }
-
-func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	message := ""
 	for _, item := range todos {
 		if item.Status == planning.TodoStatusInProgress {
 			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
-			return tools.PersistStandardResult(ctx, runtime, req, result)
+			return result, nil
 		}
 	}
 	for _, item := range todos {
 		if item.Status == planning.TodoStatusPending {
 			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
-			return tools.PersistStandardResult(ctx, runtime, req, result)
+			return result, nil
 		}
 	}
 	message = "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, message)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
 func ensureMilestoneAcceptsTodos(plan planning.Plan, ref string) error {
 	ref = strings.TrimSpace(ref)
 	for _, milestone := range plan.Milestones {

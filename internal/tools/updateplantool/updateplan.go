@@ -72,10 +72,10 @@ func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tool
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "plan", result.Output
 }
-func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (tool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	storedSteps := make([]domain.PlanStoredStep, 0, len(steps))
 	for _, item := range steps {
@@ -88,13 +88,8 @@ func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.
 		Explanation: req.Args["explanation"],
 		Steps:       storedSteps,
 	}
-	events, err := tools.PersistStandardResult(ctx, runtime, req, result)
-	if err != nil {
-		return nil, err
-	}
-	return events, nil
+	return result, nil
 }
-
 func normalizePlan(raw string) ([]step, error) {
 	var steps []step
 	if err := json.Unmarshal([]byte(raw), &steps); err != nil {

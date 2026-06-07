@@ -39,47 +39,32 @@ func TestNormalizeAndExecute(t *testing.T) {
 	}
 }
 
-func TestPersistResultCreatesPendingTask(t *testing.T) {
+func TestFinalizeResultCreatesPendingTask(t *testing.T) {
 	st := openTaskStore(t)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	control := tooltest.NewSessionControl(st)
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: control, TaskControl: control}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime.ChatID = chat.ID
-	if _, err := modeltest.AppendTimeline(context.Background(), st, chat.ID, domain.AssistantMessage{
-		Tools: []domain.ToolCall{{
-			ToolCallID: "call_task",
-			Tool:       domain.ToolKindTask,
-			Status:     domain.ToolStatusPending,
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: control, TaskControl: control}
+	req := tools.Request{
 		Tool:       domain.ToolKindTask,
 		ToolCallID: "call_task",
 		Args:       map[string]string{"body": "Ship it"},
-	}, tools.Result{Output: "Ship it"})
+	}
+	result, err := tool{}.FinalizeResult(context.Background(), runtime, req, tools.Result{Output: "Ship it"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt := <-events
-	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindTask || evt.Item.ID == "" {
-		t.Fatalf("unexpected event: %#v", evt)
+	toolResult, body, err := tools.BuildToolResult(req, result)
+	if err != nil {
+		t.Fatal(err)
 	}
-	assistant, ok := evt.Item.Content.(domain.AssistantMessage)
-	if !ok {
-		t.Fatalf("expected assistant item, got %#v", evt.Item.Content)
+	if body != "Ship it" || toolResult.Text != "Ship it" {
+		t.Fatalf("unexpected task result body=%q result=%#v", body, toolResult)
 	}
-	call := assistant.ToolByID("call_task")
-	if call == nil || call.Status != domain.ToolStatusDone || call.Result == nil {
-		t.Fatalf("expected completed task tool call, got %#v", call)
+	if _, ok := toolResult.Data.(domain.TaskStoredResult); !ok {
+		t.Fatalf("expected typed task result, got %#v", toolResult.Data)
 	}
 	tasks, err := modeltest.ListTasks(context.Background(), st, session.ID)
 	if err != nil {

@@ -319,29 +319,28 @@ func (writeTool) SummarizeResult(req tools.Request, result tools.Result) (string
 	return "Updated milestones", result.Output
 }
 
-func (listTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	if result.Stored == nil {
 		result.Stored = tools.MilestoneStoredResult(plan)
 	}
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
-func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	item := planning.Milestone{
 		Ref:          req.Args["ref"],
@@ -351,66 +350,63 @@ func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, re
 		DependsOnRef: strings.TrimSpace(req.Args["depends_on_ref"]),
 	}
 	if err := ensureMilestoneRefsAvailable(plan.Milestones, []planning.Milestone{item}); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	nextMilestones := appendMilestones(plan.Milestones, []planning.Milestone{item})
 	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, nextMilestones)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	result.Stored = tools.MilestoneStoredResult(plan)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
-func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	updated, err := updatedMilestonePlan(plan, req, actorChatFromRuntime(runtime))
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, updated.Summary, updated.Milestones)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	stored := tools.MilestoneStoredResult(tools.MilestonePlanForRef(plan, req.Args["ref"]))
 	result.Stored = stored
 	result.Output = tools.FormatMilestoneOutput(stored)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
-func (writeTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (writeTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	milestones, err := planning.ParseMilestones(req.Args["milestones"])
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, milestones); err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	plan, err := control.SetMilestonePlan(ctx, runtime.SessionID, req.Args["summary"], milestones)
 	if err != nil {
-		return nil, err
+		return tools.Result{}, err
 	}
 	result.Stored = tools.MilestoneStoredResult(plan)
-	return tools.PersistStandardResult(ctx, runtime, req, result)
+	return result, nil
 }
-
 func appendMilestones(existing, added []planning.Milestone) []planning.Milestone {
 	out := make([]planning.Milestone, 0, len(existing)+len(added))
 	for _, item := range existing {

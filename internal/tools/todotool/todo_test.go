@@ -69,7 +69,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	_, err = executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -165,7 +165,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -187,13 +187,12 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	if !strings.Contains(result.Output, "# Write tests") {
 		t.Fatalf("expected execute preview to contain task content, got %q", result.Output)
 	}
-	events, err := tools.PersistResult(ctx, runtime, req, result)
+	_, body, err := tools.FinalizeResult(ctx, runtime, req, result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := <-events
-	if !strings.Contains(event.Text, " Write tests") || !strings.Contains(event.Text, " Fix bug") {
-		t.Fatalf("expected persisted event to contain real task ids, got %q", event.Text)
+	if !strings.Contains(body, " Write tests") || !strings.Contains(body, " Fix bug") {
+		t.Fatalf("expected finalized result to contain real task ids, got %q", body)
 	}
 }
 
@@ -210,7 +209,7 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	if _, err := modeltest.AddTodoItems(ctx, st, session.ID, "implement", []string{"Write tests"}); err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	_, err = tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTasksAdd,
@@ -237,7 +236,7 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	for _, ref := range []string{"done", "cancelled"} {
 		req := tools.Request{
@@ -254,7 +253,7 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 		if !strings.Contains(err.Error(), "cannot add tasks") || !strings.Contains(err.Error(), "milestone_update with status=ready") {
 			t.Fatalf("expected reopen guidance for %s, got %v", ref, err)
 		}
-		if _, err := tools.PersistResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add tasks") {
+		if _, _, err := tools.FinalizeResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add tasks") {
 			t.Fatalf("expected persist closed milestone error for %s, got %v", ref, err)
 		}
 	}
@@ -274,7 +273,7 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 
 	if _, err := tools.Normalize(tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
@@ -326,7 +325,6 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		AssignedTodoRef:       todos[0].ID,
 	}
 	runtime := tools.Runtime{
-		Store:                 st,
 		SessionID:             session.ID,
 		ChatID:                chat.ID,
 		ChatRole:              chat.WorkflowRole,
@@ -394,7 +392,7 @@ func executeAndPersist(ctx context.Context, t *testing.T, runtime tools.Runtime,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if _, err := tools.PersistResult(ctx, runtime, req, result); err != nil {
+	if _, _, err := tools.FinalizeResult(ctx, runtime, req, result); err != nil {
 		return tools.Result{}, err
 	}
 	return result, nil
