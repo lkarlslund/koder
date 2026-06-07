@@ -13,7 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
-	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
@@ -42,13 +42,13 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 	}
 }
 
-func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]tools.ChatStatus, error) {
+func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]chattool.Status, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	snapshot := owner.Snapshot()
-	statuses := make([]tools.ChatStatus, 0, len(snapshot.Chats))
+	statuses := make([]chattool.Status, 0, len(snapshot.Chats))
 	for _, item := range snapshot.Chats {
 		status, err := owner.ChatStatus(ctx, item.ID)
 		if err != nil {
@@ -59,34 +59,34 @@ func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]tools.ChatSt
 	return statuses, nil
 }
 
-func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req chattool.StartRequest) (chattool.Status, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	snapshot := owner.Snapshot()
 	session := snapshot.Session
 	parentChat, ok := chatByID(snapshot.Chats, parentChatID)
 	if session.ID == "" || session.ID != sessionID {
-		return tools.ChatStatus{}, fmt.Errorf("session %s is not active", sessionID)
+		return chattool.Status{}, fmt.Errorf("session %s is not active", sessionID)
 	}
 	if !ok {
-		return tools.ChatStatus{}, fmt.Errorf("parent chat %s not found", parentChatID)
+		return chattool.Status{}, fmt.Errorf("parent chat %s not found", parentChatID)
 	}
 	if parentChat.Archived {
-		return tools.ChatStatus{}, fmt.Errorf("cannot start a child chat from archived chat %s", parentChatID)
+		return chattool.Status{}, fmt.Errorf("cannot start a child chat from archived chat %s", parentChatID)
 	}
 	role := domain.WorkflowRole(strings.TrimSpace(string(req.Profile)))
 	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
-		return tools.ChatStatus{}, fmt.Errorf("profile %q is not registered", role)
+		return chattool.Status{}, fmt.Errorf("profile %q is not registered", role)
 	}
 	objective := strings.TrimSpace(req.Objective)
 	if objective == "" {
-		return tools.ChatStatus{}, fmt.Errorf("objective is required")
+		return chattool.Status{}, fmt.Errorf("objective is required")
 	}
 	plan, err := owner.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	milestoneRef := strings.TrimSpace(req.MilestoneRef)
 	todoRef := id.ID(strings.TrimSpace(string(req.TodoRef)))
@@ -94,11 +94,11 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 	if todoRef != "" {
 		todo, err := sessionTodoByID(ctx, owner, sessionID, plan, todoRef)
 		if err != nil {
-			return tools.ChatStatus{}, err
+			return chattool.Status{}, err
 		}
 		scopedTodo = &todo
 		if milestoneRef != "" && todo.MilestoneRef != milestoneRef {
-			return tools.ChatStatus{}, fmt.Errorf("task %s belongs to milestone %q, not %q", todoRef, todo.MilestoneRef, milestoneRef)
+			return chattool.Status{}, fmt.Errorf("task %s belongs to milestone %q, not %q", todoRef, todo.MilestoneRef, milestoneRef)
 		}
 		milestoneRef = todo.MilestoneRef
 	}
@@ -107,17 +107,17 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		var ok bool
 		milestone, ok = milestoneByRef(plan, milestoneRef)
 		if !ok {
-			return tools.ChatStatus{}, fmt.Errorf("milestone %q not found", milestoneRef)
+			return chattool.Status{}, fmt.Errorf("milestone %q not found", milestoneRef)
 		}
 		if milestone.OwnerChatID != nil {
-			return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
+			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
 		}
 	}
 	if role == chatrole.Execution && milestoneRef == "" {
-		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or task_ref")
+		return chattool.Status{}, fmt.Errorf("execution chat requires milestone_ref or task_ref")
 	}
 	if role == chatrole.Execution && milestone.Status != planning.MilestoneStatusReady {
-		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
+		return chattool.Status{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
 	}
 	parentID := parentChat.ID
 	chatTitle := strings.TrimSpace(req.Title)
@@ -143,49 +143,49 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, r
 		UpdatedAt:             now,
 	}
 	if _, err := owner.AddPreparedChat(ctx, chatRecord); err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	if status := roleMilestoneStatus(role); status != 0 {
 		nextPlan, err := updateMilestoneStatus(plan, milestoneRef, status, chatRecord.ID)
 		if err != nil {
-			return tools.ChatStatus{}, err
+			return chattool.Status{}, err
 		}
 		plan, err = owner.SetMilestonePlan(ctx, sessionID, nextPlan.Summary, nextPlan.Milestones)
 		if err != nil {
-			return tools.ChatStatus{}, err
+			return chattool.Status{}, err
 		}
 		milestone, _ = milestoneByRef(plan, milestoneRef)
 	}
 	if todoRef != "" && role == chatrole.Execution && scopedTodo != nil && scopedTodo.Status == planning.TodoStatusPending {
 		todo, err := owner.UpdateTodoItem(ctx, todoRef, planning.TodoStatusInProgress, scopedTodo.Content, "Started execution chat.")
 		if err != nil {
-			return tools.ChatStatus{}, err
+			return chattool.Status{}, err
 		}
 		scopedTodo = &todo
 	}
 	return e.startPreparedChat(ctx, owner, chatRecord.ID, milestone, scopedTodo, role, objective)
 }
 
-func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	snapshot := owner.Snapshot()
 	target, ok := chatByID(snapshot.Chats, chatID)
 	if !ok {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
+		return chattool.Status{}, fmt.Errorf("chat %s not found", chatID)
 	}
 	if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
-		return tools.ChatStatus{}, fmt.Errorf("chat_send cannot send a message to its own chat; target a direct child chat instead")
+		return chattool.Status{}, fmt.Errorf("chat_send cannot send a message to its own chat; target a direct child chat instead")
 	}
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		rt, err := owner.Chat(ctx, chatID)
 		if err != nil {
-			return tools.ChatStatus{}, err
+			return chattool.Status{}, err
 		}
 		if strings.TrimSpace(update.Message) != "" {
 			kind := chatpkg.QueueKindUser
@@ -323,35 +323,35 @@ func chatByID(chats []domain.Chat, chatID id.ID) (domain.Chat, bool) {
 	return domain.Chat{}, false
 }
 
-func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID id.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
+func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID id.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) (chattool.Status, error) {
 	if owner == nil {
-		return tools.ChatStatus{}, fmt.Errorf("session is required")
+		return chattool.Status{}, fmt.Errorf("session is required")
 	}
 	if chatID == "" {
-		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
+		return chattool.Status{}, fmt.Errorf("chat id is required")
 	}
 	objective = strings.TrimSpace(objective)
 	if objective == "" {
-		return tools.ChatStatus{}, fmt.Errorf("objective is required")
+		return chattool.Status{}, fmt.Errorf("objective is required")
 	}
 	snapshot := owner.Snapshot()
 	activeChat, err := owner.Chat(ctx, chatID)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	updates, unsub := activeChat.Subscribe()
 	go e.consumeChatUpdates(chatID, updates, unsub)
 	activeChat.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceAutoGenerated, Text: e.bootstrapPrompt(ctx, snapshot.Session.ID, milestone, scopedTodo, role, objective)})
 	chatSnapshot := activeChat.Snapshot()
-	return tools.ChatStatus{
+	return chattool.Status{
 		ID:                 chatSnapshot.Chat.ID,
 		Title:              chatSnapshot.Chat.Title,
 		Role:               chatSnapshot.Chat.WorkflowRole,
 		Archived:           chatSnapshot.Chat.Archived,
 		ActiveMilestoneRef: chatSnapshot.Chat.ActiveMilestoneRef,
 		AssignedTodoRef:    chatSnapshot.Chat.AssignedTodoRef,
-		State:              tools.ChatRunStateRunning,
-		Status:             string(tools.ChatRunStateRunning),
+		State:              chattool.RunStateRunning,
+		Status:             string(chattool.RunStateRunning),
 		Busy:               true,
 		StatusText:         "Started; bootstrap prompt queued",
 	}, nil

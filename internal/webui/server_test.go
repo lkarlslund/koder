@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
@@ -1916,7 +1917,7 @@ func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
 	writeRPC(t, wsCtx, conn, 1, "hello", `{}`)
 	_ = readRPCResponse(t, wsCtx, conn, 1)
 
-	if _, err := ctrl.UpdateChat(ctx, second.ID, secondChatID, secondChatID, tools.ChatUpdateRequest{Title: "Renamed second chat"}); err != nil {
+	if _, err := ctrl.UpdateChat(ctx, second.ID, secondChatID, secondChatID, chattool.UpdateRequest{Title: "Renamed second chat"}); err != nil {
 		t.Fatalf("update second session chat: %v", err)
 	}
 

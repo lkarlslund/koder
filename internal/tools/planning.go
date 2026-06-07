@@ -149,24 +149,6 @@ func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem,
 	}
 }
 
-func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
-	items := make([]ChatStoredItem, 0, len(statuses))
-	for _, status := range statuses {
-		items = append(items, ChatStoredItem{
-			ID:                 status.ID,
-			Title:              status.Title,
-			Role:               string(status.Role),
-			State:              string(status.State),
-			Archived:           status.Archived,
-			QueuedInputs:       status.QueuedInputs,
-			ActiveMilestoneRef: status.ActiveMilestoneRef,
-			AssignedTodoRef:    status.AssignedTodoRef,
-			StatusText:         status.StatusText,
-		})
-	}
-	return ChatListStoredResult{Items: items}
-}
-
 func MilestonePlanResult(plan planning.Plan) Result {
 	return MilestonePlanResultWithTodoSummaries(plan, nil)
 }

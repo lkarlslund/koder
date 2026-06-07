@@ -27,7 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -489,7 +489,7 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 		t.Fatalf("add task: %v", err)
 	}
 
-	status, err := ctrl.agent.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, tools.ChatStartRequest{
+	status, err := ctrl.agent.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, chattool.StartRequest{
 		Profile:   chatrole.Execution,
 		Objective: "Implement only the assigned task",
 		TodoRef:   todos[0].ID,

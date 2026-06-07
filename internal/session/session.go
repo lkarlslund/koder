@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 // ChatLoader builds live chat runtimes for session-owned chat records.
@@ -513,22 +514,22 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 }
 
 // UpdateChat updates chat metadata, preserving its history.
-func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, id.ID, error) {
+func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, id.ID, error) {
 	if s == nil {
-		return tools.ChatStatus{}, "", fmt.Errorf("session is required")
+		return chattool.Status{}, "", fmt.Errorf("session is required")
 	}
 	if chatID == "" {
-		return tools.ChatStatus{}, "", fmt.Errorf("chat id is required")
+		return chattool.Status{}, "", fmt.Errorf("chat id is required")
 	}
 	if update.Archived == nil && strings.TrimSpace(update.Title) == "" {
-		return tools.ChatStatus{}, "", fmt.Errorf("archived or title is required")
+		return chattool.Status{}, "", fmt.Errorf("archived or title is required")
 	}
 	s.mu.RLock()
 	session := s.session
 	target, ok := chatByID(s.chats, chatID)
 	if !ok {
 		s.mu.RUnlock()
-		return tools.ChatStatus{}, "", fmt.Errorf("chat %s not found", chatID)
+		return chattool.Status{}, "", fmt.Errorf("chat %s not found", chatID)
 	}
 	nextChatID := id.ID("")
 	archivingVisibleChat := update.Archived != nil && *update.Archived && !target.Archived
@@ -537,7 +538,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.Cha
 	}
 	s.mu.RUnlock()
 	if archivingVisibleChat && nextChatID == "" {
-		return tools.ChatStatus{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
+		return chattool.Status{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
 	}
 	s.mu.Lock()
 	rt := s.runtimes[target.ID]
@@ -545,7 +546,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.Cha
 	if rt == nil {
 		loaded, err := s.chatLoader(ctx, session, target)
 		if err != nil {
-			return tools.ChatStatus{}, "", err
+			return chattool.Status{}, "", err
 		}
 		s.mu.Lock()
 		s.trackRuntimeLocked(target.ID, loaded)
@@ -557,7 +558,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.Cha
 		Title:    update.Title,
 	})
 	if err != nil {
-		return tools.ChatStatus{}, "", err
+		return chattool.Status{}, "", err
 	}
 	target = updated
 	s.mu.Lock()
@@ -816,14 +817,14 @@ func newestSessionChat(chats []domain.Chat) domain.Chat {
 	return best
 }
 
-func (s *Session) ChatStatus(ctx context.Context, chatID id.ID) (tools.ChatStatus, error) {
+func (s *Session) ChatStatus(ctx context.Context, chatID id.ID) (chattool.Status, error) {
 	if s == nil {
-		return tools.ChatStatus{}, fmt.Errorf("session is required")
+		return chattool.Status{}, fmt.Errorf("session is required")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if _, ok := chatByID(s.chats, chatID); !ok {
-		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
+		return chattool.Status{}, fmt.Errorf("chat %s not found", chatID)
 	}
 	return s.chatStatusLocked(chatID), nil
 }
@@ -1225,9 +1226,9 @@ func (s *Session) requireSession(sessionID id.ID) error {
 	return nil
 }
 
-func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
+func (s *Session) chatStatusLocked(chatID id.ID) chattool.Status {
 	chatRecord, _ := chatByID(s.chats, chatID)
-	status := tools.ChatRunStateIdle
+	status := chattool.RunStateIdle
 	statusText := string(chatpkg.StatusIdle)
 	busy := false
 	pending := 0
@@ -1240,13 +1241,13 @@ func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 		statusText = snapshot.StatusText
 		switch snapshot.Status {
 		case chatpkg.StatusWaitingApproval:
-			status = tools.ChatRunStateWaitingApproval
+			status = chattool.RunStateWaitingApproval
 			busy = true
 		case chatpkg.StatusErrored:
-			status = tools.ChatRunStateFailed
+			status = chattool.RunStateFailed
 		default:
 			if snapshot.Active {
-				status = tools.ChatRunStateRunning
+				status = chattool.RunStateRunning
 				busy = true
 			}
 		}
@@ -1254,12 +1255,12 @@ func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 			statusText = string(snapshot.Status)
 		}
 	}
-	if pending > 0 && status == tools.ChatRunStateIdle {
-		status = tools.ChatRunStateWaitingApproval
+	if pending > 0 && status == chattool.RunStateIdle {
+		status = chattool.RunStateWaitingApproval
 		busy = true
 		statusText = "Waiting for approval"
 	}
-	return tools.ChatStatus{
+	return chattool.Status{
 		ID:                 chatRecord.ID,
 		Title:              chatRecord.Title,
 		Role:               chatRecord.WorkflowRole,

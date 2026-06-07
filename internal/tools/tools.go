@@ -22,56 +22,6 @@ import (
 
 type chatIDContextKey struct{}
 
-type ChatRunState string
-
-const (
-	ChatRunStateIdle            ChatRunState = "idle"
-	ChatRunStateRunning         ChatRunState = "running"
-	ChatRunStateWaitingApproval ChatRunState = "waiting_approval"
-	ChatRunStateCompleted       ChatRunState = "completed"
-	ChatRunStateFailed          ChatRunState = "failed"
-	ChatRunStateCancelled       ChatRunState = "cancelled"
-)
-
-type ChatStatus struct {
-	ID                 id.ID
-	Title              string
-	Role               chatrole.Role
-	Archived           bool
-	ActiveMilestoneRef string
-	AssignedTodoRef    id.ID
-	State              ChatRunState
-	Status             string
-	Busy               bool
-	QueuedInputs       int
-	PendingApprovals   int
-	LastError          string
-	StatusText         string
-}
-
-type ChatStartRequest struct {
-	Profile      chatrole.Role
-	Objective    string
-	Title        string
-	MilestoneRef string
-	TodoRef      id.ID
-}
-
-type ChatUpdateRequest struct {
-	Archived  *bool
-	Title     string
-	Message   string
-	Steer     bool
-	Interrupt bool
-	Hard      bool
-}
-
-type ChatControl interface {
-	ListChats(context.Context, id.ID) ([]ChatStatus, error)
-	StartChat(context.Context, id.ID, id.ID, ChatStartRequest) (ChatStatus, error)
-	UpdateChat(context.Context, id.ID, id.ID, id.ID, ChatUpdateRequest) (ChatStatus, error)
-}
-
 type Request struct {
 	Tool       ID                `json:"tool"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
@@ -161,9 +111,9 @@ type Runtime struct {
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
 	AssignedTodoRef       id.ID
-	ChatControl           ChatControl
 	SessionControl        SessionControl
 	TaskControl           TaskControl
+	Services              map[string]any
 	AllowedTools          map[ID]bool
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
@@ -625,18 +575,24 @@ func ChatIDFromContext(ctx context.Context) (id.ID, bool) {
 	return value, true
 }
 
-func RequireChatControl(runtime Runtime) (ChatControl, error) {
-	if runtime.ChatControl == nil || runtime.SessionID == "" || runtime.ChatID == "" {
-		return nil, errors.New("chat orchestration requires an active persisted chat")
-	}
-	return runtime.ChatControl, nil
-}
-
 func RequireExecControl(runtime Runtime) (execruntime.Control, error) {
 	if runtime.Exec == nil || runtime.SessionID == "" || runtime.ChatID == "" {
 		return nil, errors.New("exec sessions require an active persisted chat")
 	}
 	return runtime.Exec, nil
+}
+
+func RequireService[T any](runtime Runtime, key string) (T, error) {
+	var zero T
+	service, ok := runtime.Services[strings.TrimSpace(key)]
+	if !ok {
+		return zero, fmt.Errorf("%s service is not configured", key)
+	}
+	typed, ok := service.(T)
+	if !ok {
+		return zero, fmt.Errorf("%s service has unexpected type", key)
+	}
+	return typed, nil
 }
 
 func DefaultSummarizeResult(req Request, result Result) (string, string) {

@@ -23,7 +23,7 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/version"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
@@ -1172,7 +1172,7 @@ func (c *Controller) NewChatForSelection(ctx context.Context, selection Selectio
 }
 
 // ListChats returns the controller's live chat list for the active session.
-func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]tools.ChatStatus, error) {
+func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]chattool.Status, error) {
 	c.mu.RLock()
 	if sessionID == "" {
 		sessionID = c.session.ID
@@ -1187,7 +1187,7 @@ func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]tools.Ch
 		statuses[id] = status
 	}
 	c.mu.RUnlock()
-	out := make([]tools.ChatStatus, 0, len(chats))
+	out := make([]chattool.Status, 0, len(chats))
 	for _, item := range chats {
 		status := statuses[item.ID]
 		out = append(out, toolStatusFromSidebar(item, status))
@@ -1196,9 +1196,9 @@ func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]tools.Ch
 }
 
 // StartChat creates a child chat and adds it to the live session before broadcasting.
-func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req chattool.StartRequest) (chattool.Status, error) {
 	if c.agent == nil {
-		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
+		return chattool.Status{}, fmt.Errorf("no chat agent")
 	}
 	return c.agent.StartChat(ctx, sessionID, parentChatID, req)
 }
@@ -1301,7 +1301,7 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
-func patchChatFromToolStatus(chats *[]domain.Chat, status tools.ChatStatus) {
+func patchChatFromToolStatus(chats *[]domain.Chat, status chattool.Status) {
 	for idx := range *chats {
 		if (*chats)[idx].ID == status.ID {
 			patchChatSnapshotFromToolStatus(&(*chats)[idx], status)
@@ -1310,7 +1310,7 @@ func patchChatFromToolStatus(chats *[]domain.Chat, status tools.ChatStatus) {
 	}
 }
 
-func patchChatSnapshotFromToolStatus(chatRecord *domain.Chat, status tools.ChatStatus) {
+func patchChatSnapshotFromToolStatus(chatRecord *domain.Chat, status chattool.Status) {
 	if chatRecord == nil || status.ID == "" || chatRecord.ID != status.ID {
 		return
 	}
@@ -1324,14 +1324,14 @@ func patchChatSnapshotFromToolStatus(chatRecord *domain.Chat, status tools.ChatS
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
-	_, err := c.UpdateChat(ctx, selection.SessionID, selection.ChatID, chatID, tools.ChatUpdateRequest{Archived: &archived})
+	_, err := c.UpdateChat(ctx, selection.SessionID, selection.ChatID, chatID, chattool.UpdateRequest{Archived: &archived})
 	return err
 }
 
 // UpdateChat updates chat metadata through the owning session.
-func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatID id.ID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatID id.ID, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, error) {
 	if chatID == "" {
-		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
+		return chattool.Status{}, fmt.Errorf("chat id is required")
 	}
 	c.mu.RLock()
 	if sessionID == "" {
@@ -1340,14 +1340,14 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 	activeChatID := c.chat.ID
 	c.mu.RUnlock()
 	if sessionID == "" {
-		return tools.ChatStatus{}, fmt.Errorf("no active session")
+		return chattool.Status{}, fmt.Errorf("no active session")
 	}
 	if c.agent == nil {
-		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
+		return chattool.Status{}, fmt.Errorf("no chat agent")
 	}
 	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	archivingActive := update.Archived != nil && *update.Archived && chatID == activeChatID
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
@@ -1356,7 +1356,7 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 	}
 	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return chattool.Status{}, err
 	}
 	c.mu.Lock()
 	matchesActiveSession := c.session.ID == sessionID
@@ -2186,23 +2186,23 @@ func idleChatSidebarStatus(chatID id.ID) ChatSidebarStatus {
 	return ChatSidebarStatus{ChatID: chatID, Status: string(chat.StatusIdle), StatusText: "Idle"}
 }
 
-func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) tools.ChatStatus {
-	state := tools.ChatRunStateIdle
-	switch tools.ChatRunState(status.Status) {
-	case tools.ChatRunStateRunning, tools.ChatRunStateWaitingApproval, tools.ChatRunStateCompleted, tools.ChatRunStateFailed, tools.ChatRunStateCancelled:
-		state = tools.ChatRunState(status.Status)
+func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) chattool.Status {
+	state := chattool.RunStateIdle
+	switch chattool.RunState(status.Status) {
+	case chattool.RunStateRunning, chattool.RunStateWaitingApproval, chattool.RunStateCompleted, chattool.RunStateFailed, chattool.RunStateCancelled:
+		state = chattool.RunState(status.Status)
 	default:
 		if status.Busy {
-			state = tools.ChatRunStateRunning
+			state = chattool.RunStateRunning
 		}
 	}
 	if status.PendingApprovals > 0 {
-		state = tools.ChatRunStateWaitingApproval
+		state = chattool.RunStateWaitingApproval
 	}
 	if status.Status == "" {
-		state = tools.ChatRunStateIdle
+		state = chattool.RunStateIdle
 	}
-	return tools.ChatStatus{
+	return chattool.Status{
 		ID:                 chatRecord.ID,
 		Title:              chatRecord.Title,
 		Role:               chatRecord.WorkflowRole,
@@ -2295,13 +2295,13 @@ func chatSidebarStatusText(status string) string {
 		return "Waiting for approval"
 	case string(chat.StatusErrored):
 		return "Error"
-	case string(tools.ChatRunStateFailed):
+	case string(chattool.RunStateFailed):
 		return "Failed"
-	case string(tools.ChatRunStateRunning):
+	case string(chattool.RunStateRunning):
 		return "Running"
-	case string(tools.ChatRunStateCompleted):
+	case string(chattool.RunStateCompleted):
 		return "Completed"
-	case string(tools.ChatRunStateCancelled):
+	case string(chattool.RunStateCancelled):
 		return "Cancelled"
 	default:
 		return "Idle"

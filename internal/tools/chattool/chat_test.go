@@ -13,30 +13,30 @@ import (
 )
 
 type fakeChatControl struct {
-	statuses         []tools.ChatStatus
-	lastStart        tools.ChatStartRequest
+	statuses         []Status
+	lastStart        StartRequest
 	lastSessionID    id.ID
 	lastOwnerChatID  id.ID
 	lastParentChatID id.ID
 	lastChatID       id.ID
-	lastUpdate       tools.ChatUpdateRequest
+	lastUpdate       UpdateRequest
 	updateErr        error
 }
 
-func (f *fakeChatControl) ListChats(context.Context, id.ID) ([]tools.ChatStatus, error) {
+func (f *fakeChatControl) ListChats(context.Context, id.ID) ([]Status, error) {
 	return f.statuses, nil
 }
 
-func (f *fakeChatControl) StartChat(_ context.Context, sessionID, parentChatID id.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+func (f *fakeChatControl) StartChat(_ context.Context, sessionID, parentChatID id.ID, req StartRequest) (Status, error) {
 	f.lastSessionID = sessionID
 	f.lastParentChatID = parentChatID
 	f.lastStart = req
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, chatID id.ID, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
+func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, chatID id.ID, update UpdateRequest) (Status, error) {
 	if f.updateErr != nil {
-		return tools.ChatStatus{}, f.updateErr
+		return Status{}, f.updateErr
 	}
 	f.lastSessionID = sessionID
 	f.lastOwnerChatID = ownerChatID
@@ -52,12 +52,12 @@ func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, 
 	return status, nil
 }
 
-func testRuntime(control tools.ChatControl) tools.Runtime {
+func testRuntime(control Control) tools.Runtime {
 	return tools.Runtime{
-		SessionID:   "session-10",
-		ChatID:      "chat-20",
-		ChatRole:    chatrole.Orchestrator,
-		ChatControl: control,
+		SessionID: "session-10",
+		ChatID:    "chat-20",
+		ChatRole:  chatrole.Orchestrator,
+		Services:  RuntimeService(control),
 	}
 }
 
@@ -132,18 +132,18 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 		t.Fatalf("expected active chat error, got %v", err)
 	}
 
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
+	control := &fakeChatControl{statuses: []Status{{
 		ID:         "chat-7",
 		Title:      "Worker",
 		Role:       chatrole.Execution,
-		State:      tools.ChatRunStateRunning,
+		State:      RunStateRunning,
 		StatusText: "Running",
 	}, {
 		ID:         "chat-8",
 		Title:      "Archived",
 		Role:       chatrole.Execution,
 		Archived:   true,
-		State:      tools.ChatRunStateIdle,
+		State:      RunStateIdle,
 		StatusText: "Idle",
 	}}}
 	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{Tool: domain.ToolKindChatList}})
@@ -166,11 +166,11 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 }
 
 func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
+	control := &fakeChatControl{statuses: []Status{{
 		ID:         "chat-9",
 		Title:      "Worker",
 		Role:       chatrole.Execution,
-		State:      tools.ChatRunStateRunning,
+		State:      RunStateRunning,
 		StatusText: "Running",
 	}}}
 	result, err := (startTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
@@ -202,11 +202,11 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 }
 
 func TestSendCancelArchiveRenameUseControl(t *testing.T) {
-	control := &fakeChatControl{statuses: []tools.ChatStatus{{
+	control := &fakeChatControl{statuses: []Status{{
 		ID:         "child-chat",
 		Title:      "Worker",
 		Role:       chatrole.Execution,
-		State:      tools.ChatRunStateRunning,
+		State:      RunStateRunning,
 		StatusText: "Running",
 	}}}
 

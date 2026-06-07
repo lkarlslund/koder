@@ -39,6 +39,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 )
 
@@ -2370,7 +2371,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
 		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
 		AssignedTodoRef:       chat.AssignedTodoRef,
-		ChatControl:           e,
+		Services:              chattool.RuntimeService(e),
 		Exec:                  e.exec,
 		MCP:                   e.mcp,
 		AllowedTools:          e.effectiveToolStates(session),

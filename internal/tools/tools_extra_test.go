@@ -141,13 +141,6 @@ func TestRequestFromMetaRejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestRequireChatControlRequiresActiveChat(t *testing.T) {
-	_, err := tools.RequireChatControl(tools.Runtime{})
-	if err == nil || !strings.Contains(err.Error(), "active persisted chat") {
-		t.Fatalf("expected missing chat control error, got %v", err)
-	}
-}
-
 func TestBuildToolResultPreservesPayloadAndDiff(t *testing.T) {
 	result, _, err := tools.BuildToolResult(tools.Request{
 		Tool:       domain.ToolKindFileWrite,

@@ -64,6 +64,87 @@ type cancelTool struct{}
 type archiveTool struct{}
 type renameTool struct{}
 
+const serviceKey = "chat"
+
+type RunState string
+
+const (
+	RunStateIdle            RunState = "idle"
+	RunStateRunning         RunState = "running"
+	RunStateWaitingApproval RunState = "waiting_approval"
+	RunStateCompleted       RunState = "completed"
+	RunStateFailed          RunState = "failed"
+	RunStateCancelled       RunState = "cancelled"
+)
+
+type Status struct {
+	ID                 id.ID
+	Title              string
+	Role               chatrole.Role
+	Archived           bool
+	ActiveMilestoneRef string
+	AssignedTodoRef    id.ID
+	State              RunState
+	Status             string
+	Busy               bool
+	QueuedInputs       int
+	PendingApprovals   int
+	LastError          string
+	StatusText         string
+}
+
+type StartRequest struct {
+	Profile      chatrole.Role
+	Objective    string
+	Title        string
+	MilestoneRef string
+	TodoRef      id.ID
+}
+
+type UpdateRequest struct {
+	Archived  *bool
+	Title     string
+	Message   string
+	Steer     bool
+	Interrupt bool
+	Hard      bool
+}
+
+type Control interface {
+	ListChats(context.Context, id.ID) ([]Status, error)
+	StartChat(context.Context, id.ID, id.ID, StartRequest) (Status, error)
+	UpdateChat(context.Context, id.ID, id.ID, id.ID, UpdateRequest) (Status, error)
+}
+
+func RuntimeService(control Control) map[string]any {
+	return map[string]any{serviceKey: control}
+}
+
+func requireControl(runtime tools.Runtime) (Control, error) {
+	if runtime.SessionID == "" || runtime.ChatID == "" {
+		return nil, errors.New("chat orchestration requires an active persisted chat")
+	}
+	return tools.RequireService[Control](runtime, serviceKey)
+}
+
+func storedResult(statuses []Status) tools.ChatListStoredResult {
+	items := make([]tools.ChatStoredItem, 0, len(statuses))
+	for _, status := range statuses {
+		items = append(items, tools.ChatStoredItem{
+			ID:                 status.ID,
+			Title:              status.Title,
+			Role:               string(status.Role),
+			State:              string(status.State),
+			Archived:           status.Archived,
+			QueuedInputs:       status.QueuedInputs,
+			ActiveMilestoneRef: status.ActiveMilestoneRef,
+			AssignedTodoRef:    status.AssignedTodoRef,
+			StatusText:         status.StatusText,
+		})
+	}
+	return tools.ChatListStoredResult{Items: items}
+}
+
 func (listTool) ID() tools.ID    { return tools.ChatList }
 func (startTool) ID() tools.ID   { return tools.ChatStart }
 func (sendTool) ID() tools.ID    { return tools.ChatSend }
@@ -224,7 +305,7 @@ func targetPreview(action, chatID string) string {
 
 func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	control, err := tools.RequireChatControl(runtime)
+	control, err := requireControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -235,15 +316,15 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if req.Args["archived"] != "true" {
 		statuses = filterArchivedChats(statuses)
 	}
-	stored := tools.ChatListStored(statuses)
+	stored := storedResult(statuses)
 	return tools.Result{
 		Output: tools.DisplayTextForStored(tools.ChatList, stored),
 		Stored: stored,
 	}, nil
 }
 
-func filterArchivedChats(statuses []tools.ChatStatus) []tools.ChatStatus {
-	out := make([]tools.ChatStatus, 0, len(statuses))
+func filterArchivedChats(statuses []Status) []Status {
+	out := make([]Status, 0, len(statuses))
 	for _, status := range statuses {
 		if !status.Archived {
 			out = append(out, status)
@@ -254,11 +335,11 @@ func filterArchivedChats(statuses []tools.ChatStatus) []tools.ChatStatus {
 
 func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	control, err := tools.RequireChatControl(runtime)
+	control, err := requireControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, tools.ChatStartRequest{
+	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, StartRequest{
 		Profile:      chatrole.Role(req.Args["profile"]),
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
@@ -268,7 +349,7 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := tools.ChatListStored([]tools.ChatStatus{status})
+	stored := storedResult([]Status{status})
 	return tools.Result{
 		Output: childReportGuidance(tools.DisplayTextForStored(req.Tool, stored)),
 		Stored: stored,
@@ -281,7 +362,7 @@ func childReportGuidance(output string) string {
 
 func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
+	status, err := updateChat(ctx, runtime, req, UpdateRequest{
 		Message: req.Args["message"],
 		Steer:   req.Args["steer"] == "true",
 	})
@@ -293,7 +374,7 @@ func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 
 func (cancelTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{
+	status, err := updateChat(ctx, runtime, req, UpdateRequest{
 		Interrupt: true,
 		Hard:      req.Args["hard"] == "true",
 	})
@@ -306,7 +387,7 @@ func (cancelTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
 	archived := req.Args["archived"] == "true"
-	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Archived: &archived})
+	status, err := updateChat(ctx, runtime, req, UpdateRequest{Archived: &archived})
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -315,17 +396,17 @@ func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 
 func (renameTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	status, err := updateChat(ctx, runtime, req, tools.ChatUpdateRequest{Title: req.Args["title"]})
+	status, err := updateChat(ctx, runtime, req, UpdateRequest{Title: req.Args["title"]})
 	if err != nil {
 		return tools.Result{}, err
 	}
 	return chatResult(req.Tool, status)
 }
 
-func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, update tools.ChatUpdateRequest) (tools.ChatStatus, error) {
-	control, err := tools.RequireChatControl(runtime)
+func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, update UpdateRequest) (Status, error) {
+	control, err := requireControl(runtime)
 	if err != nil {
-		return tools.ChatStatus{}, err
+		return Status{}, err
 	}
 	chatID := id.ID(strings.TrimSpace(req.Args["chat_id"]))
 	if chatID == "" {
@@ -334,8 +415,8 @@ func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, u
 	return control.UpdateChat(ctx, runtime.SessionID, runtime.ChatID, chatID, update)
 }
 
-func chatResult(tool tools.ID, status tools.ChatStatus) (tools.Result, error) {
-	stored := tools.ChatListStored([]tools.ChatStatus{status})
+func chatResult(tool tools.ID, status Status) (tools.Result, error) {
+	stored := storedResult([]Status{status})
 	return tools.Result{
 		Output: tools.DisplayTextForStored(tool, stored),
 		Stored: stored,

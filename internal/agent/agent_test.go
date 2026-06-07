@@ -37,6 +37,7 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -1306,7 +1307,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	}
 	engine := New(cfg, st, nil)
 	archived := true
-	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived, Title: "Renamed child"})
+	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived, Title: "Renamed child"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1322,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 		t.Fatalf("expected persisted archive flag, got %#v", reloaded)
 	}
 	archived = false
-	status, err = engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Archived: &archived})
+	status, err = engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1360,7 +1361,7 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, tools.ChatUpdateRequest{Message: "use jadx output", Steer: true})
+	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Message: "use jadx output", Steer: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1404,10 +1405,10 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, tools.ChatUpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
+	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, chattool.UpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
-	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, tools.ChatUpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot send a message to its own chat") {
+	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, chattool.UpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot send a message to its own chat") {
 		t.Fatalf("expected self-message error, got %v", err)
 	}
 }
@@ -1431,7 +1432,7 @@ func TestStartChatRejectsArchivedParent(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	_, err = engine.StartChat(context.Background(), session.ID, parent.ID, tools.ChatStartRequest{
+	_, err = engine.StartChat(context.Background(), session.ID, parent.ID, chattool.StartRequest{
 		Profile:   chatrole.General,
 		Objective: "do work",
 	})
