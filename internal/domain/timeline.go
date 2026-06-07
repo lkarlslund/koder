@@ -409,10 +409,14 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 
 // ToolResult stores one completed tool response.
 type ToolResult struct {
-	Text   string            `json:"text,omitempty"`
-	Diff   string            `json:"diff,omitempty"`
-	Data   ToolResultPayload `json:"data,omitempty"`
-	Status ToolResultStatus  `json:"status,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	Diff     string            `json:"diff,omitempty"`
+	Data     ToolResultPayload `json:"data,omitempty"`
+	Status   ToolResultStatus  `json:"status,omitempty"`
+	Output   string            `json:"-"`
+	DiffText string            `json:"-"`
+	Stored   any               `json:"-"`
+	Meta     map[string]string `json:"-"`
 }
 
 // ToolError stores one failed tool response.

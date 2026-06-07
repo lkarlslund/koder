@@ -140,12 +140,7 @@ func (r Request) ContextString() string {
 	return string(data)
 }
 
-type Result struct {
-	Output   string
-	DiffText string
-	Meta     map[string]string
-	Stored   any
-}
+type Result = domain.ToolResult
 
 type Presentation struct {
 	Title    string
