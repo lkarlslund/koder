@@ -4644,62 +4644,6 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	}
 }
 
-func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
-	cfg := testConfig(t)
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-	if err := chatpkg.SetChatQueuedInputs(context.Background(), st, chat.ID, []domain.QueuedInput{{
-		ID:       id.New(),
-		Kind:     domain.QueuedInputKindSteer,
-		Delivery: domain.QueuedInputDeliveryTurnBoundary,
-		Origin:   domain.QueuedInputOriginUser,
-		Text:     "steer the running turn",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-
-	events := make(chan domain.Event, 1)
-	applied, err := engine.applyQueuedSteer(context.Background(), session, &chat, events)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !applied {
-		t.Fatal("expected queued steer to apply")
-	}
-	evt := <-events
-	if evt.Kind != domain.EventKindStatus || evt.Text != "Applying queued steer..." {
-		t.Fatalf("unexpected event: %#v", evt)
-	}
-	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue {
-		t.Fatalf("expected queue refresh metadata, got %#v", evt.Meta)
-	}
-	user, ok := evt.Item.Content.(domain.UserMessage)
-	if !ok || user.Text != "steer the running turn" {
-		t.Fatalf("expected persisted user message item, got %#v", evt.Item)
-	}
-	if user.Delivery != domain.QueuedInputDeliveryTurnBoundary {
-		t.Fatalf("user delivery = %q, want %q", user.Delivery, domain.QueuedInputDeliveryTurnBoundary)
-	}
-
-	timeline, err := chatpkg.TimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(timeline) != 1 || timeline[0].ID != evt.Item.ID {
-		t.Fatalf("expected event item to match persisted timeline, event=%#v timeline=%#v", evt.Item, timeline)
-	}
-}
-
 func TestConversationMessagesRenderSteerAsSteeringUpdate(t *testing.T) {
 	engine := New(testConfig(t), nil, nil)
 	session := domain.Session{ID: "session-1", ProjectRoot: "/tmp/project"}

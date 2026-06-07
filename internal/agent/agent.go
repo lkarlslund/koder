@@ -767,26 +767,6 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return sessionpkg.GetSession(ctx, e.store, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID id.ID, prompt string, source string, delivery domain.QueuedInputDelivery, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
-	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	user.Source = strings.TrimSpace(source)
-	if delivery.IsAQueuedInputDelivery() {
-		user.Delivery = delivery
-	}
-	item, err := chatpkg.AppendTimeline(ctx, e.store, chatID, user)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(ctx, e.store, item); err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
-}
-
 func (e *Engine) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {
 	user := domain.UserMessage{Text: prompt}
 	for _, draft := range drafts {
@@ -808,82 +788,6 @@ func (e *Engine) userMessageForPrompt(session domain.Session, prompt string, dra
 		})
 	}
 	return user, nil
-}
-
-func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]attachment.Draft, 0, len(src))
-	for _, item := range src {
-		dst = append(dst, attachment.Draft{Metadata: attachment.Metadata{
-			ID:       item.ID,
-			Name:     item.Name,
-			MIME:     item.MIME,
-			Path:     item.Path,
-			Size:     item.Size,
-			Source:   item.Source,
-			Original: item.Original,
-		}})
-	}
-	return dst
-}
-
-func queuedReferenceDrafts(src []domain.QueuedReference) []reference.Draft {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]reference.Draft, 0, len(src))
-	for _, item := range src {
-		dst = append(dst, reference.Draft{
-			Kind:    reference.Kind(item.Kind),
-			Path:    item.Path,
-			Display: item.Display,
-			Start:   item.Start,
-			End:     item.End,
-		})
-	}
-	return dst
-}
-
-func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, chat *domain.Chat, out chan<- domain.Event) (bool, error) {
-	refreshed, err := chatpkg.GetChat(ctx, e.store, chat.ID)
-	if err != nil {
-		return false, err
-	}
-	*chat = refreshed
-	idx := -1
-	for i, item := range chat.QueuedInputs {
-		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryTurnBoundary {
-			continue
-		}
-		idx = i
-		break
-	}
-	if idx < 0 {
-		return false, nil
-	}
-	item := chat.QueuedInputs[idx]
-	remaining := append(slices.Clone(chat.QueuedInputs[:idx]), slices.Clone(chat.QueuedInputs[idx+1:])...)
-	if err := chatpkg.SetChatQueuedInputs(ctx, e.store, chat.ID, remaining); err != nil {
-		return false, err
-	}
-	chat.QueuedInputs = remaining
-	source := domain.UserMessageSourceForQueuedInput(item)
-	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryTurnBoundary && source == domain.UserMessageSourceUser {
-		source = domain.UserMessageSourceSteer
-	}
-	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, source, domain.DeliveryForQueuedInput(item), queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
-	if err != nil {
-		return false, err
-	}
-	out <- domain.Event{
-		Kind: domain.EventKindStatus,
-		Text: "Applying queued steer...",
-		Item: userItem,
-		Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
-	}
-	return true, nil
 }
 
 func (e *Engine) maxToolLoopSteps() int {
