@@ -25,7 +25,7 @@ func init() {
 	})
 }
 
-func (tool) ID() domain.ToolKind      { return domain.ToolKindUpdatePlan }
+func (tool) ID() tools.ID             { return domain.ToolKindUpdatePlan }
 func (tool) BypassesPermission() bool { return true }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	plan := strings.TrimSpace(tools.FirstArg(args, "plan", "steps"))

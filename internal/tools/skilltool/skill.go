@@ -25,7 +25,7 @@ func init() {
 	})
 }
 
-func (tool) ID() domain.ToolKind      { return domain.ToolKindSkill }
+func (tool) ID() tools.ID             { return domain.ToolKindSkill }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	spec.Usage = skills.ToolDescription(spec.Usage, runtime.Workdir)

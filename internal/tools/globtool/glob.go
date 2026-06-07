@@ -27,7 +27,7 @@ func init() {
 	})
 }
 
-func (tool) ID() domain.ToolKind      { return domain.ToolKindFileGlob }
+func (tool) ID() tools.ID             { return domain.ToolKindFileGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))

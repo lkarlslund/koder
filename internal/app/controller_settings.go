@@ -1064,7 +1064,7 @@ func accessPreferencesFromConfig(src accesssettings.Settings) AccessPreferences 
 	}
 }
 
-func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
+func toolDefaultPreferencesFromConfig(src map[tools.ID]bool) []ToolDefaultPreference {
 	kinds := tools.RegisteredIDs()
 	out := make([]ToolDefaultPreference, 0, len(kinds))
 	for _, kind := range kinds {
@@ -1087,30 +1087,30 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 	return out
 }
 
-func hideToolDefault(kind domain.ToolKind) bool {
+func hideToolDefault(kind tools.ID) bool {
 	switch kind {
-	case domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem:
+	case tools.MilestonePlan, tools.MilestoneWrite, tools.TaskAddItems, tools.TaskUpdateItem:
 		return true
 	default:
 		return false
 	}
 }
 
-func toolDefaultGroup(kind domain.ToolKind) (string, string) {
+func toolDefaultGroup(kind tools.ID) (string, string) {
 	switch kind {
-	case domain.ToolKindFileRead, domain.ToolKindFileWrite, domain.ToolKindFileEdit, domain.ToolKindFileGrep, domain.ToolKindFileGlob:
+	case tools.FileRead, tools.FileWrite, tools.FileEdit, tools.FileGrep, tools.FileGlob:
 		return "file", "File"
-	case domain.ToolKindWebFetch, domain.ToolKindWebSearch:
+	case tools.WebFetch, tools.WebSearch:
 		return "web", "Web"
-	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecList, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate, domain.ToolKindExecCleanup:
+	case tools.ExecCommand, tools.ExecStatus, tools.ExecList, tools.ExecWriteStdin, tools.ExecResize, tools.ExecTerminate, tools.ExecCleanup:
 		return "exec", "Exec"
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatSend, domain.ToolKindChatCancel, domain.ToolKindChatArchive, domain.ToolKindChatRename:
+	case tools.ChatList, tools.ChatStart, tools.ChatSend, tools.ChatCancel, tools.ChatArchive, tools.ChatRename:
 		return "chat", "Chat"
-	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
+	case tools.MilestoneList, tools.MilestoneAdd, tools.MilestoneUpdate, tools.MilestonePlan, tools.MilestoneWrite:
 		return "milestone", "Milestone"
-	case domain.ToolKindTaskList, domain.ToolKindTaskAddItems, domain.ToolKindTaskUpdateItem, domain.ToolKindTaskFetchNext, domain.ToolKindTasksAdd, domain.ToolKindTasksUpdate:
+	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TasksAdd, tools.TasksUpdate:
 		return "task", "Task"
-	case domain.ToolKindViewImage, domain.ToolKindShowImage:
+	case tools.ViewImage, tools.ShowImage:
 		return "image", "Image"
 	default:
 		key := kind.String()
@@ -1332,7 +1332,7 @@ func applyAccessPreferences(cfg *config.Config, prefs AccessPreferences) error {
 }
 
 func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreference) {
-	next := map[domain.ToolKind]bool{}
+	next := map[tools.ID]bool{}
 	for _, item := range prefs {
 		next[item.Tool] = item.Enabled
 	}

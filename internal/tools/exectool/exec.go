@@ -78,13 +78,13 @@ type resizeTool struct{}
 type terminateTool struct{}
 type cleanupTool struct{}
 
-func (commandTool) ID() domain.ToolKind    { return domain.ToolKindExecCommand }
-func (statusTool) ID() domain.ToolKind     { return domain.ToolKindExecStatus }
-func (listTool) ID() domain.ToolKind       { return domain.ToolKindExecList }
-func (writeStdinTool) ID() domain.ToolKind { return domain.ToolKindExecWriteStdin }
-func (resizeTool) ID() domain.ToolKind     { return domain.ToolKindExecResize }
-func (terminateTool) ID() domain.ToolKind  { return domain.ToolKindExecTerminate }
-func (cleanupTool) ID() domain.ToolKind    { return domain.ToolKindExecCleanup }
+func (commandTool) ID() tools.ID    { return domain.ToolKindExecCommand }
+func (statusTool) ID() tools.ID     { return domain.ToolKindExecStatus }
+func (listTool) ID() tools.ID       { return domain.ToolKindExecList }
+func (writeStdinTool) ID() tools.ID { return domain.ToolKindExecWriteStdin }
+func (resizeTool) ID() tools.ID     { return domain.ToolKindExecResize }
+func (terminateTool) ID() tools.ID  { return domain.ToolKindExecTerminate }
+func (cleanupTool) ID() tools.ID    { return domain.ToolKindExecCleanup }
 
 func (commandTool) BypassesPermission() bool    { return false }
 func (statusTool) BypassesPermission() bool     { return true }

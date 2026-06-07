@@ -68,7 +68,7 @@ type ChatControl interface {
 }
 
 type Request struct {
-	Tool       domain.ToolKind   `json:"tool"`
+	Tool       ID                `json:"tool"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
 	Args       map[string]string `json:"-"`
 }
@@ -159,7 +159,7 @@ type Runtime struct {
 	ChatControl           ChatControl
 	SessionControl        SessionControl
 	TaskControl           TaskControl
-	AllowedTools          map[domain.ToolKind]bool
+	AllowedTools          map[ID]bool
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	FileTracker           FileTracker
@@ -182,7 +182,7 @@ func (r Runtime) TouchFile(ctx context.Context, path, content string) {
 }
 
 type Tool interface {
-	ID() domain.ToolKind
+	ID() ID
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	Preview(req Request) string
@@ -216,9 +216,9 @@ type resultFinalizer interface {
 
 var (
 	regMu    sync.RWMutex
-	registry = map[domain.ToolKind]Tool{}
-	specs    = map[domain.ToolKind]ToolSpec{}
-	order    []domain.ToolKind
+	registry = map[ID]Tool{}
+	specs    = map[ID]ToolSpec{}
+	order    []ID
 )
 
 func Register(tool Tool, spec ToolSpec) {
@@ -236,14 +236,14 @@ func Register(tool Tool, spec ToolSpec) {
 	order = append(order, toolID)
 }
 
-func Lookup(kind domain.ToolKind) (Tool, bool) {
+func Lookup(kind ID) (Tool, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	tool, ok := registry[kind]
 	return tool, ok
 }
 
-func lookupWithSpec(kind domain.ToolKind) (Tool, ToolSpec, bool) {
+func lookupWithSpec(kind ID) (Tool, ToolSpec, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	tool, ok := registry[kind]
@@ -254,7 +254,7 @@ func lookupWithSpec(kind domain.ToolKind) (Tool, ToolSpec, bool) {
 	return tool, spec, true
 }
 
-func Info(kind domain.ToolKind) ToolSpec {
+func Info(kind ID) ToolSpec {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	if spec, ok := specs[kind]; ok {
@@ -263,7 +263,7 @@ func Info(kind domain.ToolKind) ToolSpec {
 	return normalizeToolSpec(kind, ToolSpec{})
 }
 
-func RegisteredIDs() []domain.ToolKind {
+func RegisteredIDs() []ID {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	return slices.Clone(order)
@@ -384,7 +384,7 @@ func Definitions(runtime Runtime) []provider.ToolDefinition {
 }
 
 // DefinitionFor returns the provider tool definition for a registered tool.
-func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefinition, bool) {
+func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 	tool, spec, ok := lookupWithSpec(kind)
 	if !ok {
 		return provider.ToolDefinition{}, false
@@ -420,7 +420,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if name == "" {
 		return Request{}, fmt.Errorf("provider tool call missing function name")
 	}
-	kind := domain.ToolKind(name)
+	kind := ID(name)
 	req := Request{
 		Tool:       kind,
 		ToolCallID: strings.TrimSpace(call.ID),
@@ -450,7 +450,7 @@ func formatArgumentByteLimit(limit int) string {
 	return fmt.Sprintf("%d bytes", limit)
 }
 
-func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
+func RequestFromStored(kind ID, raw string) (Request, error) {
 	args, err := decodeStringMap([]byte(raw))
 	if err != nil {
 		return Request{}, fmt.Errorf("decode stored tool arguments for %s: %w", kind, err)
@@ -485,7 +485,7 @@ func RequestFromMetaMap(raw map[string]string) (Request, error) {
 	if toolName == "" {
 		return Request{}, fmt.Errorf("tool name is empty")
 	}
-	kind := domain.ToolKind(toolName)
+	kind := ID(toolName)
 	req := Request{
 		Tool:       kind,
 		ToolCallID: strings.TrimSpace(raw["tool_call_id"]),
@@ -524,16 +524,16 @@ func PresentationForRequest(req Request) Presentation {
 	return SharedPresentation(req.Tool, tool.Preview(req))
 }
 
-func PresentationForTool(kind domain.ToolKind, preview string) Presentation {
+func PresentationForTool(kind ID, preview string) Presentation {
 	return SharedPresentation(kind, preview)
 }
 
-func SharedPresentation(kind domain.ToolKind, preview string) Presentation {
+func SharedPresentation(kind ID, preview string) Presentation {
 	preview = strings.TrimSpace(preview)
 	return Presentation{Title: Info(kind).Title, Subtitle: preview, Preview: preview}
 }
 
-func normalizeToolSpec(kind domain.ToolKind, spec ToolSpec) ToolSpec {
+func normalizeToolSpec(kind ID, spec ToolSpec) ToolSpec {
 	spec.Title = strings.TrimSpace(spec.Title)
 	spec.Description = strings.TrimSpace(spec.Description)
 	spec.Usage = strings.TrimSpace(spec.Usage)
@@ -570,7 +570,7 @@ func ToolCall(req Request) provider.ToolCall {
 	}
 }
 
-func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefinition {
+func providerDefinition(kind ID, spec ToolSpec) provider.ToolDefinition {
 	description := spec.Usage
 	if description == "" {
 		description = spec.Description
@@ -658,7 +658,7 @@ func normalizeRequest(req Request) (Request, Tool, error) {
 	return req, tool, nil
 }
 
-func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
+func defaultSummary(tool ID, result Result) (string, string) {
 	output := strings.TrimSpace(result.Output)
 	switch {
 	case output != "":
