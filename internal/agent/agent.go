@@ -2026,6 +2026,9 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, turnInstructions)
 	}
 	timeline := filterQueuedTimelineItems(turn.Timeline())
+	if turn.ExcludesQueuedInputs() {
+		timeline = filterFutureUserMessagesAfterToolCall(timeline)
+	}
 	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		return nil, err
@@ -2051,6 +2054,30 @@ func filterQueuedTimelineItems(timeline []domain.TimelineItem) []domain.Timeline
 		if _, ok := item.Content.(domain.ToolExecution); ok {
 			waitingToolResult = false
 		}
+	}
+	return out
+}
+
+func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []domain.TimelineItem {
+	lastToolAssistant := -1
+	for idx, item := range timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok || len(assistant.Tools) == 0 {
+			continue
+		}
+		lastToolAssistant = idx
+	}
+	if lastToolAssistant < 0 {
+		return timeline
+	}
+	out := make([]domain.TimelineItem, 0, len(timeline))
+	for idx, item := range timeline {
+		if idx > lastToolAssistant {
+			if _, ok := item.Content.(domain.UserMessage); ok {
+				continue
+			}
+		}
+		out = append(out, item)
 	}
 	return out
 }

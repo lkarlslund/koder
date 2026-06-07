@@ -371,7 +371,11 @@ func (t *TurnState) Chat() domain.Chat {
 	t.chat.mu.RLock()
 	defer t.chat.mu.RUnlock()
 	chat := t.chat.chat
-	chat.QueuedInputs = cloneQueuedInputs(t.chat.queue)
+	if t.skipQueued {
+		chat.QueuedInputs = nil
+	} else {
+		chat.QueuedInputs = cloneQueuedInputs(t.chat.queue)
+	}
 	return chat
 }
 
@@ -386,6 +390,11 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 		return nil
 	}
 	return t.chat.state.SnapshotTimeline()
+}
+
+// ExcludesQueuedInputs reports whether this turn intentionally hides queued future inputs.
+func (t *TurnState) ExcludesQueuedInputs() bool {
+	return t != nil && t.skipQueued
 }
 
 // PendingExecutableToolCalls returns pending tool calls from the live transcript.
@@ -2058,9 +2067,6 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 			return
 		}
 		if shouldContinue {
-			if turn.chat.hasQueuedModelTurn() {
-				return
-			}
 			if r.deps.Turns == nil {
 				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
 				return
@@ -2176,9 +2182,6 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 			return
 		}
 		if shouldContinue {
-			if turn.chat.hasQueuedModelTurn() {
-				return
-			}
 			if r.deps.Turns == nil {
 				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
 				return
