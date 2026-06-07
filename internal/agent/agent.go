@@ -378,7 +378,7 @@ func (e *Engine) DenyToolForTurn(ctx context.Context, turn *chatpkg.TurnState, t
 		return err
 	}
 	text := fmt.Sprintf("%s denied", req.Tool)
-	item, err := e.recordDeniedToolResult(ctx, turn.Chat().ID, req, text)
+	item, err := e.recordDeniedToolResult(ctx, turn.Session().ID, turn.Chat().ID, req, text)
 	if err != nil {
 		return err
 	}
@@ -1221,23 +1221,26 @@ func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string
 	if chatID == "" {
 		return "", nil
 	}
-	chat, err := chatpkg.GetChat(ctx, e.store, chatID)
+	chatRecord, err := e.chatByID(ctx, chatID)
 	if err != nil {
 		return "", err
 	}
-	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
 	if err != nil {
 		return "", err
 	}
-	if !shouldRefreshChatTitle(chat, timeline) {
+	timeline, err := rt.Timeline(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !shouldRefreshChatTitle(chatRecord, timeline) {
 		return "", nil
 	}
 	title := titleFromTimeline(timeline)
 	if title == "" {
 		return "", nil
 	}
-	chat.Title = title
-	if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {
+	if _, err := rt.UpdateMetadata(ctx, chatpkg.MetadataUpdate{Title: title}); err != nil {
 		return "", err
 	}
 	return title, nil
@@ -1314,11 +1317,19 @@ func hasCustomSessionTitle(title string) bool {
 }
 
 func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID id.ID) ([]domain.TimelineItem, []provider.Message, error) {
-	chat, err := sessionpkg.DefaultChat(ctx, e.store, sessionID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
-	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chat.ID)
+	chatRecord, err := owner.EnsureDefaultChat(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	timeline, err := rt.Timeline(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1436,7 +1447,11 @@ func (e *Engine) persistToolFailureForTurn(ctx context.Context, turn *chatpkg.Tu
 		if turn != nil {
 			item, err = turn.AttachToolError(ctx, req.ToolCallID, domain.ToolError{Message: text})
 		} else {
-			item, err = chatpkg.AttachToolError(ctx, e.store, chatID, req.ToolCallID, domain.ToolError{Message: text})
+			rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+			if ownerErr != nil {
+				return nil, ownerErr
+			}
+			item, err = rt.AttachToolError(ctx, req.ToolCallID, domain.ToolError{Message: text})
 		}
 	} else {
 		now := time.Now().UTC()
@@ -1452,11 +1467,23 @@ func (e *Engine) persistToolFailureForTurn(ctx context.Context, turn *chatpkg.Tu
 		if turn != nil {
 			item, err = turn.AppendTimelineContent(ctx, content)
 		} else {
-			item, err = chatpkg.AppendTimeline(ctx, e.store, chatID, content)
+			rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+			if ownerErr != nil {
+				return nil, ownerErr
+			}
+			item, err = rt.AppendTimelineContent(ctx, content)
 		}
-		if err == nil && turn == nil {
+		if err == nil {
 			item.Seal(now)
-			err = chatpkg.PutTimelineItem(ctx, e.store, item)
+			if turn != nil {
+				item, err = turn.UpsertTimelineItem(ctx, item)
+			} else {
+				rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+				if ownerErr != nil {
+					return nil, ownerErr
+				}
+				item, err = rt.UpsertTimelineItem(ctx, item)
+			}
 		}
 	}
 	if err != nil {
@@ -1701,7 +1728,11 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 			noticeTool = tk
 		}
 	}
-	item, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.Notice{
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, false
+	}
+	item, err := rt.AppendTimelineContent(ctx, domain.Notice{
 		Level:    strings.TrimSpace(meta.Severity),
 		Text:     body,
 		Kind:     strings.TrimSpace(meta.Kind),
@@ -1716,7 +1747,8 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 		return domain.TimelineItem{}, false
 	}
 	item.Seal(time.Now().UTC())
-	if err := chatpkg.PutTimelineItem(ctx, e.store, item); err != nil {
+	item, err = rt.UpsertTimelineItem(ctx, item)
+	if err != nil {
 		return domain.TimelineItem{}, false
 	}
 	return item, true
@@ -3768,11 +3800,11 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 }
 
 func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
-	item, err := chatpkg.AppendAssistantToolCallsWithItem(ctx, e.store, chatID, item, toolCalls, text, reasoning, usage)
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
-	return item, nil
+	return rt.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
 }
 
 func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
@@ -3787,23 +3819,7 @@ func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, tur
 	if turn == nil {
 		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, reasoning, usage)
 	}
-	assistant := domain.AssistantMessage{Text: text, Reasoning: reasoning, Tools: toolCalls}
-	usage = usage.Normalized()
-	if usage.HasAnyTokens() {
-		assistant.Usage = &usage
-	}
-	now := time.Now().UTC()
-	item.Content = assistant
-	if item.CreatedAt.IsZero() {
-		item.CreatedAt = now
-	}
-	item.UpdatedAt = now
-	item.Seal(now)
-	item, err := turn.UpsertTimelineItem(ctx, item)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
+	return turn.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
 }
 
 func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
@@ -3903,7 +3919,11 @@ func (e *Engine) markPreparedToolRunning(ctx context.Context, turn *chatpkg.Turn
 	if turn != nil {
 		item, err = turn.MarkToolRunning(ctx, req.ToolCallID)
 	} else {
-		item, err = chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
+		rt, ownerErr := e.chatOwner(ctx, sessionID, chatID)
+		if ownerErr != nil {
+			return domain.TimelineItem{}, ownerErr
+		}
+		item, err = rt.MarkToolRunning(ctx, req.ToolCallID)
 	}
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -3989,7 +4009,7 @@ func (e *Engine) appendLintMessageForTouchedFiles(ctx context.Context, session d
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	item, err := appendLintTimelineItem(ctx, e.store, turn, chat.ID, domain.LintMessage{Text: text, Files: paths})
+	item, err := e.appendLintTimelineItem(ctx, turn, chat, domain.LintMessage{Text: text, Files: paths})
 	if err != nil {
 		return err
 	}
@@ -4028,7 +4048,7 @@ func lintTouchedFiles(ctx context.Context, root string, paths []string) codediag
 	return report
 }
 
-func appendLintTimelineItem(ctx context.Context, st *store.Store, turn *chatpkg.TurnState, chatID id.ID, lint domain.LintMessage) (domain.TimelineItem, error) {
+func (e *Engine) appendLintTimelineItem(ctx context.Context, turn *chatpkg.TurnState, chat domain.Chat, lint domain.LintMessage) (domain.TimelineItem, error) {
 	now := time.Now().UTC()
 	if turn != nil {
 		item := domain.TimelineItem{
@@ -4041,12 +4061,16 @@ func appendLintTimelineItem(ctx context.Context, st *store.Store, turn *chatpkg.
 		}
 		return turn.UpsertTimelineItem(ctx, item)
 	}
-	item, err := chatpkg.AppendTimeline(ctx, st, chatID, lint)
+	rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item, err := rt.AppendTimelineContent(ctx, lint)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	item.Seal(now)
-	if err := chatpkg.PutTimelineItem(ctx, st, item); err != nil {
+	if _, err := rt.UpsertTimelineItem(ctx, item); err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil
@@ -4105,7 +4129,7 @@ func (e *Engine) persistedToolCallState(ctx context.Context, session domain.Sess
 		session = latest
 	}
 	if chat.ID != "" {
-		latest, err := chatpkg.GetChat(ctx, e.store, chat.ID)
+		latest, err := e.chatByID(ctx, chat.ID)
 		if err != nil {
 			return domain.Session{}, domain.Chat{}, err
 		}
@@ -4119,7 +4143,7 @@ func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID
 	if sessionID == "" {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
 	}
-	item, err := e.recordDeniedToolResult(ctx, chatID, req, text)
+	item, err := e.recordDeniedToolResult(ctx, sessionID, chatID, req, text)
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -4131,24 +4155,28 @@ func (e *Engine) recordRoleDeniedToolResult(ctx context.Context, chatID, session
 	if sessionID == "" {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
 	}
-	item, err := e.recordDeniedToolResult(ctx, chatID, req, text)
+	item, err := e.recordDeniedToolResult(ctx, sessionID, chatID, req, text)
 	if err != nil {
 		return domain.Event{}, err
 	}
 	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
 }
 
-func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID id.ID, req tools.Request, text string) (domain.TimelineItem, error) {
+func (e *Engine) recordDeniedToolResult(ctx context.Context, sessionID, chatID id.ID, req tools.Request, text string) (domain.TimelineItem, error) {
 	result := domain.ToolResult{
 		Text:   text,
 		Status: domain.ToolResultStatusDenied,
 		Data:   domain.DeniedStoredResult{Message: text},
 	}
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
 	if strings.TrimSpace(req.ToolCallID) != "" {
-		return chatpkg.AttachToolResult(ctx, e.store, chatID, req.ToolCallID, result)
+		return rt.AttachToolResult(ctx, req.ToolCallID, result)
 	}
 	now := time.Now().UTC()
-	item, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.ToolExecution{
+	item, err := rt.AppendTimelineContent(ctx, domain.ToolExecution{
 		Tool:      req.Tool,
 		Args:      req.Args,
 		Result:    &result,
@@ -4159,7 +4187,7 @@ func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID id.ID, req t
 		return domain.TimelineItem{}, err
 	}
 	item.Seal(now)
-	if err := chatpkg.PutTimelineItem(ctx, e.store, item); err != nil {
+	if _, err := rt.UpsertTimelineItem(ctx, item); err != nil {
 		return domain.TimelineItem{}, err
 	}
 	return item, nil
@@ -4347,7 +4375,11 @@ func max(a, b int) int {
 
 func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID id.ID, tool domain.ToolKind, approvalID, preview, toolCallID string) (domain.TimelineItem, error) {
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
-	item, err := chatpkg.AttachToolApproval(ctx, e.store, chatID, toolCallID, domain.ApprovalRequest{
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item, err := rt.AttachToolApproval(ctx, toolCallID, domain.ApprovalRequest{
 		Body: body,
 	})
 	if err != nil {
@@ -4374,7 +4406,11 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID id.I
 		data = domain.DeniedStoredResult{Message: body}
 	}
 	_ = payload
-	item, err := chatpkg.AttachToolResult(ctx, e.store, chatID, toolCallID, domain.ToolResult{
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item, err := rt.AttachToolResult(ctx, toolCallID, domain.ToolResult{
 		Text:   body,
 		Data:   data,
 		Status: resultStatus,
@@ -4401,35 +4437,29 @@ func (e *Engine) requestForToolCall(ctx context.Context, chatID id.ID, toolCallI
 	if toolCallID == "" {
 		return tools.Request{}, fmt.Errorf("tool call id is required")
 	}
-	items, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	chatRecord, err := e.chatByID(ctx, chatID)
 	if err != nil {
 		return tools.Request{}, err
 	}
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		assistant, ok := items[idx].Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
-		if call == nil {
-			continue
-		}
-		if call.Status != domain.ToolStatusAwaitingApproval {
-			return tools.Request{}, fmt.Errorf("tool call %q is %s, not awaiting approval", toolCallID, call.Status)
-		}
-		return tools.Normalize(tools.Request{
-			Tool:       call.Tool,
-			ToolCallID: string(call.ToolCallID),
-			Args:       maps.Clone(call.Args),
-		})
+	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
+	if err != nil {
+		return tools.Request{}, err
 	}
-	return tools.Request{}, fmt.Errorf("tool call %q not found", toolCallID)
+	call, err := rt.RequestForToolCall(ctx, toolCallID)
+	if err != nil {
+		return tools.Request{}, err
+	}
+	return tools.Normalize(tools.Request{
+		Tool:       call.Tool,
+		ToolCallID: string(call.ToolCallID),
+		Args:       maps.Clone(call.Args),
+	})
 }
 
 func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID, approvalID id.ID) (domain.Session, domain.Chat, tools.Request, error) {
 	var chats []domain.Chat
 	if chatID != "" {
-		chat, err := chatpkg.GetChat(ctx, e.store, chatID)
+		chat, err := e.chatByID(ctx, chatID)
 		if err != nil {
 			return domain.Session{}, domain.Chat{}, tools.Request{}, err
 		}
@@ -4442,7 +4472,11 @@ func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID
 		chats = listed
 	}
 	for _, chat := range chats {
-		approvals, err := chatpkg.PendingApprovalsForChat(ctx, e.store, chat.ID)
+		rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
+		if err != nil {
+			return domain.Session{}, domain.Chat{}, tools.Request{}, err
+		}
+		approvals, err := rt.PendingApprovals(ctx)
 		if err != nil {
 			return domain.Session{}, domain.Chat{}, tools.Request{}, err
 		}

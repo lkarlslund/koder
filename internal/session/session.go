@@ -260,7 +260,11 @@ func (s *Session) TimelinePage(ctx context.Context, chatID, before id.ID, limit 
 	if !ok {
 		return chatpkg.TimelinePage{}, fmt.Errorf("chat %s not found", chatID)
 	}
-	return chatpkg.TimelinePageForChat(ctx, s.store, chatID, before, limit, all)
+	rt, err := s.Chat(ctx, chatID)
+	if err != nil {
+		return chatpkg.TimelinePage{}, err
+	}
+	return rt.TimelinePage(ctx, before, limit, all)
 }
 
 // NewChat creates a new orchestrator chat under parentChatID.

@@ -47,6 +47,56 @@ func (e *Engine) Session(ctx context.Context, sessionID id.ID) (*sessionpkg.Sess
 	return e.LoadSession(ctx, sessionID)
 }
 
+func (e *Engine) chatOwner(ctx context.Context, sessionID, chatID id.ID) (*chat.Chat, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if chatID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	owner, err := e.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return owner.Chat(ctx, chatID)
+}
+
+func (e *Engine) chatByID(ctx context.Context, chatID id.ID) (domain.Chat, error) {
+	if chatID == "" {
+		return domain.Chat{}, fmt.Errorf("chat id is required")
+	}
+	e.sessionMu.RLock()
+	for _, owner := range e.sessions {
+		if owner == nil {
+			continue
+		}
+		snapshot := owner.Snapshot()
+		for _, chatRecord := range snapshot.Chats {
+			if chatRecord.ID == chatID {
+				e.sessionMu.RUnlock()
+				return chatRecord, nil
+			}
+		}
+	}
+	e.sessionMu.RUnlock()
+	sessions, err := e.Sessions(ctx)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	for _, session := range sessions {
+		chats, err := sessionpkg.ListChats(ctx, e.store, session.ID)
+		if err != nil {
+			return domain.Chat{}, err
+		}
+		for _, chatRecord := range chats {
+			if chatRecord.ID == chatID {
+				return chatRecord, nil
+			}
+		}
+	}
+	return domain.Chat{}, fmt.Errorf("chat %s not found", chatID)
+}
+
 // Sessions returns persisted session metadata.
 func (e *Engine) Sessions(ctx context.Context) ([]domain.Session, error) {
 	if e == nil || e.store == nil {

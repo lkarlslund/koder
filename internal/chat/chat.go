@@ -491,6 +491,14 @@ func (t *TurnState) AppendTimelineContent(ctx context.Context, content domain.Ti
 	return t.chat.AppendTimelineContent(ctx, content)
 }
 
+// AppendAssistantToolCalls records a completed assistant item through the live chat owner.
+func (t *TurnState) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.AppendAssistantToolCalls(ctx, item, calls, text, reasoning, usage)
+}
+
 // NextAssistantItem returns the next live assistant timeline identity.
 func (t *TurnState) NextAssistantItem() domain.TimelineItem {
 	if t == nil || t.chat == nil {
@@ -518,7 +526,14 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 	if t == nil || t.chat == nil {
 		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
 	}
-	r := t.chat
+	return t.chat.UpsertTimelineItem(ctx, item)
+}
+
+// UpsertTimelineItem records a timeline item in live memory and storage.
+func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
 	if item.ChatID == "" {
 		r.mu.RLock()
 		item.ChatID = r.chat.ID
@@ -1142,6 +1157,64 @@ func (r *Chat) ContextSize() domain.ContextUsage {
 	return r.state.CurrentContextSize()
 }
 
+// Timeline returns the live transcript, hydrating it from storage if needed.
+func (r *Chat) Timeline(ctx context.Context) ([]domain.TimelineItem, error) {
+	if r == nil {
+		return nil, fmt.Errorf("chat runtime is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.state == nil {
+		return nil, nil
+	}
+	return r.state.SnapshotTimeline(), nil
+}
+
+// TimelinePage returns a page of the live transcript.
+func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bool) (TimelinePage, error) {
+	timeline, err := r.Timeline(ctx)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	total := len(timeline)
+	if all || limit <= 0 || total <= limit {
+		return timelinePage(timeline, false, true, total), nil
+	}
+	end := total
+	if before != "" {
+		idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool {
+			return item.ID == before
+		})
+		if idx >= 0 {
+			end = idx
+		}
+	}
+	if end <= 0 {
+		return TimelinePage{LoadedAll: true, Total: total}, nil
+	}
+	start := max(0, end-limit)
+	return timelinePage(timeline[start:end], start > 0, false, total), nil
+}
+
+// PendingApprovals returns approval requests derived from the live transcript.
+func (r *Chat) PendingApprovals(ctx context.Context) ([]Approval, error) {
+	if r == nil {
+		return nil, fmt.Errorf("chat runtime is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.state == nil {
+		return nil, nil
+	}
+	return r.state.Approvals(), nil
+}
+
 // EnsureTimeline loads persisted transcript items into memory once.
 func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	if r == nil {
@@ -1523,6 +1596,69 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 	return item, nil
 }
 
+// AppendAssistantToolCalls appends or updates one sealed assistant message through the live chat owner.
+func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	if len(calls) == 0 && strings.TrimSpace(text) == "" {
+		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	assistant := domain.AssistantMessage{Text: text, Reasoning: reasoning}
+	for _, call := range calls {
+		if err := assistant.AddToolCall(call); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
+		assistant.Usage = &usage
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	if item.ID == "" {
+		item.ID = NewTimelineID(now)
+	}
+	if item.ChatID == "" {
+		item.ChatID = r.chat.ID
+	}
+	if item.Seq == 0 && r.state != nil {
+		item.Seq = int64(len(r.state.Timeline()) + 1)
+	}
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.UpdatedAt = now
+	item.Content = assistant
+	item.Seal(now)
+	if r.state != nil {
+		r.state.UpsertTimelineItem(item)
+		if text := timelineItemSummary(item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
+			if putErr := PutTimelineItem(ctx, r.deps.Store, item); putErr != nil {
+				return domain.TimelineItem{}, err
+			}
+		}
+		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
+	return item, nil
+}
+
 // MarkToolRunning marks one live tool call as running and persists the updated item.
 func (r *Chat) MarkToolRunning(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {
 	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
@@ -1579,6 +1715,41 @@ func (r *Chat) AttachToolApproval(ctx context.Context, toolCallID string, approv
 		call.Status = domain.ToolStatusAwaitingApproval
 		return nil
 	})
+}
+
+// RequestForToolCall returns a normalized tool request for an approval-pending tool call.
+func (r *Chat) RequestForToolCall(ctx context.Context, toolCallID string) (domain.ToolCall, error) {
+	if r == nil {
+		return domain.ToolCall{}, fmt.Errorf("chat runtime is required")
+	}
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return domain.ToolCall{}, fmt.Errorf("tool call id is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.ToolCall{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.state == nil {
+		return domain.ToolCall{}, fmt.Errorf("tool call %q not found", toolCallID)
+	}
+	items := r.state.SnapshotTimeline()
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		assistant, ok := items[idx].Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
+		if call == nil {
+			continue
+		}
+		if call.Status != domain.ToolStatusAwaitingApproval {
+			return domain.ToolCall{}, fmt.Errorf("tool call %q is %s, not awaiting approval", toolCallID, call.Status)
+		}
+		return *call, nil
+	}
+	return domain.ToolCall{}, fmt.Errorf("tool call %q not found", toolCallID)
 }
 
 // FailRunningToolCalls marks currently running tool calls as failed.
