@@ -379,6 +379,16 @@ func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]doma
 	return items, nil
 }
 
+func putTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
+	if item.ID == "" {
+		return fmt.Errorf("put timeline item: id is required")
+	}
+	if item.ChatID == "" {
+		return fmt.Errorf("put timeline item: chat id is required")
+	}
+	return timelineCollection(st).Put(ctx, item)
+}
+
 func cloneTimelineItemForChat(item domain.TimelineItem, chatID id.ID, seq int64, now time.Time) (domain.TimelineItem, error) {
 	raw, err := json.Marshal(item)
 	if err != nil {

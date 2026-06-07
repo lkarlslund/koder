@@ -377,7 +377,7 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 		if err != nil {
 			return nil, err
 		}
-		if err := chatpkg.PutTimelineItem(ctx, s.store, copied); err != nil {
+		if err := putTimelineItem(ctx, s.store, copied); err != nil {
 			return nil, err
 		}
 	}
