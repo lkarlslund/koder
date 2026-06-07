@@ -75,7 +75,7 @@ func TestFinalizeResultStoresPlanUpdate(t *testing.T) {
 	if !strings.Contains(body, "[completed] Inspect") {
 		t.Fatalf("unexpected plan result body: %q", body)
 	}
-	if _, ok := toolResult.Data.(domain.UpdatePlanStoredResult); !ok {
+	if _, ok := toolResult.Data.(tools.UpdatePlanStoredResult); !ok {
 		t.Fatalf("expected typed plan result, got %#v", toolResult.Data)
 	}
 }

@@ -169,7 +169,7 @@ func TestBuildToolResultPreservesPayloadAndDiff(t *testing.T) {
 	if strings.TrimSpace(result.Diff) == "" {
 		t.Fatalf("expected diff on tool result, got %#v", result)
 	}
-	payload, ok := result.Data.(domain.WriteStoredResult)
+	payload, ok := result.Data.(tools.WriteStoredResult)
 	if !ok || payload.Path != "notes.txt" {
 		t.Fatalf("expected typed write payload, got %#v", result.Data)
 	}

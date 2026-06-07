@@ -506,7 +506,7 @@ func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID id.ID
 	return item
 }
 
-func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
+func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID id.ID, req tools.Request, text string, data any) domain.TimelineItem {
 	t.Helper()
 	item, err := testAttachToolResult(context.Background(), st, chatID, req.ToolCallID, domain.ToolResult{
 		Text:   text,
@@ -6614,8 +6614,16 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	if !ok || exec.Result == nil {
 		t.Fatalf("expected task tool execution, got %#v", items[0])
 	}
-	if _, ok := exec.Result.Data.(domain.TaskStoredResult); !ok {
-		t.Fatalf("expected typed task result, got %#v", exec.Result.Data)
+	raw, ok := exec.Result.Data.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected raw task result data, got %#v", exec.Result.Data)
+	}
+	var task tools.TaskStoredResult
+	if err := json.Unmarshal(raw, &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Body != "write docs" {
+		t.Fatalf("unexpected task result data: %#v", task)
 	}
 	if got := exec.Result.Text; got != "write docs" {
 		t.Fatalf("unexpected task update body: %q", got)

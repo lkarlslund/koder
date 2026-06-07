@@ -77,14 +77,14 @@ func (tool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	storedSteps := make([]domain.PlanStoredStep, 0, len(steps))
+	storedSteps := make([]tools.PlanStoredStep, 0, len(steps))
 	for _, item := range steps {
-		storedSteps = append(storedSteps, domain.PlanStoredStep{
+		storedSteps = append(storedSteps, tools.PlanStoredStep{
 			Step:   item.Step,
 			Status: item.Status,
 		})
 	}
-	result.Stored = domain.UpdatePlanStoredResult{
+	result.Stored = tools.UpdatePlanStoredResult{
 		Explanation: req.Args["explanation"],
 		Steps:       storedSteps,
 	}

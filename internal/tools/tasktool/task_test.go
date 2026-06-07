@@ -63,7 +63,7 @@ func TestFinalizeResultCreatesPendingTask(t *testing.T) {
 	if body != "Ship it" || toolResult.Text != "Ship it" {
 		t.Fatalf("unexpected task result body=%q result=%#v", body, toolResult)
 	}
-	if _, ok := toolResult.Data.(domain.TaskStoredResult); !ok {
+	if _, ok := toolResult.Data.(tools.TaskStoredResult); !ok {
 		t.Fatalf("expected typed task result, got %#v", toolResult.Data)
 	}
 	tasks, err := modeltest.ListTasks(context.Background(), st, session.ID)

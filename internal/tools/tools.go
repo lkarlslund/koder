@@ -588,31 +588,13 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 
 func BuildToolResult(req Request, result Result) (domain.ToolResult, string, error) {
 	_, body := SummarizeResult(req, result)
-	stored, err := domainToolResultPayload(req.Tool, domain.ToolResultStatusOK, result.Stored)
-	if err != nil {
-		return domain.ToolResult{}, "", err
-	}
 	toolResult := domain.ToolResult{
 		Text:   body,
 		Diff:   strings.TrimSpace(result.DiffText),
-		Data:   stored,
+		Data:   result.Stored,
 		Status: domain.ToolResultStatusOK,
 	}
 	return toolResult, body, nil
-}
-
-func domainToolResultPayload(tool domain.ToolKind, status domain.ToolResultStatus, stored any) (domain.ToolResultPayload, error) {
-	if stored == nil {
-		return nil, nil
-	}
-	if payload, ok := stored.(domain.ToolResultPayload); ok {
-		return payload, nil
-	}
-	raw, err := json.Marshal(stored)
-	if err != nil {
-		return nil, fmt.Errorf("marshal tool result %s: %w", tool, err)
-	}
-	return domain.DecodeToolResultPayload(tool, status, raw)
 }
 
 func WithChatID(ctx context.Context, chatID id.ID) context.Context {

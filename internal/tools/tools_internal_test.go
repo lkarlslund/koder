@@ -12,15 +12,18 @@ type badStoredResult struct {
 
 func (badStoredResult) storedResultPayload() {}
 
-func TestBuildToolResultReturnsStoredMarshalError(t *testing.T) {
-	_, _, err := BuildToolResult(Request{
+func TestBuildToolResultKeepsToolOwnedData(t *testing.T) {
+	result, _, err := BuildToolResult(Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, Result{
 		Output: "What next?",
 		Stored: badStoredResult{Bad: func() {}},
 	})
-	if err == nil {
-		t.Fatal("expected stored result marshal error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.Data.(badStoredResult); !ok {
+		t.Fatalf("expected tool-owned data to be preserved, got %#v", result.Data)
 	}
 }

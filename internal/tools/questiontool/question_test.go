@@ -39,7 +39,7 @@ func TestFinalizeResult(t *testing.T) {
 	if body != "What next?" || result.Text != "What next?" {
 		t.Fatalf("unexpected result body=%q result=%#v", body, result)
 	}
-	if _, ok := result.Data.(domain.QuestionStoredResult); !ok {
+	if _, ok := result.Data.(tools.QuestionStoredResult); !ok {
 		t.Fatalf("expected typed question tool payload, got %#v", result.Data)
 	}
 }

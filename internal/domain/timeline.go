@@ -307,11 +307,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	}
 	var result *ToolResult
 	if in.Result != nil && tool != 0 {
-		decoded, err := DecodeToolResultPayload(tool, in.Result.Status, in.Result.Data)
-		if err != nil {
-			return fmt.Errorf("decode tool result %s: %w", tool, err)
-		}
-		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
+		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	status := in.Status
 	approvalID := strings.TrimSpace(in.ApprovalID)
@@ -397,11 +393,7 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 	}
 	var result *ToolResult
 	if in.Result != nil && tool != 0 {
-		decoded, err := DecodeToolResultPayload(tool, in.Result.Status, in.Result.Data)
-		if err != nil {
-			return fmt.Errorf("decode tool result %s: %w", tool, err)
-		}
-		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
+		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	*e = ToolExecution{Tool: tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
 	return nil
@@ -411,7 +403,7 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 type ToolResult struct {
 	Text     string            `json:"text,omitempty"`
 	Diff     string            `json:"diff,omitempty"`
-	Data     ToolResultPayload `json:"data,omitempty"`
+	Data     any               `json:"data,omitempty"`
 	Status   ToolResultStatus  `json:"status,omitempty"`
 	Output   string            `json:"-"`
 	DiffText string            `json:"-"`

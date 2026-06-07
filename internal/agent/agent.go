@@ -3826,8 +3826,12 @@ func toolResultPath(item domain.TimelineItem, toolCallID string) string {
 	return ""
 }
 
-func pathFromToolResultData(data domain.ToolResultPayload) string {
+func pathFromToolResultData(data any) string {
 	switch result := data.(type) {
+	case tools.EditStoredResult:
+		return strings.TrimSpace(result.Path)
+	case tools.WriteStoredResult:
+		return strings.TrimSpace(result.Path)
 	case domain.EditStoredResult:
 		return strings.TrimSpace(result.Path)
 	case domain.WriteStoredResult:
@@ -4246,7 +4250,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID id.I
 		payload["tool_call_id"] = toolCallID
 	}
 	resultStatus := domain.ToolResultStatusOK
-	var data domain.ToolResultPayload
+	var data any
 	if status == "denied" {
 		resultStatus = domain.ToolResultStatusDenied
 		data = domain.DeniedStoredResult{Message: body}

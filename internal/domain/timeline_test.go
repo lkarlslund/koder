@@ -185,7 +185,15 @@ func TestToolCallUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	if call.Result == nil {
 		t.Fatal("expected result")
 	}
-	if _, ok := call.Result.Data.(GrepStoredResult); !ok {
-		t.Fatalf("expected grep stored result, got %#v", call.Result.Data)
+	raw, ok := call.Result.Data.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected raw tool result data, got %#v", call.Result.Data)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["pattern"] != "needle" || decoded["output"] != "main.go:1:needle" {
+		t.Fatalf("unexpected raw tool result data: %#v", decoded)
 	}
 }
