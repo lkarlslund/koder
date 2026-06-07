@@ -203,7 +203,7 @@ type PendingToolService interface {
 }
 
 type CompactService interface {
-	CompactTurn(context.Context, *TurnState, string, chan<- domain.Event) error
+	CompactChat(context.Context, *Chat, string, chan<- domain.Event) error
 }
 
 type PromptTurnService interface {
@@ -535,6 +535,13 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
 	}
 	return t.chat.UpsertTimelineItem(ctx, item)
+}
+
+func (t *TurnState) ResetContextAndTokenUsage(ctx context.Context) error {
+	if t == nil || t.chat == nil {
+		return fmt.Errorf("turn state is required")
+	}
+	return t.chat.ResetContextAndTokenUsage(ctx)
 }
 
 // UpsertTimelineItem records a timeline item in live memory and storage.
@@ -980,6 +987,9 @@ func (r *Chat) Compact(instructions string) error {
 	if service == nil {
 		return fmt.Errorf("compaction service is not configured")
 	}
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return err
+	}
 	instructions = strings.TrimSpace(instructions)
 	r.mu.Lock()
 	chatID := r.chat.ID
@@ -1003,7 +1013,7 @@ func (r *Chat) Compact(instructions string) error {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		if err := service.CompactTurn(ctx, r.turnState(), instructions, out); err != nil {
+		if err := service.CompactChat(ctx, r, instructions, out); err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 		}
 	}()

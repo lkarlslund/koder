@@ -159,21 +159,26 @@ func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
 	return provider.New(providerID, providerCfg, e.debug)
 }
 
-func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, instructions string, out chan<- domain.Event) error {
-	if turn == nil {
-		return fmt.Errorf("turn state is required")
+func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions string, out chan<- domain.Event) error {
+	if rt == nil {
+		return fmt.Errorf("chat is required")
 	}
-	session := turn.Session()
-	chatRecord := turn.Chat()
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chatRecord := snapshot.Chat
 	client, err := e.clientForChat(chatRecord)
 	if err != nil {
 		return err
 	}
-	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
-	if err := e.compactSession(ctx, session, chatRecord.ID, client, "manual", instructions, out); err != nil {
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
+	}
+	if err := e.compactChatRuntime(ctx, session, rt, client, "manual", instructions, out); err != nil {
 		return err
 	}
-	out <- domain.Event{Kind: domain.EventKindMessageDone}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindMessageDone}
+	}
 	return nil
 }
 
@@ -2838,7 +2843,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% known context used", used)}
 	}
-	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
+	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", "", out); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -2869,15 +2874,11 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 	return min(100, (tokens*100)/contextWindow), true
 }
 
-func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID id.ID, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
-	chat, err := e.chatByID(ctx, chatID)
-	if err != nil {
-		return err
+func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
+	if rt == nil {
+		return fmt.Errorf("chat is required")
 	}
-	rt, err := e.chatOwner(ctx, chat.SessionID, chatID)
-	if err != nil {
-		return err
-	}
+	chat := rt.Snapshot().Chat
 	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
@@ -2969,7 +2970,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	return nil
 }
 
-func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger string, out chan<- domain.Event) error {
+func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
 	if turn == nil {
 		return fmt.Errorf("turn state is required")
 	}
@@ -2979,7 +2980,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	}
 
 	timeline := turn.Timeline()
-	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, "", e.providerStreamingEnabled(compactionChat))
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
 	if err != nil {
 		return err
 	}
@@ -3045,6 +3046,9 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	}
 	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
 	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
+		return err
+	}
+	if err := turn.ResetContextAndTokenUsage(ctx); err != nil {
 		return err
 	}
 	if out != nil {

@@ -519,6 +519,15 @@ func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID id.ID, r
 	return item
 }
 
+func compactTestChat(t *testing.T, engine *Engine, session domain.Session, chatRecord domain.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
+	t.Helper()
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		return err
+	}
+	return engine.compactChatRuntime(context.Background(), session, rt, client, trigger, instructions, out)
+}
+
 func waitForToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string, want domain.ToolStatus) bool {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -5363,7 +5372,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := make(chan domain.Event, 4)
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", events); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", events); err != nil {
 		t.Fatal(err)
 	}
 	close(events)
@@ -5471,7 +5480,7 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "focus on your list of directives", nil); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "focus on your list of directives", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(requestBody, "Additional compaction instructions:") ||
@@ -5536,7 +5545,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -5866,7 +5875,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !sawStream {
@@ -5940,7 +5949,7 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := make(chan domain.Event, 8)
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", events); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", events); err != nil {
 		t.Fatal(err)
 	}
 	close(events)
@@ -6027,7 +6036,7 @@ func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !sawCompactionModel {
@@ -6068,7 +6077,7 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil)
+	err = compactTestChat(t, engine, session, chat, client, "manual", "", nil)
 	if err == nil || !strings.Contains(err.Error(), `compaction provider "missing"`) {
 		t.Fatalf("expected invalid compaction provider error, got %v", err)
 	}
@@ -6115,7 +6124,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", "", nil); err != nil {
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
