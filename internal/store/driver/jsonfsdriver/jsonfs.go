@@ -3,9 +3,10 @@ package jsonfsdriver
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/store/driver"
@@ -81,10 +82,21 @@ func (b *Backend) Put(ctx context.Context, namespace string, id string, data []b
 	if err := driver.EnsureDir(dir); err != nil {
 		return err
 	}
+	if err := b.deleteIndexEntries(namespace, id); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(dir, id+".json"), append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("put %s %s: %w", namespace, id, err)
 	}
-	_ = indexes
+	for name, value := range indexes {
+		indexDir := b.indexDir(namespace, name, value)
+		if err := driver.EnsureDir(indexDir); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(indexDir, id), nil, 0o644); err != nil {
+			return fmt.Errorf("index %s %s: %w", namespace, id, err)
+		}
+	}
 	return nil
 }
 
@@ -94,6 +106,9 @@ func (b *Backend) Delete(ctx context.Context, namespace string, id string) error
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if err := b.deleteIndexEntries(namespace, id); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(b.root, "collections", namespace, id+".json")); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete %s %s: %w", namespace, id, err)
 	}
@@ -104,24 +119,16 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	if err := driver.EnsureContext(ctx); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(b.root, "collections", namespace)
-	paths, err := driver.SortedJSONPaths(dir)
+	paths, err := b.listRecordPaths(namespace, lookup)
 	if err != nil {
 		return nil, err
 	}
 	out := make([][]byte, 0, len(paths))
 	for _, path := range paths {
-		id := strings.TrimSuffix(filepath.Base(path), ".json")
-		if lookup != nil {
-			ok, err := b.indexContains(namespace, lookup.Name, lookup.Value, id)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-		}
 		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -130,17 +137,76 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return out, nil
 }
 
-func (b *Backend) Transaction(ctx context.Context, fn func() error) error {
-	if err := driver.EnsureContext(ctx); err != nil {
-		return err
+func (b *Backend) listRecordPaths(namespace string, lookup *driver.IndexLookup) ([]string, error) {
+	if lookup == nil {
+		return driver.SortedJSONPaths(filepath.Join(b.root, "collections", namespace))
 	}
-	return fn()
+	indexPaths, err := sortedIndexEntryPaths(b.indexDir(namespace, lookup.Name, lookup.Value))
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(indexPaths))
+	for _, path := range indexPaths {
+		id := filepath.Base(path)
+		paths = append(paths, filepath.Join(b.root, "collections", namespace, id+".json"))
+	}
+	return paths, nil
 }
 
-func (b *Backend) indexContains(namespace, name, value string, id string) (bool, error) {
-	_ = namespace
-	_ = name
-	_ = value
-	_ = id
-	return true, nil
+func sortedIndexEntryPaths(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func (b *Backend) indexDir(namespace, name, value string) string {
+	return filepath.Join(b.root, "indexes", escapePathSegment(namespace), escapePathSegment(name), escapePathSegment(value))
+}
+
+func escapePathSegment(value string) string {
+	return url.PathEscape(value)
+}
+
+func (b *Backend) deleteIndexEntries(namespace, id string) error {
+	root := filepath.Join(b.root, "indexes", escapePathSegment(namespace))
+	nameEntries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read index namespace %s: %w", namespace, err)
+	}
+	for _, nameEntry := range nameEntries {
+		if !nameEntry.IsDir() {
+			continue
+		}
+		nameDir := filepath.Join(root, nameEntry.Name())
+		valueEntries, err := os.ReadDir(nameDir)
+		if err != nil {
+			return fmt.Errorf("read index %s %s: %w", namespace, nameEntry.Name(), err)
+		}
+		for _, valueEntry := range valueEntries {
+			if !valueEntry.IsDir() {
+				continue
+			}
+			path := filepath.Join(nameDir, valueEntry.Name(), id)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("delete index %s %s: %w", namespace, id, err)
+			}
+		}
+	}
+	return nil
 }

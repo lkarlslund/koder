@@ -137,12 +137,10 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := st.Transaction(ctx, func(tx *store.Tx) error {
-		if err := SessionCollection(st).PutTx(tx, ctx, session); err != nil {
-			return err
-		}
-		return chatCollection(st).PutTx(tx, ctx, chatRecord)
-	}); err != nil {
+	if err := SessionCollection(st).Put(ctx, session); err != nil {
+		return domain.Session{}, err
+	}
+	if err := chatCollection(st).Put(ctx, chatRecord); err != nil {
 		return domain.Session{}, err
 	}
 	return session, nil

@@ -186,13 +186,6 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return b.listByPrefix(driver.RecordPrefix(namespace))
 }
 
-func (b *Backend) Transaction(ctx context.Context, fn func() error) error {
-	if err := driver.EnsureContext(ctx); err != nil {
-		return err
-	}
-	return fn()
-}
-
 func (b *Backend) listByPrefix(prefix string) ([][]byte, error) {
 	iter, err := b.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(prefix),

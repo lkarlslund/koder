@@ -71,23 +71,18 @@ func TestCollectionRoundTripAndIndex(t *testing.T) {
 	}
 }
 
-func TestCollectionTransactionPersistsMultipleCollections(t *testing.T) {
+func TestCollectionPersistsMultipleCollections(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
 			notes := testNotes(st)
 			markers := testMarkers(st)
 
-			var inserted testNote
-			if err := st.Transaction(context.Background(), func(tx *Tx) error {
-				var err error
-				inserted, err = notes.InsertTx(tx, context.Background(), testNote{ChatID: "chat-42", Body: "inside transaction"})
-				if err != nil {
-					return err
-				}
-				_, err = markers.InsertTx(tx, context.Background(), testMarker{NoteID: inserted.ID, Label: "linked"})
-				return err
-			}); err != nil {
+			inserted, err := notes.Insert(context.Background(), testNote{ChatID: "chat-42", Body: "linked note"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := markers.Insert(context.Background(), testMarker{NoteID: inserted.ID, Label: "linked"}); err != nil {
 				t.Fatal(err)
 			}
 			reloadedNotes, err := notes.List(context.Background(), ByIndex[testNote]("chat", "chat-42"))
@@ -103,6 +98,48 @@ func TestCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 			}
 			if len(reloadedMarkers) != 1 || reloadedMarkers[0].Label != "linked" {
 				t.Fatalf("reloaded markers = %#v", reloadedMarkers)
+			}
+		})
+	}
+}
+
+func TestCollectionIndexUpdatesAndDeletes(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+			notes := testNotes(st)
+
+			note, err := notes.Insert(context.Background(), testNote{ChatID: "chat-a", Body: "indexed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			note.ChatID = "chat-b"
+			if err := notes.Put(context.Background(), note); err != nil {
+				t.Fatal(err)
+			}
+			oldItems, err := notes.List(context.Background(), ByIndex[testNote]("chat", "chat-a"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(oldItems) != 0 {
+				t.Fatalf("expected old index to be empty, got %#v", oldItems)
+			}
+			newItems, err := notes.List(context.Background(), ByIndex[testNote]("chat", "chat-b"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(newItems) != 1 || newItems[0].ID != note.ID {
+				t.Fatalf("new index = %#v", newItems)
+			}
+			if err := notes.Delete(context.Background(), note.ID); err != nil {
+				t.Fatal(err)
+			}
+			deletedItems, err := notes.List(context.Background(), ByIndex[testNote]("chat", "chat-b"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(deletedItems) != 0 {
+				t.Fatalf("expected deleted index to be empty, got %#v", deletedItems)
 			}
 		})
 	}

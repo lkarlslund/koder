@@ -9,7 +9,6 @@ type Backend interface {
 	Put(context.Context, string, string, []byte, map[string]string) error
 	Delete(context.Context, string, string) error
 	List(context.Context, string, *IndexLookup) ([][]byte, error)
-	Transaction(context.Context, func() error) error
 }
 
 // IndexLookup selects records by one secondary index.

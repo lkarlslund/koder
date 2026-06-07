@@ -174,26 +174,6 @@ func (c Collection[T]) List(ctx context.Context, query Query[T]) ([]T, error) {
 	return out, nil
 }
 
-// Transaction groups multiple collection writes behind one store-facing operation.
-func (s *Store) Transaction(ctx context.Context, fn func(*Tx) error) error {
-	return s.backend.Transaction(ctx, func() error {
-		return fn(&Tx{})
-	})
-}
-
-// Tx marks collection writes as part of a transaction.
-type Tx struct{}
-
-// PutTx upserts one record inside a Store transaction.
-func (c Collection[T]) PutTx(_ *Tx, ctx context.Context, value T) error {
-	return c.Put(ctx, value)
-}
-
-// InsertTx inserts one record inside a Store transaction.
-func (c Collection[T]) InsertTx(_ *Tx, ctx context.Context, value T) (T, error) {
-	return c.Insert(ctx, value)
-}
-
 func (c Collection[T]) put(ctx context.Context, value T) error {
 	data, err := json.Marshal(value)
 	if err != nil {
