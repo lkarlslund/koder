@@ -12,22 +12,135 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/modeltest"
-	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
-type fakeChatRewinder struct {
-	sessionID id.ID
-	chatID    id.ID
-	anchorID  id.ID
+type fakeSource struct {
+	sessions        []SessionDebug
+	sessionDetails  map[id.ID]SessionDetail
+	chatDetails     map[string]ChatDetail
+	transcripts     map[string][]domain.TimelineItem
+	defaults        map[id.ID][]domain.TimelineItem
+	approvals       map[id.ID][]DebugApproval
+	plans           map[id.ID]planning.Plan
+	todos           map[id.ID][]planning.TodoItem
+	tasks           map[id.ID][]planning.Task
+	rewindSessionID id.ID
+	rewindChatID    id.ID
+	rewindAnchorID  id.ID
 }
 
-func (f *fakeChatRewinder) RewindLiveChat(_ context.Context, sessionID, chatID, anchorItemID id.ID) (any, error) {
-	f.sessionID = sessionID
-	f.chatID = chatID
-	f.anchorID = anchorItemID
+func (f *fakeSource) DebugSessions(context.Context, RuntimeDebug) ([]SessionDebug, error) {
+	return f.sessions, nil
+}
+
+func (f *fakeSource) DebugSession(_ context.Context, sessionID id.ID, _ RuntimeDebug) (SessionDetail, error) {
+	if f.sessionDetails != nil {
+		if detail, ok := f.sessionDetails[sessionID]; ok {
+			return detail, nil
+		}
+	}
+	return SessionDetail{}, fmt.Errorf("session %s is not loaded", sessionID)
+}
+
+func (f *fakeSource) DebugChat(_ context.Context, sessionID, chatID id.ID, _ RuntimeDebug) (ChatDetail, error) {
+	if f.chatDetails != nil {
+		if detail, ok := f.chatDetails[debugChatKey(sessionID, chatID)]; ok {
+			return detail, nil
+		}
+	}
+	return ChatDetail{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
+}
+
+func (f *fakeSource) ChatTranscript(_ context.Context, sessionID, chatID id.ID, opts TranscriptOptions) ([]domain.TimelineItem, error) {
+	items, ok := f.transcripts[debugChatKey(sessionID, chatID)]
+	if !ok {
+		return nil, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
+	}
+	return sliceFakeTranscript(items, opts), nil
+}
+
+func (f *fakeSource) DefaultTranscript(_ context.Context, sessionID id.ID, opts TranscriptOptions) ([]domain.TimelineItem, error) {
+	items, ok := f.defaults[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("session %s has no default transcript", sessionID)
+	}
+	return sliceFakeTranscript(items, opts), nil
+}
+
+func (f *fakeSource) SessionApprovals(_ context.Context, sessionID id.ID) ([]DebugApproval, error) {
+	return f.approvals[sessionID], nil
+}
+
+func (f *fakeSource) Milestones(_ context.Context, sessionID id.ID) (planning.Plan, error) {
+	return f.plans[sessionID], nil
+}
+
+func (f *fakeSource) Todos(_ context.Context, sessionID id.ID) ([]planning.TodoItem, error) {
+	return f.todos[sessionID], nil
+}
+
+func (f *fakeSource) Tasks(_ context.Context, sessionID id.ID) ([]planning.Task, error) {
+	return f.tasks[sessionID], nil
+}
+
+func (f *fakeSource) ResolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error) {
+	if strings.TrimSpace(selector) == "" {
+		selector = "first_compaction_error"
+	}
+	if selector != "first_compaction_error" {
+		return "", fmt.Errorf("unsupported rewind selector %q", selector)
+	}
+	items, err := f.ChatTranscript(ctx, sessionID, chatID, TranscriptOptions{All: true})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range items {
+		compaction, ok := item.Content.(domain.Compaction)
+		if ok && compaction.Status == "failed" {
+			return item.ID, nil
+		}
+	}
+	return "", fmt.Errorf("chat %s has no failed compaction item", chatID)
+}
+
+func (f *fakeSource) RewindLiveChat(_ context.Context, sessionID, chatID, anchorItemID id.ID) (any, error) {
+	f.rewindSessionID = sessionID
+	f.rewindChatID = chatID
+	f.rewindAnchorID = anchorItemID
 	return map[string]any{"removed_count": 3}, nil
+}
+
+func debugChatKey(sessionID, chatID id.ID) string {
+	return string(sessionID) + "/" + string(chatID)
+}
+
+func sliceFakeTranscript(items []domain.TimelineItem, opts TranscriptOptions) []domain.TimelineItem {
+	if opts.All || opts.Limit <= 0 || len(items) <= opts.Limit {
+		out := make([]domain.TimelineItem, len(items))
+		copy(out, items)
+		return out
+	}
+	if opts.Tail {
+		out := make([]domain.TimelineItem, opts.Limit)
+		copy(out, items[len(items)-opts.Limit:])
+		return out
+	}
+	out := make([]domain.TimelineItem, opts.Limit)
+	copy(out, items[:opts.Limit])
+	return out
+}
+
+func debugTimelineItem(chatID id.ID, seq int64, content domain.TimelineContent) domain.TimelineItem {
+	item := domain.TimelineItem{
+		ID:      id.ID(fmt.Sprintf("item-%d", seq)),
+		ChatID:  chatID,
+		Seq:     seq,
+		Content: content,
+	}
+	item.Seal(item.UpdatedAt)
+	return item
 }
 
 func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
@@ -152,28 +265,19 @@ func TestRecorderFiltersHTTPTraces(t *testing.T) {
 func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sessionID := id.ID("session-debug")
+	chatID := id.ID("chat-main")
+	source := &fakeSource{chatDetails: map[string]ChatDetail{
+		debugChatKey(sessionID, chatID): {Chat: SessionChatDebug{ID: chatID, SessionID: sessionID, Hydration: "live", Hydrated: true}},
+	}}
 
 	rec := NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	activeCtx, requestID, finish := rec.StartHTTP(ctx, HTTPTrace{
 		ProviderID:  "llamacpp",
-		SessionID:   session.ID,
-		ChatID:      chat.ID,
+		SessionID:   sessionID,
+		ChatID:      chatID,
 		Method:      http.MethodPost,
 		Path:        "/v1/chat/completions",
 		RequestBody: `{"messages":[{"role":"user","content":"hello"}]}`,
@@ -185,10 +289,10 @@ func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
 		Meta:         map[string]string{"phase": "streaming", "chunk_count": "1"},
 	})
 
-	srv := httptest.NewServer(Handler(st, rec))
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
-	url := srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(chat.ID) + "/http/active"
+	url := srv.URL + "/debug/sessions/" + string(sessionID) + "/chats/" + string(chatID) + "/http/active"
 	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatal(err)
@@ -227,32 +331,20 @@ func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
 func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
+	sessionID := id.ID("session-debug")
+	chatID := id.ID("chat-main")
+	source := &fakeSource{defaults: map[id.ID][]domain.TimelineItem{
+		sessionID: {debugTimelineItem(chatID, 1, domain.UserMessage{Text: "hello"})},
+	}}
 
 	rec := NewRecorder()
 	rec.RecordLifecycle("", "startup_timing", "list_sessions", map[string]string{"duration_ms": "42"})
-	rec.RecordEvent(session.ID, domain.Event{Kind: domain.EventKindMessageDelta, Text: "hello"})
+	rec.RecordEvent(sessionID, domain.Event{Kind: domain.EventKindMessageDelta, Text: "hello"})
 
-	srv := httptest.NewServer(Handler(st, rec))
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/debug/sessions/" + session.ID + "/transcript")
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/transcript")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +362,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected transcript payload: %#v", transcript)
 	}
 
-	resp, err = http.Get(srv.URL + "/debug/sessions/" + session.ID + "/events")
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,41 +409,28 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultChat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sideChat, err := modeltest.CreateChat(context.Background(), st, session.ID, "Side", "execution", &defaultChat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, defaultChat.ID, domain.UserMessage{Text: "default"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, sideChat.ID, domain.UserMessage{Text: "side-one"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, sideChat.ID, domain.UserMessage{Text: "side-two"}); err != nil {
-		t.Fatal(err)
+	sessionID := id.ID("session-debug")
+	defaultChatID := id.ID("chat-main")
+	sideChatID := id.ID("chat-side")
+	source := &fakeSource{
+		chatDetails: map[string]ChatDetail{
+			debugChatKey(sessionID, sideChatID): {Chat: SessionChatDebug{ID: sideChatID, SessionID: sessionID, Hydration: "live", Hydrated: true}},
+		},
+		transcripts: map[string][]domain.TimelineItem{
+			debugChatKey(sessionID, sideChatID): {
+				debugTimelineItem(sideChatID, 1, domain.UserMessage{Text: "side-one"}),
+				debugTimelineItem(sideChatID, 2, domain.UserMessage{Text: "side-two"}),
+			},
+		},
 	}
 
 	rec := NewRecorder()
-	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: defaultChat.ID, RequestBody: `{"messages":[{"role":"user","content":"default"}]}`})
-	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: sideChat.ID, RequestBody: `{"messages":[{"role":"user","content":"side"}]}`})
-	srv := httptest.NewServer(Handler(st, rec))
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: sessionID, ChatID: defaultChatID, RequestBody: `{"messages":[{"role":"user","content":"default"}]}`})
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: sessionID, ChatID: sideChatID, RequestBody: `{"messages":[{"role":"user","content":"side"}]}`})
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(sideChat.ID) + "/transcript?tail=true&limit=1")
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/chats/" + string(sideChatID) + "/transcript?tail=true&limit=1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +447,7 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
 		t.Fatal(err)
 	}
-	if transcript.ChatID != sideChat.ID || len(transcript.Timeline) != 1 {
+	if transcript.ChatID != sideChatID || len(transcript.Timeline) != 1 {
 		t.Fatalf("unexpected transcript response: %#v", transcript)
 	}
 	user, ok := transcript.Timeline[0].Content.(domain.UserMessage)
@@ -376,7 +455,7 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 		t.Fatalf("expected side chat tail item, got %#v", transcript.Timeline)
 	}
 
-	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(sideChat.ID) + "/http")
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/chats/" + string(sideChatID) + "/http")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,11 +466,11 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&traces); err != nil {
 		t.Fatal(err)
 	}
-	if len(traces.Traces) != 1 || traces.Traces[0].ChatID != sideChat.ID || !strings.Contains(traces.Traces[0].RequestBody, "side") {
+	if len(traces.Traces) != 1 || traces.Traces[0].ChatID != sideChatID || !strings.Contains(traces.Traces[0].RequestBody, "side") {
 		t.Fatalf("expected side chat HTTP trace, got %#v", traces.Traces)
 	}
 
-	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/not-a-chat/http")
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/chats/not-a-chat/http")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,41 +483,35 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 func TestServerExposesSpecificChatDebugDetails(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
+	sessionID := id.ID("session-debug")
+	chatID := id.ID("chat-main")
+	timeline := []domain.TimelineItem{
+		debugTimelineItem(chatID, 1, domain.Compaction{
+			Status:              "completed",
+			Summary:             "summary",
+			FirstKeptItemID:     "kept-1",
+			BeforeContextTokens: 1000,
+			AfterContextTokens:  300,
+		}),
+		debugTimelineItem(chatID, 2, domain.AssistantMessage{
+			Text:  "done",
+			Usage: &domain.Usage{PromptTokens: 123, CompletionTokens: 4, CachedTokens: 100, TotalTokens: 127},
+		}),
 	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, chat.ID, domain.Compaction{
-		Status:              "completed",
-		Summary:             "summary",
-		FirstKeptItemID:     "kept-1",
-		BeforeContextTokens: 1000,
-		AfterContextTokens:  300,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{
-		Text:  "done",
-		Usage: &domain.Usage{PromptTokens: 123, CompletionTokens: 4, CachedTokens: 100, TotalTokens: 127},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	source := &fakeSource{chatDetails: map[string]ChatDetail{
+		debugChatKey(sessionID, chatID): {
+			Chat:             SessionChatDebug{ID: chatID, SessionID: sessionID, Hydration: "live", Hydrated: true},
+			Timeline:         timeline,
+			LatestCompaction: LatestCompactionDebug(timeline),
+			LatestUsage:      LatestUsageDebug(timeline),
+		},
+	}}
 	rec := NewRecorder()
-	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: session.ID, ChatID: chat.ID, RequestBody: `{"messages":[{"role":"user","content":"x"}]}`})
-	srv := httptest.NewServer(Handler(st, rec))
+	rec.RecordHTTP(HTTPTrace{ProviderID: "p", SessionID: sessionID, ChatID: chatID, RequestBody: `{"messages":[{"role":"user","content":"x"}]}`})
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(session.ID) + "/chats/" + string(chat.ID))
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/chats/" + string(chatID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +534,7 @@ func TestServerExposesSpecificChatDebugDetails(t *testing.T) {
 	if payload.LatestUsage["usage"] == nil {
 		t.Fatalf("expected latest usage detail, got %#v", payload.LatestUsage)
 	}
-	if len(payload.HTTPTraces) != 1 || payload.HTTPTraces[0].ChatID != chat.ID {
+	if len(payload.HTTPTraces) != 1 || payload.HTTPTraces[0].ChatID != chatID {
 		t.Fatalf("expected matching HTTP trace, got %#v", payload.HTTPTraces)
 	}
 }
@@ -469,40 +542,23 @@ func TestServerExposesSpecificChatDebugDetails(t *testing.T) {
 func TestServerRewindResolvesFirstCompactionError(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "keep"}); err != nil {
-		t.Fatal(err)
-	}
-	failed, err := appendDebugTimelineItem(st, chat.ID, domain.Compaction{Status: "failed", Trigger: "manual"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "remove"}); err != nil {
-		t.Fatal(err)
-	}
-
-	rewinder := &fakeChatRewinder{}
-	debugServer := NewServer(st, NewRecorder())
-	debugServer.SetChatRewinder(rewinder)
+	sessionID := id.ID("session-debug")
+	chatID := id.ID("chat-main")
+	failed := debugTimelineItem(chatID, 2, domain.Compaction{Status: "failed", Trigger: "manual"})
+	source := &fakeSource{transcripts: map[string][]domain.TimelineItem{
+		debugChatKey(sessionID, chatID): {
+			debugTimelineItem(chatID, 1, domain.UserMessage{Text: "keep"}),
+			failed,
+			debugTimelineItem(chatID, 3, domain.UserMessage{Text: "remove"}),
+		},
+	}}
+	debugServer := NewServer(source, NewRecorder())
 	mux := http.NewServeMux()
 	debugServer.Register(mux)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/debug/sessions/"+string(session.ID)+"/chats/"+string(chat.ID)+"/rewind", "application/json", strings.NewReader(`{"selector":"first_compaction_error"}`))
+	resp, err := http.Post(srv.URL+"/debug/sessions/"+string(sessionID)+"/chats/"+string(chatID)+"/rewind", "application/json", strings.NewReader(`{"selector":"first_compaction_error"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,49 +567,32 @@ func TestServerRewindResolvesFirstCompactionError(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected rewind status %d: %s", resp.StatusCode, body)
 	}
-	if rewinder.sessionID != session.ID || rewinder.chatID != chat.ID || rewinder.anchorID != failed.ID {
-		t.Fatalf("rewinder got session=%s chat=%s anchor=%s, want session=%s chat=%s anchor=%s", rewinder.sessionID, rewinder.chatID, rewinder.anchorID, session.ID, chat.ID, failed.ID)
+	if source.rewindSessionID != sessionID || source.rewindChatID != chatID || source.rewindAnchorID != failed.ID {
+		t.Fatalf("rewinder got session=%s chat=%s anchor=%s, want session=%s chat=%s anchor=%s", source.rewindSessionID, source.rewindChatID, source.rewindAnchorID, sessionID, chatID, failed.ID)
 	}
 }
 
 func TestServerExposesSessionAnalysis(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistantStop, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{Text: "Now update `CollidesWith`:"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
+	sessionID := id.ID("session-debug")
+	chatID := id.ID("chat-main")
+	assistantStop := debugTimelineItem(chatID, 1, domain.AssistantMessage{Text: "Now update `CollidesWith`:"})
+	toolMsg := debugTimelineItem(chatID, 2, domain.AssistantMessage{Tools: []domain.ToolCall{{
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindFileEdit,
 		Args:       map[string]string{"path": "main.go"},
 		Status:     domain.ToolStatusPending,
 	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	source := &fakeSource{defaults: map[id.ID][]domain.TimelineItem{sessionID: {assistantStop, toolMsg}}}
 
 	rec := NewRecorder()
-	rec.RecordLifecycle(session.ID, "continue", "", nil)
+	rec.RecordLifecycle(sessionID, "continue", "", nil)
 
-	srv := httptest.NewServer(Handler(st, rec))
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/debug/sessions/" + session.ID + "/analysis")
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + string(sessionID) + "/analysis")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,8 +605,8 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&analysis); err != nil {
 		t.Fatal(err)
 	}
-	if analysis.SessionID != session.ID {
-		t.Fatalf("expected session id %s, got %#v", session.ID, analysis)
+	if analysis.SessionID != sessionID {
+		t.Fatalf("expected session id %s, got %#v", sessionID, analysis)
 	}
 	if analysis.ContinueCount != 1 || len(analysis.Continues) != 1 || analysis.Continues[0].Kind != "continue" {
 		t.Fatalf("expected one continue event, got %#v", analysis)
@@ -586,48 +625,52 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	session, err := modeltest.CreateSession(context.Background(), st, "debug", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultChat, err := modeltest.DefaultChat(context.Background(), st, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sideChat, err := modeltest.CreateChat(context.Background(), st, session.ID, "Side", "executor", &defaultChat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := appendDebugTimelineItem(st, defaultChat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
-		ToolCallID: "call_1",
-		Tool:       domain.ToolKindFileRead,
-		Args:       map[string]string{"path": "main.go"},
-		Status:     domain.ToolStatusPending,
-	}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := modeltest.SetChatQueuedInputs(context.Background(), st, sideChat.ID, []domain.QueuedInput{{Text: "queued"}}); err != nil {
-		t.Fatal(err)
-	}
+	sessionID := id.ID("session-debug")
+	defaultChatID := id.ID("chat-main")
+	sideChatID := id.ID("chat-side")
 
 	rec := NewRecorder()
-	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: session.ID, SelectedChat: defaultChat.ID})
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: sessionID, SelectedChat: defaultChatID})
 	rec.UpdateChats([]ChatDebug{{
-		ID:               defaultChat.ID,
-		SessionID:        session.ID,
-		Title:            defaultChat.Title,
+		ID:               defaultChatID,
+		SessionID:        sessionID,
+		Title:            "Main",
 		Status:           "idle",
 		QueueLen:         0,
 		PendingApprovals: 0,
 	}})
-
-	srv := httptest.NewServer(Handler(st, rec))
+	source := &fakeSource{sessions: []SessionDebug{{
+		ID:                  sessionID,
+		Title:               "debug",
+		ProjectRoot:         "/workspace",
+		Hydration:           "live",
+		Hydrated:            true,
+		StoredChatCount:     2,
+		HydratedChatCount:   2,
+		VisibleChatCount:    2,
+		SelectedClientCount: 1,
+		Record:              domain.Session{ID: sessionID, Title: "debug", ProjectRoot: "/workspace"},
+		Chats: []SessionChatDebug{
+			{
+				ID:                         defaultChatID,
+				SessionID:                  sessionID,
+				Title:                      "Main",
+				Hydration:                  "live",
+				Hydrated:                   true,
+				PendingExecutableToolCalls: 1,
+				Runtime:                    &ChatDebug{ID: defaultChatID, SessionID: sessionID, Status: "idle"},
+			},
+			{
+				ID:        sideChatID,
+				SessionID: sessionID,
+				Title:     "Side",
+				Hydration: "live",
+				Hydrated:  true,
+				QueueLen:  1,
+			},
+		},
+	}}}
+	srv := httptest.NewServer(Handler(source, rec))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/debug/sessions")
@@ -653,45 +696,27 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 		t.Fatalf("expected one session debug entry, got %#v", payload.Sessions)
 	}
 	got := payload.Sessions[0]
-	if !got.Hydrated || got.Hydration != "hydrated" || got.StoredChatCount != 2 || got.HydratedChatCount != 1 || got.SelectedClientCount != 1 {
+	if !got.Hydrated || got.Hydration != "live" || got.StoredChatCount != 2 || got.HydratedChatCount != 2 || got.SelectedClientCount != 1 {
 		t.Fatalf("unexpected session hydration summary: %#v", got)
 	}
 	byID := map[id.ID]SessionChatDebug{}
 	for _, chat := range got.Chats {
 		byID[chat.ID] = chat
 	}
-	mainDebug := byID[defaultChat.ID]
+	mainDebug := byID[defaultChatID]
 	if !mainDebug.Hydrated || mainDebug.Runtime == nil || mainDebug.PendingExecutableToolCalls != 1 {
 		t.Fatalf("unexpected hydrated main chat debug: %#v", mainDebug)
 	}
-	sideDebug := byID[sideChat.ID]
-	if sideDebug.Hydrated || sideDebug.QueueLen != 1 || len(sideDebug.Diagnostics) == 0 {
-		t.Fatalf("unexpected stored-only side chat debug: %#v", sideDebug)
+	sideDebug := byID[sideChatID]
+	if !sideDebug.Hydrated || sideDebug.QueueLen != 1 {
+		t.Fatalf("unexpected side chat debug: %#v", sideDebug)
 	}
-}
-
-func appendDebugTimelineItem(st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	item, err := modeltest.AppendTimeline(context.Background(), st, chatID, content)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item.Seal(item.UpdatedAt)
-	if err := modeltest.PutTimelineItem(context.Background(), st, item); err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
 }
 
 func TestServerExposesPprofHandlers(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	srv := httptest.NewServer(Handler(st, NewRecorder()))
+	srv := httptest.NewServer(Handler(nil, NewRecorder()))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/debug/pprof/")
@@ -714,14 +739,8 @@ func TestServerExposesPprofHandlers(t *testing.T) {
 func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
 	rec := NewRecorder()
-	srv := httptest.NewServer(Handler(st, rec))
+	srv := httptest.NewServer(Handler(nil, rec))
 	defer srv.Close()
 
 	reqBody := strings.NewReader(`{"deep_debug":true}`)
@@ -754,16 +773,10 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 func TestServerExposesClientsAndChats(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
 	rec := NewRecorder()
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9"})
 	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
-	srv := httptest.NewServer(Handler(st, rec))
+	srv := httptest.NewServer(Handler(nil, rec))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/debug/clients")

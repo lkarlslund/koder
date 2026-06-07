@@ -198,7 +198,7 @@ func TestWebBindForLaunchIgnoresSavedEphemeralRecords(t *testing.T) {
 }
 
 func TestStartWebUISurfacesBindError(t *testing.T) {
-	ctrl, st := newRootTestController(t)
+	ctrl, _ := newRootTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -209,7 +209,7 @@ func TestStartWebUISurfacesBindError(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	bind := listener.Addr().String()
 
-	if _, err := startWebUI(ctx, ctrl, st, bind, true, nil, func() error { return nil }); err == nil {
+	if _, err := startWebUI(ctx, ctrl, bind, true, nil, func() error { return nil }); err == nil {
 		t.Fatalf("expected bind error while %q stays busy", bind)
 	}
 }

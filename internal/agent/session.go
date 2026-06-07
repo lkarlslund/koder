@@ -47,6 +47,22 @@ func (e *Engine) Session(ctx context.Context, sessionID id.ID) (*sessionpkg.Sess
 	return e.LoadSession(ctx, sessionID)
 }
 
+// LoadedSessions returns the live session owners currently held by the engine.
+func (e *Engine) LoadedSessions() []*sessionpkg.Session {
+	if e == nil {
+		return nil
+	}
+	e.sessionMu.RLock()
+	defer e.sessionMu.RUnlock()
+	out := make([]*sessionpkg.Session, 0, len(e.sessions))
+	for _, owner := range e.sessions {
+		if owner != nil {
+			out = append(out, owner)
+		}
+	}
+	return out
+}
+
 func (e *Engine) chatOwner(ctx context.Context, sessionID, chatID id.ID) (*chat.Chat, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")

@@ -18,7 +18,6 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -27,7 +26,7 @@ const (
 	defaultMaxHTTP = 20
 )
 
-type debugApproval struct {
+type DebugApproval struct {
 	ID         id.ID                 `json:"ID"`
 	SessionID  id.ID                 `json:"SessionID"`
 	ChatID     id.ID                 `json:"ChatID"`
@@ -193,6 +192,45 @@ type SessionChatDebug struct {
 	LastMessage                string     `json:"last_message,omitempty"`
 	Runtime                    *ChatDebug `json:"runtime,omitempty"`
 	Diagnostics                []string   `json:"diagnostics,omitempty"`
+}
+
+type SessionDetail struct {
+	Debug     SessionDebug
+	Session   domain.Session
+	Chats     []domain.Chat
+	Timeline  []domain.TimelineItem
+	Approvals []DebugApproval
+	Plan      planning.Plan
+	Todos     []planning.TodoItem
+	Tasks     []planning.Task
+}
+
+type ChatDetail struct {
+	Chat             SessionChatDebug
+	Timeline         []domain.TimelineItem
+	LatestCompaction map[string]any
+	LatestUsage      map[string]any
+}
+
+type TranscriptOptions struct {
+	Before id.ID
+	Limit  int
+	Tail   bool
+	All    bool
+}
+
+type Source interface {
+	DebugSessions(ctx context.Context, runtime RuntimeDebug) ([]SessionDebug, error)
+	DebugSession(ctx context.Context, sessionID id.ID, runtime RuntimeDebug) (SessionDetail, error)
+	DebugChat(ctx context.Context, sessionID, chatID id.ID, runtime RuntimeDebug) (ChatDetail, error)
+	ChatTranscript(ctx context.Context, sessionID, chatID id.ID, opts TranscriptOptions) ([]domain.TimelineItem, error)
+	DefaultTranscript(ctx context.Context, sessionID id.ID, opts TranscriptOptions) ([]domain.TimelineItem, error)
+	SessionApprovals(ctx context.Context, sessionID id.ID) ([]DebugApproval, error)
+	Milestones(ctx context.Context, sessionID id.ID) (planning.Plan, error)
+	Todos(ctx context.Context, sessionID id.ID) ([]planning.TodoItem, error)
+	Tasks(ctx context.Context, sessionID id.ID) ([]planning.Task, error)
+	ResolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error)
+	RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error)
 }
 
 type SessionAnalysis struct {
@@ -802,35 +840,23 @@ func (r *Recorder) ChatHTTPTraces(sessionID, chatID id.ID, limit int) []HTTPTrac
 }
 
 type Server struct {
-	store    *store.Store
+	source   Source
 	recorder *Recorder
-	rewinder ChatRewinder
 }
 
-type ChatRewinder interface {
-	RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error)
-}
-
-func NewServer(st *store.Store, recorder *Recorder) *Server {
+func NewServer(source Source, recorder *Recorder) *Server {
 	if recorder == nil {
 		recorder = NewRecorder()
 	}
 	return &Server{
-		store:    st,
+		source:   source,
 		recorder: recorder,
 	}
 }
 
-func (s *Server) SetChatRewinder(rewinder ChatRewinder) {
-	if s == nil {
-		return
-	}
-	s.rewinder = rewinder
-}
-
-func Handler(st *store.Store, recorder *Recorder) http.Handler {
+func Handler(source Source, recorder *Recorder) http.Handler {
 	mux := http.NewServeMux()
-	NewServer(st, recorder).Register(mux)
+	NewServer(source, recorder).Register(mux)
 	return mux
 }
 
@@ -935,156 +961,38 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 func debugArchitecture() ArchitectureDebug {
 	return ArchitectureDebug{
-		Summary: "Engine owns sessions, sessions own persisted chats, and hydrated chat runtimes report live state through the debug recorder.",
+		Summary: "Engine owns live sessions, sessions own live chats, and debug state is read through live snapshots plus recorder data.",
 		Organization: []string{
-			"session records and chat records are loaded from the store",
-			"chat hydration is detected from live recorder chat state",
-			"session hydration is inferred when at least one stored chat has live recorder state",
+			"debugsrv does not read persistence directly",
+			"session and chat data comes from live owners",
 			"client selection is grouped by selected session and selected chat",
 		},
 		DataSources: []string{
-			"store: sessions, chats, timelines, and approvals",
-			"recorder: connected clients, live chat runtime status, queue length, approvals, and running tool counts",
+			"live snapshots: sessions, chats, timelines, milestones, tasks, queue, approvals, and context",
+			"recorder: connected clients, HTTP traces, lifecycle events, and active provider requests",
 		},
 		MoreDataNeeded: []string{
-			"exact engine-owned session hydration is inferred here; expose agent session snapshots if the debug API must distinguish a loaded session with no active chat runtime",
-			"stored-only chats have persisted queue, timeline, approval, and context counts but no live goroutine status until hydrated",
+			"offline persisted data inspection should use a separate repair/debug tool, not debugsrv",
 		},
 	}
 }
 
 func (s *Server) debugSessions(ctx context.Context) ([]SessionDebug, error) {
-	sessions, err := debugListSessions(ctx, s.store)
+	source, err := s.sourceRequired()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SessionDebug, 0, len(sessions))
-	for _, session := range sessions {
-		item, _, err := s.debugSession(ctx, session)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, nil
+	return source.DebugSessions(ctx, s.recorder.Runtime())
 }
 
-func (s *Server) debugSession(ctx context.Context, session domain.Session) (SessionDebug, []domain.Chat, error) {
-	chats, err := debugListChats(ctx, s.store, session.ID)
-	if err != nil {
-		return SessionDebug{}, nil, err
+func (s *Server) sourceRequired() (Source, error) {
+	if s == nil || s.source == nil {
+		return nil, fmt.Errorf("debug source is unavailable")
 	}
-	runtime := s.recorder.Runtime()
-	runtimeByChat := make(map[id.ID]ChatDebug, len(runtime.Chats))
-	for _, chat := range runtime.Chats {
-		runtimeByChat[chat.ID] = chat
-	}
-	selectedSessions, selectedChats := selectedClientCounts(runtime.Clients)
-
-	out := SessionDebug{
-		ID:                  session.ID,
-		Title:               session.Title,
-		ProjectRoot:         session.ProjectRoot,
-		Hydration:           "stored",
-		StoredChatCount:     len(chats),
-		SelectedClientCount: selectedSessions[session.ID],
-		Record:              session,
-		Chats:               make([]SessionChatDebug, 0, len(chats)),
-	}
-	for _, chatRecord := range chats {
-		chatDebug, err := s.debugChat(ctx, chatRecord, runtimeByChat, selectedChats)
-		if err != nil {
-			return SessionDebug{}, nil, err
-		}
-		out.Chats = append(out.Chats, chatDebug)
-		if chatRecord.Archived {
-			out.ArchivedChatCount++
-		} else {
-			out.VisibleChatCount++
-		}
-		if chatDebug.Hydrated {
-			out.HydratedChatCount++
-		}
-	}
-	if out.HydratedChatCount > 0 {
-		out.Hydrated = true
-		out.Hydration = "hydrated"
-	}
-	if out.HydratedChatCount == 0 && len(chats) > 0 {
-		out.DataNotes = append(out.DataNotes, "no stored chat in this session has live recorder state")
-	}
-	if out.HydratedChatCount > 0 && out.HydratedChatCount < out.StoredChatCount {
-		out.DataNotes = append(out.DataNotes, "some stored chats are not currently hydrated")
-	}
-	return out, chats, nil
+	return s.source, nil
 }
 
-func (s *Server) debugChat(ctx context.Context, chatRecord domain.Chat, runtimeByChat map[id.ID]ChatDebug, selectedChats map[id.ID]int) (SessionChatDebug, error) {
-	timeline, err := debugTimelineForChat(ctx, s.store, chatRecord.ID)
-	if err != nil {
-		return SessionChatDebug{}, err
-	}
-	approvals, err := debugPendingApprovalsForChat(ctx, s.store, chatRecord)
-	if err != nil {
-		return SessionChatDebug{}, err
-	}
-	out := SessionChatDebug{
-		ID:                         chatRecord.ID,
-		SessionID:                  chatRecord.SessionID,
-		Title:                      chatRecord.Title,
-		WorkflowRole:               string(chatRecord.WorkflowRole),
-		Archived:                   chatRecord.Archived,
-		Hydration:                  "stored",
-		QueueLen:                   len(chatRecord.QueuedInputs),
-		TimelineCount:              len(timeline),
-		PendingApprovals:           len(approvals),
-		PendingExecutableToolCalls: pendingExecutableToolCalls(timeline),
-		SelectedClientCount:        selectedChats[chatRecord.ID],
-		LastKnownContextTokens:     chatRecord.LastKnownContextTokens,
-		ContextTokensKnown:         chatRecord.ContextTokensKnown,
-		LastMessage:                chatRecord.LastMessage,
-	}
-	if runtime, ok := runtimeByChat[chatRecord.ID]; ok {
-		out.Hydrated = true
-		out.Hydration = "hydrated"
-		out.Runtime = &runtime
-		out.QueueLen = runtime.QueueLen
-		out.PendingApprovals = runtime.PendingApprovals
-		if runtime.Busy && runtime.Status == "running_tools" && runtime.RunningToolCalls == 0 {
-			out.Diagnostics = append(out.Diagnostics, "live runtime reports running_tools with no running tool calls")
-		}
-		return out, nil
-	}
-	out.Diagnostics = append(out.Diagnostics, "no live recorder state; runtime goroutine status is unavailable")
-	return out, nil
-}
-
-func (s *Server) runtimeChatsByID() map[id.ID]ChatDebug {
-	runtime := s.recorder.Runtime()
-	out := make(map[id.ID]ChatDebug, len(runtime.Chats))
-	for _, chat := range runtime.Chats {
-		out[chat.ID] = chat
-	}
-	return out
-}
-
-func (s *Server) debugChatForSession(ctx context.Context, sessionID, chatID id.ID) (domain.Chat, error) {
-	if chatID == "" {
-		return domain.Chat{}, fmt.Errorf("invalid chat id")
-	}
-	chats, err := debugListChats(ctx, s.store, sessionID)
-	if err != nil {
-		return domain.Chat{}, err
-	}
-	for _, chat := range chats {
-		if chat.ID == chatID {
-			return chat, nil
-		}
-	}
-	return domain.Chat{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
-}
-
-func latestCompactionDebug(timeline []domain.TimelineItem) map[string]any {
+func LatestCompactionDebug(timeline []domain.TimelineItem) map[string]any {
 	for idx := len(timeline) - 1; idx >= 0; idx-- {
 		compaction, ok := timeline[idx].Content.(domain.Compaction)
 		if !ok {
@@ -1105,7 +1013,7 @@ func latestCompactionDebug(timeline []domain.TimelineItem) map[string]any {
 	return nil
 }
 
-func latestUsageDebug(timeline []domain.TimelineItem) map[string]any {
+func LatestUsageDebug(timeline []domain.TimelineItem) map[string]any {
 	for idx := len(timeline) - 1; idx >= 0; idx-- {
 		assistant, ok := timeline[idx].Content.(domain.AssistantMessage)
 		if !ok || assistant.Usage == nil {
@@ -1121,223 +1029,8 @@ func latestUsageDebug(timeline []domain.TimelineItem) map[string]any {
 	return nil
 }
 
-func sliceTimelineForQuery(r *http.Request, timeline []domain.TimelineItem) []domain.TimelineItem {
-	if r == nil || len(timeline) == 0 {
-		return timeline
-	}
-	query := r.URL.Query()
-	limit, _ := strconv.Atoi(strings.TrimSpace(query.Get("limit")))
-	if limit <= 0 || limit > len(timeline) {
-		return timeline
-	}
-	if strings.EqualFold(strings.TrimSpace(query.Get("tail")), "true") {
-		return slices.Clone(timeline[len(timeline)-limit:])
-	}
-	return slices.Clone(timeline[:limit])
-}
-
-func selectedClientCounts(clients []ClientDebug) (map[id.ID]int, map[id.ID]int) {
-	sessions := map[id.ID]int{}
-	chats := map[id.ID]int{}
-	for _, client := range clients {
-		if !client.Connected {
-			continue
-		}
-		if client.SelectedSession != "" {
-			sessions[client.SelectedSession]++
-		}
-		if client.SelectedChat != "" {
-			chats[client.SelectedChat]++
-		}
-	}
-	return sessions, chats
-}
-
-func pendingExecutableToolCalls(timeline []domain.TimelineItem) int {
-	for i := len(timeline) - 1; i >= 0; i-- {
-		message, ok := timeline[i].Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		var count int
-		for _, call := range message.Tools {
-			if call.Status == domain.ToolStatusPending && call.Result == nil && call.Error == nil && call.Approval == nil && call.ApprovalID == "" {
-				count++
-			}
-		}
-		return count
-	}
-	return 0
-}
-
-func debugTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
-	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
-		Namespace: "timeline",
-		GetID:     func(v domain.TimelineItem) string { return v.ID },
-		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[domain.TimelineItem]{
-			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
-		},
-	})
-}
-
-func debugSessionCollection(st *store.Store) store.Collection[domain.Session] {
-	return store.NewCollection(st, store.CollectionSpec[domain.Session]{
-		Namespace: "sessions",
-		GetID:     func(v domain.Session) string { return v.ID },
-		SetID:     func(v *domain.Session, id string) { v.ID = id },
-	})
-}
-
-func debugChatCollection(st *store.Store) store.Collection[domain.Chat] {
-	return store.NewCollection(st, store.CollectionSpec[domain.Chat]{
-		Namespace: "chats",
-		GetID:     func(v domain.Chat) string { return v.ID },
-		SetID:     func(v *domain.Chat, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[domain.Chat]{
-			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
-		},
-	})
-}
-
-func debugPlanCollection(st *store.Store) store.Collection[planning.Plan] {
-	return store.NewCollection(st, store.CollectionSpec[planning.Plan]{
-		Namespace: "milestone-plans",
-		GetID:     func(v planning.Plan) string { return v.SessionID },
-		SetID:     func(v *planning.Plan, id string) { v.SessionID = id },
-	})
-}
-
-func debugTodoCollection(st *store.Store) store.Collection[planning.TodoItem] {
-	return store.NewCollection(st, store.CollectionSpec[planning.TodoItem]{
-		Namespace: "todos",
-		GetID:     func(v planning.TodoItem) string { return v.ID },
-		SetID:     func(v *planning.TodoItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[planning.TodoItem]{
-			{Name: "session", Value: func(v planning.TodoItem) string { return v.SessionID }},
-			{Name: "milestone", Value: func(v planning.TodoItem) string { return v.SessionID + "/" + v.MilestoneRef }},
-		},
-	})
-}
-
-func debugTaskCollection(st *store.Store) store.Collection[planning.Task] {
-	return store.NewCollection(st, store.CollectionSpec[planning.Task]{
-		Namespace: "tasks",
-		GetID:     func(v planning.Task) string { return v.ID },
-		SetID:     func(v *planning.Task, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[planning.Task]{
-			{Name: "session", Value: func(v planning.Task) string { return v.SessionID }},
-		},
-	})
-}
-
-func debugListSessions(ctx context.Context, st *store.Store) ([]domain.Session, error) {
-	sessions, err := debugSessionCollection(st).List(ctx, store.All[domain.Session]())
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(sessions, func(i, j int) bool {
-		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
-			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
-		}
-		return sessions[i].ID < sessions[j].ID
-	})
-	return sessions, nil
-}
-
-func debugGetSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
-	return debugSessionCollection(st).Get(ctx, sessionID)
-}
-
-func debugListChats(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
-	chats, err := debugChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(chats, func(i, j int) bool {
-		if chats[i].Position != chats[j].Position {
-			return chats[i].Position < chats[j].Position
-		}
-		if !chats[i].CreatedAt.Equal(chats[j].CreatedAt) {
-			return chats[i].CreatedAt.Before(chats[j].CreatedAt)
-		}
-		return chats[i].ID < chats[j].ID
-	})
-	return chats, nil
-}
-
-func debugDefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
-	chats, err := debugListChats(ctx, st, sessionID)
-	if err != nil {
-		return domain.Chat{}, err
-	}
-	for _, chatRecord := range chats {
-		if chatRecord.ParentChatID == nil {
-			return chatRecord, nil
-		}
-	}
-	if len(chats) > 0 {
-		return chats[0], nil
-	}
-	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
-}
-
-func debugGetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
-	plan, err := debugPlanCollection(st).Get(ctx, sessionID)
-	if err != nil {
-		return planning.Plan{SessionID: sessionID}, nil
-	}
-	return plan, nil
-}
-
-func debugListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
-	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
-	milestoneRef = strings.TrimSpace(milestoneRef)
-	if milestoneRef != "" {
-		query = store.ByIndex[planning.TodoItem]("milestone", string(sessionID)+"/"+milestoneRef)
-	}
-	items, err := debugTodoCollection(st).List(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	planning.SortTodos(items)
-	return items, nil
-}
-
-func debugListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
-	items, err := debugTaskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if !items[i].CreatedAt.Equal(items[j].CreatedAt) {
-			return items[i].CreatedAt.Before(items[j].CreatedAt)
-		}
-		return items[i].ID < items[j].ID
-	})
-	return items, nil
-}
-
-func debugTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
-	items, err := debugTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Seq != items[j].Seq {
-			return items[i].Seq < items[j].Seq
-		}
-		return items[i].ID < items[j].ID
-	})
-	return items, nil
-}
-
-func debugPendingApprovalsForChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) ([]debugApproval, error) {
-	items, err := debugTimelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		return nil, err
-	}
-	var approvals []debugApproval
+func PendingApprovalsFromTimeline(chatRecord domain.Chat, items []domain.TimelineItem) []DebugApproval {
+	var approvals []DebugApproval
 	for _, item := range items {
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
@@ -1347,7 +1040,7 @@ func debugPendingApprovalsForChat(ctx context.Context, st *store.Store, chatReco
 			if call.Status != domain.ToolStatusAwaitingApproval {
 				continue
 			}
-			approvals = append(approvals, debugApproval{
+			approvals = append(approvals, DebugApproval{
 				ID:         id.ID(strings.TrimSpace(string(call.ToolCallID))),
 				SessionID:  chatRecord.SessionID,
 				ChatID:     chatRecord.ID,
@@ -1359,7 +1052,7 @@ func debugPendingApprovalsForChat(ctx context.Context, st *store.Store, chatReco
 			})
 		}
 	}
-	return approvals, nil
+	return approvals
 }
 
 func debugToolCallPreview(call domain.ToolCall) string {
@@ -1395,6 +1088,20 @@ func httpTraceFilterFromQuery(r *http.Request) HTTPTraceFilter {
 		ChatID:     id.ID(strings.TrimSpace(query.Get("chat_id"))),
 		ProviderID: strings.TrimSpace(query.Get("provider_id")),
 		Limit:      limit,
+	}
+}
+
+func transcriptOptionsFromRequest(r *http.Request) TranscriptOptions {
+	if r == nil {
+		return TranscriptOptions{}
+	}
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(strings.TrimSpace(query.Get("limit")))
+	return TranscriptOptions{
+		Before: id.ID(strings.TrimSpace(query.Get("before"))),
+		Limit:  limit,
+		Tail:   strings.EqualFold(strings.TrimSpace(query.Get("tail")), "true"),
+		All:    strings.EqualFold(strings.TrimSpace(query.Get("all")), "true"),
 	}
 }
 
@@ -1504,8 +1211,9 @@ func (s *Server) handleSessionChatRewind(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
-	if s.rewinder == nil {
-		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("debug chat rewinder is unavailable"))
+	source, err := s.sourceRequired()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
 	var req struct {
@@ -1521,13 +1229,13 @@ func (s *Server) handleSessionChatRewind(w http.ResponseWriter, r *http.Request,
 	anchorID := req.AnchorItemID
 	if anchorID == "" {
 		var err error
-		anchorID, err = s.resolveRewindAnchor(r.Context(), sessionID, chatID, req.Selector)
+		anchorID, err = source.ResolveRewindAnchor(r.Context(), sessionID, chatID, req.Selector)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 	}
-	result, err := s.rewinder.RewindLiveChat(r.Context(), sessionID, chatID, anchorID)
+	result, err := source.RewindLiveChat(r.Context(), sessionID, chatID, anchorID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1561,7 +1269,12 @@ func (s *Server) handleSessionChatHTTP(w http.ResponseWriter, r *http.Request, s
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
-	if _, err := s.debugChatForSession(r.Context(), sessionID, chatID); err != nil {
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	if _, err := source.DebugChat(r.Context(), sessionID, chatID, s.recorder.Runtime()); err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
@@ -1576,7 +1289,12 @@ func (s *Server) handleSessionChatHTTP(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) handleSessionChatActiveHTTP(w http.ResponseWriter, r *http.Request, sessionID, chatID id.ID) {
-	if _, err := s.debugChatForSession(r.Context(), sessionID, chatID); err != nil {
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	if _, err := source.DebugChat(r.Context(), sessionID, chatID, s.recorder.Runtime()); err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
@@ -1634,28 +1352,22 @@ func (s *Server) handleSessionChat(w http.ResponseWriter, r *http.Request, sessi
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
-	chatRecord, err := s.debugChatForSession(r.Context(), sessionID, chatID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	detail, err := source.DebugChat(r.Context(), sessionID, chatID, s.recorder.Runtime())
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	_, selectedChats := selectedClientCounts(s.recorder.Runtime().Clients)
-	chatDebug, err := s.debugChat(r.Context(), chatRecord, s.runtimeChatsByID(), selectedChats)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	timeline, err := debugTimelineForChat(r.Context(), s.store, chatID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":        sessionID,
 		"chat_id":           chatID,
-		"chat":              chatDebug,
-		"latest_compaction": latestCompactionDebug(timeline),
-		"latest_usage":      latestUsageDebug(timeline),
+		"chat":              detail.Chat,
+		"latest_compaction": detail.LatestCompaction,
+		"latest_usage":      detail.LatestUsage,
 		"http_traces":       s.recorder.ChatHTTPTraces(sessionID, chatID, 5),
 	})
 }
@@ -1666,16 +1378,16 @@ func (s *Server) handleChatTranscript(w http.ResponseWriter, r *http.Request, se
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
-	if _, err := s.debugChatForSession(r.Context(), sessionID, chatID); err != nil {
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	timeline, err := source.ChatTranscript(r.Context(), sessionID, chatID, transcriptOptionsFromRequest(r))
+	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	timeline, err := debugTimelineForChat(r.Context(), s.store, chatID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	timeline = sliceTimelineForQuery(r, timeline)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"chat_id":    chatID,
@@ -1683,85 +1395,39 @@ func (s *Server) handleChatTranscript(w http.ResponseWriter, r *http.Request, se
 	})
 }
 
-func (s *Server) resolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error) {
-	if strings.TrimSpace(selector) == "" {
-		selector = "first_compaction_error"
-	}
-	if selector != "first_compaction_error" {
-		return "", fmt.Errorf("unsupported rewind selector %q", selector)
-	}
-	chats, err := debugListChats(ctx, s.store, sessionID)
-	if err != nil {
-		return "", err
-	}
-	if !slices.ContainsFunc(chats, func(chat domain.Chat) bool { return chat.ID == chatID }) {
-		return "", fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
-	}
-	timeline, err := debugTimelineForChat(ctx, s.store, chatID)
-	if err != nil {
-		return "", err
-	}
-	for _, item := range timeline {
-		compaction, ok := item.Content.(domain.Compaction)
-		if ok && compaction.Status == "failed" {
-			return item.ID, nil
-		}
-	}
-	return "", fmt.Errorf("chat %s has no failed compaction item", chatID)
-}
-
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	session, err := debugGetSession(r.Context(), s.store, sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
 		return
 	}
-	sessionDebug, chats, err := s.debugSession(r.Context(), session)
+	detail, err := source.DebugSession(r.Context(), sessionID, s.recorder.Runtime())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
-	}
-	timeline, err := s.sessionTimeline(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	approvals, err := s.sessionApprovals(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	plan, err := debugGetPlan(r.Context(), s.store, sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	var todos []planning.TodoItem
-	for _, milestone := range plan.Milestones {
-		items, err := debugListTodos(r.Context(), s.store, sessionID, milestone.Ref)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		todos = append(todos, items...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"architecture":   debugArchitecture(),
-		"debug":          sessionDebug,
-		"session":        session,
-		"chats":          chats,
-		"timeline":       timeline,
-		"approvals":      approvals,
-		"milestone_plan": plan,
-		"todos":          todos,
+		"debug":          detail.Debug,
+		"session":        detail.Session,
+		"chats":          detail.Chats,
+		"timeline":       detail.Timeline,
+		"approvals":      detail.Approvals,
+		"milestone_plan": detail.Plan,
+		"todos":          detail.Todos,
 		"events":         s.recorder.Events(sessionID),
 	})
 }
 
 func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	timeline, err := s.sessionTimeline(r.Context(), sessionID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	timeline, err := source.DefaultTranscript(r.Context(), sessionID, transcriptOptionsFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1778,20 +1444,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID 
 }
 
 func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	timeline, err := s.sessionTimeline(r.Context(), sessionID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	timeline, err := source.DefaultTranscript(r.Context(), sessionID, transcriptOptionsFromRequest(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, analyzeSession(sessionID, timeline, s.recorder.Events(sessionID)))
-}
-
-func (s *Server) sessionTimeline(ctx context.Context, sessionID id.ID) ([]domain.TimelineItem, error) {
-	chat, err := debugDefaultChat(ctx, s.store, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return debugTimelineForChat(ctx, s.store, chat.ID)
 }
 
 func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
@@ -1802,9 +1465,14 @@ func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	approvals, err := s.sessionApprovals(r.Context(), sessionID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	approvals, err := source.SessionApprovals(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1813,26 +1481,15 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
-func (s *Server) sessionApprovals(ctx context.Context, sessionID id.ID) ([]debugApproval, error) {
-	chats, err := debugListChats(ctx, s.store, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	var approvals []debugApproval
-	for _, chatRecord := range chats {
-		next, err := debugPendingApprovalsForChat(ctx, s.store, chatRecord)
-		if err != nil {
-			return nil, err
-		}
-		approvals = append(approvals, next...)
-	}
-	return approvals, nil
-}
-
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	tasks, err := debugListTasks(r.Context(), s.store, sessionID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	tasks, err := source.Tasks(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1842,9 +1499,14 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID i
 }
 
 func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	plan, err := debugGetPlan(r.Context(), s.store, sessionID)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
+		return
+	}
+	plan, err := source.Milestones(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1854,19 +1516,15 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	plan, err := debugGetPlan(r.Context(), s.store, sessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	source, sourceErr := s.sourceRequired()
+	if sourceErr != nil {
+		writeError(w, http.StatusServiceUnavailable, sourceErr)
 		return
 	}
-	var todos []planning.TodoItem
-	for _, milestone := range plan.Milestones {
-		items, err := debugListTodos(r.Context(), s.store, sessionID, milestone.Ref)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		todos = append(todos, items...)
+	todos, err := source.Todos(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,

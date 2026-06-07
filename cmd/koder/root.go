@@ -166,7 +166,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		return err
 	}
 	restartRequested := make(chan struct{}, 1)
-	server, err := startWebUI(ctx, controller, st, bind, startupOpts.NoOpenBrowser, recorder, func() error {
+	server, err := startWebUI(ctx, controller, bind, startupOpts.NoOpenBrowser, recorder, func() error {
 		select {
 		case restartRequested <- struct{}{}:
 		default:
@@ -216,12 +216,11 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *app.Controller, st *store.Store, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder, requestProcessRestart func() error) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder, requestProcessRestart func() error) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
 		Bind:                  bind,
 		NoOpenBrowser:         noOpenBrowser,
 		Debug:                 recorder,
-		Store:                 st,
 		RequestProcessRestart: requestProcessRestart,
 	})
 }
