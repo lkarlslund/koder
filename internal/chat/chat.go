@@ -402,15 +402,23 @@ func (t *TurnState) PendingExecutableToolCalls(ctx context.Context) ([]domain.To
 	if t == nil || t.chat == nil {
 		return nil, fmt.Errorf("turn state is required")
 	}
-	if err := t.chat.EnsureTimeline(ctx); err != nil {
+	return t.chat.PendingExecutableToolCalls(ctx)
+}
+
+// PendingExecutableToolCalls returns pending tool calls from the live transcript.
+func (r *Chat) PendingExecutableToolCalls(ctx context.Context) ([]domain.ToolCall, error) {
+	if r == nil {
+		return nil, fmt.Errorf("chat runtime is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
 		return nil, err
 	}
-	t.chat.mu.RLock()
-	defer t.chat.mu.RUnlock()
-	if t.chat.state == nil {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.state == nil {
 		return nil, nil
 	}
-	items := t.chat.state.SnapshotTimeline()
+	items := r.state.SnapshotTimeline()
 	for idx := len(items) - 1; idx >= 0; idx-- {
 		assistant, ok := items[idx].Content.(domain.AssistantMessage)
 		if !ok {
@@ -780,6 +788,33 @@ func (r *Chat) ResetTokenUsage(ctx context.Context) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// ResetContextAndTokenUsage clears cached context and token-burn accounting after compaction.
+func (r *Chat) ResetContextAndTokenUsage(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	r.mu.Lock()
+	r.chat.LastKnownContextTokens = 0
+	r.chat.ContextTokensKnown = false
+	r.chat.TokenUsage = domain.Usage{}
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.LastKnownContextTokens = 0
+			chat.ContextTokensKnown = false
+			chat.TokenUsage = domain.Usage{}
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if _, err := updateStoredChatUsage(ctx, r.deps.Store, chatRecord.ID, chatRecord); err != nil {
+			return err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, true, false))
 	return nil
 }
 

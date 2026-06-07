@@ -181,30 +181,27 @@ func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID id.ID) (
 	if chatID == "" {
 		return nil, nil
 	}
-	items, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	chatRecord, err := e.chatByID(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		item := items[idx]
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		var calls []tools.Request
-		for _, call := range assistant.Tools {
-			if call.Status != domain.ToolStatusPending || call.Result != nil || call.Error != nil || call.Approval != nil {
-				continue
-			}
-			calls = append(calls, tools.Request{
-				Tool:       call.Tool,
-				ToolCallID: string(call.ToolCallID),
-				Args:       maps.Clone(call.Args),
-			})
-		}
-		return calls, nil
+	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	calls, err := rt.PendingExecutableToolCalls(ctx)
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]tools.Request, 0, len(calls))
+	for _, call := range calls {
+		requests = append(requests, tools.Request{
+			Tool:       call.Tool,
+			ToolCallID: string(call.ToolCallID),
+			Args:       maps.Clone(call.Args),
+		})
+	}
+	return requests, nil
 }
 
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
@@ -1922,7 +1919,15 @@ func (e *Engine) chatWithRetry(ctx context.Context, session domain.Session, chat
 
 func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID id.ID) (domain.TimelineItem, error) {
 	now := time.Now().UTC()
-	items, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	chatRecord, err := e.chatByID(ctx, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	items, err := rt.Timeline(ctx)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
@@ -2141,7 +2146,7 @@ func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat d
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	chat := domain.Chat{WorkflowRole: chatrole.General}
 	if chatID != "" {
-		stored, err := chatpkg.GetChat(ctx, e.store, chatID)
+		stored, err := e.chatByID(ctx, chatID)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -2150,7 +2155,11 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 	var timeline []domain.TimelineItem
 	if chatID != "" {
 		var err error
-		timeline, err = chatpkg.TimelineForChat(ctx, e.store, chatID)
+		rt, err := e.chatOwner(ctx, chat.SessionID, chatID)
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		timeline, err = rt.Timeline(ctx)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -2861,7 +2870,11 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 }
 
 func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID id.ID, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
-	chat, err := chatpkg.GetChat(ctx, e.store, chatID)
+	chat, err := e.chatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	rt, err := e.chatOwner(ctx, chat.SessionID, chatID)
 	if err != nil {
 		return err
 	}
@@ -2870,7 +2883,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return err
 	}
 
-	timeline, err := chatpkg.TimelineForChat(ctx, e.store, chatID)
+	timeline, err := rt.Timeline(ctx)
 	if err != nil {
 		return err
 	}
@@ -2882,7 +2895,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return nil
 	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
-	compactionItem, err := chatpkg.AppendTimeline(ctx, e.store, chatID, domain.Compaction{
+	compactionItem, err := rt.AppendTimelineContent(ctx, domain.Compaction{
 		Trigger:             trigger,
 		Status:              "pending",
 		FirstKeptItemID:     firstKeptItemID,
@@ -2904,7 +2917,8 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		if status == "completed" || status == "failed" {
 			compactionItem.Seal(compactionItem.UpdatedAt)
 		}
-		return chatpkg.PutTimelineItem(ctx, e.store, compactionItem)
+		_, err := rt.UpsertTimelineItem(ctx, compactionItem)
+		return err
 	}
 	if out != nil {
 		out <- domain.Event{
@@ -2931,14 +2945,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
-	if chat, err := chatpkg.GetChat(ctx, e.store, chatID); err == nil {
-		chat.LastKnownContextTokens = 0
-		chat.ContextTokensKnown = false
-		chat.TokenUsage = domain.Usage{}
-		if err := chatpkg.UpdateChat(ctx, e.store, chat); err != nil {
-			return err
-		}
-	} else {
+	if err := rt.ResetContextAndTokenUsage(ctx); err != nil {
 		return err
 	}
 	if out != nil {

@@ -29,7 +29,6 @@ import (
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/runtimeprefs"
-	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/version"
@@ -393,10 +392,12 @@ func newSessionDumpCommand() *cobra.Command {
 			}
 			defer st.Close()
 
-			chats, err := sessionpkg.ListChats(cmd.Context(), st, sessionID)
+			engine := agent.New(cfg, st, nil)
+			owner, err := engine.LoadSession(cmd.Context(), sessionID)
 			if err != nil {
 				return err
 			}
+			snapshot := owner.Snapshot()
 			type chatDump struct {
 				Chat     domain.Chat           `json:"chat"`
 				Timeline []domain.TimelineItem `json:"timeline"`
@@ -407,8 +408,12 @@ func newSessionDumpCommand() *cobra.Command {
 			}{
 				SessionID: sessionID,
 			}
-			for _, chat := range chats {
-				timeline, err := chatpkg.TimelineForChat(cmd.Context(), st, chat.ID)
+			for _, chat := range snapshot.Chats {
+				rt, err := owner.Chat(cmd.Context(), chat.ID)
+				if err != nil {
+					return err
+				}
+				timeline, err := rt.Timeline(cmd.Context())
 				if err != nil {
 					return err
 				}
