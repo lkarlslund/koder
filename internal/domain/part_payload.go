@@ -88,11 +88,6 @@ const (
 	ToolResultStatusError  ToolResultStatus = "error"
 )
 
-// ToolResultPayload is a typed persisted tool result body.
-type ToolResultPayload interface {
-	ToolResultPayload()
-}
-
 // ToolOutputPayload stores a tool response and its typed result data.
 type ToolOutputPayload struct {
 	Tool       ToolKind          `json:"tool"`
@@ -136,7 +131,7 @@ func (p ToolOutputPayload) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON loads the typed result payload from the tool/status discriminator.
+// UnmarshalJSON preserves tool result data without interpreting tool-specific payloads.
 func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	type encodedToolOutput struct {
 		Tool       string            `json:"tool"`
@@ -152,13 +147,9 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	tool := ToolKind(strings.TrimSpace(encoded.Tool))
-	var result ToolResultPayload
-	if tool != "" {
-		var err error
-		result, err = decodeToolResultPayload(tool, encoded.Status, encoded.Result)
-		if err != nil {
-			return err
-		}
+	var result any
+	if len(encoded.Result) > 0 && string(encoded.Result) != "null" {
+		result = json.RawMessage(encoded.Result)
 	}
 	p.Tool = tool
 	p.ToolCallID = encoded.ToolCallID
@@ -171,77 +162,6 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	p.Diff = encoded.Diff
 	p.Result = result
 	return nil
-}
-
-// DecodeToolResultPayload loads typed tool result data from the tool and status discriminator.
-func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.RawMessage) (ToolResultPayload, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil, nil
-	}
-	switch status {
-	case ToolResultStatusDenied:
-		return decodeToolResult[DeniedStoredResult](raw)
-	case ToolResultStatusError:
-		return decodeToolResult[ErrorStoredResult](raw)
-	}
-	switch tool {
-	case ToolKindFileRead:
-		return decodeToolResult[ReadStoredResult](raw)
-	case ToolKindBash:
-		return decodeToolResult[BashStoredResult](raw)
-	case ToolKindExecCommand, ToolKindExecStatus, ToolKindExecWriteStdin, ToolKindExecResize, ToolKindExecTerminate:
-		return decodeToolResult[ExecStoredResult](raw)
-	case ToolKindExecList, ToolKindExecCleanup:
-		return decodeToolResult[ExecListStoredResult](raw)
-	case ToolKindFileEdit:
-		return decodeToolResult[EditStoredResult](raw)
-	case ToolKindFileWrite:
-		return decodeToolResult[WriteStoredResult](raw)
-	case ToolKindLint:
-		return decodeToolResult[LintStoredResult](raw)
-	case ToolKindFileGlob:
-		return decodeToolResult[GlobStoredResult](raw)
-	case ToolKindFileGrep:
-		return decodeToolResult[GrepStoredResult](raw)
-	case ToolKindQuestion:
-		return decodeToolResult[QuestionStoredResult](raw)
-	case ToolKindTask:
-		return decodeToolResult[TaskStoredResult](raw)
-	case ToolKindUpdatePlan:
-		return decodeToolResult[UpdatePlanStoredResult](raw)
-	case ToolKindSkill:
-		return decodeToolResult[SkillStoredResult](raw)
-	case ToolKindWebFetch:
-		return decodeToolResult[WebFetchStoredResult](raw)
-	case ToolKindWebSearch:
-		return decodeToolResult[WebSearchStoredResult](raw)
-	case ToolKindViewImage:
-		return decodeToolResult[ViewImageStoredResult](raw)
-	case ToolKindShowImage:
-		return decodeToolResult[ShowImageStoredResult](raw)
-	case ToolKindMilestoneList, ToolKindMilestoneAdd, ToolKindMilestoneUpdate, ToolKindMilestoneWrite, ToolKindMilestonePlan:
-		return decodeToolResult[MilestonePlanStoredResult](raw)
-	case ToolKindChatList, ToolKindChatStart, ToolKindChatSend, ToolKindChatCancel, ToolKindChatArchive, ToolKindChatRename:
-		return decodeToolResult[ChatListStoredResult](raw)
-	case ToolKindTaskList, ToolKindTaskAddItems, ToolKindTaskUpdateItem, ToolKindTaskFetchNext, ToolKindTasksAdd, ToolKindTasksUpdate:
-		return decodeToolResult[TodoListStoredResult](raw)
-	case ToolKindMCP:
-		return decodeToolResult[MCPStoredResult](raw)
-	default:
-		return nil, fmt.Errorf("unsupported tool result kind %q", tool)
-	}
-}
-
-func decodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.RawMessage) (ToolResultPayload, error) {
-	return DecodeToolResultPayload(tool, status, raw)
-}
-
-func decodeToolResult[T ToolResultPayload](raw json.RawMessage) (ToolResultPayload, error) {
-	var result T
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 // ApprovalRequestPayload stores a persisted permission prompt.

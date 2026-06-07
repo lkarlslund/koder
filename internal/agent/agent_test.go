@@ -689,7 +689,7 @@ func testTranscriptItem(sessionID id.ID, item domain.TimelineItem) (domain.Messa
 				addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: tool.Result.Status, Text: tool.Result.Text, Diff: tool.Result.Diff, Result: tool.Result.Data}, offset)
 			}
 			if tool.Error != nil {
-				addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: domain.ToolResultStatusError, Text: tool.Error.Message, Result: domain.ErrorStoredResult{Message: tool.Error.Message}}, offset)
+				addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: domain.ToolResultStatusError, Text: tool.Error.Message, Result: tools.ErrorStoredResult{Message: tool.Error.Message}}, offset)
 			}
 		}
 	case domain.ToolExecution:
@@ -699,7 +699,7 @@ func testTranscriptItem(sessionID id.ID, item domain.TimelineItem) (domain.Messa
 			addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: content.Tool, ToolCallID: string(content.ToolCallID), Args: content.Args, Status: content.Result.Status, Text: content.Result.Text, Diff: content.Result.Diff, Result: content.Result.Data}, 1)
 		}
 		if content.Error != nil {
-			addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: content.Tool, ToolCallID: string(content.ToolCallID), Args: content.Args, Status: domain.ToolResultStatusError, Text: content.Error.Message, Result: domain.ErrorStoredResult{Message: content.Error.Message}}, 1)
+			addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: content.Tool, ToolCallID: string(content.ToolCallID), Args: content.Args, Status: domain.ToolResultStatusError, Text: content.Error.Message, Result: tools.ErrorStoredResult{Message: content.Error.Message}}, 1)
 		}
 	case domain.Notice:
 		msg.Role = domain.MessageRoleAssistant
@@ -1716,7 +1716,7 @@ func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.
 	appendUserTimelineItem(t, st, chat.ID, "old question")
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
 	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 	appendCompactionTimelineItem(t, st, chat.ID, "summary block", toolItem.ID)
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
@@ -1796,7 +1796,7 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 	appendUserTimelineItem(t, st, chat.ID, "summarize this away")
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
 	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 	appendUserTimelineItem(t, st, chat.ID, "keep this question raw")
 	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "keep this answer raw"})
 	appendCompactionTimelineItem(t, st, chat.ID, "summary block", toolItem.ID)
@@ -1840,7 +1840,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	appendUserTimelineItem(t, st, chat.ID, "old question")
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
 	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -1891,7 +1891,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	}})
 	imageReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, imageReq, "I will inspect the image.")
-	attachToolResultTimelineItem(t, st, chat.ID, imageReq, "Viewed image screen.png", domain.ViewImageStoredResult{
+	attachToolResultTimelineItem(t, st, chat.ID, imageReq, "Viewed image screen.png", tools.ViewImageStoredResult{
 		Path:       "screen.png",
 		SourcePath: imagePath,
 		MIMEType:   "image/png",
@@ -1899,7 +1899,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	})
 	tailReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_tail", Args: map[string]string{"command": "pwd"}}
 	tailItem := appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -1960,7 +1960,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	}
 	req := tools.Request{Tool: domain.ToolKindExecCommand, ToolCallID: "call_exec", Args: map[string]string{"cmd": "long"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
-	attachToolResultTimelineItem(t, st, chat.ID, req, strings.Join(lines, "\n"), domain.ExecStoredResult{
+	attachToolResultTimelineItem(t, st, chat.ID, req, strings.Join(lines, "\n"), tools.ExecStoredResult{
 		ProcessID: "proc-1",
 		Command:   "long",
 		State:     "done",
@@ -2008,12 +2008,12 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	appendUserTimelineItem(t, st, chat.ID, strings.Repeat("old raw history ", 1000))
 	previousReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_previous", Args: map[string]string{"command": "pwd"}}
 	previousToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, previousReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, previousReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	attachToolResultTimelineItem(t, st, chat.ID, previousReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 	appendCompactionTimelineItem(t, st, chat.ID, "previous compact summary", previousToolItem.ID)
 	appendUserTimelineItem(t, st, chat.ID, "new raw history")
 	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "go test"}}
 	latestToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", domain.BashStoredResult{Command: "go test", Output: "ok"})
+	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", tools.BashStoredResult{Command: "go test", Output: "ok"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -2108,7 +2108,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/stale/body", domain.BashStoredResult{
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/stale/body", tools.BashStoredResult{
 		Command:   "pwd",
 		Workdir:   ".",
 		TimeoutMS: 1000,
@@ -2147,7 +2147,7 @@ func TestBuildConversationRendersSteerAfterToolResultAsSeparateUserMessage(t *te
 	chat := defaultChatForSession(t, st, session.ID)
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/typed/output", domain.BashStoredResult{Command: "pwd", Output: "/typed/output"})
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/typed/output", tools.BashStoredResult{Command: "pwd", Output: "/typed/output"})
 	appendSteerTimelineItem(t, st, chat.ID, "we have pdftotext")
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
@@ -2225,7 +2225,7 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	}
 	toolReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Viewed image screen.png", domain.ViewImageStoredResult{
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Viewed image screen.png", tools.ViewImageStoredResult{
 		Path:       "screen.png",
 		SourcePath: imagePath,
 		MIMEType:   "image/png",

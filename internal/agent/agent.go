@@ -2300,7 +2300,7 @@ func (e *Engine) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCal
 	if tool.Error != nil {
 		status = domain.ToolResultStatusError
 		text = tool.Error.Message
-		data = domain.ErrorStoredResult{Message: tool.Error.Message}
+		data = tools.ErrorStoredResult{Message: tool.Error.Message}
 	}
 	part := domain.Part{
 		Kind: domain.PartKindToolOutput,
@@ -3350,7 +3350,7 @@ func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Mes
 	if tool.Error != nil {
 		status = domain.ToolResultStatusError
 		text = tool.Error.Message
-		data = domain.ErrorStoredResult{Message: tool.Error.Message}
+		data = tools.ErrorStoredResult{Message: tool.Error.Message}
 	}
 	part := domain.Part{
 		Kind: domain.PartKindToolOutput,
@@ -3829,10 +3829,6 @@ func pathFromToolResultData(data any) string {
 		return strings.TrimSpace(result.Path)
 	case tools.WriteStoredResult:
 		return strings.TrimSpace(result.Path)
-	case domain.EditStoredResult:
-		return strings.TrimSpace(result.Path)
-	case domain.WriteStoredResult:
-		return strings.TrimSpace(result.Path)
 	default:
 		return ""
 	}
@@ -4026,7 +4022,7 @@ func (e *Engine) recordDeniedToolResult(ctx context.Context, sessionID, chatID i
 	result := domain.ToolResult{
 		Text:   text,
 		Status: domain.ToolResultStatusDenied,
-		Data:   domain.DeniedStoredResult{Message: text},
+		Data:   tools.DeniedStoredResult{Message: text},
 	}
 	rt, err := e.chatOwner(ctx, sessionID, chatID)
 	if err != nil {
@@ -4251,7 +4247,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID id.I
 	var data any
 	if status == "denied" {
 		resultStatus = domain.ToolResultStatusDenied
-		data = domain.DeniedStoredResult{Message: body}
+		data = tools.DeniedStoredResult{Message: body}
 	}
 	_ = payload
 	rt, err := e.chatOwner(ctx, sessionID, chatID)

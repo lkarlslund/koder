@@ -93,8 +93,16 @@ func TestToolPayloadUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	if payload.Tool != ToolKindFileGlob {
 		t.Fatalf("expected file_glob tool kind, got %s", payload.Tool)
 	}
-	if _, ok := payload.Result.(GlobStoredResult); !ok {
-		t.Fatalf("expected glob stored result, got %#v", payload.Result)
+	raw, ok := payload.Result.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected raw tool result, got %#v", payload.Result)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["pattern"] != "*.go" {
+		t.Fatalf("unexpected raw tool result data: %#v", decoded)
 	}
 }
 
@@ -133,12 +141,24 @@ func TestToolPayloadUnmarshalAcceptsLintToolResult(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected tool output payload, got %#v", part.Payload)
 	}
-	result, ok := payload.Result.(LintStoredResult)
+	raw, ok := payload.Result.(json.RawMessage)
 	if !ok {
-		t.Fatalf("expected lint stored result, got %#v", payload.Result)
+		t.Fatalf("expected raw lint result, got %#v", payload.Result)
+	}
+	var result struct {
+		Path             string `json:"path"`
+		Diagnostics      string `json:"diagnostics"`
+		DiagnosticReport struct {
+			Diagnostics []struct {
+				Message string `json:"message"`
+			} `json:"diagnostics"`
+		} `json:"diagnostic_report"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
 	}
 	if result.Path != "bad.json" || result.Diagnostics == "" || len(result.DiagnosticReport.Diagnostics) != 1 {
-		t.Fatalf("unexpected lint result: %#v", result)
+		t.Fatalf("unexpected raw lint result: %#v", result)
 	}
 }
 

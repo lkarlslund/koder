@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type QueueKind string
@@ -70,7 +71,7 @@ type Snapshot struct {
 	TimelineBefore    id.ID
 	Approvals         []Approval
 	QueuedInputs      []domain.QueuedInput
-	ExecProcesses     []domain.ExecProcess
+	ExecProcesses     []tools.ExecProcess
 	PendingAssistant  PendingAssistantTurn
 	Status            Status
 	StatusText        string

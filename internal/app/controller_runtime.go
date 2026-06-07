@@ -11,6 +11,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type execRuntimeSubscription struct {
@@ -60,10 +61,10 @@ func (c *Controller) snapshotWithExecProcessesLocked(snapshot chat.Snapshot) cha
 	return snapshot
 }
 
-func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []domain.ExecProcess {
-	out := make([]domain.ExecProcess, 0, len(snapshots))
+func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []tools.ExecProcess {
+	out := make([]tools.ExecProcess, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		out = append(out, domain.ExecProcess{
+		out = append(out, tools.ExecProcess{
 			ProcessID:   snapshot.ProcessID,
 			Command:     snapshot.Command,
 			Workdir:     snapshot.Workdir,
@@ -82,25 +83,25 @@ func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []domain.ExecP
 }
 
 // TerminateExecProcessForSelection stops a running exec process owned by the selected chat.
-func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selection Selection, processID string) (domain.ExecProcess, error) {
+func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selection Selection, processID string) (tools.ExecProcess, error) {
 	if c == nil {
-		return domain.ExecProcess{}, fmt.Errorf("controller is nil")
+		return tools.ExecProcess{}, fmt.Errorf("controller is nil")
 	}
 	processID = strings.TrimSpace(processID)
 	if processID == "" {
-		return domain.ExecProcess{}, fmt.Errorf("process id is required")
+		return tools.ExecProcess{}, fmt.Errorf("process id is required")
 	}
 	if selection.SessionID == "" {
-		return domain.ExecProcess{}, fmt.Errorf("session id is required")
+		return tools.ExecProcess{}, fmt.Errorf("session id is required")
 	}
 	if selection.ChatID == "" {
-		return domain.ExecProcess{}, fmt.Errorf("chat id is required")
+		return tools.ExecProcess{}, fmt.Errorf("chat id is required")
 	}
 	c.mu.Lock()
 	manager := c.execManagerLocked()
 	c.mu.Unlock()
 	if manager == nil {
-		return domain.ExecProcess{}, fmt.Errorf("exec manager is unavailable")
+		return tools.ExecProcess{}, fmt.Errorf("exec manager is unavailable")
 	}
 	snap, err := manager.Terminate(ctx, execruntime.TerminateRequest{
 		SessionID: selection.SessionID,
@@ -109,10 +110,10 @@ func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selec
 		MaxBytes:  16 * 1024,
 	})
 	if err != nil {
-		return domain.ExecProcess{}, err
+		return tools.ExecProcess{}, err
 	}
 	processes := execProcessesFromSnapshots([]execruntime.Snapshot{snap})
-	process := domain.ExecProcess{}
+	process := tools.ExecProcess{}
 	if len(processes) > 0 {
 		process = processes[0]
 	}

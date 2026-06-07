@@ -910,7 +910,7 @@ func TestChatDeltaIncludesEmptyExecProcessesWhenAuthoritative(t *testing.T) {
 	update := chat.Update{
 		Snapshot: chat.Snapshot{
 			Chat:          domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
-			ExecProcesses: []domain.ExecProcess{},
+			ExecProcesses: []tools.ExecProcess{},
 			Status:        chat.StatusIdle,
 		},
 		StatusChanged: true,
