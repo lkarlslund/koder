@@ -153,14 +153,14 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 	items := make([]ChatStoredItem, 0, len(statuses))
 	for _, status := range statuses {
 		items = append(items, ChatStoredItem{
-			ID:                 status.Chat.ID,
-			Title:              status.Chat.Title,
-			Role:               string(status.Chat.WorkflowRole),
+			ID:                 status.ID,
+			Title:              status.Title,
+			Role:               string(status.Role),
 			State:              string(status.State),
-			Archived:           status.Chat.Archived,
+			Archived:           status.Archived,
 			QueuedInputs:       status.QueuedInputs,
-			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
-			AssignedTodoRef:    status.Chat.AssignedTodoRef,
+			ActiveMilestoneRef: status.ActiveMilestoneRef,
+			AssignedTodoRef:    status.AssignedTodoRef,
 			StatusText:         status.StatusText,
 		})
 	}

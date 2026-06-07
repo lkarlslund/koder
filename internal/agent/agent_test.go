@@ -1310,8 +1310,8 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.Chat.Archived || status.Chat.Title != "Renamed child" {
-		t.Fatalf("expected archived status, got %#v", status.Chat)
+	if !status.Archived || status.Title != "Renamed child" {
+		t.Fatalf("expected archived status, got %#v", status)
 	}
 	reloaded, err := testGetChat(context.Background(), st, child.ID)
 	if err != nil {
@@ -1325,8 +1325,8 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Chat.Archived {
-		t.Fatalf("expected restored status, got %#v", status.Chat)
+	if status.Archived {
+		t.Fatalf("expected restored status, got %#v", status)
 	}
 	reloaded, err = testGetChat(context.Background(), st, child.ID)
 	if err != nil {
@@ -1364,8 +1364,8 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Chat.ID != child.ID {
-		t.Fatalf("expected child status, got %#v", status.Chat)
+	if status.ID != child.ID {
+		t.Fatalf("expected child status, got %#v", status)
 	}
 	owner, err := engine.LoadSession(context.Background(), session.ID)
 	if err != nil {

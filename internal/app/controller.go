@@ -1301,6 +1301,26 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
+func patchChatFromToolStatus(chats *[]domain.Chat, status tools.ChatStatus) {
+	for idx := range *chats {
+		if (*chats)[idx].ID == status.ID {
+			patchChatSnapshotFromToolStatus(&(*chats)[idx], status)
+			return
+		}
+	}
+}
+
+func patchChatSnapshotFromToolStatus(chatRecord *domain.Chat, status tools.ChatStatus) {
+	if chatRecord == nil || status.ID == "" || chatRecord.ID != status.ID {
+		return
+	}
+	chatRecord.Title = status.Title
+	chatRecord.WorkflowRole = status.Role
+	chatRecord.Archived = status.Archived
+	chatRecord.ActiveMilestoneRef = status.ActiveMilestoneRef
+	chatRecord.AssignedTodoRef = status.AssignedTodoRef
+}
+
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
@@ -1338,18 +1358,19 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	target := status.Chat
 	c.mu.Lock()
 	matchesActiveSession := c.session.ID == sessionID
 	if matchesActiveSession {
-		upsertChat(&c.chats, target)
-		if c.chat.ID == target.ID {
-			c.chat = target
+		patchChatFromToolStatus(&c.chats, status)
+		if c.chat.ID == status.ID {
+			if updated, ok := chatByID(c.chats, status.ID); ok {
+				c.chat = updated
+			}
 		}
 	}
-	if snapshot, ok := c.snapshots[target.ID]; ok {
-		snapshot.Chat = target
-		c.snapshots[target.ID] = snapshot
+	if snapshot, ok := c.snapshots[status.ID]; ok {
+		patchChatSnapshotFromToolStatus(&snapshot.Chat, status)
+		c.snapshots[status.ID] = snapshot
 	}
 	if matchesActiveSession && archivingActive {
 		if next, ok := chatByID(c.chats, nextChatID); ok {
@@ -2182,14 +2203,19 @@ func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) too
 		state = tools.ChatRunStateIdle
 	}
 	return tools.ChatStatus{
-		Chat:             chatRecord,
-		State:            state,
-		Status:           string(state),
-		Busy:             status.Busy,
-		QueuedInputs:     status.QueuedInputs,
-		PendingApprovals: status.PendingApprovals,
-		StatusText:       status.StatusText,
-		LastError:        status.LastError,
+		ID:                 chatRecord.ID,
+		Title:              chatRecord.Title,
+		Role:               chatRecord.WorkflowRole,
+		Archived:           chatRecord.Archived,
+		ActiveMilestoneRef: chatRecord.ActiveMilestoneRef,
+		AssignedTodoRef:    chatRecord.AssignedTodoRef,
+		State:              state,
+		Status:             string(state),
+		Busy:               status.Busy,
+		QueuedInputs:       status.QueuedInputs,
+		PendingApprovals:   status.PendingApprovals,
+		StatusText:         status.StatusText,
+		LastError:          status.LastError,
 	}
 }
 

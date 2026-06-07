@@ -34,14 +34,19 @@ const (
 )
 
 type ChatStatus struct {
-	Chat             domain.Chat
-	State            ChatRunState
-	Status           string
-	Busy             bool
-	QueuedInputs     int
-	PendingApprovals int
-	LastError        string
-	StatusText       string
+	ID                 id.ID
+	Title              string
+	Role               domain.WorkflowRole
+	Archived           bool
+	ActiveMilestoneRef string
+	AssignedTodoRef    id.ID
+	State              ChatRunState
+	Status             string
+	Busy               bool
+	QueuedInputs       int
+	PendingApprovals   int
+	LastError          string
+	StatusText         string
 }
 
 type ChatStartRequest struct {

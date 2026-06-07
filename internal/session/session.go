@@ -578,7 +578,12 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update tools.Cha
 		snapshot.StatusText = statusText
 	}
 	s.mu.Unlock()
-	status.Chat = target
+	status.ID = target.ID
+	status.Title = target.Title
+	status.Role = target.WorkflowRole
+	status.Archived = target.Archived
+	status.ActiveMilestoneRef = target.ActiveMilestoneRef
+	status.AssignedTodoRef = target.AssignedTodoRef
 	status.StatusText = statusText
 	kind := EventChatChanged
 	if archivingVisibleChat {
@@ -1255,13 +1260,18 @@ func (s *Session) chatStatusLocked(chatID id.ID) tools.ChatStatus {
 		statusText = "Waiting for approval"
 	}
 	return tools.ChatStatus{
-		Chat:             chatRecord,
-		State:            status,
-		Status:           string(status),
-		Busy:             busy,
-		QueuedInputs:     queuedInputs,
-		PendingApprovals: pending,
-		StatusText:       statusText,
+		ID:                 chatRecord.ID,
+		Title:              chatRecord.Title,
+		Role:               chatRecord.WorkflowRole,
+		Archived:           chatRecord.Archived,
+		ActiveMilestoneRef: chatRecord.ActiveMilestoneRef,
+		AssignedTodoRef:    chatRecord.AssignedTodoRef,
+		State:              status,
+		Status:             string(status),
+		Busy:               busy,
+		QueuedInputs:       queuedInputs,
+		PendingApprovals:   pending,
+		StatusText:         statusText,
 	}
 }
 

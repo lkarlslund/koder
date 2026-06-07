@@ -245,7 +245,7 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 func filterArchivedChats(statuses []tools.ChatStatus) []tools.ChatStatus {
 	out := make([]tools.ChatStatus, 0, len(statuses))
 	for _, status := range statuses {
-		if !status.Chat.Archived {
+		if !status.Archived {
 			out = append(out, status)
 		}
 	}
@@ -329,7 +329,7 @@ func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, u
 	return control.UpdateChat(ctx, runtime.SessionID, runtime.ChatID, chatID, update)
 }
 
-func chatResult(tool domain.ToolKind, status tools.ChatStatus) (tools.Result, error) {
+func chatResult(tool tools.ID, status tools.ChatStatus) (tools.Result, error) {
 	stored := tools.ChatListStored([]tools.ChatStatus{status})
 	return tools.Result{
 		Output: tools.DisplayTextForStored(tool, stored),

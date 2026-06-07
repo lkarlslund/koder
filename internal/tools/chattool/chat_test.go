@@ -44,10 +44,10 @@ func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, 
 	f.lastUpdate = update
 	status := f.statuses[0]
 	if update.Archived != nil {
-		status.Chat.Archived = *update.Archived
+		status.Archived = *update.Archived
 	}
 	if update.Title != "" {
-		status.Chat.Title = update.Title
+		status.Title = update.Title
 	}
 	return status, nil
 }
@@ -133,11 +133,16 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-7", Title: "Worker", WorkflowRole: chatrole.Execution},
+		ID:         "chat-7",
+		Title:      "Worker",
+		Role:       chatrole.Execution,
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}, {
-		Chat:       domain.Chat{ID: "chat-8", Title: "Archived", WorkflowRole: chatrole.Execution, Archived: true},
+		ID:         "chat-8",
+		Title:      "Archived",
+		Role:       chatrole.Execution,
+		Archived:   true,
 		State:      tools.ChatRunStateIdle,
 		StatusText: "Idle",
 	}}}
@@ -162,7 +167,9 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 
 func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-9", Title: "Worker", WorkflowRole: chatrole.Execution},
+		ID:         "chat-9",
+		Title:      "Worker",
+		Role:       chatrole.Execution,
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
@@ -196,7 +203,9 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 
 func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "child-chat", Title: "Worker", WorkflowRole: chatrole.Execution},
+		ID:         "child-chat",
+		Title:      "Worker",
+		Role:       chatrole.Execution,
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}

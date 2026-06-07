@@ -502,7 +502,7 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		next = ctrl.State()
-		if _, ok := next.Snapshots[status.Chat.ID]; ok {
+		if _, ok := next.Snapshots[status.ID]; ok {
 			break
 		}
 		select {
@@ -514,7 +514,7 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 	}
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == status.Chat.ID && item.ActiveMilestoneRef == "alpha" && item.AssignedTodoRef == todos[0].ID {
+		if item.ID == status.ID && item.ActiveMilestoneRef == "alpha" && item.AssignedTodoRef == todos[0].ID {
 			found = true
 			break
 		}
@@ -522,7 +522,7 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 	if !found {
 		t.Fatalf("expected started chat in sidebar state, got %#v", next.Chats)
 	}
-	if _, ok := next.Snapshots[status.Chat.ID]; !ok {
+	if _, ok := next.Snapshots[status.ID]; !ok {
 		t.Fatalf("expected started chat snapshot, got %#v", next.Snapshots)
 	}
 }
