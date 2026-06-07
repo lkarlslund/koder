@@ -17,8 +17,6 @@ const (
 	Compaction   Role = "compaction"
 )
 
-const legacyDecomposition Role = "decomposition"
-
 // Spec describes a chat role's behavior contract.
 type Spec struct {
 	Registered   bool // Registered is false for unknown roles.
@@ -98,9 +96,6 @@ func (r Registry) Lookup(name Role) (Spec, bool) {
 
 // SpecFor returns the registered role spec.
 func SpecFor(role Role) Spec {
-	if role == legacyDecomposition {
-		return orchestrationSpec(Orchestrator, "Orchestrate")
-	}
 	if spec, ok := DefaultRegistry().Lookup(role); ok {
 		return spec
 	}

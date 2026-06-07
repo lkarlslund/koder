@@ -41,7 +41,6 @@ func TestRoleAllowsTool(t *testing.T) {
 		tool toolkind.Kind
 		want bool
 	}{
-		{"legacy decomposition allows orchestrator tools", Role("decomposition"), toolkind.ToolKindChatSend, true},
 		{"execution allows edit", Execution, toolkind.ToolKindFileEdit, true},
 		{"execution rejects chat start", Execution, toolkind.ToolKindChatStart, false},
 		{"execution rejects chat send", Execution, toolkind.ToolKindChatSend, false},

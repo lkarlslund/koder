@@ -10,10 +10,10 @@ func TestToolStatesUnmarshalAcceptsPersistedSnakeCaseKeys(t *testing.T) {
 	err := json.Unmarshal([]byte(`{
 		"chat_send": false,
 		"exec_write_stdin": false,
-		"exec_cleanup_background": false,
-		"milestone_add_items": false,
-		"milestone_plan_and_decompose": false,
-		"milestone_update_item": false
+		"exec_cleanup": false,
+		"milestone_add": false,
+		"milestone_plan": false,
+		"milestone_update": false
 	}`), &states)
 	if err != nil {
 		t.Fatal(err)
@@ -32,14 +32,14 @@ func TestToolStatesUnmarshalAcceptsPersistedSnakeCaseKeys(t *testing.T) {
 	}
 }
 
-func TestToolStatesUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+func TestToolStatesUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	var states ToolStates
 	err := json.Unmarshal([]byte(`{
-		"read": false,
-		"write": false,
-		"edit": false,
-		"grep": false,
-		"glob": false,
+		"file_read": false,
+		"file_write": false,
+		"file_edit": false,
+		"file_grep": false,
+		"file_glob": false,
 		"removed_tool": false
 	}`), &states)
 	if err != nil {

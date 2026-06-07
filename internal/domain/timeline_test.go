@@ -71,12 +71,12 @@ func TestReasoningReplayTextUsesOnlyShorterCaveman(t *testing.T) {
 	}
 }
 
-func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+func TestToolPayloadUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{
 		"kind": "tool_output",
 		"payload": {
-			"tool": "glob",
+			"tool": "file_glob",
 			"tool_call_id": "call_1",
 			"status": "ok",
 			"text": "matched",
@@ -91,7 +91,7 @@ func TestToolPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 		t.Fatalf("expected tool output payload, got %#v", part.Payload)
 	}
 	if payload.Tool != ToolKindFileGlob {
-		t.Fatalf("expected renamed glob tool kind, got %s", payload.Tool)
+		t.Fatalf("expected file_glob tool kind, got %s", payload.Tool)
 	}
 	if _, ok := payload.Result.(GlobStoredResult); !ok {
 		t.Fatalf("expected glob stored result, got %#v", payload.Result)
@@ -142,12 +142,12 @@ func TestToolPayloadUnmarshalAcceptsLintToolResult(t *testing.T) {
 	}
 }
 
-func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+func TestToolCallPayloadUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	var part Part
 	err := json.Unmarshal([]byte(`{
 		"kind": "tool_call",
 		"payload": {
-			"tool": "read",
+			"tool": "file_read",
 			"tool_call_id": "call_1",
 			"args": {"path": "README.md"}
 		}
@@ -160,15 +160,15 @@ func TestToolCallPayloadUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 		t.Fatalf("expected tool call payload, got %#v", part.Payload)
 	}
 	if payload.Tool != ToolKindFileRead {
-		t.Fatalf("expected renamed read tool kind, got %s", payload.Tool)
+		t.Fatalf("expected file_read tool kind, got %s", payload.Tool)
 	}
 }
 
-func TestToolCallUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
+func TestToolCallUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 	var call ToolCall
 	err := json.Unmarshal([]byte(`{
 		"tool_call_id": "call_1",
-		"tool": "grep",
+		"tool": "file_grep",
 		"status": "done",
 		"result": {
 			"status": "ok",
@@ -180,7 +180,7 @@ func TestToolCallUnmarshalAcceptsRenamedFileToolKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	if call.Tool != ToolKindFileGrep {
-		t.Fatalf("expected renamed grep tool kind, got %s", call.Tool)
+		t.Fatalf("expected file_grep tool kind, got %s", call.Tool)
 	}
 	if call.Result == nil {
 		t.Fatal("expected result")

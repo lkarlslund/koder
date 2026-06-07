@@ -41,13 +41,8 @@ const (
 	ToolKindChatCancel
 	ToolKindChatArchive
 	ToolKindChatRename
-	// Legacy value kept for stored data that may still be present.
-	ToolKindChatPoll
 	ToolKindSkill
 	ToolKindWebFetch
 	ToolKindWebSearch
 	ToolKindMCP
-	// Legacy sentinel values kept for stored data that may still be present.
-	ToolKindChatStartDecomposition
-	ToolKindChatStartExecution
 )
