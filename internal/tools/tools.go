@@ -36,7 +36,7 @@ const (
 type ChatStatus struct {
 	ID                 id.ID
 	Title              string
-	Role               domain.WorkflowRole
+	Role               chatrole.Role
 	Archived           bool
 	ActiveMilestoneRef string
 	AssignedTodoRef    id.ID
@@ -50,7 +50,7 @@ type ChatStatus struct {
 }
 
 type ChatStartRequest struct {
-	Profile      domain.WorkflowRole
+	Profile      chatrole.Role
 	Objective    string
 	Title        string
 	MilestoneRef string
@@ -157,7 +157,7 @@ type Runtime struct {
 	HTTPClient            *http.Client
 	SessionID             id.ID
 	ChatID                id.ID
-	ChatRole              domain.WorkflowRole
+	ChatRole              chatrole.Role
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
 	AssignedTodoRef       id.ID

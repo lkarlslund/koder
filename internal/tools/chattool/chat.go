@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -97,7 +96,7 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if profile == "" {
 		return nil, errors.New("profile is required")
 	}
-	if _, ok := chatrole.DefaultRegistry().Lookup(domain.WorkflowRole(profile)); !ok {
+	if _, ok := chatrole.DefaultRegistry().Lookup(chatrole.Role(profile)); !ok {
 		return nil, errors.New("profile is not registered")
 	}
 	objective := strings.TrimSpace(tools.FirstArg(args, "objective", "prompt", "task"))
@@ -258,7 +257,7 @@ func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.R
 		return tools.Result{}, err
 	}
 	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, tools.ChatStartRequest{
-		Profile:      domain.WorkflowRole(req.Args["profile"]),
+		Profile:      chatrole.Role(req.Args["profile"]),
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_ref"],
