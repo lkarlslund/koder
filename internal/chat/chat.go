@@ -392,6 +392,37 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 	return t.chat.state.SnapshotTimeline()
 }
 
+// PendingExecutableToolCalls returns pending tool calls from the live transcript.
+func (t *TurnState) PendingExecutableToolCalls(ctx context.Context) ([]domain.ToolCall, error) {
+	if t == nil || t.chat == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	if err := t.chat.EnsureTimeline(ctx); err != nil {
+		return nil, err
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	if t.chat.state == nil {
+		return nil, nil
+	}
+	items := t.chat.state.SnapshotTimeline()
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		assistant, ok := items[idx].Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		var calls []domain.ToolCall
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusPending || call.Result != nil || call.Error != nil || call.Approval != nil {
+				continue
+			}
+			calls = append(calls, call)
+		}
+		return calls, nil
+	}
+	return nil, nil
+}
+
 // AppendUserMessage records a user message in the live transcript.
 func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
 	if t == nil || t.chat == nil {
@@ -445,6 +476,14 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 		}
 	}
 	return item, nil
+}
+
+// AppendTimelineContent records a new timeline entry through the live chat owner.
+func (t *TurnState) AppendTimelineContent(ctx context.Context, content domain.TimelineContent) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.AppendTimelineContent(ctx, content)
 }
 
 // NextAssistantItem returns the next live assistant timeline identity.
@@ -505,6 +544,38 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 		}
 	}
 	return item, nil
+}
+
+// MarkToolRunning marks one pending tool call as running through the live chat owner.
+func (t *TurnState) MarkToolRunning(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.MarkToolRunning(ctx, toolCallID)
+}
+
+// AttachToolResult records a tool result through the live chat owner.
+func (t *TurnState) AttachToolResult(ctx context.Context, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.AttachToolResult(ctx, toolCallID, result)
+}
+
+// AttachToolError records a tool error through the live chat owner.
+func (t *TurnState) AttachToolError(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.AttachToolError(ctx, toolCallID, toolErr)
+}
+
+// AttachToolApproval records an approval request through the live chat owner.
+func (t *TurnState) AttachToolApproval(ctx context.Context, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	return t.chat.AttachToolApproval(ctx, toolCallID, approval)
 }
 
 // ApplyNextSteer removes and records queued turn-boundary messages.
@@ -1388,6 +1459,179 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 			return domain.TimelineItem{}, err
 		}
 	}
+	return item, nil
+}
+
+// AppendTimelineContent appends a timeline entry through the live chat owner.
+func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.TimelineContent) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	if content == nil {
+		return domain.TimelineItem{}, fmt.Errorf("timeline content is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	seq := int64(1)
+	if r.state != nil {
+		seq = int64(len(r.state.Timeline()) + 1)
+	}
+	item := domain.TimelineItem{
+		ID:        NewTimelineID(now),
+		ChatID:    r.chat.ID,
+		Seq:       seq,
+		Content:   content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if r.state != nil {
+		r.state.AppendTimelineItem(item)
+		if text := timelineItemSummary(item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if _, err := InsertTimelineItem(ctx, r.deps.Store, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
+		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
+	return item, nil
+}
+
+// MarkToolRunning marks one live tool call as running and persists the updated item.
+func (r *Chat) MarkToolRunning(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {
+	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+		call.Status = domain.ToolStatusRunning
+		call.Approval = nil
+		call.ApprovalID = ""
+		if call.StartedAt.IsZero() {
+			call.StartedAt = time.Now().UTC()
+		}
+		return nil
+	})
+}
+
+// AttachToolResult attaches a result to one live tool call and persists the updated item.
+func (r *Chat) AttachToolResult(ctx context.Context, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
+	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+		call.Result = &result
+		call.Error = nil
+		call.Approval = nil
+		call.ApprovalID = ""
+		if result.Status == domain.ToolResultStatusDenied {
+			call.Status = domain.ToolStatusDenied
+		} else {
+			call.Status = domain.ToolStatusDone
+		}
+		if call.CompletedAt.IsZero() {
+			call.CompletedAt = time.Now().UTC()
+		}
+		return nil
+	})
+}
+
+// AttachToolError attaches an error to one live tool call and persists the updated item.
+func (r *Chat) AttachToolError(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+		call.Error = &toolErr
+		call.Result = nil
+		call.Approval = nil
+		call.ApprovalID = ""
+		call.Status = domain.ToolStatusErrored
+		if call.CompletedAt.IsZero() {
+			call.CompletedAt = time.Now().UTC()
+		}
+		return nil
+	})
+}
+
+// AttachToolApproval marks one live tool call as awaiting approval.
+func (r *Chat) AttachToolApproval(ctx context.Context, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
+	_ = approval
+	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+		call.Approval = nil
+		call.ApprovalID = strings.TrimSpace(toolCallID)
+		call.Status = domain.ToolStatusAwaitingApproval
+		return nil
+	})
+}
+
+func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update func(*domain.ToolCall) error) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return domain.TimelineItem{}, fmt.Errorf("tool call id is required")
+	}
+	if update == nil {
+		return domain.TimelineItem{}, fmt.Errorf("tool call update is required")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	now := time.Now().UTC()
+	var item domain.TimelineItem
+	r.mu.Lock()
+	if r.state == nil {
+		r.mu.Unlock()
+		return domain.TimelineItem{}, fmt.Errorf("chat timeline is not loaded")
+	}
+	records := r.state.Timeline()
+	for idx := len(records) - 1; idx >= 0; idx-- {
+		record := records[idx]
+		if record == nil {
+			continue
+		}
+		assistant, ok := record.Item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
+		if call == nil {
+			continue
+		}
+		if err := update(call); err != nil {
+			r.mu.Unlock()
+			return domain.TimelineItem{}, err
+		}
+		record.Item.Content = assistant
+		record.Item.UpdatedAt = now
+		item = record.Item
+		if text := timelineItemSummary(item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+		break
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if item.ID == "" {
+		return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
+	}
+	if r.deps.Store != nil {
+		if err := PutTimelineItem(ctx, r.deps.Store, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
+		if err := UpdateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
 	return item, nil
 }
 

@@ -173,6 +173,14 @@ type Runtime struct {
 	MCP                   MCPExecutor
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
+	Timeline              TimelineRecorder
+}
+
+type TimelineRecorder interface {
+	AppendTimelineContent(context.Context, domain.TimelineContent) (domain.TimelineItem, error)
+	AttachToolResult(context.Context, string, domain.ToolResult) (domain.TimelineItem, error)
+	AttachToolError(context.Context, string, domain.ToolError) (domain.TimelineItem, error)
+	AttachToolApproval(context.Context, string, domain.ApprovalRequest) (domain.TimelineItem, error)
 }
 
 type MCPExecutor interface {
@@ -729,11 +737,11 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 	_, body := SummarizeResult(req, result)
 	st := runtime.Store
 	sessionID := runtime.SessionID
-	if st == nil {
+	if st == nil && runtime.Timeline == nil {
 		return nil, errors.New("persist tool result requires a chat runtime")
 	}
 	chatID, ok := ChatIDFromContext(ctx)
-	if !ok || chatID == "" {
+	if (!ok || chatID == "") && runtime.Timeline == nil {
 		chat, err := defaultChatForToolResult(ctx, st, sessionID)
 		if err != nil {
 			return nil, err
@@ -752,13 +760,22 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 	}
 	var item domain.TimelineItem
 	if strings.TrimSpace(req.ToolCallID) == "" {
-		item, err = toolAppendTimeline(ctx, st, chatID, domain.ToolExecution{
+		content := domain.ToolExecution{
 			Tool:   req.Tool,
 			Args:   req.Meta(),
 			Result: &toolResult,
-		})
+		}
+		if runtime.Timeline != nil {
+			item, err = runtime.Timeline.AppendTimelineContent(ctx, content)
+		} else {
+			item, err = toolAppendTimeline(ctx, st, chatID, content)
+		}
 	} else {
-		item, err = toolAttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
+		if runtime.Timeline != nil {
+			item, err = runtime.Timeline.AttachToolResult(ctx, req.ToolCallID, toolResult)
+		} else {
+			item, err = toolAttachToolResult(ctx, st, chatID, req.ToolCallID, toolResult)
+		}
 	}
 	if err != nil {
 		return nil, err

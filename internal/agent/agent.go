@@ -396,7 +396,7 @@ func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.Tu
 	}
 	session := turn.Session()
 	chat := turn.Chat()
-	calls, err := e.pendingExecutableToolCalls(ctx, chat.ID)
+	calls, err := e.pendingExecutableToolCallsForTurn(ctx, turn)
 	if err != nil || len(calls) == 0 {
 		return false, err
 	}
@@ -408,6 +408,29 @@ func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.Tu
 		return false, nil
 	}
 	return true, nil
+}
+
+func (e *Engine) pendingExecutableToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState) ([]tools.Request, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	calls, err := turn.PendingExecutableToolCalls(ctx)
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]tools.Request, 0, len(calls))
+	for _, call := range calls {
+		req, err := tools.Normalize(tools.Request{
+			Tool:       call.Tool,
+			ToolCallID: string(call.ToolCallID),
+			Args:       maps.Clone(call.Args),
+		})
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, req)
+	}
+	return requests, nil
 }
 
 type engineTurnLoop struct {
@@ -1461,16 +1484,28 @@ func normalizeSessionTitle(raw string) string {
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID id.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	session, chat, err := e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
-	if err != nil {
-		return nil, err
+	return e.persistToolResultForTurn(ctx, nil, chatID, sessionID, req, result)
+}
+
+func (e *Engine) persistToolResultForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	session := domain.Session{ID: sessionID}
+	chat := domain.Chat{ID: chatID}
+	if turn != nil {
+		session = turn.Session()
+		chat = turn.Chat()
+	} else {
+		var err error
+		session, chat, err = e.persistedToolCallState(ctx, session, chat)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if session.ID != "" {
 		if _, err := e.LoadSession(ctx, session.ID); err != nil {
 			return nil, err
 		}
 	}
-	events, err := tools.PersistResult(ctx, e.toolRuntime(session, chat), req, result)
+	events, err := tools.PersistResult(ctx, e.toolRuntimeForTurn(session, chat, turn), req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -1480,6 +1515,10 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID id.ID,
 }
 
 func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {
+	return e.persistToolFailureForTurn(ctx, nil, chatID, sessionID, req, execErr)
+}
+
+func (e *Engine) persistToolFailureForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {
 	if execErr == nil {
 		return nil, errors.New("tool failure error is nil")
 	}
@@ -1490,10 +1529,14 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID
 	var item domain.TimelineItem
 	var err error
 	if strings.TrimSpace(req.ToolCallID) != "" {
-		item, err = chatpkg.AttachToolError(ctx, e.store, chatID, req.ToolCallID, domain.ToolError{Message: text})
+		if turn != nil {
+			item, err = turn.AttachToolError(ctx, req.ToolCallID, domain.ToolError{Message: text})
+		} else {
+			item, err = chatpkg.AttachToolError(ctx, e.store, chatID, req.ToolCallID, domain.ToolError{Message: text})
+		}
 	} else {
 		now := time.Now().UTC()
-		item, err = chatpkg.AppendTimeline(ctx, e.store, chatID, domain.ToolExecution{
+		content := domain.ToolExecution{
 			Tool: req.Tool,
 			Args: req.Args,
 			Error: &domain.ToolError{
@@ -1501,8 +1544,13 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID id.ID
 			},
 			StartedAt: now,
 			EndedAt:   now,
-		})
-		if err == nil {
+		}
+		if turn != nil {
+			item, err = turn.AppendTimelineContent(ctx, content)
+		} else {
+			item, err = chatpkg.AppendTimeline(ctx, e.store, chatID, content)
+		}
+		if err == nil && turn == nil {
 			item.Seal(now)
 			err = chatpkg.PutTimelineItem(ctx, e.store, item)
 		}
@@ -2480,6 +2528,14 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	if owner := e.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
+	}
+	return runtime
+}
+
+func (e *Engine) toolRuntimeForTurn(session domain.Session, chat domain.Chat, turn *chatpkg.TurnState) tools.Runtime {
+	runtime := e.toolRuntime(session, chat)
+	if turn != nil {
+		runtime.Timeline = turn
 	}
 	return runtime
 }
@@ -3909,15 +3965,17 @@ func (e *Engine) markPreparedToolRunning(ctx context.Context, turn *chatpkg.Turn
 	if strings.TrimSpace(req.ToolCallID) == "" {
 		return domain.TimelineItem{}, nil
 	}
-	item, err := chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
+	var (
+		item domain.TimelineItem
+		err  error
+	)
+	if turn != nil {
+		item, err = turn.MarkToolRunning(ctx, req.ToolCallID)
+	} else {
+		item, err = chatpkg.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
+	}
 	if err != nil {
 		return domain.TimelineItem{}, err
-	}
-	if turn != nil && item.ID != "" {
-		item, err = turn.UpsertTimelineItem(ctx, item)
-		if err != nil {
-			return domain.TimelineItem{}, err
-		}
 	}
 	e.recordLifecycle(sessionID, "tool_execution_running", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 	return item, nil
@@ -4225,13 +4283,13 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 			return nil, err
 		}
 	}
-	result, err := tools.Execute(ctx, e.toolRuntime(session, chat), req)
+	result, err := tools.Execute(ctx, e.toolRuntimeForTurn(session, chat, turn), req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 		if interruptedErr(err) {
 			return nil, err
 		}
-		events, persistErr := e.persistToolFailure(ctx, chatID, sessionID, req, err)
+		events, persistErr := e.persistToolFailureForTurn(ctx, turn, chatID, sessionID, req, err)
 		if persistErr != nil {
 			return nil, persistErr
 		}
@@ -4249,7 +4307,7 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 		return out, nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
-	events, err := e.persistToolResult(ctx, chatID, sessionID, req, result)
+	events, err := e.persistToolResultForTurn(ctx, turn, chatID, sessionID, req, result)
 	if err != nil {
 		return nil, err
 	}
