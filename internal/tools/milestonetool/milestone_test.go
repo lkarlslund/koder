@@ -172,24 +172,24 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
 			{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
 		},
-	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done", "depends_on_ref": "beta"}}, domain.Chat{})
+	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done", "depends_on_ref": "beta"}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" || plan.Milestones[0].DependsOnRef != "beta" {
 		t.Fatalf("unexpected updated plan: %#v", plan)
 	}
-	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": ""}}, domain.Chat{})
+	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": ""}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Milestones[0].DependsOnRef != "" {
 		t.Fatalf("expected dependency to be cleared, got %#v", plan.Milestones[0])
 	}
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": "alpha"}}, domain.Chat{}); err == nil {
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": "alpha"}}, milestoneActor{}); err == nil {
 		t.Fatal("expected self dependency error")
 	}
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, domain.Chat{}); err == nil {
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, milestoneActor{}); err == nil {
 		t.Fatal("expected missing milestone error")
 	}
 }
@@ -204,7 +204,7 @@ func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "ready"}}, domain.Chat{})
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "ready"}}, milestoneActor{})
 	if err != nil {
 		t.Fatalf("expected status update to ignore existing duplicate titles, got %v", err)
 	}
@@ -212,7 +212,7 @@ func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
 		t.Fatalf("expected alpha to be ready, got %#v", updated.Milestones[0])
 	}
 
-	_, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "gamma", "status": "pending", "title": " shared "}}, domain.Chat{})
+	_, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "gamma", "status": "pending", "title": " shared "}}, milestoneActor{})
 	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
 		t.Fatalf("expected title collision error, got %v", err)
 	}
@@ -227,7 +227,7 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}}, domain.Chat{})
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,16 +246,16 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 		},
 	}
 
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
-		ID:           otherID,
-		WorkflowRole: chatrole.Execution,
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, milestoneActor{
+		ID:   otherID,
+		Role: chatrole.Execution,
 	}); err == nil || !strings.Contains(err.Error(), "owned by chat") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
-		ID:           ownerID,
-		WorkflowRole: chatrole.Execution,
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, milestoneActor{
+		ID:   ownerID,
+		Role: chatrole.Execution,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -274,9 +274,9 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "executing"}}, domain.Chat{
-		ID:           ownerID,
-		WorkflowRole: chatrole.Execution,
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "executing"}}, milestoneActor{
+		ID:   ownerID,
+		Role: chatrole.Execution,
 	})
 	if err != nil {
 		t.Fatal(err)

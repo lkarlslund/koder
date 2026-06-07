@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -275,7 +274,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	updated, err := updatedMilestonePlan(plan, req, actorChatFromRuntime(runtime))
+	updated, err := updatedMilestonePlan(plan, req, actorFromRuntime(runtime))
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -372,7 +371,7 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	updated, err := updatedMilestonePlan(plan, req, actorChatFromRuntime(runtime))
+	updated, err := updatedMilestonePlan(plan, req, actorFromRuntime(runtime))
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -464,16 +463,19 @@ func upsertMilestone(existing []planning.Milestone, next planning.Milestone) []p
 	return append(out, next)
 }
 
-func actorChatFromRuntime(runtime tools.Runtime) domain.Chat {
-	return domain.Chat{
-		ID:                    runtime.ChatID,
-		WorkflowRole:          runtime.ChatRole,
-		ActiveMilestoneRef:    runtime.ActiveMilestoneRef,
-		AssignedTodoBucketRef: runtime.AssignedTodoBucketRef,
+type milestoneActor struct {
+	ID   id.ID
+	Role chatrole.Role
+}
+
+func actorFromRuntime(runtime tools.Runtime) milestoneActor {
+	return milestoneActor{
+		ID:   runtime.ChatID,
+		Role: runtime.ChatRole,
 	}
 }
 
-func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Chat) (planning.Plan, error) {
+func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor milestoneActor) (planning.Plan, error) {
 	ref := req.Args["ref"]
 	status, err := planning.MilestoneStatusString(req.Args["status"])
 	if err != nil {
@@ -533,8 +535,8 @@ func ensureMilestoneTitleAvailable(existing []planning.Milestone, ref, title str
 	return nil
 }
 
-func validateMilestoneOwner(milestone planning.Milestone, next planning.MilestoneStatus, actor domain.Chat) error {
-	if actor.ID == "" || actor.WorkflowRole == chatrole.Orchestrator {
+func validateMilestoneOwner(milestone planning.Milestone, next planning.MilestoneStatus, actor milestoneActor) error {
+	if actor.ID == "" || actor.Role == chatrole.Orchestrator {
 		return nil
 	}
 	if milestone.OwnerChatID != nil && *milestone.OwnerChatID != actor.ID {
@@ -542,17 +544,17 @@ func validateMilestoneOwner(milestone planning.Milestone, next planning.Mileston
 	}
 	switch next {
 	case planning.MilestoneStatusExecuting:
-		if actor.WorkflowRole != chatrole.Execution {
+		if actor.Role != chatrole.Execution {
 			return fmt.Errorf("milestone %q can only be set to executing by an execution chat", milestone.Ref)
 		}
 	}
 	return nil
 }
 
-func applyMilestoneOwner(milestone *planning.Milestone, status planning.MilestoneStatus, actor domain.Chat) {
+func applyMilestoneOwner(milestone *planning.Milestone, status planning.MilestoneStatus, actor milestoneActor) {
 	switch status {
 	case planning.MilestoneStatusExecuting:
-		if actor.ID != "" && actor.WorkflowRole != chatrole.Orchestrator {
+		if actor.ID != "" && actor.Role != chatrole.Orchestrator {
 			owner := actor.ID
 			milestone.OwnerChatID = &owner
 		}
