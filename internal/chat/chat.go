@@ -581,38 +581,6 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 	return item, nil
 }
 
-// MarkToolRunning marks one pending tool call as running through the live chat owner.
-func (t *TurnState) MarkToolRunning(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.MarkToolRunning(ctx, toolCallID)
-}
-
-// AttachToolResult records a tool result through the live chat owner.
-func (t *TurnState) AttachToolResult(ctx context.Context, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.AttachToolResult(ctx, toolCallID, result)
-}
-
-// AttachToolError records a tool error through the live chat owner.
-func (t *TurnState) AttachToolError(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.AttachToolError(ctx, toolCallID, toolErr)
-}
-
-// AttachToolApproval records an approval request through the live chat owner.
-func (t *TurnState) AttachToolApproval(ctx context.Context, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.AttachToolApproval(ctx, toolCallID, approval)
-}
-
 // ApplyNextSteer removes and records queued turn-boundary messages.
 func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
 	if t == nil || t.chat == nil || t.skipQueued {
