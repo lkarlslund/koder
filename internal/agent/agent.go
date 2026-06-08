@@ -4310,11 +4310,11 @@ func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID
 		}
 		chats = []domain.Chat{chat}
 	} else {
-		listed, err := sessionpkg.ListChats(ctx, e.store, sessionID)
+		owner, err := e.LoadSession(ctx, sessionID)
 		if err != nil {
 			return domain.Session{}, domain.Chat{}, tools.Request{}, err
 		}
-		chats = listed
+		chats = owner.Snapshot().Chats
 	}
 	for _, chat := range chats {
 		rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)

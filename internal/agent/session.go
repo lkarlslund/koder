@@ -100,10 +100,11 @@ func (e *Engine) chatByID(ctx context.Context, chatID id.ID) (domain.Chat, error
 		return domain.Chat{}, err
 	}
 	for _, session := range sessions {
-		chats, err := sessionpkg.ListChats(ctx, e.store, session.ID)
+		owner, err := e.LoadSession(ctx, session.ID)
 		if err != nil {
 			return domain.Chat{}, err
 		}
+		chats := owner.Snapshot().Chats
 		for _, chatRecord := range chats {
 			if chatRecord.ID == chatID {
 				return chatRecord, nil
