@@ -2578,7 +2578,7 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 		return nil
 	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
-	compactionItem, err := rt.AppendTimelineContent(ctx, domain.Compaction{
+	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
 		Trigger:             trigger,
 		Status:              "pending",
 		FirstKeptItemID:     firstKeptItemID,
@@ -2588,7 +2588,7 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 		return err
 	}
 	updateCompactionState := func(summary, status string, afterContextTokens int) error {
-		compactionItem.Content = domain.Compaction{
+		next := domain.Compaction{
 			Summary:             summary,
 			Trigger:             trigger,
 			Status:              status,
@@ -2596,11 +2596,8 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 			BeforeContextTokens: beforeContextTokens,
 			AfterContextTokens:  afterContextTokens,
 		}
-		compactionItem.UpdatedAt = time.Now().UTC()
-		if status == "completed" || status == "failed" {
-			compactionItem.Seal(compactionItem.UpdatedAt)
-		}
-		_, err := rt.UpsertTimelineItem(ctx, compactionItem)
+		var err error
+		compactionItem, err = rt.UpdateCompaction(ctx, compactionItem, next)
 		return err
 	}
 	if out != nil {
@@ -2670,26 +2667,17 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 		return nil
 	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
-	now := time.Now().UTC()
-	compactionItem := domain.TimelineItem{
-		ID:        chatpkg.NewTimelineID(now),
-		ChatID:    chat.ID,
-		Seq:       int64(len(timeline) + 1),
-		CreatedAt: now,
-		UpdatedAt: now,
-		Content: domain.Compaction{
-			Trigger:             trigger,
-			Status:              "pending",
-			FirstKeptItemID:     firstKeptItemID,
-			BeforeContextTokens: beforeContextTokens,
-		},
-	}
-	compactionItem, err = rt.UpsertTimelineItem(ctx, compactionItem)
+	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
+		Trigger:             trigger,
+		Status:              "pending",
+		FirstKeptItemID:     firstKeptItemID,
+		BeforeContextTokens: beforeContextTokens,
+	})
 	if err != nil {
 		return err
 	}
 	updateCompactionState := func(summary, status string, afterContextTokens int) error {
-		compactionItem.Content = domain.Compaction{
+		next := domain.Compaction{
 			Summary:             summary,
 			Trigger:             trigger,
 			Status:              status,
@@ -2697,12 +2685,8 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			BeforeContextTokens: beforeContextTokens,
 			AfterContextTokens:  afterContextTokens,
 		}
-		compactionItem.UpdatedAt = time.Now().UTC()
-		if status == "completed" || status == "failed" {
-			compactionItem.Seal(compactionItem.UpdatedAt)
-		}
 		var updateErr error
-		compactionItem, updateErr = rt.UpsertTimelineItem(ctx, compactionItem)
+		compactionItem, updateErr = rt.UpdateCompaction(ctx, compactionItem, next)
 		return updateErr
 	}
 	if out != nil {

@@ -1492,6 +1492,28 @@ func (r *Chat) AppendNotice(ctx context.Context, notice domain.Notice) (domain.T
 	return r.UpsertTimelineItem(ctx, item)
 }
 
+// AppendCompaction appends a pending compaction marker through the live chat owner.
+func (r *Chat) AppendCompaction(ctx context.Context, compaction domain.Compaction) (domain.TimelineItem, error) {
+	if strings.TrimSpace(compaction.Status) == "" {
+		compaction.Status = "pending"
+	}
+	return r.AppendTimelineContent(ctx, compaction)
+}
+
+// UpdateCompaction updates and seals a compaction marker when it reaches a final state.
+func (r *Chat) UpdateCompaction(ctx context.Context, item domain.TimelineItem, compaction domain.Compaction) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	now := time.Now().UTC()
+	item.Content = compaction
+	item.UpdatedAt = now
+	if compaction.Status == "completed" || compaction.Status == "failed" {
+		item.Seal(now)
+	}
+	return r.UpsertTimelineItem(ctx, item)
+}
+
 // AppendAssistantToolCalls appends or updates one sealed assistant message through the live chat owner.
 func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	if r == nil {
