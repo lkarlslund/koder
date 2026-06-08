@@ -1077,7 +1077,11 @@ func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]chattool
 	if c.agent == nil {
 		return nil, fmt.Errorf("no chat agent")
 	}
-	return c.agent.ListChats(ctx, sessionID)
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return owner.ChatToolControl("").ListChats(ctx, sessionID)
 }
 
 // StartChat creates a child chat and adds it to the live session before broadcasting.
@@ -1085,7 +1089,11 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	if c.agent == nil {
 		return chattool.Status{}, fmt.Errorf("no chat agent")
 	}
-	return c.agent.StartChat(ctx, sessionID, parentChatID, req)
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return chattool.Status{}, err
+	}
+	return owner.ChatToolControl(parentChatID).StartChat(ctx, sessionID, parentChatID, req)
 }
 
 func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID id.ID) (planning.Plan, error) {
@@ -1209,8 +1217,7 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 		return chattool.Status{}, err
 	}
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
-		status, err := c.agent.UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
-		return status, err
+		return owner.ChatToolControl(ownerChatID).UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
 	}
 	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {

@@ -6,8 +6,6 @@ import (
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
@@ -34,28 +32,4 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 		Pending: e.toolsRuntime,
 		Compact: e,
 	}
-}
-
-func (e *Engine) ListChats(ctx context.Context, sessionID id.ID) ([]chattool.Status, error) {
-	owner, err := e.LoadSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return owner.ChatToolControl("").ListChats(ctx, sessionID)
-}
-
-func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID id.ID, req chattool.StartRequest) (chattool.Status, error) {
-	owner, err := e.LoadSession(ctx, sessionID)
-	if err != nil {
-		return chattool.Status{}, err
-	}
-	return owner.ChatToolControl(parentChatID).StartChat(ctx, sessionID, parentChatID, req)
-}
-
-func (e *Engine) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, error) {
-	owner, err := e.LoadSession(ctx, sessionID)
-	if err != nil {
-		return chattool.Status{}, err
-	}
-	return owner.ChatToolControl(ownerChatID).UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
 }

@@ -463,7 +463,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 		t.Fatalf("add task: %v", err)
 	}
 
-	status, err := ctrl.agent.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
+	status, err := ctrl.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
 		Profile:   chatrole.Execution,
 		Objective: "Implement only the assigned task",
 		TodoRef:   todos[0].ID,

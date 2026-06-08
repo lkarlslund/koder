@@ -1140,8 +1140,13 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := owner.ChatToolControl(parent.ID)
 	archived := true
-	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived, Title: "Renamed child"})
+	status, err := control.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived, Title: "Renamed child"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1156,7 +1161,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 		t.Fatalf("expected persisted archive flag, got %#v", reloaded)
 	}
 	archived = false
-	status, err = engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived})
+	status, err = control.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Archived: &archived})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1195,16 +1200,17 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	status, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Message: "use jadx output", Steer: true})
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := owner.ChatToolControl(parent.ID)
+	status, err := control.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Message: "use jadx output", Steer: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status.ID != child.ID {
 		t.Fatalf("expected child status, got %#v", status)
-	}
-	owner, err := engine.LoadSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
 	}
 	childRuntime, err := owner.Chat(context.Background(), child.ID)
 	if err != nil {
@@ -1239,10 +1245,10 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, chattool.UpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
+	if _, err := control.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, chattool.UpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
-	if _, err := engine.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, chattool.UpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot send a message to its own chat") {
+	if _, err := control.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, chattool.UpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot send a message to its own chat") {
 		t.Fatalf("expected self-message error, got %v", err)
 	}
 }
@@ -1266,7 +1272,11 @@ func TestStartChatRejectsArchivedParent(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	_, err = engine.StartChat(context.Background(), session.ID, parent.ID, chattool.StartRequest{
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = owner.ChatToolControl(parent.ID).StartChat(context.Background(), session.ID, parent.ID, chattool.StartRequest{
 		Profile:   chatrole.General,
 		Objective: "do work",
 	})
