@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -28,35 +27,33 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
+	"github.com/lkarlslund/koder/internal/toolruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
-	"github.com/lkarlslund/koder/internal/tools/chattool"
-	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 )
 
 type Engine struct {
-	cfg         config.Config
-	store       *store.Store
-	debug       *debugsrv.Recorder
-	files       *attachment.Manager
-	caps        *provider.CapabilityStore
-	agents      *agents.Manager
-	mcp         *mcp.Manager
-	exec        *execruntime.Manager
-	envMu       sync.Mutex
-	envPrompts  map[id.ID]string
-	caveman     *cavemanService
-	cavemanMu   sync.Mutex
-	cavemanJobs map[id.ID]cavemanJob
-	registry    *sessionpkg.Registry
-	retryPause  func(context.Context, time.Duration, func(time.Duration)) error
+	cfg          config.Config
+	store        *store.Store
+	debug        *debugsrv.Recorder
+	files        *attachment.Manager
+	caps         *provider.CapabilityStore
+	agents       *agents.Manager
+	mcp          *mcp.Manager
+	toolsRuntime *toolruntime.Runtime
+	envMu        sync.Mutex
+	envPrompts   map[id.ID]string
+	caveman      *cavemanService
+	cavemanMu    sync.Mutex
+	cavemanJobs  map[id.ID]cavemanJob
+	registry     *sessionpkg.Registry
+	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
 
 const (
@@ -73,6 +70,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
 	}
+	execRuntime := execruntime.NewManager()
 	e := &Engine{
 		cfg:         cfg,
 		store:       st,
@@ -81,12 +79,18 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		caps:        provider.NewCapabilityStore(cfg.StateDir()),
 		agents:      agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:         mcpManager,
-		exec:        execruntime.NewManager(),
 		caveman:     newCavemanService(cfg.Thinking.CavemanParallelism),
 		cavemanJobs: map[id.ID]cavemanJob{},
 		retryPause:  waitForRetry,
 	}
 	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(cfg))
+	e.toolsRuntime = toolruntime.New(toolruntime.Config{
+		Config:   cfg,
+		Debug:    debug,
+		Sessions: e.registry,
+		Exec:     execRuntime,
+		MCP:      e.mcp,
+	})
 	return e
 }
 
@@ -96,6 +100,9 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
 	if e.registry != nil {
 		e.registry.UpdateConfig(sessionRegistryConfig(cfg))
+	}
+	if e.toolsRuntime != nil {
+		e.toolsRuntime.UpdateConfig(cfg)
 	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)
@@ -123,47 +130,19 @@ func (e *Engine) ReloadMCP(ctx context.Context) error {
 }
 
 func (e *Engine) ExecManager() *execruntime.Manager {
-	return e.exec
+	if e.toolsRuntime != nil {
+		return e.toolsRuntime.ExecManager()
+	}
+	return nil
 }
 
 func (e *Engine) SetExecManager(manager *execruntime.Manager) {
 	if e == nil || manager == nil {
 		return
 	}
-	e.exec = manager
-}
-
-func (e *Engine) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runtime, error) {
-	if rt == nil {
-		return tools.Runtime{}, fmt.Errorf("chat runtime is required")
+	if e.toolsRuntime != nil {
+		e.toolsRuntime.SetExecManager(manager)
 	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	chat := snapshot.Chat
-	if session.ID != "" {
-		owner, err := e.LoadSession(ctx, session.ID)
-		if err != nil {
-			return tools.Runtime{}, err
-		}
-		session = owner.Snapshot().Session
-		rt.SetSession(session)
-	}
-	return e.toolRuntime(session, chat), nil
-}
-
-func (e *Engine) ToolExecutionStarted(_ context.Context, rt *chatpkg.Chat, req tools.Request) {
-	snapshot := rt.Snapshot()
-	e.recordLifecycle(snapshot.Session.ID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
-}
-
-func (e *Engine) ToolExecutionFinished(_ context.Context, rt *chatpkg.Chat, req tools.Request) {
-	snapshot := rt.Snapshot()
-	e.recordLifecycle(snapshot.Session.ID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
-}
-
-func (e *Engine) ToolExecutionFailed(_ context.Context, rt *chatpkg.Chat, req tools.Request, err error) {
-	snapshot := rt.Snapshot()
-	e.recordLifecycle(snapshot.Session.ID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 }
 
 func chatModel(chat domain.Chat) (string, string, error) {
@@ -431,118 +410,6 @@ func (e *Engine) AutoContinueBadStopEnabled() bool {
 	return e.cfg.UI.AutoContinue
 }
 
-func (e *Engine) ApproveToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
-	if rt == nil {
-		return false, fmt.Errorf("chat runtime is required")
-	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	if rule != nil {
-		next := *rule
-		next.Pattern = strings.TrimSpace(next.Pattern)
-		if next.Pattern == "" {
-			next.Pattern = "*"
-		}
-		if err := permissionprofile.Validate(next.Action); err != nil {
-			return false, err
-		}
-		owner, err := e.LoadSession(ctx, session.ID)
-		if err != nil {
-			return false, err
-		}
-		session, err = owner.UpdateSession(ctx, func(session *domain.Session) {
-			session.PermissionRules = sessionpkg.AppendPermissionRule(session.PermissionRules, next)
-		})
-		if err != nil {
-			return false, err
-		}
-		rt.SetSession(session)
-		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
-			Meta: map[string]string{
-				"permission_tool":    next.Tool,
-				"permission_pattern": next.Pattern,
-			},
-		}
-	}
-	chat := rt.Snapshot().Chat
-	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
-	if err != nil {
-		return false, err
-	}
-	needsApproval, execErr := rt.RunToolCalls(ctx, []tools.Request{req}, out)
-	if execErr != nil {
-		return false, execErr
-	}
-	if needsApproval {
-		return false, nil
-	}
-	if chatpkg.ShouldStop(ctx) {
-		return false, context.Canceled
-	}
-	return true, nil
-}
-
-func (e *Engine) DenyToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, out chan<- domain.Event) error {
-	if rt == nil {
-		return fmt.Errorf("chat runtime is required")
-	}
-	chat := rt.Snapshot().Chat
-	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
-	if err != nil {
-		return err
-	}
-	text := fmt.Sprintf("%s denied", req.Tool)
-	evt, err := rt.RecordToolDenied(ctx, req, text)
-	if err != nil {
-		return err
-	}
-	out <- evt
-	return nil
-}
-
-func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event) (bool, error) {
-	if rt == nil {
-		return false, fmt.Errorf("chat runtime is required")
-	}
-	calls, err := e.pendingExecutableToolCallsForTurn(ctx, rt)
-	if err != nil || len(calls) == 0 {
-		return false, err
-	}
-	needsApproval, err := rt.RunToolCalls(ctx, calls, out)
-	if err != nil {
-		return false, err
-	}
-	if needsApproval || chatpkg.ShouldStop(ctx) {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (e *Engine) pendingExecutableToolCallsForTurn(ctx context.Context, rt *chatpkg.Chat) ([]tools.Request, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("chat runtime is required")
-	}
-	calls, err := rt.PendingExecutableToolCalls(ctx)
-	if err != nil {
-		return nil, err
-	}
-	requests := make([]tools.Request, 0, len(calls))
-	for _, call := range calls {
-		req, err := tools.Normalize(tools.Request{
-			Tool:       call.Tool,
-			ToolCallID: string(call.ToolCallID),
-			Args:       maps.Clone(call.Args),
-		})
-		if err != nil {
-			return nil, err
-		}
-		requests = append(requests, req)
-	}
-	return requests, nil
-}
-
 func (e *Engine) RefreshAgents(ctx context.Context, sessionID id.ID) (domain.Session, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
@@ -690,9 +557,8 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 		ToolArgumentLimits: tools.ArgumentByteLimits(),
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
-		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
-		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) && chatrole.AllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
-			req.Tools = append(req.Tools, e.mcp.ToolDefinitionsWithReserved(req.Tools)...)
+		if e.toolsRuntime != nil {
+			req.Tools = e.toolsRuntime.Definitions(session, chat)
 		}
 		if len(req.Tools) > 0 {
 			req.ToolChoice = "auto"
@@ -1889,48 +1755,6 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 	return instructions
 }
 
-func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
-	runtime := tools.Runtime{
-		Workdir:               sessionProjectRoot(session),
-		SessionID:             session.ID,
-		ChatID:                chat.ID,
-		ChatRole:              chat.WorkflowRole,
-		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
-		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
-		AssignedTodoRef:       chat.AssignedTodoRef,
-		Exec:                  e.exec,
-		MCP:                   e.mcp,
-		AllowedTools:          e.effectiveToolStates(session),
-		FileTracker:           codeIntelFileTracker{root: sessionProjectRoot(session)},
-		AccessSettings:        sessionAccessSettings(session, e.cfg),
-	}
-	if owner := e.loadedSession(session.ID); owner != nil {
-		runtime.SessionControl = owner.PlanningForChat(chat)
-		runtime.TaskControl = owner
-		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
-	}
-	return runtime
-}
-
-type codeIntelFileTracker struct {
-	root string
-}
-
-func (t codeIntelFileTracker) TouchFile(ctx context.Context, path, content string) {
-	if strings.TrimSpace(t.root) == "" || strings.TrimSpace(path) == "" {
-		return
-	}
-	_ = codesearchtool.TouchFile(ctx, t.root, path, content)
-}
-
-func sessionAccessSettings(session domain.Session, cfg config.Config) accesssettings.Settings {
-	settings := session.AccessSettings
-	if accesssettings.IsZero(settings) {
-		settings = cfg.Access
-	}
-	return accesssettings.Normalize(settings)
-}
-
 func (e *Engine) loadedSession(sessionID id.ID) *sessionpkg.Session {
 	if e == nil || e.registry == nil || sessionID == "" {
 		return nil
@@ -3052,7 +2876,10 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	ok := false
 	serverID, toolName := "", ""
 	if e.mcp != nil {
-		localDefs := tools.Definitions(e.toolRuntime(domain.Session{}, domain.Chat{}))
+		localDefs := tools.Definitions(tools.Runtime{})
+		if e.toolsRuntime != nil {
+			localDefs = e.toolsRuntime.Definitions(domain.Session{}, domain.Chat{})
+		}
 		serverID, toolName, ok = e.mcp.ResolveToolName(name, localDefs)
 	}
 	if !ok {
@@ -3131,28 +2958,6 @@ func toolCallRecord(call tools.Request) domain.ToolCall {
 	}
 }
 
-func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {
-	if enabled, ok := cfg.ToolDefaults[kind]; ok && !enabled {
-		return false
-	}
-	if enabled, ok := session.ToolStates[kind]; ok {
-		return enabled
-	}
-	if enabled, ok := cfg.ToolDefaults[kind]; ok {
-		return enabled
-	}
-	return true
-}
-
-func (e *Engine) effectiveToolStates(session domain.Session) map[domain.ToolKind]bool {
-	registered := tools.RegisteredIDs()
-	out := make(map[domain.ToolKind]bool, len(registered))
-	for _, kind := range registered {
-		out[kind] = toolEnabledForSession(e.cfg, session, kind)
-	}
-	return out
-}
-
 func serializeRequest(req tools.Request) (string, error) {
 	payload := maps.Clone(req.Args)
 	if strings.TrimSpace(req.ToolCallID) != "" {
@@ -3165,202 +2970,6 @@ func serializeRequest(req tools.Request) (string, error) {
 	return string(data), nil
 }
 
-func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request) ([]string, bool, bool) {
-	baseDir := projectRoot
-	if strings.TrimSpace(projectRoot) != "" {
-		baseDir = projectRoot
-	}
-	var raws []string
-	switch req.Tool {
-	case domain.ToolKindFileRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindFileEdit, domain.ToolKindFileWrite:
-		raws = append(raws, req.Args["path"])
-	case domain.ToolKindFileGlob, domain.ToolKindFileGrep, domain.ToolKindCodeSearch:
-		if root := strings.TrimSpace(req.Args["path"]); root != "" {
-			raws = append(raws, root)
-		} else {
-			raws = append(raws, ".")
-		}
-	default:
-		return nil, false, false
-	}
-	if len(raws) == 0 {
-		return nil, false, true
-	}
-	projectRoot = filepath.Clean(projectRoot)
-	var targets []string
-	outsideProject := false
-	for _, raw := range raws {
-		target, ok := resolvePermissionTarget(baseDir, raw)
-		if !ok {
-			return nil, false, true
-		}
-		targets = append(targets, target)
-		if strings.TrimSpace(projectRoot) == "" {
-			outsideProject = true
-			continue
-		}
-		rel, err := filepath.Rel(projectRoot, target)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			outsideProject = true
-		}
-	}
-	return targets, outsideProject, false
-}
-
-func resolvePermissionTarget(baseDir, raw string) (string, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", false
-	}
-	raw = tools.NormalizePathInput(raw)
-	if raw == "" {
-		return "", false
-	}
-	if filepath.IsAbs(raw) {
-		return maybeResolveExistingPath(filepath.Clean(raw)), true
-	}
-	abs := filepath.Join(baseDir, raw)
-	return maybeResolveExistingPath(filepath.Clean(abs)), true
-}
-
-func maybeResolveExistingPath(path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		return resolved
-	}
-	if os.IsNotExist(err) {
-		return path
-	}
-	return path
-}
-
-func requestFromStoredApproval(tool domain.ToolKind, raw string) (tools.Request, error) {
-	return tools.RequestFromStored(tool, raw)
-}
-
 func max(a, b int) int {
 	return slices.Max([]int{a, b})
-}
-
-func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID id.ID, tool domain.ToolKind, approvalID, preview, toolCallID string) (domain.TimelineItem, error) {
-	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
-	rt, err := e.chatOwner(ctx, sessionID, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item, err := rt.AttachToolApproval(ctx, toolCallID, domain.ApprovalRequest{
-		Body: body,
-	})
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
-}
-
-func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID id.ID, tool domain.ToolKind, approvalID id.ID, status, preview, toolCallID string) (domain.TimelineItem, error) {
-	body := fmt.Sprintf("Approval %s %s for %s: %s", approvalID, status, tool, preview)
-	payload := map[string]string{
-		"approval_id": approvalID,
-		"tool":        tool.String(),
-		"status":      status,
-		"command":     preview,
-	}
-	if strings.TrimSpace(toolCallID) != "" {
-		payload["tool_call_id"] = toolCallID
-	}
-	resultStatus := domain.ToolResultStatusOK
-	var data any
-	if status == "denied" {
-		resultStatus = domain.ToolResultStatusDenied
-		data = tools.DeniedStoredResult{Message: body}
-	}
-	_ = payload
-	rt, err := e.chatOwner(ctx, sessionID, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item, err := rt.AttachToolResult(ctx, toolCallID, domain.ToolResult{
-		Text:   body,
-		Data:   data,
-		Status: resultStatus,
-	})
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
-}
-
-func approvalPreviewFromStored(tool domain.ToolKind, raw string) string {
-	req, err := requestFromStoredApproval(tool, raw)
-	if err != nil {
-		return raw
-	}
-	return tools.Preview(req)
-}
-
-func (e *Engine) requestForToolCall(ctx context.Context, chatID id.ID, toolCallID string) (tools.Request, error) {
-	toolCallID = strings.TrimSpace(toolCallID)
-	if chatID == "" {
-		return tools.Request{}, fmt.Errorf("chat id is required")
-	}
-	if toolCallID == "" {
-		return tools.Request{}, fmt.Errorf("tool call id is required")
-	}
-	chatRecord, err := e.chatByID(ctx, chatID)
-	if err != nil {
-		return tools.Request{}, err
-	}
-	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
-	if err != nil {
-		return tools.Request{}, err
-	}
-	call, err := rt.RequestForToolCall(ctx, toolCallID)
-	if err != nil {
-		return tools.Request{}, err
-	}
-	return tools.Normalize(tools.Request{
-		Tool:       call.Tool,
-		ToolCallID: string(call.ToolCallID),
-		Args:       maps.Clone(call.Args),
-	})
-}
-
-func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID, approvalID id.ID) (domain.Session, domain.Chat, tools.Request, error) {
-	var chats []domain.Chat
-	if chatID != "" {
-		chat, err := e.chatByID(ctx, chatID)
-		if err != nil {
-			return domain.Session{}, domain.Chat{}, tools.Request{}, err
-		}
-		chats = []domain.Chat{chat}
-	} else {
-		owner, err := e.LoadSession(ctx, sessionID)
-		if err != nil {
-			return domain.Session{}, domain.Chat{}, tools.Request{}, err
-		}
-		chats = owner.Snapshot().Chats
-	}
-	for _, chat := range chats {
-		rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
-		if err != nil {
-			return domain.Session{}, domain.Chat{}, tools.Request{}, err
-		}
-		approvals, err := rt.PendingApprovals(ctx)
-		if err != nil {
-			return domain.Session{}, domain.Chat{}, tools.Request{}, err
-		}
-		for _, approval := range approvals {
-			if approval.ID != approvalID {
-				continue
-			}
-			owner, err := e.LoadSession(ctx, chat.SessionID)
-			if err != nil {
-				return domain.Session{}, domain.Chat{}, tools.Request{}, err
-			}
-			session := owner.Snapshot().Session
-			req, err := e.requestForToolCall(ctx, chat.ID, approval.ToolCallID)
-			return session, chat, req, err
-		}
-	}
-	return domain.Session{}, domain.Chat{}, tools.Request{}, fmt.Errorf("approval %s not found", approvalID)
 }

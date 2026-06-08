@@ -28,10 +28,10 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 	return chatpkg.Deps{
 		Store:   e.store,
 		Model:   e,
-		Tools:   e,
-		Runtime: e,
-		Life:    e,
-		Pending: e,
+		Tools:   e.toolsRuntime,
+		Runtime: e.toolsRuntime,
+		Life:    e.toolsRuntime,
+		Pending: e.toolsRuntime,
 		Compact: e,
 	}
 }

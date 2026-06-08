@@ -216,7 +216,7 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := e.ToolRuntime(ctx, rt)
+	runtime, err := e.toolsRuntime.ToolRuntime(ctx, rt)
 	if err != nil {
 		return nil, err
 	}
@@ -1044,7 +1044,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := requestFromStoredApproval(domain.ToolKindFileWrite, raw)
+	got, err := tools.RequestFromStored(domain.ToolKindFileWrite, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7718,7 +7718,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	evt, err := rt.FinalizeToolResult(context.Background(), engine.toolRuntime(session, chat), tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
+	evt, err := rt.FinalizeToolResult(context.Background(), engine.toolsRuntime.Runtime(session, chat), tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
 	if err != nil {
 		t.Fatal(err)
 	}
