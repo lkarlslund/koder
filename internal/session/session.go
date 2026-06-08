@@ -137,11 +137,19 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan 
 			continue
 		}
 		seen[ref] = struct{}{}
-		items, err := ListTodos(ctx, st, sessionID, ref)
-		if err != nil {
-			return nil, err
-		}
-		out[ref] = slices.Clone(items)
+		out[ref] = nil
+	}
+	items, err := ListTodos(ctx, st, sessionID, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		ref := strings.TrimSpace(item.MilestoneRef)
+		out[ref] = append(out[ref], item)
+	}
+	for ref, items := range out {
+		planning.SortTodos(items)
+		out[ref] = items
 	}
 	return out, nil
 }

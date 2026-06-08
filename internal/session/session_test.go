@@ -117,6 +117,39 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	}
 }
 
+func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := Load(ctx, st, func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error) { return nil, nil }, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := owner.ListTodos(ctx, sessionRecord.ID, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(created) {
+		t.Fatalf("expected %d tasks, got %#v", len(created), listed)
+	}
+	for idx := range created {
+		if listed[idx].ID != created[idx].ID {
+			t.Fatalf("task %d: expected %s, got %s", idx, created[idx].ID, listed[idx].ID)
+		}
+	}
+}
+
 func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

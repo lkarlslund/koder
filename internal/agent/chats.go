@@ -444,10 +444,11 @@ func (e *Engine) childIdleNotification(ctx context.Context, chatRecord domain.Ch
 }
 
 func (e *Engine) todosForNotification(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
-	if owner := e.loadedSession(sessionID); owner != nil {
-		return owner.ListTodos(ctx, sessionID, milestoneRef)
+	owner, err := e.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
-	return sessionpkg.ListTodos(ctx, e.store, sessionID, milestoneRef)
+	return owner.ListTodos(ctx, sessionID, milestoneRef)
 }
 
 func (e *Engine) enqueueSteer(ctx context.Context, sessionID, chatID id.ID, text string) {
@@ -473,7 +474,10 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID id.ID, milestone
 		strings.TrimSpace(objective),
 	}
 	if milestone.Ref != "" {
-		todos, _ := sessionpkg.ListTodos(ctx, e.store, sessionID, milestone.Ref)
+		var todos []planning.TodoItem
+		if owner, err := e.LoadSession(ctx, sessionID); err == nil {
+			todos, _ = owner.ListTodos(ctx, sessionID, milestone.Ref)
+		}
 		if scopedTodo != nil {
 			todos = []planning.TodoItem{*scopedTodo}
 		}
