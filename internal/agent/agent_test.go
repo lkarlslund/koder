@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/environment"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeltest"
@@ -823,13 +824,13 @@ func TestEngineCompactionPromptUsesManagedUserAsset(t *testing.T) {
 }
 
 func TestFormatEnvironmentPrompt(t *testing.T) {
-	got := formatEnvironmentPrompt(environmentSnapshot{
+	got := environment.Format(environment.Snapshot{
 		WorkspaceRoot: "/repo",
 		Workdir:       "/repo/pkg",
 		Platform:      "linux/amd64",
 		OS:            "Linux 6.8.0",
 		Shell:         "/bin/zsh",
-		Git: gitSnapshot{
+		Git: environment.GitSnapshot{
 			Repository: true,
 		},
 	})
@@ -855,7 +856,7 @@ func TestFormatEnvironmentPrompt(t *testing.T) {
 }
 
 func TestFormatEnvironmentPromptNonGit(t *testing.T) {
-	got := formatEnvironmentPrompt(environmentSnapshot{
+	got := environment.Format(environment.Snapshot{
 		WorkspaceRoot: "/repo",
 		Workdir:       "/repo",
 		Platform:      "linux/amd64",
@@ -998,7 +999,7 @@ func TestGitInfoDetectsRepositoryState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := gitInfo(repo)
+	got := environment.GitInfo(repo)
 	if !got.Repository {
 		t.Fatalf("expected git repository, got %#v", got)
 	}
