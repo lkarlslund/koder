@@ -210,7 +210,11 @@ func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID id.ID) (
 }
 
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
-	chat, err := sessionpkg.DefaultChat(ctx, e.store, session.ID)
+	owner, err := e.LoadSession(ctx, session.ID)
+	if err != nil {
+		return provider.ChatRequest{}, err
+	}
+	chat, err := owner.EnsureDefaultChat(ctx)
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
@@ -329,16 +333,16 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 		if err := permissionprofile.Validate(next.Action); err != nil {
 			return false, err
 		}
-		if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
-			session.PermissionRules = sessionpkg.AppendPermissionRule(session.PermissionRules, next)
-		}); err != nil {
-			return false, err
-		}
-		refreshed, err := sessionpkg.GetSession(ctx, e.store, session.ID)
+		owner, err := e.LoadSession(ctx, session.ID)
 		if err != nil {
 			return false, err
 		}
-		session = refreshed
+		session, err = owner.UpdateSession(ctx, func(session *domain.Session) {
+			session.PermissionRules = sessionpkg.AppendPermissionRule(session.PermissionRules, next)
+		})
+		if err != nil {
+			return false, err
+		}
 		turn.SetSession(session)
 		out <- domain.Event{
 			Kind: domain.EventKindStatus,
@@ -487,10 +491,11 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			return chatpkg.TurnStepResult{}, compactErr
 		}
 		if compacted {
-			session, buildErr = sessionpkg.GetSession(ctx, e.store, session.ID)
-			if buildErr != nil {
-				return chatpkg.TurnStepResult{}, buildErr
+			owner, err := e.LoadSession(ctx, session.ID)
+			if err != nil {
+				return chatpkg.TurnStepResult{}, err
 			}
+			session = owner.Snapshot().Session
 			l.session = session
 			turn.SetSession(session)
 			l.skipAutoCompactOnce = true
@@ -700,11 +705,12 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 }
 
 func (e *Engine) RefreshAgents(ctx context.Context, sessionID id.ID) (domain.Session, error) {
-	session, err := sessionpkg.GetSession(ctx, e.store, sessionID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	chat, err := sessionpkg.DefaultChat(ctx, e.store, sessionID)
+	session := owner.Snapshot().Session
+	chat, err := owner.EnsureDefaultChat(ctx)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -754,16 +760,17 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 			DiscoveredBy: item.DiscoveredBy,
 		})
 	}
-	if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
+	owner, err := e.LoadSession(ctx, session.ID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return owner.UpdateSession(ctx, func(session *domain.Session) {
 		session.ProjectChecksum = resolution.Snapshot.Checksum
 		session.AgentsResolved = resolution.ResolvedAgents
 		session.AgentsSummary = resolution.ConflictSummary
 		session.AgentsFiles = append([]domain.AgentsFile(nil), files...)
 		session.AgentsGeneratedAt = resolution.GeneratedAt
-	}); err != nil {
-		return domain.Session{}, err
-	}
-	return sessionpkg.GetSession(ctx, e.store, session.ID)
+	})
 }
 
 func (e *Engine) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {
@@ -838,7 +845,11 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 		return "", nil
 	}
 	refreshCount, _ := sessionTitleRefreshState(session)
-	if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
+	owner, err := e.LoadSession(ctx, session.ID)
+	if err != nil {
+		return "", err
+	}
+	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
 		session.Title = title
 		session.TitleGeneratedAt = now
 		session.TitleRefreshCount = refreshCount + 1
@@ -1925,10 +1936,11 @@ func turnInstructionUserMessage(block provider.InstructionBlock) (domain.UserMes
 }
 
 func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID) ([]provider.Message, error) {
-	session, err := sessionpkg.GetSession(ctx, e.store, sessionID)
+	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	session := owner.Snapshot().Session
 	return e.buildConversationPreview(ctx, session, chatID, "", nil, nil, nil)
 }
 
@@ -3979,11 +3991,11 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 
 func (e *Engine) persistedToolCallState(ctx context.Context, session domain.Session, chat domain.Chat) (domain.Session, domain.Chat, error) {
 	if session.ID != "" {
-		latest, err := sessionpkg.GetSession(ctx, e.store, session.ID)
+		owner, err := e.LoadSession(ctx, session.ID)
 		if err != nil {
 			return domain.Session{}, domain.Chat{}, err
 		}
-		session = latest
+		session = owner.Snapshot().Session
 	}
 	if chat.ID != "" {
 		latest, err := e.chatByID(ctx, chat.ID)
@@ -4329,10 +4341,11 @@ func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID
 			if approval.ID != approvalID {
 				continue
 			}
-			session, err := sessionpkg.GetSession(ctx, e.store, chat.SessionID)
+			owner, err := e.LoadSession(ctx, chat.SessionID)
 			if err != nil {
 				return domain.Session{}, domain.Chat{}, tools.Request{}, err
 			}
+			session := owner.Snapshot().Session
 			req, err := e.requestForToolCall(ctx, chat.ID, approval.ToolCallID)
 			return session, chat, req, err
 		}

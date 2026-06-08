@@ -521,6 +521,36 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	return chatRecord, nil
 }
 
+// UpdateSession mutates live and persisted session metadata.
+func (s *Session) UpdateSession(ctx context.Context, update func(*domain.Session)) (domain.Session, error) {
+	if s == nil {
+		return domain.Session{}, fmt.Errorf("session is required")
+	}
+	if update == nil {
+		return domain.Session{}, fmt.Errorf("session update is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	s.mu.RUnlock()
+	if err := UpdateSession(ctx, s.store, sessionID, update); err != nil {
+		return domain.Session{}, err
+	}
+	updated, err := GetSession(ctx, s.store, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	s.mu.Lock()
+	s.session = updated
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(updated)
+		}
+	}
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
+	return updated, nil
+}
+
 // UpdateChat updates chat metadata, preserving its history.
 func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, id.ID, error) {
 	if s == nil {
@@ -637,30 +667,15 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	if title == "" {
 		return domain.Session{}, fmt.Errorf("session title is required")
 	}
-	s.mu.RLock()
-	sessionID := s.session.ID
-	s.mu.RUnlock()
-	if err := UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) {
+	updated, err := s.UpdateSession(ctx, func(session *domain.Session) {
 		session.Title = strings.TrimSpace(title)
 		session.TitleGeneratedAt = time.Time{}
 		session.TitleRefreshCount = 0
-	}); err != nil {
-		return domain.Session{}, err
-	}
-	updated, err := GetSession(ctx, s.store, sessionID)
+	})
 	if err != nil {
 		return domain.Session{}, err
 	}
-	s.mu.Lock()
-	s.session = updated
-	for _, rt := range s.runtimes {
-		if rt != nil {
-			rt.SetSession(updated)
-		}
-	}
-	s.mu.Unlock()
 	slog.Info("session renamed", "session_id", updated.ID, "title", updated.Title)
-	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
 
@@ -673,26 +688,11 @@ func (s *Session) SetAccessSettings(ctx context.Context, settings accesssettings
 	if err := accesssettings.Validate(settings); err != nil {
 		return domain.Session{}, err
 	}
-	s.mu.RLock()
-	sessionID := s.session.ID
-	s.mu.RUnlock()
-	if err := UpdateSession(ctx, s.store, sessionID, func(session *domain.Session) { session.AccessSettings = settings }); err != nil {
-		return domain.Session{}, err
-	}
-	updated, err := GetSession(ctx, s.store, sessionID)
+	updated, err := s.UpdateSession(ctx, func(session *domain.Session) { session.AccessSettings = settings })
 	if err != nil {
 		return domain.Session{}, err
 	}
-	s.mu.Lock()
-	s.session = updated
-	for _, rt := range s.runtimes {
-		if rt != nil {
-			rt.SetSession(updated)
-		}
-	}
-	s.mu.Unlock()
 	slog.Info("session access settings stored", "session_id", updated.ID)
-	s.emit(Event{Kind: EventSessionChanged, SessionID: updated.ID, Session: updated})
 	return updated, nil
 }
 

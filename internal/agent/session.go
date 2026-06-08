@@ -157,7 +157,11 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, c
 	if err != nil {
 		return nil, err
 	}
-	if err := sessionpkg.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
+	owner, err := e.LoadSession(ctx, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
 		session.ProjectRoot = projectRoot
 		session.AccessSettings = e.cfg.Access
 		session.ToolStates = make(domain.ToolStates, len(e.cfg.ToolDefaults))
@@ -167,7 +171,7 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, c
 	}); err != nil {
 		return nil, err
 	}
-	return e.LoadSession(ctx, session.ID)
+	return owner, nil
 }
 
 // DeleteSession closes any live runtimes and deletes the persisted session.
