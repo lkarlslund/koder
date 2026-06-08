@@ -73,6 +73,7 @@ type Snapshot struct {
 	QueuedInputs      []domain.QueuedInput
 	ExecProcesses     []tools.ExecProcess
 	PendingAssistant  PendingAssistantTurn
+	Turn              Turn
 	Status            Status
 	StatusText        string
 	Context           domain.ContextUsage
@@ -83,6 +84,7 @@ type Snapshot struct {
 type Update struct {
 	Event             *domain.Event
 	Snapshot          Snapshot
+	Turn              Turn
 	Status            Status
 	StatusText        string
 	Queue             []domain.QueuedInput
@@ -1277,7 +1279,7 @@ func (r *Chat) Snapshot() Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
-		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
+		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
 	chatRecord := r.state.Chat()
 	return Snapshot{
@@ -1289,6 +1291,7 @@ func (r *Chat) Snapshot() Snapshot {
 		Approvals:         r.state.Approvals(),
 		QueuedInputs:      visibleQueuedInputs(r.queue),
 		PendingAssistant:  r.state.PendingAssistant(),
+		Turn:              turnForStatus(r.status, r.active, r.cancelState),
 		Status:            r.status,
 		StatusText:        r.statusText,
 		Context:           r.state.CurrentContextSize(),
@@ -2967,6 +2970,7 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 	return Update{
 		Event:             event,
 		Snapshot:          snapshot,
+		Turn:              snapshot.Turn,
 		Status:            snapshot.Status,
 		StatusText:        snapshot.StatusText,
 		Queue:             visibleQueuedInputs(snapshot.QueuedInputs),
