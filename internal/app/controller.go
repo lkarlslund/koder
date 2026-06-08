@@ -520,25 +520,6 @@ func (c *Controller) RewindLiveChat(ctx context.Context, sessionID, chatID, anch
 		return nil, err
 	}
 	snapshot := rt.Snapshot()
-	status := sidebarStatusFromSnapshot(snapshot)
-	c.mu.Lock()
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.runtimes[chatID] = rt
-	c.snapshots[chatID] = snapshot
-	c.statuses[chatID] = status
-	if c.chat.ID == chatID {
-		c.runtime = rt
-		c.chat = snapshot.Chat
-	}
-	c.mu.Unlock()
 	c.broadcast("chat_delta", chat.Update{
 		Snapshot:        snapshot,
 		Status:          snapshot.Status,
@@ -592,21 +573,6 @@ func (c *Controller) ForkChatForSelection(ctx context.Context, selection Selecti
 		return domain.Chat{}, err
 	}
 	snapshot := rt.Snapshot()
-	status := sidebarStatusFromSnapshot(snapshot)
-	c.mu.Lock()
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.runtimes[snapshot.Chat.ID] = rt
-	c.snapshots[snapshot.Chat.ID] = snapshot
-	c.statuses[snapshot.Chat.ID] = status
-	c.mu.Unlock()
 	return snapshot.Chat, nil
 }
 
@@ -1052,44 +1018,24 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	c.shutdownMu.Lock()
 	defer c.shutdownMu.Unlock()
 
-	c.mu.RLock()
-	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
-	for _, rt := range c.runtimes {
-		if rt != nil {
-			runtimes = append(runtimes, rt)
-		}
-	}
+	c.mu.Lock()
 	if c.workspaceRefreshTimer != nil {
 		c.workspaceRefreshTimer.Stop()
+		c.workspaceRefreshTimer = nil
 	}
-	c.mu.RUnlock()
-	slog.Info("controller shutdown requested", "reason", reason, "runtimes", len(runtimes), "agent", c.agent != nil)
-	if c.agent != nil {
-		if err := c.agent.Shutdown(ctx, reason); err != nil {
-			slog.Error("controller shutdown failed", "reason", reason, "error", err)
-			return err
-		}
-		slog.Info("controller shutdown complete", "reason", reason, "agent", true)
+	agent := c.agent
+	c.mu.Unlock()
+	if agent == nil {
+		slog.Info("controller shutdown complete", "reason", reason, "agent", false)
 		return nil
 	}
-	var firstErr error
-	for _, rt := range runtimes {
-		var err error
-		if reason == "" {
-			err = rt.DrainAndClose(ctx)
-		} else {
-			err = rt.Shutdown(ctx, reason)
-		}
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
+	slog.Info("controller shutdown requested", "reason", reason, "agent", true)
+	if err := agent.Shutdown(ctx, reason); err != nil {
+		slog.Error("controller shutdown failed", "reason", reason, "error", err)
+		return err
 	}
-	if firstErr != nil {
-		slog.Error("controller shutdown failed", "reason", reason, "error", firstErr)
-		return firstErr
-	}
-	slog.Info("controller shutdown complete", "reason", reason, "agent", false, "runtimes", len(runtimes))
-	return firstErr
+	slog.Info("controller shutdown complete", "reason", reason, "agent", true)
+	return nil
 }
 
 // ApproveForSelection approves a pending tool call in the selected chat.
@@ -1409,7 +1355,7 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
 	chats := snapshot.Chats
-	if err := c.ensureSessionIdle(ctx, sessionID, chats); err != nil {
+	if err := c.ensureSessionIdle(ctx, owner, chats); err != nil {
 		return err
 	}
 	if err := c.agent.DeleteSession(ctx, sessionID); err != nil {
@@ -1441,19 +1387,20 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	return nil
 }
 
-func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID id.ID, chats []domain.Chat) error {
+func (c *Controller) ensureSessionIdle(ctx context.Context, owner *sessionpkg.Session, chats []domain.Chat) error {
+	if owner == nil {
+		return fmt.Errorf("session owner is required")
+	}
 	for _, chatRecord := range chats {
 		if len(chatRecord.QueuedInputs) > 0 {
 			return fmt.Errorf("session has active chats and cannot be deleted")
 		}
-		c.mu.RLock()
-		rt := c.runtimes[chatRecord.ID]
-		c.mu.RUnlock()
-		if rt != nil {
-			snapshot := rt.Snapshot()
-			if snapshot.Active || len(snapshot.QueuedInputs) > 0 || len(snapshot.Approvals) > 0 {
-				return fmt.Errorf("session has active chats and cannot be deleted")
-			}
+		status, err := owner.ChatStatus(ctx, chatRecord.ID)
+		if err != nil {
+			return err
+		}
+		if status.Busy || status.QueuedInputs > 0 || status.PendingApprovals > 0 {
+			return fmt.Errorf("session has active chats and cannot be deleted")
 		}
 	}
 	return nil
