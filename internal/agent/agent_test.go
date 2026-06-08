@@ -3314,7 +3314,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing
 	appendUserTimelineItem(t, st, chat.ID, "continue")
 	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "done"})
 
-	calls, err := engine.pendingExecutableToolCalls(context.Background(), chat.ID)
+	calls, err := engine.toolsRuntime.PendingExecutableToolCalls(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3347,7 +3347,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeFinalAssistant(t *te
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "done"})
 
-	calls, err := engine.pendingExecutableToolCalls(context.Background(), chat.ID)
+	calls, err := engine.toolsRuntime.PendingExecutableToolCalls(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

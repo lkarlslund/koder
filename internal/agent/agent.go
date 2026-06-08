@@ -193,33 +193,6 @@ func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions
 	return nil
 }
 
-func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID id.ID) ([]tools.Request, error) {
-	if chatID == "" {
-		return nil, nil
-	}
-	chatRecord, err := e.chatByID(ctx, chatID)
-	if err != nil {
-		return nil, err
-	}
-	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
-	if err != nil {
-		return nil, err
-	}
-	calls, err := rt.PendingExecutableToolCalls(ctx)
-	if err != nil {
-		return nil, err
-	}
-	requests := make([]tools.Request, 0, len(calls))
-	for _, call := range calls {
-		requests = append(requests, tools.Request{
-			Tool:       call.Tool,
-			ToolCallID: string(call.ToolCallID),
-			Args:       maps.Clone(call.Args),
-		})
-	}
-	return requests, nil
-}
-
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
 	owner, err := e.LoadSession(ctx, session.ID)
 	if err != nil {
@@ -1753,18 +1726,6 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 		})
 	}
 	return instructions
-}
-
-func (e *Engine) loadedSession(sessionID id.ID) *sessionpkg.Session {
-	if e == nil || e.registry == nil || sessionID == "" {
-		return nil
-	}
-	for _, owner := range e.registry.Loaded() {
-		if owner != nil && owner.Snapshot().Session.ID == sessionID {
-			return owner
-		}
-	}
-	return nil
 }
 
 func compactedHistoryMessage(summary string) provider.Message {
