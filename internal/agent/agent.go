@@ -506,7 +506,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 		return chatpkg.TurnStepResult{}, err
 	}
 	e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-	if err := e.materializeTurnInstructions(ctx, rt, turnInstructions, out); err != nil {
+	if err := rt.MaterializeTurnInstructions(ctx, turnInstructions, out); err != nil {
 		return chatpkg.TurnStepResult{}, err
 	}
 	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, rt, turnInstructions)
@@ -1789,36 +1789,6 @@ func turnInstructionBlocks(note string, continuePrompt string) []provider.Instru
 	return out
 }
 
-func (e *Engine) materializeTurnInstructions(ctx context.Context, rt *chatpkg.Chat, blocks []provider.InstructionBlock, out chan<- domain.Event) error {
-	if rt == nil {
-		return fmt.Errorf("chat runtime is required")
-	}
-	for _, block := range blocks {
-		user, ok := turnInstructionUserMessage(block)
-		if !ok {
-			continue
-		}
-		item, err := rt.AppendUserMessage(ctx, user)
-		if err != nil {
-			return err
-		}
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Turn instruction added", Item: item}
-	}
-	return nil
-}
-
-func turnInstructionUserMessage(block provider.InstructionBlock) (domain.UserMessage, bool) {
-	text := strings.TrimSpace(block.Text)
-	if text == "" {
-		return domain.UserMessage{}, false
-	}
-	source := domain.UserMessageSourceTurnInstruction
-	if block.Kind == provider.InstructionKindContinuation && text == "Continue from where you left off." {
-		source = domain.UserMessageSourceAutoResume
-	}
-	return domain.UserMessage{Text: text, Source: source}, true
-}
-
 func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID) ([]provider.Message, error) {
 	owner, err := e.LoadSession(ctx, sessionID)
 	if err != nil {
@@ -1991,7 +1961,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provider.Message {
 	var out []provider.Message
 	for _, block := range blocks {
-		user, ok := turnInstructionUserMessage(block)
+		user, ok := chatpkg.TurnInstructionUserMessage(block)
 		if !ok {
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -88,6 +89,36 @@ func ProviderRefusalPauseBody(reasoning string) string {
 		return body
 	}
 	return body + "\n\nProvider reasoning:\n" + strings.TrimSpace(reasoning)
+}
+
+func (r *Chat) MaterializeTurnInstructions(ctx context.Context, blocks []provider.InstructionBlock, out chan<- domain.Event) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	for _, block := range blocks {
+		user, ok := TurnInstructionUserMessage(block)
+		if !ok {
+			continue
+		}
+		item, err := r.AppendUserMessage(ctx, user)
+		if err != nil {
+			return err
+		}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Turn instruction added", Item: item}
+	}
+	return nil
+}
+
+func TurnInstructionUserMessage(block provider.InstructionBlock) (domain.UserMessage, bool) {
+	text := strings.TrimSpace(block.Text)
+	if text == "" {
+		return domain.UserMessage{}, false
+	}
+	source := domain.UserMessageSourceTurnInstruction
+	if block.Kind == provider.InstructionKindContinuation && text == "Continue from where you left off." {
+		source = domain.UserMessageSourceAutoResume
+	}
+	return domain.UserMessage{Text: text, Source: source}, true
 }
 
 func (r *Chat) PauseContinuation(ctx context.Context, pause ContinuationPause, out chan<- domain.Event) (domain.TimelineItem, bool) {
