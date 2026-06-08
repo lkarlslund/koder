@@ -46,6 +46,10 @@ func (r *Runtime) CompleteModelRequest(ctx context.Context, session domain.Sessi
 	}, nil
 }
 
+func DefaultRetryPause(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
+	return waitForRetry(ctx, delay, onTick)
+}
+
 func (r *Runtime) chatWithRetry(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, cavemanJob, error) {
 	sessionID := session.ID
 	providerID := chat.ProviderID

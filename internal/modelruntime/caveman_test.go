@@ -1,4 +1,4 @@
-package agent
+package modelruntime
 
 import (
 	"context"
@@ -69,7 +69,7 @@ func TestCavemanJobCanBeAwaitedMoreThanOnce(t *testing.T) {
 	}
 }
 
-func TestEngineWaitsForOutstandingCaveman(t *testing.T) {
+func TestRuntimeWaitsForOutstandingCaveman(t *testing.T) {
 	t.Parallel()
 
 	chatID := id.ID("chat-1")
@@ -79,12 +79,12 @@ func TestEngineWaitsForOutstandingCaveman(t *testing.T) {
 		<-release
 		return "me finish", nil
 	})
-	engine := &Engine{cavemanJobs: map[id.ID]cavemanJob{chatID: job}}
+	runtime := &Runtime{cavemanJobs: map[id.ID]cavemanJob{chatID: job}}
 	events := make(chan domain.Event, 1)
 	done := make(chan error, 1)
 
 	go func() {
-		done <- engine.awaitOutstandingCaveman(context.Background(), chatID, events)
+		done <- runtime.awaitOutstandingCaveman(context.Background(), chatID, events)
 	}()
 
 	select {
@@ -107,7 +107,7 @@ func TestEngineWaitsForOutstandingCaveman(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for outstanding caveman to finish")
 	}
-	if len(engine.cavemanJobs) != 0 {
-		t.Fatalf("expected outstanding caveman to be cleared, got %#v", engine.cavemanJobs)
+	if len(runtime.cavemanJobs) != 0 {
+		t.Fatalf("expected outstanding caveman to be cleared, got %#v", runtime.cavemanJobs)
 	}
 }
