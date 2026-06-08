@@ -20,9 +20,6 @@ import (
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
-// ChatLoader builds live chat runtimes for session-owned chat records.
-type ChatLoader func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error)
-
 // EventKind identifies a session-owned state mutation.
 type EventKind string
 
@@ -53,8 +50,9 @@ type Event struct {
 
 // Session owns the live state for one persisted session.
 type Session struct {
-	store      *store.Store
-	chatLoader ChatLoader
+	store    *store.Store
+	chatsSrc *chatpkg.Source
+	planSrc  *planning.Source
 
 	mu         sync.RWMutex
 	session    domain.Session
@@ -71,12 +69,15 @@ type Session struct {
 }
 
 // Load hydrates a live session owner from persisted state.
-func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID id.ID) (*Session, error) {
+func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSrc *planning.Source, sessionID id.ID) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("store is required")
 	}
-	if chatLoader == nil {
-		return nil, fmt.Errorf("chat loader is required")
+	if chatsSrc == nil {
+		return nil, fmt.Errorf("chat source is required")
+	}
+	if planSrc == nil {
+		return nil, fmt.Errorf("planning source is required")
 	}
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
@@ -85,25 +86,26 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	chats, err := chatpkg.ListRecordsForSession(ctx, st, sessionID)
+	chats, err := chatsSrc.ListRecordsForSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planning.LoadPlan(ctx, st, sessionID)
+	plan, err := planSrc.LoadPlan(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	todosByRef, err := loadTodosByRef(ctx, st, sessionID, plan)
+	todosByRef, err := loadTodosByRef(ctx, planSrc, sessionID, plan)
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := planning.ListTasks(ctx, st, sessionID)
+	tasks, err := planSrc.ListTasks(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	owner := &Session{
 		store:      st,
-		chatLoader: chatLoader,
+		chatsSrc:   chatsSrc,
+		planSrc:    planSrc,
 		session:    session,
 		chats:      slices.Clone(chats),
 		runtimes:   map[id.ID]*chatpkg.Chat{},
@@ -114,7 +116,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 		subs:       map[int]chan Event{},
 	}
 	for _, chatRecord := range owner.chats {
-		rt, err := owner.chatLoader(ctx, owner.session, chatRecord)
+		rt, err := owner.chatsSrc.LoadMetadata(ctx, owner.session, chatRecord)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +127,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	return owner, nil
 }
 
-func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
+func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
 	out := map[string][]planning.TodoItem{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
@@ -139,7 +141,7 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan 
 		seen[ref] = struct{}{}
 		out[ref] = nil
 	}
-	items, err := planning.ListTodos(ctx, st, sessionID, "")
+	items, err := planSrc.ListTodos(ctx, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +247,7 @@ func (s *Session) Chat(ctx context.Context, chatID id.ID) (*chatpkg.Chat, error)
 	if !ok {
 		return nil, fmt.Errorf("chat %s not found", chatID)
 	}
-	rt, err := s.chatLoader(ctx, session, chatRecord)
+	rt, err := s.chatsSrc.LoadMetadata(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -352,11 +354,11 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 		return nil, err
 	}
 	sourceSnapshot := sourceRuntime.Snapshot()
-	chatRecord, err := chatpkg.ForkRecordAt(ctx, s.store, source, sourceSnapshot.Timeline, anchorItemID, title, position)
+	chatRecord, err := s.chatsSrc.ForkRecordAt(ctx, source, sourceSnapshot.Timeline, anchorItemID, title, position)
 	if err != nil {
 		return nil, err
 	}
-	rt, err := s.chatLoader(ctx, session, chatRecord)
+	rt, err := s.chatsSrc.LoadMetadata(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -396,10 +398,10 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
 	}
-	if err := chatpkg.PutRecord(ctx, s.store, chatRecord); err != nil {
+	if err := s.chatsSrc.PutRecord(ctx, chatRecord); err != nil {
 		return nil, err
 	}
-	rt, err := s.chatLoader(ctx, session, chatRecord)
+	rt, err := s.chatsSrc.LoadMetadata(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +475,7 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	if best := newestSessionChat(chats); best.ID != "" {
 		return best, nil
 	}
-	chatRecord, err := chatpkg.DefaultRecord(ctx, s.store, session.ID)
+	chatRecord, err := s.chatsSrc.DefaultRecord(ctx, session.ID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -541,7 +543,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 	rt := s.runtimes[target.ID]
 	s.mu.Unlock()
 	if rt == nil {
-		loaded, err := s.chatLoader(ctx, session, target)
+		loaded, err := s.chatsSrc.LoadMetadata(ctx, session, target)
 		if err != nil {
 			return chattool.Status{}, "", err
 		}
@@ -624,7 +626,7 @@ func (s *Session) ReorderChats(ctx context.Context, ids []id.ID) ([]domain.Chat,
 		}
 		seen[chatID] = true
 		chatRecord.Position = idx
-		if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
+		if err := s.chatsSrc.UpdateRecord(ctx, chatRecord); err != nil {
 			s.mu.Unlock()
 			return nil, err
 		}
@@ -703,7 +705,7 @@ func (s *Session) SetChatModel(ctx context.Context, chatID id.ID, providerID, mo
 	chatRecord.ProviderID = providerID
 	chatRecord.ModelID = modelID
 	chatRecord.UpdatedAt = time.Now().UTC()
-	if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
+	if err := s.chatsSrc.UpdateRecord(ctx, chatRecord); err != nil {
 		return domain.Chat{}, err
 	}
 	s.mu.Lock()
@@ -778,7 +780,7 @@ func (s *Session) TouchSelection(ctx context.Context, chatID id.ID) (domain.Sess
 		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
-	if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
+	if err := s.chatsSrc.UpdateRecord(ctx, chatRecord); err != nil {
 		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
@@ -927,7 +929,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
-	if err := planning.SavePlan(ctx, s.store, plan); err != nil {
+	if err := s.planSrc.SavePlan(ctx, plan); err != nil {
 		return planning.Plan{}, err
 	}
 	s.mu.Lock()
@@ -971,7 +973,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 		})
 	}
 	for _, item := range items {
-		if err := planning.SaveTodo(ctx, s.store, item); err != nil {
+		if err := s.planSrc.SaveTodo(ctx, item); err != nil {
 			return nil, err
 		}
 	}
@@ -1023,7 +1025,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = now
-	if err := planning.SaveTodo(ctx, s.store, item); err != nil {
+	if err := s.planSrc.SaveTodo(ctx, item); err != nil {
 		return planning.TodoItem{}, err
 	}
 	s.mu.Lock()
@@ -1069,7 +1071,7 @@ func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, sta
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := planning.SaveTask(ctx, s.store, task); err != nil {
+	if err := s.planSrc.SaveTask(ctx, task); err != nil {
 		return planning.Task{}, err
 	}
 	s.mu.Lock()

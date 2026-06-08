@@ -25,6 +25,97 @@ type Approval struct {
 	CreatedAt  time.Time
 }
 
+type Source struct {
+	deps func() Deps
+}
+
+func NewSource(deps func() Deps) *Source {
+	return &Source{deps: deps}
+}
+
+func (s *Source) currentDeps() (Deps, error) {
+	if s == nil || s.deps == nil {
+		return Deps{}, fmt.Errorf("chat source is required")
+	}
+	deps := s.deps()
+	if deps.Store == nil {
+		return Deps{}, fmt.Errorf("store is required")
+	}
+	return deps, nil
+}
+
+func (s *Source) Load(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return nil, err
+	}
+	return Load(ctx, session, chatRecord, deps, nil)
+}
+
+func (s *Source) LoadMetadata(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return nil, err
+	}
+	return LoadMetadata(ctx, session, chatRecord, deps, nil)
+}
+
+func (s *Source) ListRecordsForSession(ctx context.Context, sessionID id.ID) ([]domain.Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return nil, err
+	}
+	return listRecordsForSession(ctx, deps.Store, sessionID)
+}
+
+func (s *Source) DefaultRecord(ctx context.Context, sessionID id.ID) (domain.Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	return defaultRecord(ctx, deps.Store, sessionID)
+}
+
+func (s *Source) CreateRecord(ctx context.Context, req CreateRecordRequest) (domain.Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	return createRecord(ctx, deps.Store, req)
+}
+
+func (s *Source) PutRecord(ctx context.Context, chatRecord domain.Chat) error {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return err
+	}
+	return putChat(ctx, deps.Store, chatRecord)
+}
+
+func (s *Source) UpdateRecord(ctx context.Context, chatRecord domain.Chat) error {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return err
+	}
+	return updateChat(ctx, deps.Store, chatRecord)
+}
+
+func (s *Source) ForkRecordAt(ctx context.Context, source domain.Chat, sourceTimeline []domain.TimelineItem, anchorItemID id.ID, title string, position int) (domain.Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	return forkRecordAt(ctx, deps.Store, source, sourceTimeline, anchorItemID, title, position)
+}
+
+func (s *Source) DeleteSessionData(ctx context.Context, sessionID id.ID) error {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return err
+	}
+	return deleteSessionData(ctx, deps.Store, sessionID)
+}
+
 func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
 		Namespace: "timeline",
@@ -60,7 +151,7 @@ func chatCollection(st *store.Store) store.Collection[domain.Chat] {
 	})
 }
 
-func ListRecordsForSession(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
+func listRecordsForSession(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
 	chats, err := chatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -90,8 +181,8 @@ func sortRecordsForSidebar(chats []domain.Chat) {
 	})
 }
 
-func DefaultRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
-	chats, err := ListRecordsForSession(ctx, st, sessionID)
+func defaultRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
+	chats, err := listRecordsForSession(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -118,12 +209,12 @@ type CreateRecordRequest struct {
 	Position          int
 }
 
-func CreateRecord(ctx context.Context, st *store.Store, req CreateRecordRequest) (domain.Chat, error) {
+func createRecord(ctx context.Context, st *store.Store, req CreateRecordRequest) (domain.Chat, error) {
 	session := req.Session
 	if session.ID == "" {
 		return domain.Chat{}, fmt.Errorf("create chat: session id is required")
 	}
-	chats, err := ListRecordsForSession(ctx, st, session.ID)
+	chats, err := listRecordsForSession(ctx, st, session.ID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -159,7 +250,7 @@ func CreateRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 		chatRecord.ToolStates = cloneToolStates(session.ToolStates)
 	}
 	if chatRecord.ProviderID == "" || chatRecord.ModelID == "" {
-		if defaultChat, err := DefaultRecord(ctx, st, session.ID); err == nil {
+		if defaultChat, err := defaultRecord(ctx, st, session.ID); err == nil {
 			if chatRecord.ProviderID == "" {
 				chatRecord.ProviderID = defaultChat.ProviderID
 			}
@@ -174,23 +265,15 @@ func CreateRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 	return chatRecord, nil
 }
 
-func PutRecord(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
-	return putChat(ctx, st, chatRecord)
-}
-
-func UpdateRecord(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
-	return updateChat(ctx, st, chatRecord)
-}
-
 func deleteRecord(ctx context.Context, st *store.Store, chatID id.ID) error {
 	return chatCollection(st).Delete(ctx, chatID)
 }
 
-func DeleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
+func deleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
 	if sessionID == "" {
 		return fmt.Errorf("delete chat session data: session id is required")
 	}
-	chats, err := ListRecordsForSession(ctx, st, sessionID)
+	chats, err := listRecordsForSession(ctx, st, sessionID)
 	if err != nil {
 		return err
 	}
@@ -205,7 +288,7 @@ func DeleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) er
 	return nil
 }
 
-func ForkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sourceTimeline []domain.TimelineItem, anchorItemID id.ID, title string, position int) (domain.Chat, error) {
+func forkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sourceTimeline []domain.TimelineItem, anchorItemID id.ID, title string, position int) (domain.Chat, error) {
 	if source.ID == "" {
 		return domain.Chat{}, fmt.Errorf("fork chat: source chat id is required")
 	}

@@ -11,6 +11,77 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 )
 
+type Source struct {
+	store *store.Store
+}
+
+func NewSource(st *store.Store) *Source {
+	return &Source{store: st}
+}
+
+func (s *Source) requireStore() (*store.Store, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("planning source store is required")
+	}
+	return s.store, nil
+}
+
+func (s *Source) LoadPlan(ctx context.Context, sessionID id.ID) (Plan, error) {
+	st, err := s.requireStore()
+	if err != nil {
+		return Plan{}, err
+	}
+	return loadPlan(ctx, st, sessionID)
+}
+
+func (s *Source) SavePlan(ctx context.Context, plan Plan) error {
+	st, err := s.requireStore()
+	if err != nil {
+		return err
+	}
+	return savePlan(ctx, st, plan)
+}
+
+func (s *Source) SaveTodo(ctx context.Context, item TodoItem) error {
+	st, err := s.requireStore()
+	if err != nil {
+		return err
+	}
+	return saveTodo(ctx, st, item)
+}
+
+func (s *Source) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]TodoItem, error) {
+	st, err := s.requireStore()
+	if err != nil {
+		return nil, err
+	}
+	return listTodos(ctx, st, sessionID, milestoneRef)
+}
+
+func (s *Source) SaveTask(ctx context.Context, task Task) error {
+	st, err := s.requireStore()
+	if err != nil {
+		return err
+	}
+	return saveTask(ctx, st, task)
+}
+
+func (s *Source) ListTasks(ctx context.Context, sessionID id.ID) ([]Task, error) {
+	st, err := s.requireStore()
+	if err != nil {
+		return nil, err
+	}
+	return listTasks(ctx, st, sessionID)
+}
+
+func (s *Source) DeleteSessionData(ctx context.Context, sessionID id.ID) error {
+	st, err := s.requireStore()
+	if err != nil {
+		return err
+	}
+	return deleteSessionData(ctx, st, sessionID)
+}
+
 func planCollection(st *store.Store) store.Collection[Plan] {
 	return store.NewCollection(st, store.CollectionSpec[Plan]{
 		Namespace: "milestone-plans",
@@ -42,7 +113,7 @@ func taskCollection(st *store.Store) store.Collection[Task] {
 	})
 }
 
-func LoadPlan(ctx context.Context, st *store.Store, sessionID id.ID) (Plan, error) {
+func loadPlan(ctx context.Context, st *store.Store, sessionID id.ID) (Plan, error) {
 	plan, err := planCollection(st).Get(ctx, sessionID)
 	if err != nil {
 		return Plan{SessionID: sessionID}, nil
@@ -50,7 +121,7 @@ func LoadPlan(ctx context.Context, st *store.Store, sessionID id.ID) (Plan, erro
 	return plan, nil
 }
 
-func SavePlan(ctx context.Context, st *store.Store, plan Plan) error {
+func savePlan(ctx context.Context, st *store.Store, plan Plan) error {
 	if plan.SessionID == "" {
 		return fmt.Errorf("put milestone plan: session id is required")
 	}
@@ -60,7 +131,7 @@ func SavePlan(ctx context.Context, st *store.Store, plan Plan) error {
 	return planCollection(st).Put(ctx, plan)
 }
 
-func SaveTodo(ctx context.Context, st *store.Store, item TodoItem) error {
+func saveTodo(ctx context.Context, st *store.Store, item TodoItem) error {
 	if item.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
@@ -73,7 +144,7 @@ func SaveTodo(ctx context.Context, st *store.Store, item TodoItem) error {
 	return todoCollection(st).Put(ctx, item)
 }
 
-func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]TodoItem, error) {
+func listTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]TodoItem, error) {
 	query := store.ByIndex[TodoItem]("session", string(sessionID))
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	if milestoneRef != "" {
@@ -87,7 +158,7 @@ func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneR
 	return items, nil
 }
 
-func SaveTask(ctx context.Context, st *store.Store, task Task) error {
+func saveTask(ctx context.Context, st *store.Store, task Task) error {
 	if task.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
@@ -97,7 +168,7 @@ func SaveTask(ctx context.Context, st *store.Store, task Task) error {
 	return taskCollection(st).Put(ctx, task)
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]Task, error) {
+func listTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]Task, error) {
 	items, err := taskCollection(st).List(ctx, store.ByIndex[Task]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -119,8 +190,8 @@ func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]Task, e
 	return items, nil
 }
 
-func DeleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
-	tasks, err := ListTasks(ctx, st, sessionID)
+func deleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
+	tasks, err := listTasks(ctx, st, sessionID)
 	if err != nil {
 		return err
 	}
@@ -129,7 +200,7 @@ func DeleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) er
 			return err
 		}
 	}
-	todos, err := ListTodos(ctx, st, sessionID, "")
+	todos, err := listTodos(ctx, st, sessionID, "")
 	if err != nil {
 		return err
 	}

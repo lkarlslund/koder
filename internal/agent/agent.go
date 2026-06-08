@@ -26,6 +26,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modelruntime"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -89,7 +90,9 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		}
 		return e.retryPause(ctx, delay, onTick)
 	})
-	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
+	chatSource := chatpkg.NewSource(e.ChatDeps)
+	planSource := planning.NewSource(st)
+	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.modelRuntime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings: settingsStore,

@@ -23,7 +23,7 @@ func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 	})
 }
 
-func createSessionRecord(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
+func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
 		ID:                id.NewAt(now),
@@ -39,7 +39,10 @@ func createSessionRecord(ctx context.Context, st *store.Store, title, providerID
 	if err := sessionCollection(st).Put(ctx, session); err != nil {
 		return domain.Session{}, err
 	}
-	if _, err := chatpkg.CreateRecord(ctx, st, chatpkg.CreateRecordRequest{
+	if chatsSrc == nil {
+		return domain.Session{}, fmt.Errorf("chat source is required")
+	}
+	if _, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{
 		Session:    session,
 		Title:      "Main",
 		Role:       chatrole.Orchestrator,
@@ -85,14 +88,20 @@ func putSessionRecord(ctx context.Context, st *store.Store, session domain.Sessi
 	return sessionCollection(st).Put(ctx, session)
 }
 
-func deleteSessionRecord(ctx context.Context, st *store.Store, sessionID id.ID) error {
+func deleteSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSrc *planning.Source, sessionID id.ID) error {
 	if sessionID == "" {
 		return fmt.Errorf("delete session: session id is required")
 	}
-	if err := chatpkg.DeleteSessionData(ctx, st, sessionID); err != nil {
+	if chatsSrc == nil {
+		return fmt.Errorf("chat source is required")
+	}
+	if planSrc == nil {
+		return fmt.Errorf("planning source is required")
+	}
+	if err := chatsSrc.DeleteSessionData(ctx, sessionID); err != nil {
 		return err
 	}
-	if err := planning.DeleteSessionData(ctx, st, sessionID); err != nil {
+	if err := planSrc.DeleteSessionData(ctx, sessionID); err != nil {
 		return err
 	}
 	return sessionCollection(st).Delete(ctx, sessionID)

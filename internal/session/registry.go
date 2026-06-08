@@ -11,6 +11,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -21,20 +22,22 @@ type RegistryConfig struct {
 }
 
 type Registry struct {
-	store      *store.Store
-	chatLoader ChatLoader
+	store    *store.Store
+	chatsSrc *chatpkg.Source
+	planSrc  *planning.Source
 
 	mu       sync.RWMutex
 	sessions map[id.ID]*Session
 	config   RegistryConfig
 }
 
-func NewRegistry(st *store.Store, chatLoader ChatLoader, cfg RegistryConfig) *Registry {
+func NewRegistry(st *store.Store, chatsSrc *chatpkg.Source, planSrc *planning.Source, cfg RegistryConfig) *Registry {
 	return &Registry{
-		store:      st,
-		chatLoader: chatLoader,
-		sessions:   map[id.ID]*Session{},
-		config:     cloneRegistryConfig(cfg),
+		store:    st,
+		chatsSrc: chatsSrc,
+		planSrc:  planSrc,
+		sessions: map[id.ID]*Session{},
+		config:   cloneRegistryConfig(cfg),
 	}
 }
 
@@ -51,8 +54,11 @@ func (r *Registry) Load(ctx context.Context, sessionID id.ID) (*Session, error) 
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")
 	}
-	if r.chatLoader == nil {
-		return nil, fmt.Errorf("chat loader is required")
+	if r.chatsSrc == nil {
+		return nil, fmt.Errorf("chat source is required")
+	}
+	if r.planSrc == nil {
+		return nil, fmt.Errorf("planning source is required")
 	}
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
@@ -64,7 +70,7 @@ func (r *Registry) Load(ctx context.Context, sessionID id.ID) (*Session, error) 
 	}
 	r.mu.RUnlock()
 
-	loaded, err := Load(ctx, r.store, r.chatLoader, sessionID)
+	loaded, err := Load(ctx, r.store, r.chatsSrc, r.planSrc, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +187,7 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 		}
 	}
 	cfg := r.currentConfig()
-	session, err := createSessionRecord(ctx, r.store, title, cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := createSessionRecord(ctx, r.store, r.chatsSrc, title, cfg.DefaultProvider, cfg.DefaultModel, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +220,7 @@ func (r *Registry) Delete(ctx context.Context, sessionID id.ID) error {
 			return err
 		}
 	}
-	return deleteSessionRecord(ctx, r.store, sessionID)
+	return deleteSessionRecord(ctx, r.store, r.chatsSrc, r.planSrc, sessionID)
 }
 
 func (r *Registry) Shutdown(ctx context.Context, reason chatpkg.CancelReason) error {
