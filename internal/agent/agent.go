@@ -1336,10 +1336,6 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) buildConversationForTurn(_ context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
-	return e.modelRuntime.BuildConversationForTurn(context.Background(), req)
-}
-
 func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []domain.TimelineItem {
 	lastToolAssistant := -1
 	for idx, item := range timeline {
