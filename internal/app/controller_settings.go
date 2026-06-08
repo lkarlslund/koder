@@ -147,15 +147,6 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 			return ProviderState{}, err
 		}
 		c.chat = chatRecord
-		for idx := range c.chats {
-			if c.chats[idx].ID == chatRecord.ID {
-				c.chats[idx] = chatRecord
-			}
-		}
-		if c.runtime != nil {
-			c.runtime.SetChat(chatRecord)
-			c.runtime.SetSession(c.session)
-		}
 	}
 	state := c.providerStateLocked()
 	c.mu.Unlock()
@@ -216,15 +207,6 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 			return ProviderState{}, err
 		}
 		c.chat = chatRecord
-		for idx := range c.chats {
-			if c.chats[idx].ID == chatRecord.ID {
-				c.chats[idx] = chatRecord
-			}
-		}
-		if c.runtime != nil {
-			c.runtime.SetChat(chatRecord)
-			c.runtime.SetSession(c.session)
-		}
 	}
 	state := c.providerStateLocked()
 	c.mu.Unlock()
@@ -521,11 +503,7 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 			c.sessions[idx] = session
 		}
 	}
-	if snapshot, ok := c.snapshots[chatRecord.ID]; ok {
-		snapshot.Chat = chatRecord
-		snapshot.Session = session
-		c.snapshots[chatRecord.ID] = snapshot
-	}
+	c.chat = chatRecord
 	c.mu.Unlock()
 	return nil
 }
@@ -564,11 +542,8 @@ func (c *Controller) SetAccessSettingsForSelection(ctx context.Context, selectio
 			c.sessions[idx] = session
 		}
 	}
-	for id, item := range c.snapshots {
-		if item.Session.ID == session.ID {
-			item.Session = session
-			c.snapshots[id] = item
-		}
+	if c.session.ID == session.ID {
+		c.session = session
 	}
 	c.mu.Unlock()
 	for _, rt := range runtimes {

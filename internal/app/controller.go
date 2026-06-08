@@ -336,17 +336,7 @@ type Controller struct {
 	mu                          sync.RWMutex
 	session                     domain.Session
 	sessions                    []domain.Session
-	chats                       []domain.Chat
-	statuses                    map[id.ID]ChatSidebarStatus
 	chat                        domain.Chat
-	runtime                     *chat.Chat
-	unsub                       func()
-	runtimes                    map[id.ID]*chat.Chat
-	execUnsubs                  map[id.ID]func()
-	snapshots                   map[id.ID]chat.Snapshot
-	milestone                   planning.Plan
-	todos                       []planning.TodoItem
-	todosByRef                  map[string][]planning.TodoItem
 	workspace                   workspacepkg.Status
 	workspaceWatchCancel        context.CancelFunc
 	workspaceRefreshMinInterval time.Duration
@@ -372,10 +362,6 @@ func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 		store:                       st,
 		agent:                       engine,
 		theme:                       normalizeTheme(cfg.UI.Theme),
-		statuses:                    map[id.ID]ChatSidebarStatus{},
-		runtimes:                    map[id.ID]*chat.Chat{},
-		execUnsubs:                  map[id.ID]func(){},
-		snapshots:                   map[id.ID]chat.Snapshot{},
 		subs:                        map[int]chan Event{},
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 	}
@@ -1366,19 +1352,9 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	}
 	c.mu.Lock()
 	c.sessions = sessions
-	for _, chatRecord := range chats {
-		delete(c.runtimes, chatRecord.ID)
-		delete(c.snapshots, chatRecord.ID)
-		delete(c.statuses, chatRecord.ID)
-	}
 	if c.session.ID == sessionID {
 		c.session = domain.Session{}
 		c.chat = domain.Chat{}
-		c.runtime = nil
-		c.chats = nil
-		c.milestone = planning.Plan{}
-		c.todos = nil
-		c.todosByRef = nil
 		c.workspace = workspacepkg.Status{}
 	}
 	c.mu.Unlock()
@@ -1861,55 +1837,17 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		runtimes[item.ID] = loaded
 	}
 	ownerSnapshot = owner.Snapshot()
-	milestone := ownerSnapshot.Plan
-	todos := ownerSnapshot.Todos
-	todosByRef := ownerSnapshot.TodosByRef
-	statuses := idleStatusesForChats(chats)
 	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
 	for id, snapshot := range ownerSnapshot.Snapshots {
 		snapshots[id] = snapshot
-		if _, ok := statuses[id]; ok {
-			statuses[id] = sidebarStatusFromSnapshot(snapshot)
-		}
 	}
 	if _, ok := snapshots[chatRecord.ID]; !ok {
-		snapshot := rt.Snapshot()
-		snapshots[chatRecord.ID] = snapshot
-		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
+		snapshots[chatRecord.ID] = rt.Snapshot()
 	}
 	c.mu.Lock()
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.execUnsubs == nil {
-		c.execUnsubs = map[id.ID]func(){}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
 	c.session = session
 	c.sessions = sessions
-	c.chats = chats
 	c.chat = chatRecord
-	c.runtime = rt
-	c.unsub = nil
-	for id, loaded := range runtimes {
-		c.runtimes[id] = loaded
-	}
-	execSubscriptions := c.ensureExecSubscriptionsLocked(chats)
-	for id, snapshot := range snapshots {
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		c.snapshots[id] = snapshot
-	}
-	for id, status := range statuses {
-		c.statuses[id] = status
-	}
-	c.milestone = milestone
-	c.todos = todos
-	c.todosByRef = todosByRef
 	c.workspace = workspacepkg.Status{ProjectRoot: session.ProjectRoot}
 	c.lastWorkspaceRefresh = time.Time{}
 	if c.workspaceRefreshTimer != nil {
@@ -1920,9 +1858,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	c.lastErr = ""
 	c.mu.Unlock()
 
-	for _, sub := range execSubscriptions {
-		go c.forwardExecRuntime(sub.chatID, sub.events)
-	}
 	if err := c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshInitial); err != nil {
 		return err
 	}

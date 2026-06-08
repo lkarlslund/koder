@@ -6,33 +6,9 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
-	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
-
-type execRuntimeSubscription struct {
-	chatID id.ID
-	events <-chan execruntime.Event
-}
-
-func (c *Controller) ensureExecSubscriptionsLocked(chats []domain.Chat) []execRuntimeSubscription {
-	manager := c.execManagerLocked()
-	if manager == nil {
-		return nil
-	}
-	subscriptions := make([]execRuntimeSubscription, 0, len(chats))
-	for _, item := range chats {
-		if item.ID == "" || c.execUnsubs[item.ID] != nil {
-			continue
-		}
-		events, unsub := manager.Subscribe(item.ID)
-		c.execUnsubs[item.ID] = unsub
-		subscriptions = append(subscriptions, execRuntimeSubscription{chatID: item.ID, events: events})
-	}
-	return subscriptions
-}
 
 func (c *Controller) execManagerLocked() *execruntime.Manager {
 	if c == nil || c.agent == nil {
@@ -125,37 +101,4 @@ func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selec
 		}
 	}
 	return process, nil
-}
-
-func (c *Controller) forwardExecRuntime(chatID id.ID, events <-chan execruntime.Event) {
-	for range events {
-		c.mu.RLock()
-		session := c.session
-		c.mu.RUnlock()
-		if session.ID == "" || c.agent == nil {
-			continue
-		}
-		owner, err := c.agent.LoadSession(context.Background(), session.ID)
-		if err != nil {
-			continue
-		}
-		ownerSnapshot := owner.Snapshot()
-		snapshot := ownerSnapshot.Snapshots[chatID]
-		if snapshot.Chat.ID == "" {
-			if rt, err := owner.Chat(context.Background(), chatID); err == nil && rt != nil {
-				snapshot = rt.Snapshot()
-			}
-		}
-		if snapshot.Chat.ID == "" {
-			continue
-		}
-		snapshot = c.snapshotWithExecProcessesForSession(ownerSnapshot.Session, snapshot)
-		c.broadcast("chat_delta", chat.Update{
-			Snapshot:   snapshot,
-			Status:     snapshot.Status,
-			StatusText: snapshot.StatusText,
-			Context:    snapshot.Context,
-			Active:     snapshot.Active,
-		})
-	}
 }
