@@ -1141,58 +1141,19 @@ func (c *Controller) NewChatForSelection(ctx context.Context, selection Selectio
 	if snapshot.Chat.ID == "" {
 		return domain.Chat{}, fmt.Errorf("created chat has no id")
 	}
-	c.mu.Lock()
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.runtimes[snapshot.Chat.ID] = rt
-	snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-	c.snapshots[snapshot.Chat.ID] = snapshot
-	c.statuses[snapshot.Chat.ID] = sidebarStatusFromSnapshot(snapshot)
-	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{snapshot.Chat})
-	c.mu.Unlock()
-	for _, sub := range execSubscriptions {
-		go c.forwardExecRuntime(sub.chatID, sub.events)
-	}
-	c.broadcast("chat_delta", chat.Update{
-		Snapshot:   snapshot,
-		Status:     snapshot.Status,
-		StatusText: snapshot.StatusText,
-		Context:    snapshot.Context,
-		Active:     snapshot.Active,
-	})
 	c.broadcast("chats_delta", map[string]any{"session_id": session.ID, "chat": snapshot.Chat})
 	return snapshot.Chat, nil
 }
 
-// ListChats returns the controller's live chat list for the active session.
+// ListChats returns the owning session's live chat list.
 func (c *Controller) ListChats(ctx context.Context, sessionID id.ID) ([]chattool.Status, error) {
-	c.mu.RLock()
 	if sessionID == "" {
-		sessionID = c.session.ID
+		return nil, fmt.Errorf("session id is required")
 	}
-	if sessionID != c.session.ID {
-		c.mu.RUnlock()
-		return nil, fmt.Errorf("session %s is not active", sessionID)
+	if c.agent == nil {
+		return nil, fmt.Errorf("no chat agent")
 	}
-	chats := slices.Clone(c.chats)
-	statuses := make(map[id.ID]ChatSidebarStatus, len(c.statuses))
-	for id, status := range c.statuses {
-		statuses[id] = status
-	}
-	c.mu.RUnlock()
-	out := make([]chattool.Status, 0, len(chats))
-	for _, item := range chats {
-		status := statuses[item.ID]
-		out = append(out, toolStatusFromSidebar(item, status))
-	}
-	return out, nil
+	return c.agent.ListChats(ctx, sessionID)
 }
 
 // StartChat creates a child chat and adds it to the live session before broadcasting.
@@ -1301,26 +1262,6 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
-func patchChatFromToolStatus(chats *[]domain.Chat, status chattool.Status) {
-	for idx := range *chats {
-		if (*chats)[idx].ID == status.ID {
-			patchChatSnapshotFromToolStatus(&(*chats)[idx], status)
-			return
-		}
-	}
-}
-
-func patchChatSnapshotFromToolStatus(chatRecord *domain.Chat, status chattool.Status) {
-	if chatRecord == nil || status.ID == "" || chatRecord.ID != status.ID {
-		return
-	}
-	chatRecord.Title = status.Title
-	chatRecord.WorkflowRole = status.Role
-	chatRecord.Archived = status.Archived
-	chatRecord.ActiveMilestoneRef = status.ActiveMilestoneRef
-	chatRecord.AssignedTodoRef = status.AssignedTodoRef
-}
-
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
@@ -1333,14 +1274,8 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 	if chatID == "" {
 		return chattool.Status{}, fmt.Errorf("chat id is required")
 	}
-	c.mu.RLock()
 	if sessionID == "" {
-		sessionID = c.session.ID
-	}
-	activeChatID := c.chat.ID
-	c.mu.RUnlock()
-	if sessionID == "" {
-		return chattool.Status{}, fmt.Errorf("no active session")
+		return chattool.Status{}, fmt.Errorf("session id is required")
 	}
 	if c.agent == nil {
 		return chattool.Status{}, fmt.Errorf("no chat agent")
@@ -1349,38 +1284,14 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 	if err != nil {
 		return chattool.Status{}, err
 	}
-	archivingActive := update.Archived != nil && *update.Archived && chatID == activeChatID
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		status, err := c.agent.UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
 		return status, err
 	}
-	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
+	status, _, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {
 		return chattool.Status{}, err
 	}
-	c.mu.Lock()
-	matchesActiveSession := c.session.ID == sessionID
-	if matchesActiveSession {
-		patchChatFromToolStatus(&c.chats, status)
-		if c.chat.ID == status.ID {
-			if updated, ok := chatByID(c.chats, status.ID); ok {
-				c.chat = updated
-			}
-		}
-	}
-	if snapshot, ok := c.snapshots[status.ID]; ok {
-		patchChatSnapshotFromToolStatus(&snapshot.Chat, status)
-		c.snapshots[status.ID] = snapshot
-	}
-	if matchesActiveSession && archivingActive {
-		if next, ok := chatByID(c.chats, nextChatID); ok {
-			c.chat = next
-			if rt := c.runtimes[next.ID]; rt != nil {
-				c.runtime = rt
-			}
-		}
-	}
-	c.mu.Unlock()
 	return status, nil
 }
 
@@ -1400,14 +1311,6 @@ func (c *Controller) ReorderChatsForSelection(ctx context.Context, selection Sel
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	for _, item := range ordered {
-		if snapshot, ok := c.snapshots[item.ID]; ok {
-			snapshot.Chat = item
-			c.snapshots[item.ID] = snapshot
-		}
-	}
-	c.mu.Unlock()
 	c.broadcast("chats_delta", map[string]any{"session_id": selection.SessionID, "chats": ordered})
 	return nil
 }
@@ -1580,10 +1483,14 @@ func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection
 	if selection.SessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
-	session, err := sessionpkg.GetSession(ctx, c.store, selection.SessionID)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
 	if err != nil {
 		return err
 	}
+	session := owner.Snapshot().Session
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
 	}
@@ -1936,9 +1843,17 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode, proje
 }
 
 func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) error {
-	session, err := sessionpkg.GetSession(ctx, c.store, sessionID)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
 	if err != nil {
 		return err
+	}
+	ownerSnapshot := owner.Snapshot()
+	session := ownerSnapshot.Session
+	if session.ID == "" {
+		return fmt.Errorf("session %s not found", sessionID)
 	}
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
@@ -1947,24 +1862,14 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	if err != nil {
 		return err
 	}
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	chats, err := sessionpkg.ListChats(ctx, c.store, session.ID)
-	if err != nil {
-		return err
-	}
+	chats := ownerSnapshot.Chats
 	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
 		return err
 	}
 	if err := c.failProcessInterruptedToolCalls(ctx, chats); err != nil {
 		return err
 	}
-	owner, err := c.agent.LoadSession(ctx, session.ID)
-	if err != nil {
-		return err
-	}
-	ownerSnapshot := owner.Snapshot()
+	ownerSnapshot = owner.Snapshot()
 	chats = ownerSnapshot.Chats
 	var chatRecord domain.Chat
 	if chatID != "" {
@@ -2111,31 +2016,6 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 	return session.ID != ""
 }
 
-func (c *Controller) planningState(ctx context.Context, sessionID id.ID) (planning.Plan, []planning.TodoItem, map[string][]planning.TodoItem) {
-	plan, err := sessionpkg.GetPlan(ctx, c.store, sessionID)
-	if err != nil {
-		return planning.Plan{}, nil, nil
-	}
-	todosByRef := make(map[string][]planning.TodoItem, len(plan.Milestones))
-	for _, milestone := range plan.Milestones {
-		ref := strings.TrimSpace(milestone.Ref)
-		if ref == "" {
-			continue
-		}
-		todos, err := sessionpkg.ListTodos(ctx, c.store, sessionID, ref)
-		if err != nil {
-			todosByRef[ref] = nil
-			continue
-		}
-		todosByRef[ref] = slices.Clone(todos)
-	}
-	active, ok := planning.ActiveMilestone(plan)
-	if !ok {
-		return plan, nil, todosByRef
-	}
-	return plan, slices.Clone(todosByRef[active.Ref]), todosByRef
-}
-
 func cloneTodosByRef(in map[string][]planning.TodoItem) map[string][]planning.TodoItem {
 	if len(in) == 0 {
 		return nil
@@ -2184,39 +2064,6 @@ func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
 
 func idleChatSidebarStatus(chatID id.ID) ChatSidebarStatus {
 	return ChatSidebarStatus{ChatID: chatID, Status: string(chat.StatusIdle), StatusText: "Idle"}
-}
-
-func toolStatusFromSidebar(chatRecord domain.Chat, status ChatSidebarStatus) chattool.Status {
-	state := chattool.RunStateIdle
-	switch chattool.RunState(status.Status) {
-	case chattool.RunStateRunning, chattool.RunStateWaitingApproval, chattool.RunStateCompleted, chattool.RunStateFailed, chattool.RunStateCancelled:
-		state = chattool.RunState(status.Status)
-	default:
-		if status.Busy {
-			state = chattool.RunStateRunning
-		}
-	}
-	if status.PendingApprovals > 0 {
-		state = chattool.RunStateWaitingApproval
-	}
-	if status.Status == "" {
-		state = chattool.RunStateIdle
-	}
-	return chattool.Status{
-		ID:                 chatRecord.ID,
-		Title:              chatRecord.Title,
-		Role:               chatRecord.WorkflowRole,
-		Archived:           chatRecord.Archived,
-		ActiveMilestoneRef: chatRecord.ActiveMilestoneRef,
-		AssignedTodoRef:    chatRecord.AssignedTodoRef,
-		State:              state,
-		Status:             string(state),
-		Busy:               status.Busy,
-		QueuedInputs:       status.QueuedInputs,
-		PendingApprovals:   status.PendingApprovals,
-		StatusText:         status.StatusText,
-		LastError:          status.LastError,
-	}
 }
 
 func sidebarStatusFromUpdate(update chat.Update) ChatSidebarStatus {
@@ -2316,26 +2163,6 @@ func (c *Controller) resolveSelectedRuntime(ctx context.Context, selection Selec
 	rt, err := owner.Chat(ctx, chatRecord.ID)
 	if err != nil {
 		return nil, domain.Session{}, domain.Chat{}, nil, err
-	}
-	c.mu.Lock()
-	if c.runtimes == nil {
-		c.runtimes = map[id.ID]*chat.Chat{}
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	c.runtimes[chatRecord.ID] = rt
-	snapshot := rt.Snapshot()
-	snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-	c.snapshots[chatRecord.ID] = snapshot
-	c.statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
-	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{chatRecord})
-	c.mu.Unlock()
-	for _, sub := range execSubscriptions {
-		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
 	return owner, session, chatRecord, rt, nil
 }

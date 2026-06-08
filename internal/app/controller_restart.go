@@ -2,27 +2,31 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
-	sessionpkg "github.com/lkarlslund/koder/internal/session"
 )
 
 const processRestartToolFailure = "Tool execution failed because koder restarted before the tool completed."
 const processStartupRunningToolFailure = "Tool execution failed because koder restarted while the tool was running."
 
 func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Session, bool, error) {
+	if c.agent == nil {
+		return domain.Session{}, false, fmt.Errorf("no chat agent")
+	}
 	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return domain.Session{}, false, err
 	}
 	var matches []domain.Session
 	for _, session := range sessions {
-		chats, err := sessionpkg.ListChats(ctx, c.store, session.ID)
+		owner, err := c.agent.LoadSession(ctx, session.ID)
 		if err != nil {
 			return domain.Session{}, false, err
 		}
+		chats := owner.Snapshot().Chats
 		for _, chatRecord := range chats {
 			if chatRecord.AutoRestart {
 				matches = append(matches, session)

@@ -1150,13 +1150,12 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	}
 }
 
-func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
-	ctrl, st := newTestController(t)
+func TestControllerStateForSelectionDoesNotSwitchControllerState(t *testing.T) {
+	ctrl, _ := newTestController(t)
 	ctx := context.Background()
 
 	firstState := ctrl.State()
 	firstSessionID := firstState.Session.ID
-	firstChatID := firstState.ActiveChatID
 	secondSession, err := ctrl.CreateSession(ctx, "Second", firstState.Session.ProjectRoot, false)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
@@ -1168,20 +1167,14 @@ func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state for second session: %v", err)
 	}
-	secondChatID := secondState.ActiveChatID
-
-	ctrl.mu.RLock()
-	firstRuntime := ctrl.runtimes[firstChatID]
-	secondRuntime := ctrl.runtimes[secondChatID]
-	ctrl.mu.RUnlock()
-	if firstRuntime == nil {
-		t.Fatalf("expected first session chat runtime %s to remain loaded", firstChatID)
+	if secondState.Session.ID != secondSession.ID {
+		t.Fatalf("expected selected state for second session %s, got %s", secondSession.ID, secondState.Session.ID)
 	}
-	if secondRuntime == nil {
-		t.Fatalf("expected second session chat runtime %s to be loaded", secondChatID)
+	if secondState.ActiveChatID == "" {
+		t.Fatalf("expected selected state to include active chat")
 	}
-	if _, err := sessionpkg.GetSession(ctx, st, firstSessionID); err != nil {
-		t.Fatalf("first session should still exist: %v", err)
+	if got := ctrl.State().Session.ID; got != firstSessionID {
+		t.Fatalf("expected controller state to remain %s after second selection state, got %s", firstSessionID, got)
 	}
 }
 

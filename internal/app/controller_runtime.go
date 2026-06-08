@@ -117,48 +117,41 @@ func (c *Controller) TerminateExecProcessForSelection(ctx context.Context, selec
 	if len(processes) > 0 {
 		process = processes[0]
 	}
-	c.mu.Lock()
-	snapshot, ok := c.snapshots[selection.ChatID]
-	if !ok || snapshot.Chat.ID == "" {
-		if rt := c.runtimes[selection.ChatID]; rt != nil {
-			snapshot = rt.Snapshot()
-			ok = true
+	if c.agent != nil {
+		owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+		if err == nil {
+			event, ok := c.eventForSelectedExec(ctx, owner, selection)
+			if ok {
+				c.broadcast(event.Type, event.Payload)
+			}
 		}
-	}
-	if ok && snapshot.Chat.ID != "" {
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		c.snapshots[selection.ChatID] = snapshot
-	}
-	c.mu.Unlock()
-	if ok && snapshot.Chat.ID != "" {
-		c.broadcast("chat_delta", chat.Update{
-			Snapshot:   snapshot,
-			Status:     snapshot.Status,
-			StatusText: snapshot.StatusText,
-			Context:    snapshot.Context,
-			Active:     snapshot.Active,
-		})
 	}
 	return process, nil
 }
 
 func (c *Controller) forwardExecRuntime(chatID id.ID, events <-chan execruntime.Event) {
 	for range events {
-		c.mu.Lock()
-		snapshot, ok := c.snapshots[chatID]
-		if !ok || snapshot.Chat.ID == "" {
-			if rt := c.runtimes[chatID]; rt != nil {
-				snapshot = rt.Snapshot()
-				ok = true
-			}
-		}
-		if !ok || snapshot.Chat.ID == "" {
-			c.mu.Unlock()
+		c.mu.RLock()
+		session := c.session
+		c.mu.RUnlock()
+		if session.ID == "" || c.agent == nil {
 			continue
 		}
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		c.snapshots[chatID] = snapshot
-		c.mu.Unlock()
+		owner, err := c.agent.LoadSession(context.Background(), session.ID)
+		if err != nil {
+			continue
+		}
+		ownerSnapshot := owner.Snapshot()
+		snapshot := ownerSnapshot.Snapshots[chatID]
+		if snapshot.Chat.ID == "" {
+			if rt, err := owner.Chat(context.Background(), chatID); err == nil && rt != nil {
+				snapshot = rt.Snapshot()
+			}
+		}
+		if snapshot.Chat.ID == "" {
+			continue
+		}
+		snapshot = c.snapshotWithExecProcessesForSession(ownerSnapshot.Session, snapshot)
 		c.broadcast("chat_delta", chat.Update{
 			Snapshot:   snapshot,
 			Status:     snapshot.Status,
