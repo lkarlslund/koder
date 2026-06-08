@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -36,19 +37,32 @@ type Config struct {
 }
 
 type Runtime struct {
-	cfg      config.Config
-	store    *store.Store
-	debug    *debugsrv.Recorder
-	files    *attachment.Manager
-	caps     *provider.CapabilityStore
-	agents   *agents.Manager
-	settings *settings.Store
-	tools    *toolruntime.Runtime
-	mcp      *mcp.Manager
-	sessions SessionSource
-	envMu    sync.Mutex
-	envCache map[string]string
+	cfg         config.Config
+	store       *store.Store
+	debug       *debugsrv.Recorder
+	files       *attachment.Manager
+	caps        *provider.CapabilityStore
+	agents      *agents.Manager
+	settings    *settings.Store
+	tools       *toolruntime.Runtime
+	mcp         *mcp.Manager
+	sessions    SessionSource
+	caveman     *cavemanService
+	cavemanMu   sync.Mutex
+	cavemanJobs map[id.ID]cavemanJob
+	retryPause  func(context.Context, time.Duration, func(time.Duration)) error
+	envMu       sync.Mutex
+	envCache    map[string]string
 }
+
+const (
+	maxRateLimitRetries       = 3
+	maxTransientChatRetries   = 3
+	defaultRateLimitRetryWait = 5 * time.Second
+	defaultTransientRetryWait = 250 * time.Millisecond
+	cavemanThinkingMaxBytes   = 4 * 1024
+	cavemanThinkingMaxTokens  = 256
+)
 
 func New(cfg Config) *Runtime {
 	files := cfg.Files
@@ -68,16 +82,19 @@ func New(cfg Config) *Runtime {
 		settingsStore = settings.New(cfg.Config)
 	}
 	return &Runtime{
-		cfg:      cfg.Config,
-		store:    cfg.Store,
-		debug:    cfg.Debug,
-		files:    files,
-		caps:     caps,
-		agents:   agentManager,
-		settings: settingsStore,
-		tools:    cfg.Tools,
-		mcp:      cfg.MCP,
-		sessions: cfg.Sessions,
+		cfg:         cfg.Config,
+		store:       cfg.Store,
+		debug:       cfg.Debug,
+		files:       files,
+		caps:        caps,
+		agents:      agentManager,
+		settings:    settingsStore,
+		tools:       cfg.Tools,
+		mcp:         cfg.MCP,
+		sessions:    cfg.Sessions,
+		caveman:     newCavemanService(cfg.Config.Thinking.CavemanParallelism),
+		cavemanJobs: map[id.ID]cavemanJob{},
+		retryPause:  waitForRetry,
 	}
 }
 
@@ -94,6 +111,7 @@ func (r *Runtime) UpdateConfig(cfg config.Config) {
 	r.files = attachment.NewManager(cfg.StateDir())
 	r.caps = provider.NewCapabilityStore(cfg.StateDir())
 	r.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+	r.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
 }
 
 func (r *Runtime) SetToolsRuntime(runtime *toolruntime.Runtime) {
@@ -115,4 +133,15 @@ func (r *Runtime) SetSessionSource(source SessionSource) {
 		return
 	}
 	r.sessions = source
+}
+
+func (r *Runtime) SetRetryPause(fn func(context.Context, time.Duration, func(time.Duration)) error) {
+	if r == nil {
+		return
+	}
+	if fn == nil {
+		r.retryPause = waitForRetry
+		return
+	}
+	r.retryPause = fn
 }

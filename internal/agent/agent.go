@@ -99,6 +99,12 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Settings: settingsStore,
 		MCP:      e.mcp,
 	})
+	e.modelRuntime.SetRetryPause(func(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
+		if e.retryPause == nil {
+			return waitForRetry(ctx, delay, onTick)
+		}
+		return e.retryPause(ctx, delay, onTick)
+	})
 	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.modelRuntime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
@@ -254,11 +260,7 @@ func (e *Engine) ClientForChat(chat domain.Chat) (*provider.Client, error) {
 }
 
 func (e *Engine) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, step int, out chan<- domain.Event) error {
-	if err := e.awaitOutstandingCaveman(ctx, chatID, out); err != nil {
-		return err
-	}
-	e.recordLifecycle(sessionID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(step)})
-	return nil
+	return e.modelRuntime.BeginModelTurn(ctx, sessionID, chatID, step, out)
 }
 
 func (e *Engine) BuildConversationForTurn(ctx context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
@@ -295,23 +297,7 @@ func (e *Engine) NextAssistantTimelineItemForTurn(ctx context.Context, rt *chatp
 }
 
 func (e *Engine) CompleteModelRequest(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, assistantItem domain.TimelineItem) (chatpkg.ModelResponse, error) {
-	resp, streamed, cavemanJob, err := e.chatWithRetry(ctx, session, chat, client, out, req, assistantItem)
-	if err != nil {
-		return chatpkg.ModelResponse{}, err
-	}
-	reasoning, err := e.reasoningContentForResponse(ctx, chat, client, resp.Reasoning, cavemanJob, out)
-	if err != nil {
-		return chatpkg.ModelResponse{}, err
-	}
-	return chatpkg.ModelResponse{
-		Text:           resp.Text,
-		RawReasoning:   resp.Reasoning,
-		Reasoning:      reasoning,
-		Usage:          resp.Usage,
-		ToolCalls:      resp.ToolCalls,
-		ToolCallErrors: resp.ToolCallErrors,
-		Streamed:       streamed,
-	}, nil
+	return e.modelRuntime.CompleteModelRequest(ctx, session, chat, client, out, req, assistantItem)
 }
 
 func (e *Engine) ParseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID id.ID) chatpkg.ToolCallParseResult {
