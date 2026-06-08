@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -16,18 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 )
 
-type approval struct {
-	ID         id.ID
-	SessionID  id.ID
-	ChatID     id.ID
-	Tool       domain.ToolKind
-	ToolCallID string
-	Command    string
-	Status     domain.ApprovalStatus
-	CreatedAt  time.Time
-}
-
-func SessionCollection(st *store.Store) store.Collection[domain.Session] {
+func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 	return store.NewCollection(st, store.CollectionSpec[domain.Session]{
 		Namespace: "sessions",
 		GetID:     func(v domain.Session) string { return v.ID },
@@ -88,31 +78,7 @@ func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	})
 }
 
-func approvalCollection(st *store.Store) store.Collection[approval] {
-	return store.NewCollection(st, store.CollectionSpec[approval]{
-		Namespace: "approvals",
-		GetID:     func(v approval) string { return v.ID },
-		SetID:     func(v *approval, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[approval]{
-			{Name: "session", Value: func(v approval) string { return v.SessionID }},
-			{Name: "chat", Value: func(v approval) string { return v.ChatID }},
-			{Name: "status", Value: func(v approval) string { return v.Status.String() }},
-		},
-	})
-}
-
-func EnsureSession(ctx context.Context, st *store.Store, providerID, modelID string) (domain.Session, error) {
-	sessions, err := ListSessions(ctx, st)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	if len(sessions) > 0 {
-		return sessions[0], nil
-	}
-	return CreateSession(ctx, st, "New Session", providerID, modelID, nil)
-}
-
-func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
+func createSessionRecord(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
 		ID:                id.NewAt(now),
@@ -137,7 +103,7 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := SessionCollection(st).Put(ctx, session); err != nil {
+	if err := sessionCollection(st).Put(ctx, session); err != nil {
 		return domain.Session{}, err
 	}
 	if err := chatCollection(st).Put(ctx, chatRecord); err != nil {
@@ -146,8 +112,8 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 	return session, nil
 }
 
-func ListSessions(ctx context.Context, st *store.Store) ([]domain.Session, error) {
-	sessions, err := SessionCollection(st).List(ctx, store.All[domain.Session]())
+func listSessionRecords(ctx context.Context, st *store.Store) ([]domain.Session, error) {
+	sessions, err := sessionCollection(st).List(ctx, store.All[domain.Session]())
 	if err != nil {
 		return nil, err
 	}
@@ -168,30 +134,18 @@ func ListSessions(ctx context.Context, st *store.Store) ([]domain.Session, error
 	return sessions, nil
 }
 
-func GetSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
-	return SessionCollection(st).Get(ctx, sessionID)
+func getSessionRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
+	return sessionCollection(st).Get(ctx, sessionID)
 }
 
-func PutSession(ctx context.Context, st *store.Store, session domain.Session) error {
+func putSessionRecord(ctx context.Context, st *store.Store, session domain.Session) error {
 	if session.ID == "" {
 		return fmt.Errorf("put session: id is required")
 	}
-	return SessionCollection(st).Put(ctx, session)
+	return sessionCollection(st).Put(ctx, session)
 }
 
-func TouchSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
-	session, err := GetSession(ctx, st, sessionID)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	session.UpdatedAt = time.Now().UTC()
-	if err := PutSession(ctx, st, session); err != nil {
-		return domain.Session{}, err
-	}
-	return session, nil
-}
-
-func PutPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
+func putPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
 	if plan.SessionID == "" {
 		return fmt.Errorf("put milestone plan: session id is required")
 	}
@@ -201,7 +155,7 @@ func PutPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
 	return planCollection(st).Put(ctx, plan)
 }
 
-func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
+func getPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Plan, error) {
 	plan, err := planCollection(st).Get(ctx, sessionID)
 	if err != nil {
 		return planning.Plan{SessionID: sessionID}, nil
@@ -209,7 +163,7 @@ func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Pl
 	return plan, nil
 }
 
-func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error {
+func putTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error {
 	if item.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
@@ -222,11 +176,7 @@ func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error
 	return todoCollection(st).Put(ctx, item)
 }
 
-func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoItem, error) {
-	return todoCollection(st).Get(ctx, todoID)
-}
-
-func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func listTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	if milestoneRef != "" {
@@ -240,10 +190,10 @@ func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneR
 	return items, nil
 }
 
-func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func addTodoItemsRecord(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	now := time.Now().UTC()
 	milestoneRef = strings.TrimSpace(milestoneRef)
-	existing, err := ListTodos(ctx, st, sessionID, milestoneRef)
+	existing, err := listTodos(ctx, st, sessionID, milestoneRef)
 	if err != nil {
 		return nil, err
 	}
@@ -265,14 +215,14 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milesto
 		})
 	}
 	for _, item := range items {
-		if err := PutTodo(ctx, st, item); err != nil {
+		if err := putTodo(ctx, st, item); err != nil {
 			return nil, err
 		}
 	}
 	return items, nil
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
+func updateTodoRecord(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	item, err := todoCollection(st).Get(ctx, todoID)
 	if err != nil {
 		return planning.TodoItem{}, err
@@ -285,13 +235,13 @@ func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status plann
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = time.Now().UTC()
-	if err := PutTodo(ctx, st, item); err != nil {
+	if err := putTodo(ctx, st, item); err != nil {
 		return planning.TodoItem{}, err
 	}
 	return item, nil
 }
 
-func PutTask(ctx context.Context, st *store.Store, task planning.Task) error {
+func putTask(ctx context.Context, st *store.Store, task planning.Task) error {
 	if task.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
@@ -301,7 +251,7 @@ func PutTask(ctx context.Context, st *store.Store, task planning.Task) error {
 	return taskCollection(st).Put(ctx, task)
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
+func listTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
 	items, err := taskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -323,7 +273,7 @@ func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]plannin
 	return items, nil
 }
 
-func ListChats(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
+func listChatRecords(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
 	chats, err := chatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
@@ -410,8 +360,8 @@ func cloneTimelineItemForChat(item domain.TimelineItem, chatID id.ID, seq int64,
 	return cloned, nil
 }
 
-func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
-	chats, err := ListChats(ctx, st, sessionID)
+func defaultChatRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
+	chats, err := listChatRecords(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -426,12 +376,12 @@ func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.
 	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
 }
 
-func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title string, role domain.WorkflowRole, parentID *id.ID) (domain.Chat, error) {
-	session, err := GetSession(ctx, st, sessionID)
+func createChatRecord(ctx context.Context, st *store.Store, sessionID id.ID, title string, role domain.WorkflowRole, parentID *id.ID) (domain.Chat, error) {
+	session, err := getSessionRecord(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	chats, err := ListChats(ctx, st, sessionID)
+	chats, err := listChatRecords(ctx, st, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -454,7 +404,7 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title str
 	if chatRecord.WorkflowRole == "" {
 		chatRecord.WorkflowRole = chatrole.General
 	}
-	if defaultChat, err := DefaultChat(ctx, st, sessionID); err == nil {
+	if defaultChat, err := defaultChatRecord(ctx, st, sessionID); err == nil {
 		chatRecord.ProviderID = defaultChat.ProviderID
 		chatRecord.ModelID = defaultChat.ModelID
 	}
@@ -464,88 +414,23 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title str
 	return chatRecord, nil
 }
 
-func ReorderChats(ctx context.Context, st *store.Store, sessionID id.ID, orderedIDs []id.ID) ([]domain.Chat, error) {
-	if sessionID == "" {
-		return nil, fmt.Errorf("reorder chats: session id is required")
-	}
-	chats, err := ListChats(ctx, st, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(orderedIDs) != len(chats) {
-		return nil, fmt.Errorf("reorder chats: expected %d chat ids, got %d", len(chats), len(orderedIDs))
-	}
-	byID := make(map[id.ID]domain.Chat, len(chats))
-	for _, chatRecord := range chats {
-		byID[chatRecord.ID] = chatRecord
-	}
-	seen := make(map[id.ID]bool, len(orderedIDs))
-	ordered := make([]domain.Chat, 0, len(orderedIDs))
-	for idx, chatID := range orderedIDs {
-		if chatID == "" {
-			return nil, fmt.Errorf("reorder chats: empty chat id at position %d", idx)
-		}
-		if seen[chatID] {
-			return nil, fmt.Errorf("reorder chats: duplicate chat id %s", chatID)
-		}
-		chatRecord, ok := byID[chatID]
-		if !ok {
-			return nil, fmt.Errorf("reorder chats: chat %s not found in session %s", chatID, sessionID)
-		}
-		seen[chatID] = true
-		chatRecord.Position = idx
-		ordered = append(ordered, chatRecord)
-	}
-	for _, chatRecord := range ordered {
-		if err := updateChat(ctx, st, chatRecord); err != nil {
-			return nil, err
-		}
-	}
-	return ordered, nil
-}
-
-func UpdateSession(ctx context.Context, st *store.Store, sessionID id.ID, update func(*domain.Session)) error {
-	session, err := GetSession(ctx, st, sessionID)
-	if err != nil {
-		return err
-	}
-	update(&session)
-	session.UpdatedAt = time.Now().UTC()
-	return PutSession(ctx, st, session)
-}
-
-func DeleteSession(ctx context.Context, st *store.Store, sessionID id.ID) error {
+func deleteSessionRecord(ctx context.Context, st *store.Store, sessionID id.ID) error {
 	if sessionID == "" {
 		return fmt.Errorf("delete session: session id is required")
 	}
-	chats, err := ListChats(ctx, st, sessionID)
+	chats, err := listChatRecords(ctx, st, sessionID)
 	if err != nil {
 		return err
 	}
 	for _, chatRecord := range chats {
-		timeline, err := timelineForChat(ctx, st, chatRecord.ID)
-		if err != nil {
+		if err := chatpkg.DeletePersistedData(ctx, st, chatRecord.ID); err != nil {
 			return err
-		}
-		for _, item := range timeline {
-			if err := timelineCollection(st).Delete(ctx, item.ID); err != nil {
-				return err
-			}
-		}
-		approvals, err := approvalCollection(st).List(ctx, store.ByIndex[approval]("chat", string(chatRecord.ID)))
-		if err != nil {
-			return err
-		}
-		for _, approval := range approvals {
-			if err := approvalCollection(st).Delete(ctx, approval.ID); err != nil {
-				return err
-			}
 		}
 		if err := chatCollection(st).Delete(ctx, chatRecord.ID); err != nil {
 			return err
 		}
 	}
-	if tasks, err := ListTasks(ctx, st, sessionID); err != nil {
+	if tasks, err := listTasks(ctx, st, sessionID); err != nil {
 		return err
 	} else {
 		for _, task := range tasks {
@@ -554,7 +439,7 @@ func DeleteSession(ctx context.Context, st *store.Store, sessionID id.ID) error 
 			}
 		}
 	}
-	if todos, err := ListTodos(ctx, st, sessionID, ""); err != nil {
+	if todos, err := listTodos(ctx, st, sessionID, ""); err != nil {
 		return err
 	} else {
 		for _, todo := range todos {
@@ -564,7 +449,7 @@ func DeleteSession(ctx context.Context, st *store.Store, sessionID id.ID) error 
 		}
 	}
 	_ = planCollection(st).Delete(ctx, sessionID)
-	return SessionCollection(st).Delete(ctx, sessionID)
+	return sessionCollection(st).Delete(ctx, sessionID)
 }
 
 func sortChatsForSidebar(chats []domain.Chat) {
@@ -586,19 +471,4 @@ func sortChatsForSidebar(chats []domain.Chat) {
 			return 0
 		}
 	})
-}
-
-func AppendPermissionRule(rules []accesssettings.PermissionOverride, rule accesssettings.PermissionOverride) []accesssettings.PermissionOverride {
-	rule.Pattern = strings.TrimSpace(rule.Pattern)
-	if rule.Pattern == "" {
-		rule.Pattern = "*"
-	}
-	next := make([]accesssettings.PermissionOverride, 0, len(rules)+1)
-	for _, existing := range rules {
-		if existing.Tool == rule.Tool && strings.TrimSpace(existing.Pattern) == rule.Pattern {
-			continue
-		}
-		next = append(next, existing)
-	}
-	return append(next, rule)
 }

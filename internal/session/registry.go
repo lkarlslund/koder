@@ -147,7 +147,7 @@ func (r *Registry) List(ctx context.Context) ([]domain.Session, error) {
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")
 	}
-	return ListSessions(ctx, r.store)
+	return listSessionRecords(ctx, r.store)
 }
 
 func (r *Registry) Create(ctx context.Context, title, projectRoot string, createProjectRoot bool) (*Session, error) {
@@ -181,7 +181,7 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 		}
 	}
 	cfg := r.currentConfig()
-	session, err := CreateSession(ctx, r.store, title, cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := createSessionRecord(ctx, r.store, title, cfg.DefaultProvider, cfg.DefaultModel, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func (r *Registry) Delete(ctx context.Context, sessionID id.ID) error {
 			return err
 		}
 	}
-	return DeleteSession(ctx, r.store, sessionID)
+	return deleteSessionRecord(ctx, r.store, sessionID)
 }
 
 func (r *Registry) Shutdown(ctx context.Context, reason chatpkg.CancelReason) error {

@@ -111,6 +111,36 @@ func CreateSession(ctx context.Context, st *store.Store, title, providerID, mode
 	return session, nil
 }
 
+func GetSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
+	return SessionCollection(st).Get(ctx, sessionID)
+}
+
+func PutSession(ctx context.Context, st *store.Store, session domain.Session) error {
+	return SessionCollection(st).Put(ctx, session)
+}
+
+func UpdateSession(ctx context.Context, st *store.Store, sessionID id.ID, update func(*domain.Session)) error {
+	session, err := GetSession(ctx, st, sessionID)
+	if err != nil {
+		return err
+	}
+	update(&session)
+	session.UpdatedAt = time.Now().UTC()
+	return PutSession(ctx, st, session)
+}
+
+func TouchSession(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Session, error) {
+	session, err := GetSession(ctx, st, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	session.UpdatedAt = time.Now().UTC()
+	if err := PutSession(ctx, st, session); err != nil {
+		return domain.Session{}, err
+	}
+	return session, nil
+}
+
 func DefaultChat(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
 	chats, err := ListChats(ctx, st, sessionID)
 	if err != nil {

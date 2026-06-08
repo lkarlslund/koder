@@ -37,21 +37,21 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
+	if err := putPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha task"})
+	alphaTodos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"alpha task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := AddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta task"})
+	betaTodos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "beta", []string{"beta task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,14 +89,14 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := PutPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
+	if err := putPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	created, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,15 +157,15 @@ func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpdateTodo(ctx, st, todos[0].ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+	if _, err := updateTodoRecord(ctx, st, todos[0].ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := Load(ctx, st, func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error) { return nil, nil }, sessionRecord.ID)
@@ -187,16 +187,16 @@ func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, todo := range todos {
-		if _, err := UpdateTodo(ctx, st, todo.ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+		if _, err := updateTodoRecord(ctx, st, todo.ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -219,15 +219,15 @@ func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := CreateChat(ctx, st, sessionRecord.ID, "first", chatrole.Orchestrator, nil)
+	first, err := createChatRecord(ctx, st, sessionRecord.ID, "first", chatrole.Orchestrator, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := CreateChat(ctx, st, sessionRecord.ID, "second", chatrole.Execution, &first.ID)
+	second, err := createChatRecord(ctx, st, sessionRecord.ID, "second", chatrole.Execution, &first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,11 +260,11 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, "test", "provider", "model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chats, err := ListChats(ctx, st, sessionRecord.ID)
+	chats, err := listChatRecords(ctx, st, sessionRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

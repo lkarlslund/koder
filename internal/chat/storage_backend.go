@@ -187,6 +187,31 @@ func deleteTimelineItem(ctx context.Context, st *store.Store, itemID id.ID) erro
 	return timelineCollection(st).Delete(ctx, itemID)
 }
 
+func DeletePersistedData(ctx context.Context, st *store.Store, chatID id.ID) error {
+	if chatID == "" {
+		return fmt.Errorf("delete chat persisted data: chat id is required")
+	}
+	items, err := timelineForChat(ctx, st, chatID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := timelineCollection(st).Delete(ctx, item.ID); err != nil {
+			return err
+		}
+	}
+	approvals, err := approvalCollection(st).List(ctx, store.ByIndex[Approval]("chat", string(chatID)))
+	if err != nil {
+		return err
+	}
+	for _, approval := range approvals {
+		if err := approvalCollection(st).Delete(ctx, approval.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func insertTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) (domain.TimelineItem, error) {
 	return timelineCollection(st).Insert(ctx, item)
 }

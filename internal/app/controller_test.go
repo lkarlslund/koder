@@ -23,6 +23,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -135,7 +136,7 @@ func testAppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID i
 }
 
 func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
-	return sessionpkg.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
+	return modeltest.UpdateSession(ctx, st, sessionID, func(session *domain.Session) {
 		session.ProjectRoot = root
 	})
 }
@@ -920,7 +921,7 @@ func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	if err := ctrl.SetAccessSettingsForSelection(ctx, selection, settings); err != nil {
 		t.Fatalf("set access settings: %v", err)
 	}
-	session, err := sessionpkg.GetSession(ctx, st, sessionID)
+	session, err := modeltest.GetSession(ctx, st, sessionID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -1035,14 +1036,14 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	ctx := context.Background()
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
-	sessionA, err := sessionpkg.CreateSession(ctx, st, "Workspace A", "test", "model", nil)
+	sessionA, err := modeltest.CreateSession(ctx, st, "Workspace A", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session a: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, sessionA.ID, workspaceA); err != nil {
 		t.Fatalf("workspace a: %v", err)
 	}
-	sessionB, err := sessionpkg.CreateSession(ctx, st, "Workspace B", "test", "model", nil)
+	sessionB, err := modeltest.CreateSession(ctx, st, "Workspace B", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session b: %v", err)
 	}
@@ -1162,14 +1163,14 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := sessionpkg.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := sessionpkg.DefaultChat(ctx, st, session.ID)
+	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
@@ -1263,14 +1264,14 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := sessionpkg.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := sessionpkg.DefaultChat(ctx, st, session.ID)
+	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
@@ -1351,14 +1352,14 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	session, err := sessionpkg.CreateSession(ctx, st, "Session", "test", "model", nil)
+	session, err := modeltest.CreateSession(ctx, st, "Session", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
-	chatRecord, err := sessionpkg.DefaultChat(ctx, st, session.ID)
+	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
@@ -1402,28 +1403,28 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 
 	ctx := context.Background()
 	workdir := t.TempDir()
-	sessionA, err := sessionpkg.CreateSession(ctx, st, "Older", "test", "model", nil)
+	sessionA, err := modeltest.CreateSession(ctx, st, "Older", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create older session: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, sessionA.ID, workdir); err != nil {
 		t.Fatalf("workspace older: %v", err)
 	}
-	sessionB, err := sessionpkg.CreateSession(ctx, st, "Last Used", "test", "model", nil)
+	sessionB, err := modeltest.CreateSession(ctx, st, "Last Used", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create last session: %v", err)
 	}
 	if err := setSessionProjectRoot(ctx, st, sessionB.ID, workdir); err != nil {
 		t.Fatalf("workspace last: %v", err)
 	}
-	if _, err := sessionpkg.TouchSession(ctx, st, sessionB.ID); err != nil {
+	if _, err := modeltest.TouchSession(ctx, st, sessionB.ID); err != nil {
 		t.Fatalf("touch last session: %v", err)
 	}
-	defaultChat, err := sessionpkg.DefaultChat(ctx, st, sessionB.ID)
+	defaultChat, err := modeltest.DefaultChat(ctx, st, sessionB.ID)
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
-	if _, err := sessionpkg.CreateChat(ctx, st, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
+	if _, err := modeltest.CreateChat(ctx, st, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
 		t.Fatalf("create side chat: %v", err)
 	}
 	defaultChat.UpdatedAt = time.Now().UTC().Add(time.Hour)

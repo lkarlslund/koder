@@ -81,15 +81,15 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	session, err := GetSession(ctx, st, sessionID)
+	session, err := getSessionRecord(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	chats, err := ListChats(ctx, st, sessionID)
+	chats, err := listChatRecords(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := GetPlan(ctx, st, sessionID)
+	plan, err := getPlan(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := ListTasks(ctx, st, sessionID)
+	tasks, err := listTasks(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan 
 		seen[ref] = struct{}{}
 		out[ref] = nil
 	}
-	items, err := ListTodos(ctx, st, sessionID, "")
+	items, err := listTodos(ctx, st, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -511,7 +511,7 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	if best := newestSessionChat(chats); best.ID != "" {
 		return best, nil
 	}
-	chatRecord, err := DefaultChat(ctx, s.store, session.ID)
+	chatRecord, err := defaultChatRecord(ctx, s.store, session.ID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -529,17 +529,14 @@ func (s *Session) UpdateSession(ctx context.Context, update func(*domain.Session
 	if update == nil {
 		return domain.Session{}, fmt.Errorf("session update is required")
 	}
-	s.mu.RLock()
-	sessionID := s.session.ID
-	s.mu.RUnlock()
-	if err := UpdateSession(ctx, s.store, sessionID, update); err != nil {
-		return domain.Session{}, err
-	}
-	updated, err := GetSession(ctx, s.store, sessionID)
-	if err != nil {
-		return domain.Session{}, err
-	}
 	s.mu.Lock()
+	updated := s.session
+	update(&updated)
+	updated.UpdatedAt = time.Now().UTC()
+	if err := putSessionRecord(ctx, s.store, updated); err != nil {
+		s.mu.Unlock()
+		return domain.Session{}, err
+	}
 	s.session = updated
 	for _, rt := range s.runtimes {
 		if rt != nil {
@@ -637,14 +634,40 @@ func (s *Session) ReorderChats(ctx context.Context, ids []id.ID) ([]domain.Chat,
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
-	s.mu.RLock()
-	sessionID := s.session.ID
-	s.mu.RUnlock()
-	ordered, err := ReorderChats(ctx, s.store, sessionID, ids)
-	if err != nil {
-		return nil, err
-	}
 	s.mu.Lock()
+	sessionID := s.session.ID
+	if len(ids) != len(s.chats) {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("reorder chats: expected %d chat ids, got %d", len(s.chats), len(ids))
+	}
+	byID := make(map[id.ID]domain.Chat, len(s.chats))
+	for _, chatRecord := range s.chats {
+		byID[chatRecord.ID] = chatRecord
+	}
+	seen := make(map[id.ID]bool, len(ids))
+	ordered := make([]domain.Chat, 0, len(ids))
+	for idx, chatID := range ids {
+		if chatID == "" {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("reorder chats: empty chat id at position %d", idx)
+		}
+		if seen[chatID] {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("reorder chats: duplicate chat id %s", chatID)
+		}
+		chatRecord, ok := byID[chatID]
+		if !ok {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("reorder chats: chat %s not found in session %s", chatID, sessionID)
+		}
+		seen[chatID] = true
+		chatRecord.Position = idx
+		if err := updateChat(ctx, s.store, chatRecord); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+		ordered = append(ordered, chatRecord)
+	}
 	s.chats = slices.Clone(ordered)
 	for _, item := range ordered {
 		if rt := s.runtimes[item.ID]; rt != nil {
@@ -779,22 +802,24 @@ func (s *Session) TouchSelection(ctx context.Context, chatID id.ID) (domain.Sess
 	if s == nil {
 		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session is required")
 	}
-	s.mu.RLock()
-	sessionID := s.session.ID
+	now := time.Now().UTC()
+	s.mu.Lock()
+	session := s.session
+	session.UpdatedAt = now
 	chatRecord, ok := chatByID(s.chats, chatID)
-	s.mu.RUnlock()
 	if !ok {
+		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, fmt.Errorf("chat %s not found", chatID)
 	}
-	session, err := TouchSession(ctx, s.store, sessionID)
-	if err != nil {
+	chatRecord.UpdatedAt = now
+	if err := putSessionRecord(ctx, s.store, session); err != nil {
+		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
-	chatRecord.UpdatedAt = time.Now().UTC()
 	if err := updateChat(ctx, s.store, chatRecord); err != nil {
+		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
-	s.mu.Lock()
 	s.session = session
 	upsertSessionChatLocked(&s.chats, chatRecord)
 	for _, rt := range s.runtimes {
@@ -940,7 +965,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
-	if err := PutPlan(ctx, s.store, plan); err != nil {
+	if err := putPlan(ctx, s.store, plan); err != nil {
 		return planning.Plan{}, err
 	}
 	s.mu.Lock()
@@ -984,7 +1009,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 		})
 	}
 	for _, item := range items {
-		if err := PutTodo(ctx, s.store, item); err != nil {
+		if err := putTodo(ctx, s.store, item); err != nil {
 			return nil, err
 		}
 	}
@@ -1036,7 +1061,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = now
-	if err := PutTodo(ctx, s.store, item); err != nil {
+	if err := putTodo(ctx, s.store, item); err != nil {
 		return planning.TodoItem{}, err
 	}
 	s.mu.Lock()
@@ -1082,7 +1107,7 @@ func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, sta
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := PutTask(ctx, s.store, task); err != nil {
+	if err := putTask(ctx, s.store, task); err != nil {
 		return planning.Task{}, err
 	}
 	s.mu.Lock()
