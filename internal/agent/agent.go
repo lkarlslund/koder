@@ -341,17 +341,16 @@ func (e *Engine) HandleTurnError(ctx context.Context, rt *chatpkg.Chat, out chan
 	if err == nil {
 		return
 	}
-	sessionID, chatID := id.ID(""), id.ID("")
+	sessionID := id.ID("")
 	if rt != nil {
 		snapshot := rt.Snapshot()
 		sessionID = snapshot.Session.ID
-		chatID = snapshot.Chat.ID
 	}
 	if interruptedErr(err) {
-		e.emitInterrupted(out, chatID, sessionID)
+		e.emitInterrupted(context.Background(), rt, out, sessionID)
 		return
 	}
-	e.emitAssistantError(ctx, out, chatID, sessionID, err)
+	e.emitAssistantError(ctx, rt, out, sessionID, err)
 }
 
 func (e *Engine) ApproveToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
@@ -1430,8 +1429,8 @@ func normalizeSessionTitle(raw string) string {
 	return strings.Join(words, " ")
 }
 
-func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event, chatID, sessionID id.ID, err error) {
-	item, _ := e.recordAssistantError(ctx, chatID, sessionID, err)
+func (e *Engine) emitAssistantError(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event, sessionID id.ID, err error) {
+	item, _ := e.recordAssistantError(ctx, rt, sessionID, err)
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	if item.ID != "" {
 		evt.Item = item
@@ -1439,18 +1438,20 @@ func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event
 	out <- evt
 }
 
-func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID id.ID, err error) (domain.TimelineItem, bool) {
-	if err == nil || sessionID == "" {
+func (e *Engine) recordAssistantError(ctx context.Context, rt *chatpkg.Chat, sessionID id.ID, err error) (domain.TimelineItem, bool) {
+	if err == nil || rt == nil {
 		return domain.TimelineItem{}, false
 	}
 	if interruptedErr(err) {
 		return domain.TimelineItem{}, false
 	}
 	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
-	return e.persistTranscriptNotice(ctx, chatID, sessionID, errorSummary(err), transcriptNotice{
-		Kind:     "model_error",
-		Severity: "error",
+	item, appendErr := rt.AppendNotice(ctx, domain.Notice{
+		Kind:  "model_error",
+		Level: "error",
+		Text:  errorSummary(err),
 	})
+	return item, appendErr == nil
 }
 
 func (e *Engine) recordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
@@ -1460,13 +1461,19 @@ func (e *Engine) recordLifecycle(sessionID id.ID, kind, text string, meta map[st
 	e.debug.RecordLifecycle(sessionID, kind, text, meta)
 }
 
-func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID id.ID) {
+func (e *Engine) emitInterrupted(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event, sessionID id.ID) {
 	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
-	item, ok := e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
-		Kind:     "interrupted",
-		Severity: "warning",
-		Reason:   domain.NoticeReasonUserInterrupted,
-	})
+	item, ok := domain.TimelineItem{}, false
+	if rt != nil {
+		var err error
+		item, err = rt.AppendNotice(ctx, domain.Notice{
+			Kind:   "interrupted",
+			Level:  "warning",
+			Text:   "Interrupted",
+			Reason: domain.NoticeReasonUserInterrupted,
+		})
+		ok = err == nil
+	}
 	evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
 	if ok {
 		evt.Item = item
@@ -1482,17 +1489,6 @@ func errorSummary(err error) string {
 	return "Error: " + strings.TrimSpace(err.Error())
 }
 
-type transcriptNotice struct {
-	Kind     string `json:"kind,omitempty"`
-	Severity string `json:"severity,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Subtitle string `json:"subtitle,omitempty"`
-	Tool     string `json:"tool,omitempty"`
-	Count    int    `json:"count,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
-}
-
 func (e *Engine) pauseContinuation(ctx context.Context, rt *chatpkg.Chat, sessionID id.ID, pause chatpkg.ContinuationPause, out chan<- domain.Event) {
 	body := strings.TrimSpace(pause.Body)
 	if body == "" {
@@ -1502,44 +1498,6 @@ func (e *Engine) pauseContinuation(ctx context.Context, rt *chatpkg.Chat, sessio
 	if rt != nil {
 		rt.PauseContinuation(ctx, pause, out)
 	}
-}
-
-func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID id.ID, body string, meta transcriptNotice) (domain.TimelineItem, bool) {
-	if sessionID == "" || chatID == "" || e.store == nil {
-		return domain.TimelineItem{}, false
-	}
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return domain.TimelineItem{}, false
-	}
-	var noticeTool domain.ToolKind
-	if meta.Tool != "" {
-		noticeTool = domain.ToolKind(strings.TrimSpace(meta.Tool))
-	}
-	rt, err := e.chatOwner(ctx, sessionID, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, false
-	}
-	item, err := rt.AppendTimelineContent(ctx, domain.Notice{
-		Level:    strings.TrimSpace(meta.Severity),
-		Text:     body,
-		Kind:     strings.TrimSpace(meta.Kind),
-		Reason:   strings.TrimSpace(meta.Reason),
-		Title:    strings.TrimSpace(meta.Title),
-		Subtitle: strings.TrimSpace(meta.Subtitle),
-		Tool:     noticeTool,
-		Count:    meta.Count,
-		Limit:    meta.Limit,
-	})
-	if err != nil {
-		return domain.TimelineItem{}, false
-	}
-	item.Seal(time.Now().UTC())
-	item, err = rt.UpsertTimelineItem(ctx, item)
-	if err != nil {
-		return domain.TimelineItem{}, false
-	}
-	return item, true
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {

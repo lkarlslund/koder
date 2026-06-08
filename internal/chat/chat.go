@@ -1479,6 +1479,19 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 	return item, nil
 }
 
+// AppendNotice appends a sealed notice through the live chat owner.
+func (r *Chat) AppendNotice(ctx context.Context, notice domain.Notice) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	item, err := r.AppendTimelineContent(ctx, notice)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(time.Now().UTC())
+	return r.UpsertTimelineItem(ctx, item)
+}
+
 // AppendAssistantToolCalls appends or updates one sealed assistant message through the live chat owner.
 func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	if r == nil {
