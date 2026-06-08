@@ -187,6 +187,12 @@ type TurnStepResult struct {
 	TurnInstructions []provider.InstructionBlock
 }
 
+type TurnRequest struct {
+	Session  domain.Session
+	Chat     domain.Chat
+	Timeline []domain.TimelineItem
+}
+
 type ToolTurnService interface {
 	ApproveToolForTurn(context.Context, *Chat, string, *accesssettings.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *Chat, string, chan<- domain.Event) error
@@ -232,7 +238,7 @@ type ModelOps interface {
 	MaxToolLoopSteps() int
 	ClientForChat(domain.Chat) (*provider.Client, error)
 	BeginModelTurn(context.Context, id.ID, id.ID, int, chan<- domain.Event) error
-	BuildConversationForTurn(context.Context, *Chat, []provider.InstructionBlock) ([]provider.Message, error)
+	BuildConversationForTurn(context.Context, TurnRequest) ([]provider.Message, error)
 	AutoCompactAtTurnBoundary(context.Context, *Chat, *provider.Client, []provider.Message, chan<- domain.Event) (bool, error)
 	ProviderStreamingEnabled(domain.Chat) bool
 	ChatRequest(domain.Session, domain.Chat, []provider.Message, bool) provider.ChatRequest
@@ -584,6 +590,49 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 		}
 	}
 	return item, true, nil
+}
+
+func (r *Chat) BuildTurnRequest() (TurnRequest, error) {
+	if r == nil {
+		return TurnRequest{}, fmt.Errorf("chat runtime is required")
+	}
+	snapshot := r.Snapshot()
+	return TurnRequest{
+		Session:  snapshot.Session,
+		Chat:     snapshot.Chat,
+		Timeline: FilterQueuedTimelineItems(r.SnapshotTimeline()),
+	}, nil
+}
+
+func FilterQueuedTimelineItems(timeline []domain.TimelineItem) []domain.TimelineItem {
+	if len(timeline) == 0 {
+		return timeline
+	}
+	out := make([]domain.TimelineItem, 0, len(timeline))
+	waitingToolResult := false
+	for _, item := range timeline {
+		if _, ok := item.Content.(domain.UserMessage); ok && waitingToolResult {
+			continue
+		}
+		out = append(out, item)
+		if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+			waitingToolResult = assistantHasUnfinishedToolCall(assistant)
+			continue
+		}
+		if _, ok := item.Content.(domain.ToolExecution); ok {
+			waitingToolResult = false
+		}
+	}
+	return out
+}
+
+func assistantHasUnfinishedToolCall(assistant domain.AssistantMessage) bool {
+	for _, call := range assistant.Tools {
+		if call.Result == nil && call.Error == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func userMessageForSteers(steers []domain.QueuedInput) domain.UserMessage {

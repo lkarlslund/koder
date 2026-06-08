@@ -59,6 +59,7 @@ type runtimeFakeRunner struct {
 	continueNotes  []string
 	turnTimelines  []int
 	promptTimeline [][]domain.TimelineItem
+	turnRequests   []TurnRequest
 	events         []<-chan domain.Event
 }
 
@@ -161,11 +162,11 @@ func (f *queuedSteerBoundaryRunner) CompleteModelRequest(_ context.Context, _ do
 	return ModelResponse{Text: "done"}, nil
 }
 
-func (f *queuedSteerBoundaryRunner) BuildConversationForTurn(_ context.Context, rt *Chat, _ []provider.InstructionBlock) ([]provider.Message, error) {
+func (f *queuedSteerBoundaryRunner) BuildConversationForTurn(_ context.Context, req TurnRequest) ([]provider.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.calls > 0 {
-		f.step1Timeline = rt.SnapshotTimeline()
+		f.step1Timeline = req.Timeline
 	}
 	return nil, nil
 }
@@ -193,7 +194,7 @@ func (f *cancelAwareRunner) BeginModelTurn(context.Context, id.ID, id.ID, int, c
 	return nil
 }
 
-func (f *cancelAwareRunner) BuildConversationForTurn(context.Context, *Chat, []provider.InstructionBlock) ([]provider.Message, error) {
+func (f *cancelAwareRunner) BuildConversationForTurn(context.Context, TurnRequest) ([]provider.Message, error) {
 	return nil, nil
 }
 
@@ -337,7 +338,10 @@ func (f *runtimeFakeRunner) BeginModelTurn(context.Context, id.ID, id.ID, int, c
 	return nil
 }
 
-func (f *runtimeFakeRunner) BuildConversationForTurn(context.Context, *Chat, []provider.InstructionBlock) ([]provider.Message, error) {
+func (f *runtimeFakeRunner) BuildConversationForTurn(_ context.Context, req TurnRequest) ([]provider.Message, error) {
+	f.mu.Lock()
+	f.turnRequests = append(f.turnRequests, req)
+	f.mu.Unlock()
 	return nil, nil
 }
 
@@ -579,6 +583,66 @@ func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatReco
 	}
 	t.Cleanup(chat.Close)
 	return chat
+}
+
+func TestBuildTurnRequestIncludesMaterializedTurnInstructions(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	out := make(chan domain.Event, 1)
+	if err := rt.MaterializeTurnInstructions(ctx, TurnInstructionBlocks("permission mode changed", ""), out); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := rt.BuildTurnRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Session.ID != session.ID {
+		t.Fatalf("request session = %q, want %q", req.Session.ID, session.ID)
+	}
+	if req.Chat.ID != chatRecord.ID {
+		t.Fatalf("request chat = %q, want %q", req.Chat.ID, chatRecord.ID)
+	}
+	if len(req.Timeline) != 1 {
+		t.Fatalf("request timeline len = %d, want 1: %#v", len(req.Timeline), req.Timeline)
+	}
+	user, ok := req.Timeline[0].Content.(domain.UserMessage)
+	if !ok {
+		t.Fatalf("request item content = %T, want user message", req.Timeline[0].Content)
+	}
+	if user.Source != domain.UserMessageSourceTurnInstruction {
+		t.Fatalf("request user source = %q, want %q", user.Source, domain.UserMessageSourceTurnInstruction)
+	}
+	if user.Text != "Session update:\npermission mode changed" {
+		t.Fatalf("request user text = %q", user.Text)
+	}
+}
+
+func TestBuildTurnRequestFiltersQueuedUsersAfterUnfinishedToolCall(t *testing.T) {
+	timeline := []domain.TimelineItem{
+		{ID: "user-1", Content: domain.UserMessage{Text: "start"}},
+		{ID: "assistant-1", Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+			ToolCallID: "call-1",
+			Tool:       domain.ToolKindFileRead,
+			Status:     domain.ToolStatusRunning,
+		}}}},
+		{ID: "queued-user", Content: domain.UserMessage{Text: "queued while tool result pending"}},
+		{ID: "tool-result", Content: domain.ToolExecution{Tool: domain.ToolKindFileRead}},
+		{ID: "user-2", Content: domain.UserMessage{Text: "after result"}},
+	}
+
+	got := FilterQueuedTimelineItems(timeline)
+	gotIDs := make([]string, 0, len(got))
+	for _, item := range got {
+		gotIDs = append(gotIDs, item.ID)
+	}
+	want := []string{"user-1", "assistant-1", "tool-result", "user-2"}
+	if !slices.Equal(gotIDs, want) {
+		t.Fatalf("filtered item IDs = %#v, want %#v", gotIDs, want)
+	}
 }
 
 func TestRuntimeEnqueueStartsPrompt(t *testing.T) {

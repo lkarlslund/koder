@@ -57,7 +57,13 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	if err := rt.MaterializeTurnInstructions(ctx, turnInstructions, out); err != nil {
 		return TurnStepResult{}, err
 	}
-	messages, buildErr := l.model.BuildConversationForTurn(ctx, rt, turnInstructions)
+	turnRequest, err := rt.BuildTurnRequest()
+	if err != nil {
+		return TurnStepResult{}, err
+	}
+	session = turnRequest.Session
+	chat = turnRequest.Chat
+	messages, buildErr := l.model.BuildConversationForTurn(ctx, turnRequest)
 	if buildErr != nil {
 		return TurnStepResult{}, buildErr
 	}

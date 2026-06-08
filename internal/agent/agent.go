@@ -301,12 +301,8 @@ func (e *Engine) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, st
 	return nil
 }
 
-func (e *Engine) BuildConversationForTurn(ctx context.Context, rt *chatpkg.Chat, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("chat runtime is required")
-	}
-	snapshot := rt.Snapshot()
-	return e.buildConversationForTurn(ctx, snapshot.Session, snapshot.Chat, rt, turnInstructions)
+func (e *Engine) BuildConversationForTurn(ctx context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
+	return e.buildConversationForTurn(ctx, req)
 }
 
 func (e *Engine) AutoCompactAtTurnBoundary(ctx context.Context, rt *chatpkg.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
@@ -1329,38 +1325,12 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("chat runtime is required")
-	}
-	timeline := filterQueuedTimelineItems(rt.SnapshotTimeline())
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+func (e *Engine) buildConversationForTurn(_ context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
+	envelope, err := e.buildPromptEnvelopeForTimeline(req.Session, req.Chat, req.Timeline, "", nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	return provider.SerializePromptEnvelope(envelope), nil
-}
-
-func filterQueuedTimelineItems(timeline []domain.TimelineItem) []domain.TimelineItem {
-	if len(timeline) == 0 {
-		return timeline
-	}
-	out := make([]domain.TimelineItem, 0, len(timeline))
-	waitingToolResult := false
-	for _, item := range timeline {
-		if _, ok := item.Content.(domain.UserMessage); ok && waitingToolResult {
-			continue
-		}
-		out = append(out, item)
-		if assistant, ok := item.Content.(domain.AssistantMessage); ok {
-			waitingToolResult = assistantHasUnfinishedToolCall(assistant)
-			continue
-		}
-		if _, ok := item.Content.(domain.ToolExecution); ok {
-			waitingToolResult = false
-		}
-	}
-	return out
 }
 
 func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []domain.TimelineItem {
@@ -1385,15 +1355,6 @@ func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []dom
 		out = append(out, item)
 	}
 	return out
-}
-
-func assistantHasUnfinishedToolCall(assistant domain.AssistantMessage) bool {
-	for _, call := range assistant.Tools {
-		if call.Result == nil && call.Error == nil {
-			return true
-		}
-	}
-	return false
 }
 
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
@@ -1432,7 +1393,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 			return provider.PromptEnvelope{}, err
 		}
 	}
-	timeline = filterQueuedTimelineItems(timeline)
+	timeline = chatpkg.FilterQueuedTimelineItems(timeline)
 	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
