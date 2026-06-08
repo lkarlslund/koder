@@ -333,7 +333,6 @@ type Controller struct {
 	shutdownMu                  sync.Mutex
 	mu                          sync.RWMutex
 	session                     domain.Session
-	sessions                    []domain.Session
 	chat                        domain.Chat
 	workspace                   workspacepkg.Status
 	workspaceWatchCancel        context.CancelFunc
@@ -384,7 +383,6 @@ func (c *Controller) State() State {
 	c.mu.RLock()
 	selection := Selection{SessionID: c.session.ID, ChatID: c.chat.ID}
 	base := State{
-		Sessions:      slices.Clone(c.sessions),
 		Theme:         c.theme,
 		Build:         version.Current(),
 		RestartNeeded: c.restartNeeded,
@@ -413,7 +411,6 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 func (c *Controller) stateForSelection(ctx context.Context, selection Selection, touch bool) (State, error) {
 	c.mu.RLock()
 	base := State{
-		Sessions:      slices.Clone(c.sessions),
 		Theme:         c.theme,
 		Build:         version.Current(),
 		RestartNeeded: c.restartNeeded,
@@ -1275,7 +1272,6 @@ func (c *Controller) CreateSession(ctx context.Context, title string, projectRoo
 		return domain.Session{}, err
 	}
 	c.mu.Lock()
-	c.sessions = sessions
 	c.mu.Unlock()
 	c.broadcast("sessions_delta", map[string]any{"sessions": sessions})
 	return session, nil
@@ -1305,12 +1301,7 @@ func (c *Controller) RenameSession(ctx context.Context, sessionID id.ID, title s
 	if err != nil {
 		return err
 	}
-	sessions, err := c.workspaceSessions(ctx)
-	if err != nil {
-		return err
-	}
 	c.mu.Lock()
-	c.sessions = sessions
 	if c.session.ID == sessionID {
 		c.session = updated
 	}
@@ -1348,7 +1339,6 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 		return err
 	}
 	c.mu.Lock()
-	c.sessions = sessions
 	if c.session.ID == sessionID {
 		c.session = domain.Session{}
 		c.chat = domain.Chat{}
@@ -1776,10 +1766,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
-	sessions, err := c.workspaceSessions(ctx)
-	if err != nil {
-		return err
-	}
 	chats := ownerSnapshot.Chats
 	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
 		return err
@@ -1843,7 +1829,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	}
 	c.mu.Lock()
 	c.session = session
-	c.sessions = sessions
 	c.chat = chatRecord
 	c.workspace = workspacepkg.Status{ProjectRoot: session.ProjectRoot}
 	c.lastWorkspaceRefresh = time.Time{}

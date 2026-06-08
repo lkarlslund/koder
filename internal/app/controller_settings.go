@@ -498,11 +498,6 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	rt.SetChat(chatRecord)
 	rt.SetSession(session)
 	c.mu.Lock()
-	for idx := range c.sessions {
-		if c.sessions[idx].ID == session.ID {
-			c.sessions[idx] = session
-		}
-	}
 	c.chat = chatRecord
 	c.mu.Unlock()
 	return nil
@@ -537,11 +532,6 @@ func (c *Controller) SetAccessSettingsForSelection(ctx context.Context, selectio
 		}
 	}
 	c.mu.Lock()
-	for idx := range c.sessions {
-		if c.sessions[idx].ID == session.ID {
-			c.sessions[idx] = session
-		}
-	}
 	if c.session.ID == session.ID {
 		c.session = session
 	}
