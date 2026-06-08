@@ -149,7 +149,7 @@
                     </div>
                     <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
                   </div>
-                  <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
+                  <div class="tool-preview small text-secondary text-truncate" x-show="toolPreview(tool)" x-text="toolPreview(tool)" :title="toolPreview(tool)"></div>
                   <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">
                     <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
                     <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: toolCallID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>

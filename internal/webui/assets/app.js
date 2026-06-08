@@ -423,7 +423,7 @@
     function renderCompactBlock(title, lines, extraClass = '') {
       const body = compactLines(lines).map(line => {
         const cls = line.omitted ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
-        return '<div class="' + cls + '">' + escapeHTML(line.text || ' ') + '</div>';
+        return '<div class="' + cls + '" title="' + escapeHTML(line.text || '') + '">' + escapeHTML(line.text || ' ') + '</div>';
       }).join('');
       const bodyClass = ['tool-result-body', extraClass].filter(Boolean).join(' ');
       return toolResultHeader(title) + '<div class="' + bodyClass + '">' + body + '</div>';
@@ -438,7 +438,7 @@
         if (line.startsWith('+') && !line.startsWith('+++')) cls += ' tool-diff-add';
         else if (line.startsWith('-') && !line.startsWith('---')) cls += ' tool-diff-del';
         else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) cls += ' tool-diff-meta';
-        return '<div class="' + cls + '">' + escapeHTML(line || ' ') + '</div>';
+        return '<div class="' + cls + '" title="' + escapeHTML(line || '') + '">' + escapeHTML(line || ' ') + '</div>';
       }).join('');
       return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
     }
@@ -555,7 +555,7 @@
       if (!lines.length) return '';
       const body = lines.map((text, idx) => {
         const cls = idx > 0 && String(text).startsWith('... ') ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
-        return '<div class="' + cls + '">' + escapeHTML(text || ' ') + '</div>';
+        return '<div class="' + cls + '" title="' + escapeHTML(text || '') + '">' + escapeHTML(text || ' ') + '</div>';
       }).join('');
       return '<div class="tool-result-body tool-result-body-mono">' + body + '</div>';
     }

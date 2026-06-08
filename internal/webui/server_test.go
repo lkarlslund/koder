@@ -1149,6 +1149,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
 		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
 	}
+	if !strings.Contains(fullPage, `class="tool-preview small text-secondary text-truncate"`) ||
+		!strings.Contains(fullPage, `.tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }`) ||
+		!strings.Contains(fullPage, `.tool-diff-line { padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: pre; }`) ||
+		!strings.Contains(fullPage, `escapeHTML(line.text || '')`) ||
+		!strings.Contains(fullPage, `escapeHTML(line || '')`) {
+		t.Fatalf("expected tool previews and result rows to stay to one visible line")
+	}
 	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) {
 		t.Fatalf("expected notices to render as compact UI instead of raw JSON")
 	}
