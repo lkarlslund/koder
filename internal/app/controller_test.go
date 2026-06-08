@@ -374,31 +374,24 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	}
 }
 
-func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
+func TestControllerSelectionStateReflectsChatMetadataChanges(t *testing.T) {
 	ctrl, _ := newTestController(t)
+	ctx := context.Background()
 	state := ctrl.State()
 	if state.ActiveChatID == "" {
 		t.Fatal("expected active chat")
 	}
-	ctrl.mu.Lock()
-	if ctrl.unsub != nil {
-		ctrl.unsub()
-		ctrl.unsub = nil
+	owner, err := ctrl.agent.LoadSession(ctx, state.Session.ID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
 	}
-	ctrl.runtime = nil
-	ctrl.mu.Unlock()
-	updated := state.Snapshot
-	updated.Chat.ID = state.ActiveChatID
-	updated.Chat.Title = "Generated Chat Title"
-	updated.Status = chat.StatusRunningTools
-	updated.StatusText = "Running tools"
-	updates := make(chan chat.Update, 1)
-	updates <- chat.Update{Snapshot: updated, Status: chat.StatusRunningTools, StatusText: "Running tools", Active: true}
-	close(updates)
-
-	ctrl.applySessionChatEvent(sessionpkg.Event{Kind: sessionpkg.EventChatChanged, SessionID: state.Session.ID, Chat: updated.Chat, Snapshot: updated, Update: <-updates})
-
-	got := ctrl.State()
+	if _, _, err := owner.UpdateChat(ctx, state.ActiveChatID, chattool.UpdateRequest{Title: "Generated Chat Title"}); err != nil {
+		t.Fatalf("update chat: %v", err)
+	}
+	got, err := ctrl.StateForSelection(ctx, Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	var listed string
 	for _, item := range got.Chats {
 		if item.ID == state.ActiveChatID {
@@ -409,20 +402,11 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	if listed != "Generated Chat Title" {
 		t.Fatalf("expected chat list title updated, got %q", listed)
 	}
-	var sidebarStatus ChatSidebarStatus
-	for _, item := range got.ChatStatuses {
-		if item.ChatID == state.ActiveChatID {
-			sidebarStatus = item
-			break
-		}
-	}
-	if sidebarStatus.Status != string(chat.StatusRunningTools) || !sidebarStatus.Busy {
-		t.Fatalf("expected active chat sidebar status running tools, got %#v", sidebarStatus)
-	}
 }
 
-func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
+func TestControllerSelectionStateReflectsInactiveChatMetadataChanges(t *testing.T) {
 	ctrl, _ := newTestController(t)
+	ctx := context.Background()
 	selection := controllerSelection(ctrl)
 	first := selection.ChatID
 	if first == "" {
@@ -432,19 +416,17 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	if side == "" || side == first {
 		t.Fatalf("expected side chat, first=%s side=%s", first, side)
 	}
-
-	updated := ctrl.State().Snapshots[side]
-	updated.Chat.ID = side
-	updated.Chat.Title = "Generated Side Title"
-	updated.Status = chat.StatusWaitingApproval
-	updated.StatusText = "Waiting for approval"
-	updates := make(chan chat.Update, 1)
-	updates <- chat.Update{Snapshot: updated, Status: chat.StatusWaitingApproval, StatusText: "Waiting for approval", Active: true}
-	close(updates)
-
-	ctrl.applySessionChatEvent(sessionpkg.Event{Kind: sessionpkg.EventChatChanged, SessionID: ctrl.State().Session.ID, Chat: updated.Chat, Snapshot: updated, Update: <-updates})
-
-	got := ctrl.State()
+	owner, err := ctrl.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if _, _, err := owner.UpdateChat(ctx, side, chattool.UpdateRequest{Title: "Generated Side Title"}); err != nil {
+		t.Fatalf("update side chat: %v", err)
+	}
+	got, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if got.ActiveChatID != first {
 		t.Fatalf("expected active chat to remain %s, got %s", first, got.ActiveChatID)
 	}
@@ -461,35 +443,26 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	if listed != "Generated Side Title" {
 		t.Fatalf("expected inactive chat list title updated, got %q", listed)
 	}
-	var sidebarStatus ChatSidebarStatus
-	for _, item := range got.ChatStatuses {
-		if item.ChatID == side {
-			sidebarStatus = item
-			break
-		}
-	}
-	if sidebarStatus.Status != string(chat.StatusWaitingApproval) || !sidebarStatus.Busy {
-		t.Fatalf("expected inactive chat sidebar status waiting approval, got %#v", sidebarStatus)
-	}
 }
 
-func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
+func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	ctrl, _ := newTestController(t)
+	ctx := context.Background()
 	state := ctrl.State()
 	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
-	if _, err := ctrl.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []planning.Milestone{
+	if _, err := ctrl.SetMilestonePlan(ctx, state.Session.ID, "Ship it", []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}
-	todos, err := ctrl.AddTodoItems(context.Background(), state.Session.ID, "alpha", []string{"Implement alpha"})
+	todos, err := ctrl.AddTodoItems(ctx, state.Session.ID, "alpha", []string{"Implement alpha"})
 	if err != nil {
 		t.Fatalf("add task: %v", err)
 	}
 
-	status, err := ctrl.agent.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, chattool.StartRequest{
+	status, err := ctrl.agent.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
 		Profile:   chatrole.Execution,
 		Objective: "Implement only the assigned task",
 		TodoRef:   todos[0].ID,
@@ -498,19 +471,9 @@ func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 		t.Fatalf("start chat: %v", err)
 	}
 
-	var next State
-	deadline := time.After(2 * time.Second)
-	for {
-		next = ctrl.State()
-		if _, ok := next.Snapshots[status.ID]; ok {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for started chat in state, got %#v", next.Chats)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	next, err := ctrl.StateForSelection(ctx, Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
 	}
 	found := false
 	for _, item := range next.Chats {
@@ -1036,32 +999,17 @@ func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load chat: %v", err)
 	}
-	events, unsub := ctrl.Subscribe()
-	defer unsub()
 	state, err := ctrl.StateForSelection(ctx, selection)
 	if err != nil {
 		t.Fatalf("state for selection: %v", err)
 	}
 	rt.SetSession(state.Session)
-
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case event := <-events:
-			if event.Type != "snapshot" && event.Type != "chat_delta" && event.Type != "session_delta" {
-				continue
-			}
-			state, err := ctrl.StateForSelection(ctx, selection)
-			if err != nil {
-				t.Fatalf("state for selection: %v", err)
-			}
-			if got := state.Access.Settings.Network; got {
-				t.Fatalf("expected runtime update to preserve network disabled")
-			}
-			return
-		case <-deadline:
-			t.Fatalf("expected runtime update to preserve access settings")
-		}
+	state, err = ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	if got := state.Access.Settings.Network; got {
+		t.Fatalf("expected runtime update to preserve network disabled")
 	}
 }
 

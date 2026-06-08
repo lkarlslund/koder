@@ -3,14 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
-	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -160,125 +158,4 @@ func (c *Controller) forwardExecRuntime(chatID id.ID, events <-chan execruntime.
 			Active:     snapshot.Active,
 		})
 	}
-}
-
-func (c *Controller) forwardSessionEvents(sessionID id.ID, events <-chan sessionpkg.Event) {
-	for event := range events {
-		if event.SessionID != sessionID {
-			continue
-		}
-		c.mu.RLock()
-		currentSessionID := c.session.ID
-		c.mu.RUnlock()
-		if currentSessionID != sessionID {
-			return
-		}
-		switch event.Kind {
-		case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived:
-			c.applySessionChatEvent(event)
-		case sessionpkg.EventPlanningChanged:
-			c.applySessionPlanningEvent(event)
-		case sessionpkg.EventTasksChanged:
-			c.applySessionTasksEvent(event)
-		case sessionpkg.EventSessionChanged:
-			c.applySessionChangedEvent(event)
-		}
-	}
-}
-
-func (c *Controller) applySessionChatEvent(event sessionpkg.Event) {
-	update := event.Update
-	if update.Snapshot.Chat.ID == "" {
-		update.Snapshot = event.Snapshot
-	}
-	if update.Snapshot.Chat.ID == "" {
-		update.Snapshot.Chat = event.Chat
-	}
-	if update.Snapshot.Chat.ID == "" {
-		return
-	}
-	if update.Status == "" {
-		update.Status = update.Snapshot.Status
-	}
-	if update.StatusText == "" {
-		update.StatusText = update.Snapshot.StatusText
-	}
-	update.Active = update.Active || update.Snapshot.Active
-	chatID := update.Snapshot.Chat.ID
-	if update.Event != nil && update.Event.Err != nil {
-		c.mu.Lock()
-		c.lastErr = update.Event.Err.Error()
-		c.mu.Unlock()
-	}
-	c.mu.Lock()
-	if c.session.ID != event.SessionID {
-		c.mu.Unlock()
-		return
-	}
-	if c.snapshots == nil {
-		c.snapshots = map[id.ID]chat.Snapshot{}
-	}
-	if c.statuses == nil {
-		c.statuses = map[id.ID]ChatSidebarStatus{}
-	}
-	if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
-		if existing, ok := chatByID(c.chats, chatID); ok {
-			update.Snapshot.Chat = existing
-		}
-	}
-	c.snapshots[chatID] = update.Snapshot
-	upsertChat(&c.chats, update.Snapshot.Chat)
-	c.statuses[chatID] = sidebarStatusFromUpdate(update)
-	if c.chat.ID == chatID {
-		c.chat = update.Snapshot.Chat
-	}
-	if event.Kind == sessionpkg.EventChatArchived && c.chat.ID == chatID && event.NextChatID != "" {
-		if next, ok := chatByID(c.chats, event.NextChatID); ok {
-			c.chat = next
-			if rt := c.runtimes[next.ID]; rt != nil {
-				c.runtime = rt
-			}
-		}
-	}
-	c.mu.Unlock()
-	c.broadcast("chat_delta", update)
-	if event.Kind == sessionpkg.EventChatArchived {
-		c.mu.RLock()
-		activeChatID := c.chat.ID
-		c.mu.RUnlock()
-		c.broadcast("selection_delta", map[string]id.ID{"active_chat_id": activeChatID})
-	}
-}
-
-func (c *Controller) applySessionPlanningEvent(event sessionpkg.Event) {
-	c.mu.Lock()
-	if c.session.ID == event.SessionID {
-		c.milestone = event.Plan
-		c.todos = slices.Clone(event.Todos)
-		c.todosByRef = cloneTodosByRef(event.TodosByRef)
-	}
-	c.mu.Unlock()
-	c.broadcast("planning_delta", map[string]any{
-		"milestones":         event.Plan,
-		"todos":              slices.Clone(event.Todos),
-		"todos_by_milestone": cloneTodosByRef(event.TodosByRef),
-	})
-}
-
-func (c *Controller) applySessionTasksEvent(event sessionpkg.Event) {
-	c.broadcast("tasks_delta", map[string]any{"tasks": slices.Clone(event.Tasks)})
-}
-
-func (c *Controller) applySessionChangedEvent(event sessionpkg.Event) {
-	c.mu.Lock()
-	if c.session.ID == event.SessionID {
-		c.session = event.Session
-		for idx := range c.sessions {
-			if c.sessions[idx].ID == event.SessionID {
-				c.sessions[idx] = event.Session
-			}
-		}
-	}
-	c.mu.Unlock()
-	c.broadcast("session_delta", map[string]any{"session": event.Session})
 }

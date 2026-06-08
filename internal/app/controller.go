@@ -341,7 +341,6 @@ type Controller struct {
 	chat                        domain.Chat
 	runtime                     *chat.Chat
 	unsub                       func()
-	sessionUnsub                func()
 	runtimes                    map[id.ID]*chat.Chat
 	execUnsubs                  map[id.ID]func()
 	snapshots                   map[id.ID]chat.Snapshot
@@ -1932,8 +1931,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		snapshots[chatRecord.ID] = snapshot
 		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
 	}
-	sessionEvents, sessionUnsub := owner.Subscribe()
-
 	c.mu.Lock()
 	if c.runtimes == nil {
 		c.runtimes = map[id.ID]*chat.Chat{}
@@ -1953,10 +1950,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	c.chat = chatRecord
 	c.runtime = rt
 	c.unsub = nil
-	if c.sessionUnsub != nil {
-		c.sessionUnsub()
-	}
-	c.sessionUnsub = sessionUnsub
 	for id, loaded := range runtimes {
 		c.runtimes[id] = loaded
 	}
@@ -1984,7 +1977,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	for _, sub := range execSubscriptions {
 		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
-	go c.forwardSessionEvents(session.ID, sessionEvents)
 	if err := c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshInitial); err != nil {
 		return err
 	}
