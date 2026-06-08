@@ -24,7 +24,6 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -174,6 +173,56 @@ func testAttachToolResult(ctx context.Context, st *store.Store, chatID id.ID, to
 	return domain.TimelineItem{}, fmt.Errorf("tool call %q not found", toolCallID)
 }
 
+func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
+	out := make(chan domain.Event, 64)
+	_, err := e.handleModelToolCalls(ctx, session, chat, []tools.Request{req}, out)
+	close(out)
+	var final domain.Event
+	for evt := range out {
+		if evt.Kind == domain.EventKindToolStart {
+			continue
+		}
+		final = evt
+	}
+	return final, err
+}
+
+func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
+	rt, err := e.Chat(ctx, session, chat)
+	if err != nil {
+		return false, err
+	}
+	return rt.RunToolCalls(ctx, calls, out)
+}
+
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return rt.AppendAssistantToolRequests(ctx, item, calls, text, domain.ReasoningContent{}, usage)
+}
+
+func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
+	chatRecord, err := testGetChat(ctx, e.store, chatID)
+	if err != nil {
+		return nil, err
+	}
+	session, err := sessionpkg.GetSession(ctx, e.store, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rt, err := e.Chat(ctx, session, chatRecord)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := e.ToolRuntime(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+	return rt.RunToolCall(ctx, runtime, req, nil)
+}
+
 func testPendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]chatpkg.Approval, error) {
 	chatRecord, err := testGetChat(ctx, st, chatID)
 	if err != nil {
@@ -217,28 +266,6 @@ func TestParseToolCall(t *testing.T) {
 	}
 	if plain != "I will inspect the repo." {
 		t.Fatalf("unexpected plain text: %q", plain)
-	}
-}
-
-func TestLintTouchedFilesReportsOnlyTouchedFileErrors(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "other.json"), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "good.json"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report := lintTouchedFiles(context.Background(), dir, []string{"bad.json", "good.json"})
-	text := codediag.NewProblemsText(report)
-	if !strings.Contains(text, "bad.json") {
-		t.Fatalf("expected touched file diagnostic, got %q", text)
-	}
-	if strings.Contains(text, "other.json") || strings.Contains(text, "good.json") {
-		t.Fatalf("expected only touched files with errors, got %q", text)
 	}
 }
 

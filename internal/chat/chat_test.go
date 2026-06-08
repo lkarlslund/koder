@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
@@ -22,6 +25,28 @@ import (
 )
 
 var errTestProviderFailure = errors.New("provider failed")
+
+func TestLintTouchedFilesReportsOnlyTouchedFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "good.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := lintTouchedFiles(context.Background(), dir, []string{"bad.json", "good.json"})
+	text := codediag.NewProblemsText(report)
+	if !strings.Contains(text, "bad.json") {
+		t.Fatalf("expected touched file diagnostic, got %q", text)
+	}
+	if strings.Contains(text, "other.json") || strings.Contains(text, "good.json") {
+		t.Fatalf("expected only touched files with errors, got %q", text)
+	}
+}
 
 type runtimeFakeRunner struct {
 	mu             sync.Mutex
