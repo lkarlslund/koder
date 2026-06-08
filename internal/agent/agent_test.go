@@ -294,7 +294,7 @@ func TestCompactionMessagesRenderLintMessage(t *testing.T) {
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.ToolDefaults[domain.ToolKindBash] = true
+	cfg.Tools.Enabled[domain.ToolKindBash] = true
 	return cfg
 }
 
@@ -938,8 +938,8 @@ func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
 func TestRefreshSessionAgentsDoesNotChangeSessionProjectRoot(t *testing.T) {
 	ctx := context.Background()
 	cfg := testConfig(t)
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -953,7 +953,7 @@ func TestRefreshSessionAgentsDoesNotChangeSessionProjectRoot(t *testing.T) {
 	if err := os.Mkdir(selected, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	session, err := sessionpkg.CreateSession(ctx, st, "AltID", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(ctx, st, "AltID", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1055,7 +1055,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 
 func TestHandleModelToolCallDeniesGloballyDisabledTool(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.ToolDefaults[domain.ToolKindFileRead] = false
+	cfg.Tools.Enabled[domain.ToolKindFileRead] = false
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1086,7 +1086,7 @@ func TestHandleModelToolCallDeniesGloballyDisabledTool(t *testing.T) {
 
 func TestGlobalToolDefaultDisablesPersistedSessionToolState(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.ToolDefaults[domain.ToolKindBash] = false
+	cfg.Tools.Enabled[domain.ToolKindBash] = false
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1128,7 +1128,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1179,7 +1179,7 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,7 +1254,7 @@ func TestStartChatRejectsArchivedParent(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1282,7 +1282,7 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	}
 	defer st.Close()
 
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1314,7 +1314,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1362,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1413,7 +1413,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1460,7 +1460,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1501,7 +1501,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1533,7 +1533,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 
 func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1541,7 +1541,7 @@ func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1613,7 +1613,7 @@ func TestPreservedTimelineToolCallTailStartCountsToolCalls(t *testing.T) {
 
 func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1621,7 +1621,7 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1657,7 +1657,7 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 
 func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1665,7 +1665,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1698,7 +1698,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 
 func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.KeepToolCalls = 1
 	workdir := t.TempDir()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1774,7 +1774,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 
 func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 0
+	cfg.Compaction.KeepToolCalls = 0
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1782,7 +1782,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1825,7 +1825,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 
 func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1833,7 +1833,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1901,7 +1901,7 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1935,7 +1935,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1974,7 +1974,7 @@ func TestBuildConversationRendersSteerAfterToolResultAsSeparateUserMessage(t *te
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2018,7 +2018,7 @@ func TestBuildConversationKeepsStandaloneSteerAsUserMessage(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2264,8 +2264,8 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 			Timeout: 50 * time.Millisecond,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2430,14 +2430,14 @@ func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
 
 func TestPreviewNextRequestHidesGloballyDisabledTools(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.ToolDefaults[domain.ToolKindBash] = false
+	cfg.Tools.Enabled[domain.ToolKindBash] = false
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2488,7 +2488,7 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil, manager)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2601,8 +2601,8 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Rules: []config.PermissionRule{
 			{Tool: domain.ToolKindFileRead, Pattern: "*", Action: accesssettings.PermissionModeAllow},
@@ -2708,8 +2708,8 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileAsk
 	cfg.Permissions.Profiles[permissionprofile.ProfileAsk] = config.PermissionProfile{
 		Root:      string(permissionprofile.ModeReadOnly),
@@ -2856,8 +2856,8 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
@@ -2979,8 +2979,8 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
@@ -3086,8 +3086,8 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
@@ -3178,8 +3178,8 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
@@ -3243,8 +3243,8 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeDeny}},
 	}
@@ -3448,8 +3448,8 @@ func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3515,8 +3515,8 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3596,8 +3596,8 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3705,8 +3705,8 @@ func TestRunPromptPersistsOversizedStreamedToolCallAsToolError(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3757,8 +3757,8 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: true},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3846,8 +3846,8 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: false},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "Qwen/Qwen3.6-35B-A3B"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
 	cfg.Thinking.CavemanEnabled = true
 	cfg.Thinking.CavemanMinTokens = 1
@@ -3951,8 +3951,8 @@ func TestRunPromptStartsCavemanBeforeMainStreamCompletes(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: true},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "Qwen/Qwen3.6-35B-A3B"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: provider.ModelPresetAuto})
 	cfg.Thinking.CavemanEnabled = true
 	cfg.Thinking.CavemanMinTokens = 1
@@ -4088,8 +4088,8 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAsk}},
 	}
@@ -4173,8 +4173,8 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -4236,8 +4236,8 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 			Timeout: 50 * time.Millisecond,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -4292,7 +4292,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4340,7 +4340,7 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4387,7 +4387,7 @@ func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4459,8 +4459,8 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profiles[permissionprofile.ProfileReadAsk] = config.PermissionProfile{
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
@@ -4569,15 +4569,15 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 20
+	cfg.Compaction.AutoAtPercent = 20
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: server.URL + "/v1",
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 50000})
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Root:      string(permissionprofile.ModeReadOnly),
@@ -4709,15 +4709,15 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
+	cfg.Compaction.AutoAtPercent = 80
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: server.URL + "/v1",
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 1000})
 
 	st, err := store.Open(t.TempDir())
@@ -4796,8 +4796,8 @@ func TestManualCompactNextPromptUsesCompactedLiveTimeline(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 1000})
 
 	st, err := store.Open(t.TempDir())
@@ -4870,8 +4870,8 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -4931,8 +4931,8 @@ func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
 
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{}
-	cfg.DefaultProvider = "missing"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "missing"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -5018,8 +5018,8 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.Permissions.Profiles[permissionprofile.ProfileReadAsk] = config.PermissionProfile{
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
@@ -5116,15 +5116,15 @@ func TestRunPromptIgnoresUnknownContextUsageAfterCompaction(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
+	cfg.Compaction.AutoAtPercent = 80
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: server.URL + "/v1",
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 50000})
 
 	st, err := store.Open(t.TempDir())
@@ -5182,8 +5182,8 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
@@ -5291,8 +5291,8 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
@@ -5351,9 +5351,9 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
-	cfg.AutoCompactAt = 80
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.Compaction.AutoAtPercent = 80
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 200000})
 
 	st, err := store.Open(t.TempDir())
@@ -5410,8 +5410,8 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 
 func TestBuildCompactionRequestRecutsWhenRequestExceedsContext(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.AutoAtPercent = 80
+	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 12000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5509,7 +5509,7 @@ func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
 
 func TestCompactionRequestStartsAfterLatestValidCompaction(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
+	cfg.Compaction.AutoAtPercent = 80
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 5000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5560,8 +5560,8 @@ func TestCompactionRequestStartsAfterLatestValidCompaction(t *testing.T) {
 
 func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.AutoAtPercent = 80
+	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5619,8 +5619,8 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 
 func TestRepeatedCompactionWithoutCurrentToolTailKeepsCurrentSegmentBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.AutoCompactAt = 80
-	cfg.CompactionKeepToolCalls = 1
+	cfg.Compaction.AutoAtPercent = 80
+	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5686,8 +5686,8 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
@@ -5759,8 +5759,8 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
@@ -5844,10 +5844,10 @@ func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "chat"
-	cfg.DefaultModel = "chat-model"
-	cfg.CompactionProvider = "compact"
-	cfg.CompactionModel = "compact-model"
+	cfg.Defaults.ProviderID = "chat"
+	cfg.Defaults.ModelID = "chat-model"
+	cfg.Compaction.ProviderID = "compact"
+	cfg.Compaction.ModelID = "compact-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "chat", ModelID: "chat-model", ContextWindow: 32768})
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "compact", ModelID: "compact-model", ContextWindow: 32768})
 
@@ -5889,8 +5889,8 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 		},
 	}
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "chat", ModelID: "chat-model", ContextWindow: 32768})
-	cfg.CompactionProvider = "missing"
-	cfg.CompactionModel = "compact-model"
+	cfg.Compaction.ProviderID = "missing"
+	cfg.Compaction.ModelID = "compact-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -5936,8 +5936,8 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
@@ -6004,7 +6004,7 @@ func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
 	}
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6079,7 +6079,7 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6128,7 +6128,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, nil)
-	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.DefaultProvider, "test-model", nil)
+	session, err := sessionpkg.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6178,8 +6178,8 @@ func TestRunPromptIncludesVisibleTurnInstruction(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -6254,8 +6254,8 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -6333,8 +6333,8 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -6490,8 +6490,8 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -6571,8 +6571,8 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -6647,8 +6647,8 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	engine := New(cfg, nil, nil)
 	var waited []time.Duration
@@ -6727,8 +6727,8 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 			Stream:  true,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	engine := New(cfg, nil, nil)
 	client, err := provider.New("test", cfg.Providers["test"], nil)
@@ -6874,8 +6874,8 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 			Timeout: 50 * time.Millisecond,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -6935,8 +6935,8 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -6996,8 +6996,8 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7145,8 +7145,8 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7201,8 +7201,8 @@ func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7269,8 +7269,8 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7354,8 +7354,8 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7436,8 +7436,8 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7507,8 +7507,8 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7557,8 +7557,8 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -7629,8 +7629,8 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 			Timeout: time.Second,
 		},
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {

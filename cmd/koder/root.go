@@ -305,11 +305,11 @@ func newDoctorCommand() *cobra.Command {
 			if err := cfg.RequireProvider(); err != nil {
 				return err
 			}
-			providerCfg, ok := cfg.Provider(cfg.DefaultProvider)
+			providerCfg, ok := cfg.Provider(cfg.Defaults.ProviderID)
 			if !ok {
-				return fmt.Errorf("default provider %q not configured", cfg.DefaultProvider)
+				return fmt.Errorf("default provider %q not configured", cfg.Defaults.ProviderID)
 			}
-			client, err := provider.New(cfg.DefaultProvider, providerCfg, nil)
+			client, err := provider.New(cfg.Defaults.ProviderID, providerCfg, nil)
 			if err != nil {
 				return err
 			}
@@ -321,7 +321,7 @@ func newDoctorCommand() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\n", cfg.Path())
-			fmt.Fprintf(cmd.OutOrStdout(), "provider: %s\n", cfg.DefaultProvider)
+			fmt.Fprintf(cmd.OutOrStdout(), "provider: %s\n", cfg.Defaults.ProviderID)
 			for _, model := range models {
 				fmt.Fprintf(cmd.OutOrStdout(), "model: %s (%s)\n", model.ID, strings.TrimSpace(model.OwnedBy))
 			}

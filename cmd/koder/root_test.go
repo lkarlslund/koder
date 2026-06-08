@@ -227,8 +227,8 @@ func newRootTestStore(t *testing.T) *store.Store {
 func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -398,7 +398,8 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	configBody := strings.Join([]string{
-		"default_provider = \"ghost\"",
+		"[defaults]",
+		"provider_id = \"ghost\"",
 		"",
 		"[providers.other]",
 		"name = \"Other\"",

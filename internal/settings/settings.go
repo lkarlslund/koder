@@ -84,8 +84,8 @@ func (s *Store) Snapshot() config.Config {
 func (s *Store) NewSessionDefaults() NewSessionDefaults {
 	cfg := s.Snapshot()
 	return NewSessionDefaults{
-		ProviderID: strings.TrimSpace(cfg.DefaultProvider),
-		ModelID:    strings.TrimSpace(cfg.DefaultModel),
+		ProviderID: strings.TrimSpace(cfg.Defaults.ProviderID),
+		ModelID:    strings.TrimSpace(cfg.Defaults.ModelID),
 		Access:     accesssettings.Normalize(cfg.Access),
 	}
 }
@@ -104,8 +104,8 @@ func (s *Store) Tools(_ domain.Session) ToolSettings {
 	enabled := make(map[domain.ToolKind]bool, len(domain.BuiltinToolKinds()))
 	for _, kind := range domain.BuiltinToolKinds() {
 		value := true
-		if cfg.ToolDefaults != nil {
-			if configured, ok := cfg.ToolDefaults[kind]; ok {
+		if cfg.Tools.Enabled != nil {
+			if configured, ok := cfg.Tools.Enabled[kind]; ok {
 				value = configured
 			}
 		}
@@ -129,8 +129,8 @@ func (s *Store) Model(chat domain.Chat) (ModelSettings, error) {
 
 func (s *Store) Compaction(chat domain.Chat, prompt string) (CompactionSettings, error) {
 	cfg := s.Snapshot()
-	providerID := strings.TrimSpace(cfg.CompactionProvider)
-	modelID := strings.TrimSpace(cfg.CompactionModel)
+	providerID := strings.TrimSpace(cfg.Compaction.ProviderID)
+	modelID := strings.TrimSpace(cfg.Compaction.ModelID)
 	if providerID == "" {
 		providerID = strings.TrimSpace(chat.ProviderID)
 	}
@@ -142,8 +142,8 @@ func (s *Store) Compaction(chat domain.Chat, prompt string) (CompactionSettings,
 		return CompactionSettings{}, err
 	}
 	return CompactionSettings{
-		ThresholdPercent: max(1, cfg.AutoCompactAt),
-		KeepToolCalls:    config.NormalizeCompactionKeepToolCalls(cfg.CompactionKeepToolCalls),
+		ThresholdPercent: max(1, cfg.Compaction.AutoAtPercent),
+		KeepToolCalls:    config.NormalizeCompactionKeepToolCalls(cfg.Compaction.KeepToolCalls),
 		ProviderID:       model.ProviderID,
 		ModelID:          model.ModelID,
 		Provider:         model.Provider,
@@ -155,8 +155,8 @@ func (s *Store) Compaction(chat domain.Chat, prompt string) (CompactionSettings,
 
 func (s *Store) Thinking(chat domain.Chat, prompt string, preserveThinking bool) (ThinkingSettings, error) {
 	cfg := s.Snapshot()
-	providerID := strings.TrimSpace(cfg.Thinking.CavemanProvider)
-	modelID := strings.TrimSpace(cfg.Thinking.CavemanModel)
+	providerID := strings.TrimSpace(cfg.Thinking.CavemanProviderID)
+	modelID := strings.TrimSpace(cfg.Thinking.CavemanModelID)
 	if providerID == "" {
 		providerID = strings.TrimSpace(chat.ProviderID)
 	}

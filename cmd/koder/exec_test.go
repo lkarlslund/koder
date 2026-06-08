@@ -179,8 +179,9 @@ func withExecTestConfig(t *testing.T, baseURL string) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
-	cfg := `default_provider = "test"
-default_model = "model"
+	cfg := `[defaults]
+provider_id = "test"
+model_id = "model"
 
 [providers.test]
 base_url = "` + baseURL + `"

@@ -593,8 +593,8 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 		"test": {BaseURL: "https://example.invalid/v1", Stream: true, Timeout: time.Minute},
 	}
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -678,10 +678,10 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
-		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
+	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.Compaction.ModelID != "compact-model" {
+		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
 	}
-	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite thinking:\n{{thinking}}" || loaded.Thinking.CavemanMinTokens != 96 {
+	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProviderID != "test" || loaded.Thinking.CavemanModelID != "model" || loaded.Thinking.CavemanPrompt != "rewrite thinking:\n{{thinking}}" || loaded.Thinking.CavemanMinTokens != 96 {
 		t.Fatalf("expected saved thinking settings, got %#v", loaded.Thinking)
 	}
 	if got := loaded.ContextWindow("test", "model"); got != 12345 {
@@ -734,8 +734,8 @@ func TestControllerSavePreferencesRepairsDeletedDefaultProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "old-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "old-model"
 	cfg.Providers = map[string]config.Provider{
 		"test":  {BaseURL: "https://example.invalid/v1"},
 		"other": {BaseURL: "https://example.invalid/v1"},
@@ -797,8 +797,8 @@ func TestControllerPreferencesRepairsMissingDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "old-model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "old-model"
 	cfg.Providers = map[string]config.Provider{"test": {Name: "Test", BaseURL: modelServer.URL + "/v1"}}
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "old-model", ContextWindow: 32768})
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
@@ -952,8 +952,8 @@ func TestControllerAccessPresetsAreExposed(t *testing.T) {
 func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 	workdir := t.TempDir()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1024,8 +1024,8 @@ func TestControllerSetAccessSettingsRejectsRelativeMount(t *testing.T) {
 
 func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1147,9 +1147,9 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	defer providerServer.Close()
 
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.ToolDefaults[domain.ToolKindBash] = true
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Tools.Enabled[domain.ToolKindBash] = true
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: providerServer.URL + "/v1"},
 	}
@@ -1249,8 +1249,8 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 	defer providerServer.Close()
 
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: providerServer.URL + "/v1"},
 	}
@@ -1341,8 +1341,8 @@ func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(
 
 func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1392,8 +1392,8 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 
 func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1448,8 +1448,8 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1480,8 +1480,8 @@ func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 func TestControllerSelectedSessionPersistsLastUsedSession(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1530,8 +1530,8 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	}
 
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1587,8 +1587,8 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 	runGit(t, workdir, "commit", "-m", "initial")
 
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1639,8 +1639,8 @@ func newTestController(t *testing.T) (*Controller, *store.Store) {
 func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execruntime.Manager) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1670,8 +1670,8 @@ func runGit(t *testing.T, dir string, args ...string) {
 func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Controller, *store.Store) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	if edit != nil {
 		edit(&cfg)
 	}

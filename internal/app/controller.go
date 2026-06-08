@@ -1797,7 +1797,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		if chatRecord.SessionID != session.ID {
 			return fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
 		}
-		chatRecord, err = owner.EnsureChatModel(ctx, chatRecord.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
+		chatRecord, err = owner.EnsureChatModel(ctx, chatRecord.ID, c.cfg.Defaults.ProviderID, c.cfg.Defaults.ModelID)
 		if err != nil {
 			return err
 		}
@@ -2015,7 +2015,7 @@ func (c *Controller) resolveSelectedChat(ctx context.Context, selection Selectio
 		}
 		chatID = chatRecord.ID
 	}
-	chatRecord, err := owner.EnsureChatModel(ctx, chatID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
+	chatRecord, err := owner.EnsureChatModel(ctx, chatID, c.cfg.Defaults.ProviderID, c.cfg.Defaults.ModelID)
 	if err != nil {
 		return nil, domain.Session{}, domain.Chat{}, err
 	}
@@ -2061,8 +2061,8 @@ func (c *Controller) contextWindowForChat(chatRecord domain.Chat) int {
 	cfg := c.cfg
 	c.mu.RUnlock()
 	if providerID == "" || modelID == "" {
-		if strings.TrimSpace(cfg.DefaultProvider) != "" && strings.TrimSpace(cfg.DefaultModel) != "" {
-			return cfg.ContextWindow(cfg.DefaultProvider, cfg.DefaultModel)
+		if strings.TrimSpace(cfg.Defaults.ProviderID) != "" && strings.TrimSpace(cfg.Defaults.ModelID) != "" {
+			return cfg.ContextWindow(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
 		}
 		return 32768
 	}

@@ -2637,8 +2637,8 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "model"
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: "https://example.invalid/v1"},
 	}

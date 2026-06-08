@@ -106,12 +106,12 @@ func runExec(ctx context.Context, opts execOptions, prompt string) (string, erro
 	if err := cfg.RequireProvider(); err != nil {
 		return "", err
 	}
-	providerID := firstNonEmpty(strings.TrimSpace(opts.providerID), strings.TrimSpace(cfg.DefaultProvider))
+	providerID := firstNonEmpty(strings.TrimSpace(opts.providerID), strings.TrimSpace(cfg.Defaults.ProviderID))
 	providerCfg, ok := cfg.Provider(providerID)
 	if !ok {
 		return "", fmt.Errorf("provider %q not configured", providerID)
 	}
-	modelID := firstNonEmpty(strings.TrimSpace(opts.modelID), strings.TrimSpace(cfg.DefaultModel))
+	modelID := firstNonEmpty(strings.TrimSpace(opts.modelID), strings.TrimSpace(cfg.Defaults.ModelID))
 	if modelID == "" {
 		return "", fmt.Errorf("no model configured for provider %q", providerID)
 	}

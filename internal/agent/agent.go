@@ -636,8 +636,8 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 	if !e.shouldCavemanThinking(reasoning) {
 		return cavemanJob{}, nil
 	}
-	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProvider)
-	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModel)
+	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProviderID)
+	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModelID)
 	if providerID == "" && modelID == "" {
 		providerID = strings.TrimSpace(chat.ProviderID)
 		modelID = strings.TrimSpace(chat.ModelID)
@@ -1966,7 +1966,7 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 }
 
 func (e *Engine) compactionKeepToolCalls() int {
-	return config.NormalizeCompactionKeepToolCalls(e.cfg.CompactionKeepToolCalls)
+	return config.NormalizeCompactionKeepToolCalls(e.cfg.Compaction.KeepToolCalls)
 }
 
 func (e *Engine) systemPrompt() string {
@@ -2028,7 +2028,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 }
 
 func (e *Engine) autoCompactThreshold() int {
-	return max(1, e.cfg.AutoCompactAt)
+	return max(1, e.cfg.Compaction.AutoAtPercent)
 }
 
 func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
@@ -2227,8 +2227,8 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
 	next := chat
 	next.WorkflowRole = chatrole.Compaction
-	providerID := strings.TrimSpace(e.cfg.CompactionProvider)
-	modelID := strings.TrimSpace(e.cfg.CompactionModel)
+	providerID := strings.TrimSpace(e.cfg.Compaction.ProviderID)
+	modelID := strings.TrimSpace(e.cfg.Compaction.ModelID)
 	if providerID == "" && modelID == "" {
 		return next, client, nil
 	}

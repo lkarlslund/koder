@@ -27,11 +27,27 @@ type Store struct {
 
 type Thinking struct {
 	CavemanEnabled     bool   `toml:"caveman_enabled"`
-	CavemanProvider    string `toml:"caveman_provider"`
-	CavemanModel       string `toml:"caveman_model"`
+	CavemanProviderID  string `toml:"caveman_provider_id"`
+	CavemanModelID     string `toml:"caveman_model_id"`
 	CavemanPrompt      string `toml:"caveman_prompt"`
 	CavemanParallelism int    `toml:"caveman_parallelism,omitempty"`
 	CavemanMinTokens   int    `toml:"caveman_min_tokens,omitempty"`
+}
+
+type Defaults struct {
+	ProviderID string `toml:"provider_id"`
+	ModelID    string `toml:"model_id"`
+}
+
+type Compaction struct {
+	ProviderID    string `toml:"provider_id"`
+	ModelID       string `toml:"model_id"`
+	AutoAtPercent int    `toml:"auto_at_percent"`
+	KeepToolCalls int    `toml:"keep_tool_calls"`
+}
+
+type Tools struct {
+	Enabled ToolDefaults `toml:"enabled"`
 }
 
 type Provider struct {
@@ -89,26 +105,22 @@ type PermissionRule = permissionprofile.Rule
 type ToolDefaults map[domain.ToolKind]bool
 
 type Config struct {
-	DefaultProvider         string                  `toml:"default_provider"`
-	DefaultModel            string                  `toml:"default_model"`
-	CompactionProvider      string                  `toml:"compaction_provider"`
-	CompactionModel         string                  `toml:"compaction_model"`
-	MaxToolLoopSteps        int                     `toml:"max_tool_loop_steps"`
-	AutoCompactAt           int                     `toml:"auto_compact_at"`
-	CompactionKeepToolCalls int                     `toml:"compaction_keep_tool_calls"`
-	ToolDefaults            ToolDefaults            `toml:"tool_defaults"`
-	Providers               map[string]Provider     `toml:"providers"`
-	Models                  []ModelConfig           `toml:"models"`
-	MCPServers              map[string]MCPServer    `toml:"mcp_servers"`
-	Permissions             PermissionRules         `toml:"permissions"`
-	Access                  accesssettings.Settings `toml:"access"`
-	Store                   Store                   `toml:"store"`
-	UI                      UI                      `toml:"ui"`
-	Thinking                Thinking                `toml:"thinking"`
-	path                    string
-	configDir               string
-	stateDir                string
-	cacheDir                string
+	Defaults         Defaults                `toml:"defaults"`
+	Compaction       Compaction              `toml:"compaction"`
+	MaxToolLoopSteps int                     `toml:"max_tool_loop_steps"`
+	Tools            Tools                   `toml:"tools"`
+	Providers        map[string]Provider     `toml:"providers"`
+	Models           []ModelConfig           `toml:"models"`
+	MCPServers       map[string]MCPServer    `toml:"mcp_servers"`
+	Permissions      PermissionRules         `toml:"permissions"`
+	Access           accesssettings.Settings `toml:"access"`
+	Store            Store                   `toml:"store"`
+	UI               UI                      `toml:"ui"`
+	Thinking         Thinking                `toml:"thinking"`
+	path             string
+	configDir        string
+	stateDir         string
+	cacheDir         string
 }
 
 func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
@@ -128,7 +140,7 @@ func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
 	return nil
 }
 
-const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
+const providerConfigurationHint = "configure at least one provider in config.toml and set defaults.provider_id"
 const defaultMaxToolLoopSteps = 500
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
@@ -193,12 +205,6 @@ func Load() (Config, error) {
 	if !strings.Contains(string(data), "auto_continue") {
 		cfg.UI.AutoContinue = true
 	}
-	if !strings.Contains(string(data), "auto_compact_at") {
-		cfg.AutoCompactAt = defaultAutoCompactAt
-	}
-	if !strings.Contains(string(data), "compaction_keep_tool_calls") {
-		cfg.CompactionKeepToolCalls = defaultCompactionKeepToolCalls
-	}
 	cfg.configDir = configDir
 	cfg.stateDir = stateDir()
 	cfg.cacheDir = cacheDir()
@@ -215,15 +221,16 @@ func Default() Config {
 	}
 	toolDefaults[domain.ToolKindBash] = false
 	return Config{
-		DefaultProvider:         "",
-		MaxToolLoopSteps:        defaultMaxToolLoopSteps,
-		AutoCompactAt:           defaultAutoCompactAt,
-		CompactionKeepToolCalls: defaultCompactionKeepToolCalls,
-		ToolDefaults:            toolDefaults,
-		Providers:               map[string]Provider{},
-		Models:                  []ModelConfig{},
-		MCPServers:              map[string]MCPServer{},
-		Access:                  accesssettings.Default(),
+		MaxToolLoopSteps: defaultMaxToolLoopSteps,
+		Compaction: Compaction{
+			AutoAtPercent: defaultAutoCompactAt,
+			KeepToolCalls: defaultCompactionKeepToolCalls,
+		},
+		Tools:      Tools{Enabled: toolDefaults},
+		Providers:  map[string]Provider{},
+		Models:     []ModelConfig{},
+		MCPServers: map[string]MCPServer{},
+		Access:     accesssettings.Default(),
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -267,23 +274,23 @@ func (c *Config) applyDefaults() {
 	if c.MaxToolLoopSteps <= 0 {
 		c.MaxToolLoopSteps = def.MaxToolLoopSteps
 	}
-	if c.AutoCompactAt <= 0 {
-		c.AutoCompactAt = def.AutoCompactAt
+	if c.Compaction.AutoAtPercent <= 0 {
+		c.Compaction.AutoAtPercent = def.Compaction.AutoAtPercent
 	}
-	c.CompactionKeepToolCalls = NormalizeCompactionKeepToolCalls(c.CompactionKeepToolCalls)
+	c.Compaction.KeepToolCalls = NormalizeCompactionKeepToolCalls(c.Compaction.KeepToolCalls)
 	if c.Providers == nil {
 		c.Providers = def.Providers
 	}
 	if c.MCPServers == nil {
 		c.MCPServers = def.MCPServers
 	}
-	if c.ToolDefaults == nil {
-		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
+	if c.Tools.Enabled == nil {
+		c.Tools.Enabled = cloneToolDefaults(def.Tools.Enabled)
 	}
-	pruneToolDefaults(c.ToolDefaults)
+	pruneToolDefaults(c.Tools.Enabled)
 	for _, kind := range domain.BuiltinToolKinds() {
-		if _, ok := c.ToolDefaults[kind]; !ok {
-			c.ToolDefaults[kind] = def.ToolDefaults[kind]
+		if _, ok := c.Tools.Enabled[kind]; !ok {
+			c.Tools.Enabled[kind] = def.Tools.Enabled[kind]
 		}
 	}
 	if c.Permissions.Profile == "" {
@@ -310,8 +317,8 @@ func (c *Config) applyDefaults() {
 	if c.UI.Theme == "" {
 		c.UI = def.UI
 	}
-	c.Thinking.CavemanProvider = strings.TrimSpace(c.Thinking.CavemanProvider)
-	c.Thinking.CavemanModel = strings.TrimSpace(c.Thinking.CavemanModel)
+	c.Thinking.CavemanProviderID = strings.TrimSpace(c.Thinking.CavemanProviderID)
+	c.Thinking.CavemanModelID = strings.TrimSpace(c.Thinking.CavemanModelID)
 	if c.Thinking.CavemanParallelism <= 0 {
 		c.Thinking.CavemanParallelism = defaultCavemanParallelism
 	}
@@ -423,11 +430,11 @@ func (c Config) RequireProvider() error {
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("no providers configured; %s", providerConfigurationHint)
 	}
-	if strings.TrimSpace(c.DefaultProvider) == "" {
-		return fmt.Errorf("default_provider is not set; %s", providerConfigurationHint)
+	if strings.TrimSpace(c.Defaults.ProviderID) == "" {
+		return fmt.Errorf("defaults.provider_id is not set; %s", providerConfigurationHint)
 	}
-	if _, ok := c.Provider(c.DefaultProvider); !ok {
-		return fmt.Errorf("default provider %q not configured; %s", c.DefaultProvider, providerConfigurationHint)
+	if _, ok := c.Provider(c.Defaults.ProviderID); !ok {
+		return fmt.Errorf("default provider %q not configured; %s", c.Defaults.ProviderID, providerConfigurationHint)
 	}
 	return nil
 }
@@ -441,7 +448,7 @@ func (c Config) HasUsableProvider(id string) bool {
 }
 
 func (c Config) HasUsableDefaultProvider() bool {
-	return c.HasUsableProvider(c.DefaultProvider)
+	return c.HasUsableProvider(c.Defaults.ProviderID)
 }
 
 // ModelConfig returns the configured settings for a provider/model pair.

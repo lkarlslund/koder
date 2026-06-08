@@ -120,9 +120,9 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		ContextWindow: c.cfg.ContextWindow(catalogDraft.ProviderID, catalogDraft.Model),
 		ModelPreset:   c.cfg.ModelPreset(catalogDraft.ProviderID, catalogDraft.Model),
 	})
-	if strings.TrimSpace(c.cfg.DefaultProvider) == "" || c.cfg.DefaultProvider == originalID || c.cfg.DefaultProvider == catalogDraft.ProviderID {
-		c.cfg.DefaultProvider = catalogDraft.ProviderID
-		c.cfg.DefaultModel = catalogDraft.Model
+	if strings.TrimSpace(c.cfg.Defaults.ProviderID) == "" || c.cfg.Defaults.ProviderID == originalID || c.cfg.Defaults.ProviderID == catalogDraft.ProviderID {
+		c.cfg.Defaults.ProviderID = catalogDraft.ProviderID
+		c.cfg.Defaults.ModelID = catalogDraft.Model
 	}
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
@@ -167,7 +167,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	}
 	delete(c.cfg.Providers, providerID)
 	deleteModelConfigs(&c.cfg, providerID)
-	nextDefault := strings.TrimSpace(c.cfg.DefaultProvider)
+	nextDefault := strings.TrimSpace(c.cfg.Defaults.ProviderID)
 	if nextDefault == providerID || !c.cfg.HasUsableProvider(nextDefault) {
 		nextDefault = ""
 		ids := make([]string, 0, len(c.cfg.Providers))
@@ -179,10 +179,10 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 			nextDefault = ids[0]
 		}
 	}
-	c.cfg.DefaultProvider = nextDefault
-	c.cfg.DefaultModel = ""
+	c.cfg.Defaults.ProviderID = nextDefault
+	c.cfg.Defaults.ModelID = ""
 	if nextDefault != "" {
-		c.cfg.DefaultModel = firstModelForProvider(c.cfg, nextDefault)
+		c.cfg.Defaults.ModelID = firstModelForProvider(c.cfg, nextDefault)
 	}
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
@@ -201,7 +201,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
+		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, c.cfg.Defaults.ProviderID, c.cfg.Defaults.ModelID)
 		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
@@ -634,16 +634,16 @@ func deleteModelConfigs(cfg *config.Config, providerID string) {
 func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
 	models, _ := c.modelOptionsLocked(ctx)
 	liveModels := slices.Clone(models)
-	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.CompactionProvider), strings.TrimSpace(c.cfg.CompactionModel))
-	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Thinking.CavemanProvider), strings.TrimSpace(c.cfg.Thinking.CavemanModel))
+	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Compaction.ProviderID), strings.TrimSpace(c.cfg.Compaction.ModelID))
+	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Thinking.CavemanProviderID), strings.TrimSpace(c.cfg.Thinking.CavemanModelID))
 	prompts, err := promptPreferences()
 	if err != nil {
 		return PreferencesState{}, err
 	}
 	state := PreferencesState{
 		General: GeneralPreferences{
-			DefaultProvider:  strings.TrimSpace(c.cfg.DefaultProvider),
-			DefaultModel:     strings.TrimSpace(c.cfg.DefaultModel),
+			DefaultProvider:  strings.TrimSpace(c.cfg.Defaults.ProviderID),
+			DefaultModel:     strings.TrimSpace(c.cfg.Defaults.ModelID),
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
 		},
 		UI:           browserPreferencesFromConfig(c.cfg.UI),
@@ -655,7 +655,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models, models),
 		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
 		Access:       accessPreferencesFromConfig(c.cfg.Access),
-		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
+		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
 	}
 	repairPreferencesDefaultModel(&state, liveModels)
 	return state, nil
@@ -845,7 +845,7 @@ func (c *Controller) providerStateLocked() ProviderState {
 			Kind:                    strings.TrimSpace(cfg.Kind),
 			BaseURL:                 strings.TrimSpace(cfg.BaseURL),
 			Disabled:                cfg.Disabled,
-			Default:                 id == c.cfg.DefaultProvider,
+			Default:                 id == c.cfg.Defaults.ProviderID,
 			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
 			PromptProgressProbed:    cfg.PromptProgressProbed,
 			PromptProgressSupported: cfg.PromptProgressSupported,
@@ -856,8 +856,8 @@ func (c *Controller) providerStateLocked() ProviderState {
 	}
 
 	return ProviderState{
-		DefaultProvider: strings.TrimSpace(c.cfg.DefaultProvider),
-		DefaultModel:    strings.TrimSpace(c.cfg.DefaultModel),
+		DefaultProvider: strings.TrimSpace(c.cfg.Defaults.ProviderID),
+		DefaultModel:    strings.TrimSpace(c.cfg.Defaults.ModelID),
 		Catalog:         catalog,
 		Providers:       providers,
 		Drafts:          drafts,
@@ -963,15 +963,15 @@ func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {
 }
 
 func compactionPreferencesFromConfig(cfg config.Config) CompactionPreferences {
-	providerID := strings.TrimSpace(cfg.CompactionProvider)
-	modelID := strings.TrimSpace(cfg.CompactionModel)
+	providerID := strings.TrimSpace(cfg.Compaction.ProviderID)
+	modelID := strings.TrimSpace(cfg.Compaction.ModelID)
 	text := "Chat model"
 	if providerID != "" || modelID != "" {
 		text = providerID + " / " + modelID
 	}
 	return CompactionPreferences{
-		AutoCompactAt:        cfg.AutoCompactAt,
-		KeepToolCalls:        config.NormalizeCompactionKeepToolCalls(cfg.CompactionKeepToolCalls),
+		AutoCompactAt:        cfg.Compaction.AutoAtPercent,
+		KeepToolCalls:        config.NormalizeCompactionKeepToolCalls(cfg.Compaction.KeepToolCalls),
 		ProviderID:           providerID,
 		ModelID:              modelID,
 		UseChatModel:         providerID == "" && modelID == "",
@@ -980,8 +980,8 @@ func compactionPreferencesFromConfig(cfg config.Config) CompactionPreferences {
 }
 
 func thinkingPreferencesFromConfig(cfg config.Config) ThinkingPreferences {
-	providerID := strings.TrimSpace(cfg.Thinking.CavemanProvider)
-	modelID := strings.TrimSpace(cfg.Thinking.CavemanModel)
+	providerID := strings.TrimSpace(cfg.Thinking.CavemanProviderID)
+	modelID := strings.TrimSpace(cfg.Thinking.CavemanModelID)
 	text := "Chat model"
 	if providerID != "" || modelID != "" {
 		text = providerID + " / " + modelID
@@ -1084,10 +1084,10 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 }
 
 func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error {
-	cfg.DefaultProvider = strings.TrimSpace(prefs.DefaultProvider)
-	cfg.DefaultModel = strings.TrimSpace(prefs.DefaultModel)
-	if cfg.DefaultProvider != "" && !cfg.HasUsableProvider(cfg.DefaultProvider) {
-		return fmt.Errorf("default provider %q is not configured or is disabled", cfg.DefaultProvider)
+	cfg.Defaults.ProviderID = strings.TrimSpace(prefs.DefaultProvider)
+	cfg.Defaults.ModelID = strings.TrimSpace(prefs.DefaultModel)
+	if cfg.Defaults.ProviderID != "" && !cfg.HasUsableProvider(cfg.Defaults.ProviderID) {
+		return fmt.Errorf("default provider %q is not configured or is disabled", cfg.Defaults.ProviderID)
 	}
 	if prefs.MaxToolLoopSteps <= 0 {
 		return fmt.Errorf("max tool loop steps must be greater than zero")
@@ -1200,18 +1200,18 @@ func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences)
 	if prefs.AutoCompactAt <= 0 {
 		return fmt.Errorf("auto compact threshold must be greater than zero")
 	}
-	cfg.AutoCompactAt = prefs.AutoCompactAt
-	cfg.CompactionKeepToolCalls = config.NormalizeCompactionKeepToolCalls(prefs.KeepToolCalls)
+	cfg.Compaction.AutoAtPercent = prefs.AutoCompactAt
+	cfg.Compaction.KeepToolCalls = config.NormalizeCompactionKeepToolCalls(prefs.KeepToolCalls)
 	if prefs.UseChatModel {
-		cfg.CompactionProvider = ""
-		cfg.CompactionModel = ""
+		cfg.Compaction.ProviderID = ""
+		cfg.Compaction.ModelID = ""
 		return nil
 	}
 	providerID := strings.TrimSpace(prefs.ProviderID)
 	modelID := strings.TrimSpace(prefs.ModelID)
 	if providerID == "" && modelID == "" {
-		cfg.CompactionProvider = ""
-		cfg.CompactionModel = ""
+		cfg.Compaction.ProviderID = ""
+		cfg.Compaction.ModelID = ""
 		return nil
 	}
 	if providerID == "" || modelID == "" {
@@ -1220,8 +1220,8 @@ func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences)
 	if !cfg.HasUsableProvider(providerID) {
 		return fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
 	}
-	cfg.CompactionProvider = providerID
-	cfg.CompactionModel = modelID
+	cfg.Compaction.ProviderID = providerID
+	cfg.Compaction.ModelID = modelID
 	return nil
 }
 
@@ -1236,15 +1236,15 @@ func applyThinkingPreferences(cfg *config.Config, prefs ThinkingPreferences) err
 		cfg.Thinking.CavemanMinTokens = config.DefaultCavemanMinTokens
 	}
 	if prefs.UseChatModel {
-		cfg.Thinking.CavemanProvider = ""
-		cfg.Thinking.CavemanModel = ""
+		cfg.Thinking.CavemanProviderID = ""
+		cfg.Thinking.CavemanModelID = ""
 		return nil
 	}
 	providerID := strings.TrimSpace(prefs.ProviderID)
 	modelID := strings.TrimSpace(prefs.ModelID)
 	if providerID == "" && modelID == "" {
-		cfg.Thinking.CavemanProvider = ""
-		cfg.Thinking.CavemanModel = ""
+		cfg.Thinking.CavemanProviderID = ""
+		cfg.Thinking.CavemanModelID = ""
 		return nil
 	}
 	if providerID == "" || modelID == "" {
@@ -1253,8 +1253,8 @@ func applyThinkingPreferences(cfg *config.Config, prefs ThinkingPreferences) err
 	if !cfg.HasUsableProvider(providerID) {
 		return fmt.Errorf("thinking provider %q is not configured or is disabled", providerID)
 	}
-	cfg.Thinking.CavemanProvider = providerID
-	cfg.Thinking.CavemanModel = modelID
+	cfg.Thinking.CavemanProviderID = providerID
+	cfg.Thinking.CavemanModelID = modelID
 	return nil
 }
 
@@ -1306,7 +1306,7 @@ func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreferen
 			next[kind] = true
 		}
 	}
-	cfg.ToolDefaults = next
+	cfg.Tools.Enabled = next
 }
 
 func promptPreferences() ([]PromptPreference, error) {

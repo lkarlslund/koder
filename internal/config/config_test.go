@@ -20,20 +20,20 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DefaultProvider != "" {
-		t.Fatalf("expected no default provider, got %q", cfg.DefaultProvider)
+	if cfg.Defaults.ProviderID != "" {
+		t.Fatalf("expected no default provider, got %q", cfg.Defaults.ProviderID)
 	}
 	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps 500, got %d", cfg.MaxToolLoopSteps)
 	}
-	if cfg.AutoCompactAt != defaultAutoCompactAt {
-		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
+	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
+		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
 	}
-	if cfg.CompactionKeepToolCalls != defaultCompactionKeepToolCalls {
-		t.Fatalf("expected default kept tool calls %d, got %d", defaultCompactionKeepToolCalls, cfg.CompactionKeepToolCalls)
+	if cfg.Compaction.KeepToolCalls != defaultCompactionKeepToolCalls {
+		t.Fatalf("expected default kept tool calls %d, got %d", defaultCompactionKeepToolCalls, cfg.Compaction.KeepToolCalls)
 	}
-	if cfg.CompactionProvider != "" || cfg.CompactionModel != "" {
-		t.Fatalf("expected chat model compaction default, got %q/%q", cfg.CompactionProvider, cfg.CompactionModel)
+	if cfg.Compaction.ProviderID != "" || cfg.Compaction.ModelID != "" {
+		t.Fatalf("expected chat model compaction default, got %q/%q", cfg.Compaction.ProviderID, cfg.Compaction.ModelID)
 	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
@@ -56,10 +56,10 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
-	if cfg.ToolDefaults[domain.ToolKindBash] {
+	if cfg.Tools.Enabled[domain.ToolKindBash] {
 		t.Fatal("expected bash disabled by default")
 	}
-	if !cfg.ToolDefaults[domain.ToolKindExecCommand] {
+	if !cfg.Tools.Enabled[domain.ToolKindExecCommand] {
 		t.Fatal("expected exec_command enabled by default")
 	}
 	if len(cfg.Providers) != 0 {
@@ -81,8 +81,8 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Thinking.CavemanEnabled = true
-	cfg.Thinking.CavemanProvider = "test"
-	cfg.Thinking.CavemanModel = "model"
+	cfg.Thinking.CavemanProviderID = "test"
+	cfg.Thinking.CavemanModelID = "model"
 	cfg.Thinking.CavemanPrompt = "rewrite:\n{{thinking}}"
 	cfg.Thinking.CavemanParallelism = 3
 	cfg.Thinking.CavemanMinTokens = 128
@@ -93,7 +93,7 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProvider != "test" || loaded.Thinking.CavemanModel != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" || loaded.Thinking.CavemanParallelism != 3 || loaded.Thinking.CavemanMinTokens != 128 {
+	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProviderID != "test" || loaded.Thinking.CavemanModelID != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" || loaded.Thinking.CavemanParallelism != 3 || loaded.Thinking.CavemanMinTokens != 128 {
 		t.Fatalf("expected thinking settings to round-trip, got %#v", loaded.Thinking)
 	}
 }
@@ -174,8 +174,8 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.CompactionProvider = "fast"
-	cfg.CompactionModel = "fast-model"
+	cfg.Compaction.ProviderID = "fast"
+	cfg.Compaction.ModelID = "fast-model"
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +183,8 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.CompactionProvider != "fast" || loaded.CompactionModel != "fast-model" {
-		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.CompactionProvider, loaded.CompactionModel)
+	if loaded.Compaction.ProviderID != "fast" || loaded.Compaction.ModelID != "fast-model" {
+		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestLoadAcceptsTextToolDefaultKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte(`
-[tool_defaults]
+[tools.enabled]
 bash = false
 exec_write_stdin = false
 exec_cleanup_background = false
@@ -223,11 +223,11 @@ milestone_update_item = false
 		domain.ToolKindMilestonePlan,
 		domain.ToolKindMilestoneUpdate,
 	} {
-		if cfg.ToolDefaults[kind] {
-			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.ToolDefaults)
+		if cfg.Tools.Enabled[kind] {
+			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.Tools.Enabled)
 		}
 	}
-	if !cfg.ToolDefaults[domain.ToolKindFileRead] {
+	if !cfg.Tools.Enabled[domain.ToolKindFileRead] {
 		t.Fatal("expected missing tool default to be backfilled enabled")
 	}
 }
@@ -243,7 +243,7 @@ func TestLoadIgnoresUnknownToolDefaultKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte(`
-[tool_defaults]
+[tools.enabled]
 grep = false
 write = false
 file_read = false
@@ -256,8 +256,8 @@ file_read = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ToolDefaults[domain.ToolKindFileRead] {
-		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.ToolDefaults)
+	if cfg.Tools.Enabled[domain.ToolKindFileRead] {
+		t.Fatalf("expected current file_read setting to stay disabled: %#v", cfg.Tools.Enabled)
 	}
 	for _, kind := range domain.BuiltinToolKinds() {
 		if kind.String() == "" {
@@ -277,7 +277,7 @@ func TestLoadBackfillsMissingToolDefaultsFromCurrentDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte(`
-[tool_defaults]
+[tools.enabled]
 file_read = true
 `)
 	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
@@ -288,11 +288,11 @@ file_read = true
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ToolDefaults[domain.ToolKindBash] {
-		t.Fatalf("expected missing bash default to backfill disabled: %#v", cfg.ToolDefaults)
+	if cfg.Tools.Enabled[domain.ToolKindBash] {
+		t.Fatalf("expected missing bash default to backfill disabled: %#v", cfg.Tools.Enabled)
 	}
-	if !cfg.ToolDefaults[domain.ToolKindExecCommand] {
-		t.Fatalf("expected missing exec_command default to backfill enabled: %#v", cfg.ToolDefaults)
+	if !cfg.Tools.Enabled[domain.ToolKindExecCommand] {
+		t.Fatalf("expected missing exec_command default to backfill enabled: %#v", cfg.Tools.Enabled)
 	}
 }
 
@@ -379,11 +379,11 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AutoCompactAt != defaultAutoCompactAt {
-		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
+	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
+		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
 	}
-	if cfg.CompactionKeepToolCalls != defaultCompactionKeepToolCalls {
-		t.Fatalf("expected kept tool calls backfilled to %d, got %d", defaultCompactionKeepToolCalls, cfg.CompactionKeepToolCalls)
+	if cfg.Compaction.KeepToolCalls != defaultCompactionKeepToolCalls {
+		t.Fatalf("expected kept tool calls backfilled to %d, got %d", defaultCompactionKeepToolCalls, cfg.Compaction.KeepToolCalls)
 	}
 }
 
