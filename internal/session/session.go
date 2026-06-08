@@ -85,11 +85,11 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	chats, err := listChatRecords(ctx, st, sessionID)
+	chats, err := chatpkg.ListRecordsForSession(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := getPlan(ctx, st, sessionID)
+	plan, err := planning.LoadPlan(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := listTasks(ctx, st, sessionID)
+	tasks, err := planning.ListTasks(ctx, st, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func loadTodosByRef(ctx context.Context, st *store.Store, sessionID id.ID, plan 
 		seen[ref] = struct{}{}
 		out[ref] = nil
 	}
-	items, err := listTodos(ctx, st, sessionID, "")
+	items, err := planning.ListTodos(ctx, st, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -352,47 +352,9 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 		return nil, err
 	}
 	sourceSnapshot := sourceRuntime.Snapshot()
-	sourceTimeline := sourceSnapshot.Timeline
-	anchorIdx := slices.IndexFunc(sourceTimeline, func(item domain.TimelineItem) bool {
-		return item.ID == anchorItemID
-	})
-	if anchorIdx < 0 {
-		return nil, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, sourceChatID)
-	}
-	parentID := sourceChatID
-	now := time.Now().UTC()
-	chatRecord := domain.Chat{
-		ID:                     id.NewAt(now),
-		SessionID:              session.ID,
-		ParentChatID:           &parentID,
-		Title:                  title,
-		WorkflowRole:           source.WorkflowRole,
-		ProviderID:             strings.TrimSpace(source.ProviderID),
-		ModelID:                strings.TrimSpace(source.ModelID),
-		PermissionProfile:      source.PermissionProfile,
-		ToolStates:             cloneToolStateMap(source.ToolStates),
-		ActiveMilestoneRef:     source.ActiveMilestoneRef,
-		AssignedTodoBucketRef:  source.AssignedTodoBucketRef,
-		AssignedTodoRef:        source.AssignedTodoRef,
-		LastKnownContextTokens: 0,
-		ContextTokensKnown:     false,
-		TokenUsage:             domain.Usage{},
-		Position:               position,
-		CreatedAt:              now,
-		UpdatedAt:              now,
-		LastMessage:            "",
-	}
-	if err := putChat(ctx, s.store, chatRecord); err != nil {
+	chatRecord, err := chatpkg.ForkRecordAt(ctx, s.store, source, sourceSnapshot.Timeline, anchorItemID, title, position)
+	if err != nil {
 		return nil, err
-	}
-	for idx, item := range sourceTimeline[:anchorIdx+1] {
-		copied, err := cloneTimelineItemForChat(item, chatRecord.ID, int64(idx+1), now)
-		if err != nil {
-			return nil, err
-		}
-		if err := putTimelineItem(ctx, s.store, copied); err != nil {
-			return nil, err
-		}
 	}
 	rt, err := s.chatLoader(ctx, session, chatRecord)
 	if err != nil {
@@ -434,7 +396,7 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
 	}
-	if err := putChat(ctx, s.store, chatRecord); err != nil {
+	if err := chatpkg.PutRecord(ctx, s.store, chatRecord); err != nil {
 		return nil, err
 	}
 	rt, err := s.chatLoader(ctx, session, chatRecord)
@@ -511,7 +473,7 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 	if best := newestSessionChat(chats); best.ID != "" {
 		return best, nil
 	}
-	chatRecord, err := defaultChatRecord(ctx, s.store, session.ID)
+	chatRecord, err := chatpkg.DefaultRecord(ctx, s.store, session.ID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
@@ -662,7 +624,7 @@ func (s *Session) ReorderChats(ctx context.Context, ids []id.ID) ([]domain.Chat,
 		}
 		seen[chatID] = true
 		chatRecord.Position = idx
-		if err := updateChat(ctx, s.store, chatRecord); err != nil {
+		if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
 			s.mu.Unlock()
 			return nil, err
 		}
@@ -741,7 +703,7 @@ func (s *Session) SetChatModel(ctx context.Context, chatID id.ID, providerID, mo
 	chatRecord.ProviderID = providerID
 	chatRecord.ModelID = modelID
 	chatRecord.UpdatedAt = time.Now().UTC()
-	if err := updateChat(ctx, s.store, chatRecord); err != nil {
+	if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
 		return domain.Chat{}, err
 	}
 	s.mu.Lock()
@@ -816,7 +778,7 @@ func (s *Session) TouchSelection(ctx context.Context, chatID id.ID) (domain.Sess
 		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
-	if err := updateChat(ctx, s.store, chatRecord); err != nil {
+	if err := chatpkg.UpdateRecord(ctx, s.store, chatRecord); err != nil {
 		s.mu.Unlock()
 		return domain.Session{}, domain.Chat{}, nil, err
 	}
@@ -965,7 +927,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
-	if err := putPlan(ctx, s.store, plan); err != nil {
+	if err := planning.SavePlan(ctx, s.store, plan); err != nil {
 		return planning.Plan{}, err
 	}
 	s.mu.Lock()
@@ -1009,7 +971,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 		})
 	}
 	for _, item := range items {
-		if err := putTodo(ctx, s.store, item); err != nil {
+		if err := planning.SaveTodo(ctx, s.store, item); err != nil {
 			return nil, err
 		}
 	}
@@ -1061,7 +1023,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = now
-	if err := putTodo(ctx, s.store, item); err != nil {
+	if err := planning.SaveTodo(ctx, s.store, item); err != nil {
 		return planning.TodoItem{}, err
 	}
 	s.mu.Lock()
@@ -1107,7 +1069,7 @@ func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, sta
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := putTask(ctx, s.store, task); err != nil {
+	if err := planning.SaveTask(ctx, s.store, task); err != nil {
 		return planning.Task{}, err
 	}
 	s.mu.Lock()

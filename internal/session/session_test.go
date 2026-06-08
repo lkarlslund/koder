@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,20 +15,60 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 )
 
-func testAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	items, err := timelineForChat(ctx, st, chatID)
+func testAppendTimeline(ctx context.Context, st *store.Store, sessionRecord domain.Session, chatRecord domain.Chat, content domain.TimelineContent) (domain.TimelineItem, error) {
+	rt, err := chatpkg.Load(ctx, sessionRecord, chatRecord, chatpkg.Deps{Store: st}, nil)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
+	return rt.AppendTimelineContent(ctx, content)
+}
+
+func testAddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+	existing, err := planning.ListTodos(ctx, st, sessionID, milestoneRef)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
-	return timelineCollection(st).Insert(ctx, domain.TimelineItem{
-		ID:        id.New(),
-		ChatID:    chatID,
-		Seq:       int64(len(items) + 1),
-		Content:   content,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
+	items := make([]planning.TodoItem, 0, len(contents))
+	for _, content := range contents {
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+		items = append(items, planning.TodoItem{
+			ID:           id.NewAt(now),
+			SessionID:    sessionID,
+			MilestoneRef: milestoneRef,
+			Content:      content,
+			Status:       planning.TodoStatusPending,
+			Position:     len(existing) + len(items),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+	}
+	for _, item := range items {
+		if err := planning.SaveTodo(ctx, st, item); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func testUpdateTodo(ctx context.Context, st *store.Store, sessionID, todoID id.ID, status planning.TodoStatus, note string) (planning.TodoItem, error) {
+	todos, err := planning.ListTodos(ctx, st, sessionID, "")
+	if err != nil {
+		return planning.TodoItem{}, err
+	}
+	for _, item := range todos {
+		if item.ID != todoID {
+			continue
+		}
+		item.Status = status
+		item.Note = note
+		item.UpdatedAt = time.Now().UTC()
+		return item, planning.SaveTodo(ctx, st, item)
+	}
+	return planning.TodoItem{}, fmt.Errorf("task %s not found", todoID)
 }
 
 func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
@@ -41,17 +82,17 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := putPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
+	if err := planning.SavePlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTodos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"alpha task"})
+	alphaTodos, err := testAddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"alpha task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "beta", []string{"beta task"})
+	betaTodos, err := testAddTodoItems(ctx, st, sessionRecord.ID, "beta", []string{"beta task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,10 +134,10 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := putPlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
+	if err := planning.SavePlan(ctx, st, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := testAddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +169,7 @@ func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	created, err := testAddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,11 +202,11 @@ func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := testAddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := updateTodoRecord(ctx, st, todos[0].ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+	if _, err := testUpdateTodo(ctx, st, sessionRecord.ID, todos[0].ID, planning.TodoStatusCompleted, "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := Load(ctx, st, func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error) { return nil, nil }, sessionRecord.ID)
@@ -191,12 +232,12 @@ func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := addTodoItemsRecord(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	todos, err := testAddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, todo := range todos {
-		if _, err := updateTodoRecord(ctx, st, todo.ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+		if _, err := testUpdateTodo(ctx, st, sessionRecord.ID, todo.ID, planning.TodoStatusCompleted, "completed in setup"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -223,11 +264,11 @@ func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := createChatRecord(ctx, st, sessionRecord.ID, "first", chatrole.Orchestrator, nil)
+	first, err := chatpkg.CreateRecord(ctx, st, chatpkg.CreateRecordRequest{Session: sessionRecord, Title: "first", Role: chatrole.Orchestrator, Position: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := createChatRecord(ctx, st, sessionRecord.ID, "second", chatrole.Execution, &first.ID)
+	second, err := chatpkg.CreateRecord(ctx, st, chatpkg.CreateRecordRequest{Session: sessionRecord, Title: "second", Role: chatrole.Execution, ParentID: &first.ID, Position: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +305,7 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chats, err := listChatRecords(ctx, st, sessionRecord.ID)
+	chats, err := chatpkg.ListRecordsForSession(ctx, st, sessionRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,14 +313,14 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 		t.Fatalf("expected initial chat, got %#v", chats)
 	}
 	source := chats[0]
-	if _, err := testAppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "first"}); err != nil {
+	if _, err := testAppendTimeline(ctx, st, sessionRecord, source, domain.UserMessage{Text: "first"}); err != nil {
 		t.Fatal(err)
 	}
-	anchor, err := testAppendTimeline(ctx, st, source.ID, domain.AssistantMessage{Text: "second"})
+	anchor, err := testAppendTimeline(ctx, st, sessionRecord, source, domain.AssistantMessage{Text: "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAppendTimeline(ctx, st, source.ID, domain.UserMessage{Text: "third"}); err != nil {
+	if _, err := testAppendTimeline(ctx, st, sessionRecord, source, domain.UserMessage{Text: "third"}); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := Load(ctx, st, func(_ context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
@@ -292,10 +333,11 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkedTimeline, err := timelineForChat(ctx, st, fork.Snapshot().Chat.ID)
+	forkedPage, err := fork.TimelinePage(ctx, "", 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	forkedTimeline := forkedPage.Items
 	if len(forkedTimeline) != 2 {
 		t.Fatalf("expected two forked items, got %#v", forkedTimeline)
 	}
@@ -308,10 +350,15 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	if got := forkedTimeline[1].Content.(domain.AssistantMessage).Text; got != "second" {
 		t.Fatalf("expected copied anchor content, got %q", got)
 	}
-	sourceTimeline, err := timelineForChat(ctx, st, source.ID)
+	sourceRuntime, err := owner.Chat(ctx, source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sourcePage, err := sourceRuntime.TimelinePage(ctx, "", 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceTimeline := sourcePage.Items
 	if len(sourceTimeline) != 3 {
 		t.Fatalf("expected source timeline to remain intact, got %#v", sourceTimeline)
 	}

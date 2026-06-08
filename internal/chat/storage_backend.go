@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
@@ -56,6 +58,233 @@ func chatCollection(st *store.Store) store.Collection[domain.Chat] {
 			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
 		},
 	})
+}
+
+func ListRecordsForSession(ctx context.Context, st *store.Store, sessionID id.ID) ([]domain.Chat, error) {
+	chats, err := chatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(sessionID)))
+	if err != nil {
+		return nil, err
+	}
+	sortRecordsForSidebar(chats)
+	return chats, nil
+}
+
+func sortRecordsForSidebar(chats []domain.Chat) {
+	slices.SortFunc(chats, func(a, b domain.Chat) int {
+		switch {
+		case a.Position < b.Position:
+			return -1
+		case a.Position > b.Position:
+			return 1
+		case a.CreatedAt.Before(b.CreatedAt):
+			return -1
+		case a.CreatedAt.After(b.CreatedAt):
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+}
+
+func DefaultRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domain.Chat, error) {
+	chats, err := ListRecordsForSession(ctx, st, sessionID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	for _, chatRecord := range chats {
+		if chatRecord.ParentChatID == nil {
+			return chatRecord, nil
+		}
+	}
+	if len(chats) > 0 {
+		return chats[0], nil
+	}
+	return domain.Chat{}, fmt.Errorf("session %s has no chats", sessionID)
+}
+
+type CreateRecordRequest struct {
+	Session           domain.Session
+	Title             string
+	Role              domain.WorkflowRole
+	ParentID          *id.ID
+	ProviderID        string
+	ModelID           string
+	PermissionProfile string
+	ToolStates        map[domain.ToolKind]bool
+	Position          int
+}
+
+func CreateRecord(ctx context.Context, st *store.Store, req CreateRecordRequest) (domain.Chat, error) {
+	session := req.Session
+	if session.ID == "" {
+		return domain.Chat{}, fmt.Errorf("create chat: session id is required")
+	}
+	chats, err := ListRecordsForSession(ctx, st, session.ID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	position := req.Position
+	if position < 0 {
+		position = len(chats)
+	}
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                id.NewAt(now),
+		SessionID:         session.ID,
+		ParentChatID:      req.ParentID,
+		Title:             strings.TrimSpace(req.Title),
+		WorkflowRole:      req.Role,
+		ProviderID:        strings.TrimSpace(req.ProviderID),
+		ModelID:           strings.TrimSpace(req.ModelID),
+		PermissionProfile: strings.TrimSpace(req.PermissionProfile),
+		ToolStates:        cloneToolStates(req.ToolStates),
+		Position:          position,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if chatRecord.Title == "" {
+		chatRecord.Title = "New Chat"
+	}
+	if chatRecord.WorkflowRole == "" {
+		chatRecord.WorkflowRole = chatrole.General
+	}
+	if chatRecord.PermissionProfile == "" {
+		chatRecord.PermissionProfile = session.PermissionProfile
+	}
+	if len(chatRecord.ToolStates) == 0 {
+		chatRecord.ToolStates = cloneToolStates(session.ToolStates)
+	}
+	if chatRecord.ProviderID == "" || chatRecord.ModelID == "" {
+		if defaultChat, err := DefaultRecord(ctx, st, session.ID); err == nil {
+			if chatRecord.ProviderID == "" {
+				chatRecord.ProviderID = defaultChat.ProviderID
+			}
+			if chatRecord.ModelID == "" {
+				chatRecord.ModelID = defaultChat.ModelID
+			}
+		}
+	}
+	if err := putChat(ctx, st, chatRecord); err != nil {
+		return domain.Chat{}, err
+	}
+	return chatRecord, nil
+}
+
+func PutRecord(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+	return putChat(ctx, st, chatRecord)
+}
+
+func UpdateRecord(ctx context.Context, st *store.Store, chatRecord domain.Chat) error {
+	return updateChat(ctx, st, chatRecord)
+}
+
+func deleteRecord(ctx context.Context, st *store.Store, chatID id.ID) error {
+	return chatCollection(st).Delete(ctx, chatID)
+}
+
+func DeleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
+	if sessionID == "" {
+		return fmt.Errorf("delete chat session data: session id is required")
+	}
+	chats, err := ListRecordsForSession(ctx, st, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, chatRecord := range chats {
+		if err := DeletePersistedData(ctx, st, chatRecord.ID); err != nil {
+			return err
+		}
+		if err := deleteRecord(ctx, st, chatRecord.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ForkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sourceTimeline []domain.TimelineItem, anchorItemID id.ID, title string, position int) (domain.Chat, error) {
+	if source.ID == "" {
+		return domain.Chat{}, fmt.Errorf("fork chat: source chat id is required")
+	}
+	if source.SessionID == "" {
+		return domain.Chat{}, fmt.Errorf("fork chat: session id is required")
+	}
+	anchorIdx := slices.IndexFunc(sourceTimeline, func(item domain.TimelineItem) bool {
+		return item.ID == anchorItemID
+	})
+	if anchorIdx < 0 {
+		return domain.Chat{}, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, source.ID)
+	}
+	parentID := source.ID
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                    id.NewAt(now),
+		SessionID:             source.SessionID,
+		ParentChatID:          &parentID,
+		Title:                 strings.TrimSpace(title),
+		WorkflowRole:          source.WorkflowRole,
+		ProviderID:            strings.TrimSpace(source.ProviderID),
+		ModelID:               strings.TrimSpace(source.ModelID),
+		PermissionProfile:     source.PermissionProfile,
+		ToolStates:            cloneToolStates(source.ToolStates),
+		ActiveMilestoneRef:    source.ActiveMilestoneRef,
+		AssignedTodoBucketRef: source.AssignedTodoBucketRef,
+		AssignedTodoRef:       source.AssignedTodoRef,
+		Position:              position,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+	if chatRecord.Title == "" {
+		chatRecord.Title = "Fork"
+	}
+	if err := putChat(ctx, st, chatRecord); err != nil {
+		return domain.Chat{}, err
+	}
+	for idx, item := range sourceTimeline[:anchorIdx+1] {
+		copied, err := cloneTimelineItemForChat(item, chatRecord.ID, int64(idx+1), now)
+		if err != nil {
+			return domain.Chat{}, err
+		}
+		if err := putTimelineItem(ctx, st, copied); err != nil {
+			return domain.Chat{}, err
+		}
+	}
+	return chatRecord, nil
+}
+
+func cloneTimelineItemForChat(item domain.TimelineItem, chatID id.ID, seq int64, now time.Time) (domain.TimelineItem, error) {
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return domain.TimelineItem{}, fmt.Errorf("clone timeline item %s: %w", item.ID, err)
+	}
+	var cloned domain.TimelineItem
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return domain.TimelineItem{}, fmt.Errorf("clone timeline item %s: %w", item.ID, err)
+	}
+	itemTime := now.Add(time.Duration(seq-1) * time.Nanosecond)
+	cloned.ID = id.NewAt(itemTime)
+	cloned.ChatID = chatID
+	cloned.Seq = seq
+	cloned.CreatedAt = itemTime
+	cloned.UpdatedAt = itemTime
+	if !cloned.SealedAt.IsZero() {
+		cloned.SealedAt = itemTime
+	}
+	return cloned, nil
+}
+
+func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	if len(src) == 0 {
+		return map[domain.ToolKind]bool{}
+	}
+	out := make(map[domain.ToolKind]bool, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
 }
 
 func getChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
