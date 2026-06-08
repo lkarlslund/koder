@@ -41,4 +41,53 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not available to execution chats") {
 		t.Fatalf("expected role denial, got %v", err)
 	}
+	if !tools.IsDenied(err) {
+		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
+}
+
+func TestDefinitionsHideDisabledTools(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{
+		AllowedTools: map[tools.ID]bool{domain.ToolKindFileRead: false},
+	})
+	for _, def := range defs {
+		if def.Function.Name == domain.ToolKindFileRead.String() {
+			t.Fatalf("definitions exposed disabled tool %q", def.Function.Name)
+		}
+	}
+}
+
+func TestCallRejectsDisabledTool(t *testing.T) {
+	_, err := tools.Call(context.Background(), tools.Options{
+		Runtime: tools.Runtime{
+			AllowedTools: map[tools.ID]bool{domain.ToolKindFileRead: false},
+		},
+		Request: tools.Request{
+			Tool: domain.ToolKindFileRead,
+			Args: map[string]string{"path": "."},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "disabled for this session") {
+		t.Fatalf("expected disabled tool denial, got %v", err)
+	}
+	if !tools.IsDenied(err) {
+		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
+}
+
+func TestBypassPermissionToolStillObeysDisabledState(t *testing.T) {
+	_, err := tools.Call(context.Background(), tools.Options{
+		Runtime: tools.Runtime{
+			SessionID:    "session-1",
+			ChatID:       "chat-1",
+			AllowedTools: map[tools.ID]bool{domain.ToolKindChatList: false},
+		},
+		Request: tools.Request{Tool: domain.ToolKindChatList},
+	})
+	if err == nil || !strings.Contains(err.Error(), "disabled for this session") {
+		t.Fatalf("expected disabled chat tool denial, got %v", err)
+	}
+	if !tools.IsDenied(err) {
+		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
 }

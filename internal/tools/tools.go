@@ -42,6 +42,35 @@ func (e ProviderCallError) Error() string {
 
 func (e ProviderCallError) Unwrap() error { return e.Err }
 
+type DeniedError struct {
+	Tool   ID
+	Reason string
+}
+
+func (e DeniedError) Error() string {
+	reason := strings.TrimSpace(e.Reason)
+	if reason == "" {
+		reason = "denied"
+	}
+	if e.Tool == "" {
+		return reason
+	}
+	return fmt.Sprintf("%s: %s", e.Tool, reason)
+}
+
+func IsDenied(err error) bool {
+	var denied DeniedError
+	return errors.As(err, &denied)
+}
+
+func DeniedMessage(err error) string {
+	var denied DeniedError
+	if errors.As(err, &denied) {
+		return denied.Error()
+	}
+	return ""
+}
+
 func (r Request) MarshalJSON() ([]byte, error) {
 	payload := r.Meta()
 	return json.Marshal(payload)
@@ -237,12 +266,22 @@ func Call(ctx context.Context, options Options) (Result, error) {
 	}
 	runtime = normalizeRuntime(runtime)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
+		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
+	}
+	if err := checkToolEnabled(runtime, req.Tool); err != nil {
 		return Result{}, err
 	}
 	if err := checkRuntimeAccess(runtime, req); err != nil {
-		return Result{}, err
+		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
 	}
 	return tool.Call(ctx, Options{Runtime: runtime, Request: req})
+}
+
+func checkToolEnabled(runtime Runtime, kind ID) error {
+	if enabled, ok := runtime.AllowedTools[kind]; ok && !enabled {
+		return DeniedError{Tool: kind, Reason: "disabled for this session"}
+	}
+	return nil
 }
 
 func checkRuntimeAccess(runtime Runtime, req Request) error {
