@@ -18,7 +18,6 @@ type RegistryConfig struct {
 	DefaultProvider string
 	DefaultModel    string
 	AccessSettings  accesssettings.Settings
-	ToolDefaults    domain.ToolStates
 }
 
 type Registry struct {
@@ -193,7 +192,6 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
 		session.ProjectRoot = projectRoot
 		session.AccessSettings = cfg.AccessSettings
-		session.ToolStates = cloneToolStates(cfg.ToolDefaults)
 	}); err != nil {
 		return nil, err
 	}
@@ -240,17 +238,5 @@ func (r *Registry) currentConfig() RegistryConfig {
 }
 
 func cloneRegistryConfig(cfg RegistryConfig) RegistryConfig {
-	cfg.ToolDefaults = cloneToolStates(cfg.ToolDefaults)
 	return cfg
-}
-
-func cloneToolStates(src domain.ToolStates) domain.ToolStates {
-	if src == nil {
-		return nil
-	}
-	dst := make(domain.ToolStates, len(src))
-	for kind, enabled := range src {
-		dst[kind] = enabled
-	}
-	return dst
 }

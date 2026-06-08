@@ -30,6 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
@@ -46,6 +47,7 @@ type Engine struct {
 	caps         *provider.CapabilityStore
 	agents       *agents.Manager
 	mcp          *mcp.Manager
+	settings     *settings.Store
 	toolsRuntime *toolruntime.Runtime
 	envMu        sync.Mutex
 	envPrompts   map[id.ID]string
@@ -71,6 +73,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		mcpManager = mcpManagers[0]
 	}
 	execRuntime := execruntime.NewManager()
+	settingsStore := settings.New(cfg)
 	e := &Engine{
 		cfg:         cfg,
 		store:       st,
@@ -79,13 +82,14 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		caps:        provider.NewCapabilityStore(cfg.StateDir()),
 		agents:      agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:         mcpManager,
+		settings:    settingsStore,
 		caveman:     newCavemanService(cfg.Thinking.CavemanParallelism),
 		cavemanJobs: map[id.ID]cavemanJob{},
 		retryPause:  waitForRetry,
 	}
-	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(cfg))
+	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
-		Config:   cfg,
+		Settings: settingsStore,
 		Debug:    debug,
 		Sessions: e.registry,
 		Exec:     execRuntime,
@@ -96,13 +100,18 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
+	if e.settings != nil {
+		e.settings.Update(cfg)
+	} else {
+		e.settings = settings.New(cfg)
+	}
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
 	e.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
 	if e.registry != nil {
-		e.registry.UpdateConfig(sessionRegistryConfig(cfg))
+		e.registry.UpdateConfig(sessionRegistryConfig(e.settings.NewSessionDefaults()))
 	}
 	if e.toolsRuntime != nil {
-		e.toolsRuntime.UpdateConfig(cfg)
+		e.toolsRuntime.UpdateSettings(e.settings)
 	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)

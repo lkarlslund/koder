@@ -1053,8 +1053,9 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	}
 }
 
-func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
+func TestHandleModelToolCallDeniesGloballyDisabledTool(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.ToolDefaults[domain.ToolKindFileRead] = false
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1064,11 +1065,6 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	engine := New(cfg, st, nil)
 	session, err := sessionpkg.CreateSession(context.Background(), st, "test", "provider", "model", nil)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
-		domain.ToolKindFileRead: false,
-	}); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)

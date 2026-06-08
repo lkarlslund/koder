@@ -9,7 +9,6 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -18,13 +17,14 @@ import (
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 )
 
 type Runtime struct {
-	cfg      config.Config
+	settings *settings.Store
 	debug    *debugsrv.Recorder
 	sessions *sessionpkg.Registry
 	exec     *execruntime.Manager
@@ -32,7 +32,7 @@ type Runtime struct {
 }
 
 type Config struct {
-	Config   config.Config
+	Settings *settings.Store
 	Debug    *debugsrv.Recorder
 	Sessions *sessionpkg.Registry
 	Exec     *execruntime.Manager
@@ -45,7 +45,7 @@ func New(cfg Config) *Runtime {
 		exec = execruntime.NewManager()
 	}
 	return &Runtime{
-		cfg:      cfg.Config,
+		settings: cfg.Settings,
 		debug:    cfg.Debug,
 		sessions: cfg.Sessions,
 		exec:     exec,
@@ -53,11 +53,11 @@ func New(cfg Config) *Runtime {
 	}
 }
 
-func (r *Runtime) UpdateConfig(cfg config.Config) {
+func (r *Runtime) UpdateSettings(store *settings.Store) {
 	if r == nil {
 		return
 	}
-	r.cfg = cfg
+	r.settings = store
 }
 
 func (r *Runtime) ExecManager() *execruntime.Manager {
@@ -104,9 +104,9 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		AssignedTodoRef:       chat.AssignedTodoRef,
 		Exec:                  r.exec,
 		MCP:                   r.mcp,
-		AllowedTools:          r.effectiveToolStates(session),
+		AllowedTools:          r.toolStates(session),
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
-		AccessSettings:        sessionAccessSettings(session, r.cfg),
+		AccessSettings:        r.accessSettings(session),
 	}
 	if owner := r.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
@@ -121,7 +121,7 @@ func (r *Runtime) Definitions(session domain.Session, chat domain.Chat) []provid
 	if r == nil || r.mcp == nil {
 		return defs
 	}
-	if toolEnabledForSession(r.cfg, session, domain.ToolKindMCP) && chatrole.AllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
+	if r.toolEnabled(session, domain.ToolKindMCP) && chatrole.AllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
 		defs = append(defs, r.mcp.ToolDefinitionsWithReserved(defs)...)
 	}
 	return defs
@@ -357,32 +357,37 @@ func sessionProjectRoot(session domain.Session) string {
 	return strings.TrimSpace(session.ProjectRoot)
 }
 
-func sessionAccessSettings(session domain.Session, cfg config.Config) accesssettings.Settings {
-	settings := session.AccessSettings
-	if accesssettings.IsZero(settings) {
-		settings = cfg.Access
+func (r *Runtime) accessSettings(session domain.Session) accesssettings.Settings {
+	if r == nil || r.settings == nil {
+		return accesssettings.Normalize(session.AccessSettings)
 	}
-	return accesssettings.Normalize(settings)
+	return r.settings.Access(session)
 }
 
-func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {
-	if enabled, ok := cfg.ToolDefaults[kind]; ok && !enabled {
-		return false
+func (r *Runtime) toolEnabled(session domain.Session, kind domain.ToolKind) bool {
+	if r == nil || r.settings == nil {
+		return true
 	}
-	if enabled, ok := session.ToolStates[kind]; ok {
-		return enabled
+	enabled, ok := r.settings.Tools(session).Enabled[kind]
+	if !ok {
+		return true
 	}
-	if enabled, ok := cfg.ToolDefaults[kind]; ok {
-		return enabled
-	}
-	return true
+	return enabled
 }
 
-func (r *Runtime) effectiveToolStates(session domain.Session) map[domain.ToolKind]bool {
+func (r *Runtime) toolStates(session domain.Session) map[domain.ToolKind]bool {
 	registered := tools.RegisteredIDs()
 	out := make(map[domain.ToolKind]bool, len(registered))
+	global := settings.ToolSettings{}
+	if r != nil && r.settings != nil {
+		global = r.settings.Tools(session)
+	}
 	for _, kind := range registered {
-		out[kind] = toolEnabledForSession(r.cfg, session, kind)
+		enabled, ok := global.Enabled[kind]
+		if !ok {
+			enabled = true
+		}
+		out[kind] = enabled
 	}
 	return out
 }

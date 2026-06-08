@@ -5,18 +5,17 @@ import (
 	"fmt"
 
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/settings"
 )
 
-func sessionRegistryConfig(cfg config.Config) sessionpkg.RegistryConfig {
+func sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
 	return sessionpkg.RegistryConfig{
-		DefaultProvider: cfg.DefaultProvider,
-		DefaultModel:    cfg.DefaultModel,
-		AccessSettings:  cfg.Access,
-		ToolDefaults:    domain.ToolStates(cfg.ToolDefaults),
+		DefaultProvider: defaults.ProviderID,
+		DefaultModel:    defaults.ModelID,
+		AccessSettings:  defaults.Access,
 	}
 }
 
