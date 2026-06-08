@@ -55,8 +55,7 @@ type Engine struct {
 	caveman     *cavemanService
 	cavemanMu   sync.Mutex
 	cavemanJobs map[id.ID]cavemanJob
-	sessionMu   sync.RWMutex
-	sessions    map[id.ID]*sessionpkg.Session
+	registry    *sessionpkg.Registry
 	retryPause  func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -74,7 +73,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
 	}
-	return &Engine{
+	e := &Engine{
 		cfg:         cfg,
 		store:       st,
 		debug:       debug,
@@ -85,15 +84,19 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		exec:        execruntime.NewManager(),
 		caveman:     newCavemanService(cfg.Thinking.CavemanParallelism),
 		cavemanJobs: map[id.ID]cavemanJob{},
-		sessions:    map[id.ID]*sessionpkg.Session{},
 		retryPause:  waitForRetry,
 	}
+	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(cfg))
+	return e
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
 	e.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
+	if e.registry != nil {
+		e.registry.UpdateConfig(sessionRegistryConfig(cfg))
+	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)
 		go func() {
@@ -1929,12 +1932,15 @@ func sessionAccessSettings(session domain.Session, cfg config.Config) accesssett
 }
 
 func (e *Engine) loadedSession(sessionID id.ID) *sessionpkg.Session {
-	if e == nil || sessionID == "" {
+	if e == nil || e.registry == nil || sessionID == "" {
 		return nil
 	}
-	e.sessionMu.RLock()
-	defer e.sessionMu.RUnlock()
-	return e.sessions[sessionID]
+	for _, owner := range e.registry.Loaded() {
+		if owner != nil && owner.Snapshot().Session.ID == sessionID {
+			return owner
+		}
+	}
+	return nil
 }
 
 func compactedHistoryMessage(summary string) provider.Message {
