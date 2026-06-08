@@ -1212,9 +1212,21 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 		status, err := c.agent.UpdateChat(ctx, sessionID, ownerChatID, chatID, update)
 		return status, err
 	}
-	status, _, err := owner.UpdateChat(ctx, chatID, update)
+	status, nextChatID, err := owner.UpdateChat(ctx, chatID, update)
 	if err != nil {
 		return chattool.Status{}, err
+	}
+	if nextChatID != "" {
+		session, chatRecord, _, touchErr := owner.TouchSelection(ctx, nextChatID)
+		if touchErr != nil {
+			return chattool.Status{}, touchErr
+		}
+		c.mu.Lock()
+		if c.session.ID == session.ID {
+			c.session = session
+			c.chat = chatRecord
+		}
+		c.mu.Unlock()
 	}
 	return status, nil
 }

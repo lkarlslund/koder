@@ -2383,7 +2383,6 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
 		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
 		AssignedTodoRef:       chat.AssignedTodoRef,
-		Services:              chattool.RuntimeService(e),
 		Exec:                  e.exec,
 		MCP:                   e.mcp,
 		AllowedTools:          e.effectiveToolStates(session),
@@ -2393,6 +2392,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	if owner := e.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
+		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
 	}
 	return runtime
 }

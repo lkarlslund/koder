@@ -150,6 +150,68 @@ func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
 	}
 }
 
+func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateTodo(ctx, st, todos[0].ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := Load(ctx, st, func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error) { return nil, nil }, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatID := id.New()
+	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", ParentChatID: &chatID}, chatID, "Idle")
+	want := "Chat " + chatID + " is now idle. Chat completed 1 out of 2 tasks for milestone alpha, but is now stopped."
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, err := CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	todos, err := AddTodoItems(ctx, st, sessionRecord.ID, "alpha", []string{"first", "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, todo := range todos {
+		if _, err := UpdateTodo(ctx, st, todo.ID, planning.TodoStatusCompleted, "", "completed in setup"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owner, err := Load(ctx, st, func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error) { return nil, nil }, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatID := id.New()
+	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", ParentChatID: &chatID}, chatID, "Idle")
+	want := "Chat " + chatID + " is now idle. All 2 tasks for milestone alpha are done."
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
 func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
