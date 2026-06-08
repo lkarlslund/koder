@@ -329,7 +329,6 @@ type SessionState struct {
 // Controller owns session/chat state independently from any renderer.
 type Controller struct {
 	cfg   config.Config
-	store *store.Store
 	agent *agent.Engine
 
 	shutdownMu                  sync.Mutex
@@ -359,7 +358,6 @@ type Controller struct {
 func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 	return &Controller{
 		cfg:                         cfg,
-		store:                       st,
 		agent:                       engine,
 		theme:                       normalizeTheme(cfg.UI.Theme),
 		subs:                        map[int]chan Event{},
@@ -1743,8 +1741,8 @@ func blankAsDash(value string) string {
 }
 
 func (c *Controller) initialSession(ctx context.Context, mode StartupMode, projectRoot string) (domain.Session, error) {
-	if c.store == nil {
-		return domain.Session{}, fmt.Errorf("store is unavailable")
+	if c.agent == nil {
+		return domain.Session{}, fmt.Errorf("no chat agent")
 	}
 	if mode == StartupModeNew {
 		if session, ok, err := c.restartInterruptedSession(ctx); err != nil {
@@ -1882,7 +1880,10 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string, p
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
-	return sessionpkg.ListSessions(ctx, c.store)
+	if c.agent == nil {
+		return nil, fmt.Errorf("no chat agent")
+	}
+	return c.agent.Sessions(ctx)
 }
 
 func (c *Controller) sessionInWorkspace(session domain.Session) bool {
