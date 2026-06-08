@@ -1,6 +1,7 @@
 package modelruntime
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
 
@@ -8,12 +9,18 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/toolruntime"
 )
+
+type SessionSource interface {
+	LoadSession(context.Context, id.ID) (*sessionpkg.Session, error)
+}
 
 type Config struct {
 	Config   config.Config
@@ -25,6 +32,7 @@ type Config struct {
 	Settings *settings.Store
 	Tools    *toolruntime.Runtime
 	MCP      *mcp.Manager
+	Sessions SessionSource
 }
 
 type Runtime struct {
@@ -37,6 +45,7 @@ type Runtime struct {
 	settings *settings.Store
 	tools    *toolruntime.Runtime
 	mcp      *mcp.Manager
+	sessions SessionSource
 	envMu    sync.Mutex
 	envCache map[string]string
 }
@@ -68,6 +77,7 @@ func New(cfg Config) *Runtime {
 		settings: settingsStore,
 		tools:    cfg.Tools,
 		mcp:      cfg.MCP,
+		sessions: cfg.Sessions,
 	}
 }
 
@@ -98,4 +108,11 @@ func (r *Runtime) SetMCP(manager *mcp.Manager) {
 		return
 	}
 	r.mcp = manager
+}
+
+func (r *Runtime) SetSessionSource(source SessionSource) {
+	if r == nil {
+		return
+	}
+	r.sessions = source
 }

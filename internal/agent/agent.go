@@ -100,6 +100,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		MCP:      e.mcp,
 	})
 	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
+	e.modelRuntime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings: settingsStore,
 		Debug:    debug,
@@ -237,72 +238,15 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 }
 
 func (e *Engine) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input domain.QueuedInput, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("chat runtime is required")
-	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	chat := snapshot.Chat
-	if err := e.validatePromptAttachments(chat, drafts); err != nil {
-		return nil, err
-	}
-	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
-	if err != nil {
-		return nil, err
-	}
-	userItem, err := rt.AppendUserMessageForInput(ctx, input, user)
-	if err != nil {
-		return nil, err
-	}
-	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: userItem}
-	e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
-	chat = rt.Snapshot().Chat
-	client, err := e.clientForChat(chat)
-	if err != nil {
-		return nil, err
-	}
-	if session.ID != "" && needsSessionAgentsRefresh(session) {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
-	}
-	session, err = e.ensureSessionAgents(ctx, session, chat, client)
-	if err != nil {
-		return nil, err
-	}
-	rt.SetSession(session)
-	chat = rt.Snapshot().Chat
-	e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
-	return chatpkg.TurnInstructionBlocks(note, ""), nil
+	return e.modelRuntime.PreparePromptTurn(ctx, rt, input, prompt, drafts, refs, note, out)
 }
 
 func (e *Engine) PrepareContinueTurn(ctx context.Context, rt *chatpkg.Chat, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	if rt == nil {
-		return nil, fmt.Errorf("chat runtime is required")
-	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	chat := snapshot.Chat
-	client, err := e.clientForChat(chat)
-	if err != nil {
-		return nil, err
-	}
-	if session.ID != "" && needsSessionAgentsRefresh(session) {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
-	}
-	session, err = e.ensureSessionAgents(ctx, session, chat, client)
-	if err != nil {
-		return nil, err
-	}
-	rt.SetSession(session)
-	if strings.TrimSpace(note) != "" {
-		e.recordLifecycle(session.ID, "continue_with_note", note, nil)
-	} else {
-		e.recordLifecycle(session.ID, "continue", "", nil)
-	}
-	return chatpkg.TurnInstructionBlocks(note, "Continue from where you left off."), nil
+	return e.modelRuntime.PrepareContinueTurn(ctx, rt, note, out)
 }
 
 func (e *Engine) MaxToolLoopSteps() int {
-	return e.maxToolLoopSteps()
+	return e.modelRuntime.MaxToolLoopSteps()
 }
 
 func (e *Engine) ClientForChat(chat domain.Chat) (*provider.Client, error) {
