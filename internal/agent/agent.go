@@ -692,14 +692,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 	if !streamed && strings.TrimSpace(reasoning) != "" {
 		out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, Item: assistantItem}
 	}
-	now := time.Now().UTC()
-	assistantItem.Content = assistant
-	if assistantItem.CreatedAt.IsZero() {
-		assistantItem.CreatedAt = now
-	}
-	assistantItem.UpdatedAt = now
-	assistantItem.Seal(time.Now().UTC())
-	updated, updateErr := rt.UpsertTimelineItem(ctx, assistantItem)
+	updated, updateErr := rt.AppendAssistantMessage(ctx, assistantItem, assistant)
 	if updateErr != nil {
 		return chatpkg.TurnStepResult{}, updateErr
 	}

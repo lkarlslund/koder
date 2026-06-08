@@ -1500,6 +1500,24 @@ func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.Timelin
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage
 	}
+	return r.appendAssistantItem(ctx, item, assistant)
+}
+
+// AppendAssistantMessage appends or updates one sealed assistant message through the live chat owner.
+func (r *Chat) AppendAssistantMessage(ctx context.Context, item domain.TimelineItem, assistant domain.AssistantMessage) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	if strings.TrimSpace(assistant.Text) == "" && strings.TrimSpace(assistant.Reasoning.Text) == "" {
+		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or reasoning")
+	}
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return r.appendAssistantItem(ctx, item, assistant)
+}
+
+func (r *Chat) appendAssistantItem(ctx context.Context, item domain.TimelineItem, assistant domain.AssistantMessage) (domain.TimelineItem, error) {
 	now := time.Now().UTC()
 	r.mu.Lock()
 	if item.ID == "" {
