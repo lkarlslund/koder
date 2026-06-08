@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -48,6 +49,7 @@ type Engine struct {
 	agents       *agents.Manager
 	mcp          *mcp.Manager
 	settings     *settings.Store
+	modelRuntime *modelruntime.Runtime
 	toolsRuntime *toolruntime.Runtime
 	envMu        sync.Mutex
 	envPrompts   map[id.ID]string
@@ -87,6 +89,15 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		cavemanJobs: map[id.ID]cavemanJob{},
 		retryPause:  waitForRetry,
 	}
+	e.modelRuntime = modelruntime.New(modelruntime.Config{
+		Config:   cfg,
+		Store:    st,
+		Debug:    debug,
+		Files:    e.files,
+		Caps:     e.caps,
+		Agents:   e.agents,
+		Settings: settingsStore,
+	})
 	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings: settingsStore,
@@ -106,6 +117,9 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 		e.settings = settings.New(cfg)
 	}
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+	if e.modelRuntime != nil {
+		e.modelRuntime.UpdateConfig(cfg)
+	}
 	e.caveman = newCavemanService(cfg.Thinking.CavemanParallelism)
 	if e.registry != nil {
 		e.registry.UpdateConfig(sessionRegistryConfig(e.settings.NewSessionDefaults()))
