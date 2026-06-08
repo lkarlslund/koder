@@ -201,14 +201,13 @@ func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
 	}
 }
 
-func TestBashZeroTimeoutUsesDefault(t *testing.T) {
+func TestBashOmittedTimeoutUsesDefault(t *testing.T) {
 	dir := t.TempDir()
 
 	result, err := tools.Call(context.Background(), tools.Options{Runtime: testRuntime(dir), Request: tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{
-			"command":    "printf ok",
-			"timeout_ms": "0",
+			"command": "printf ok",
 		},
 	}})
 	if err != nil {

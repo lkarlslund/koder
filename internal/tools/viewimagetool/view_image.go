@@ -30,12 +30,12 @@ func init() {
 func (tool) ID() tools.ID             { return tools.ViewImage }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
+	path := tools.NormalizePathInput(args["path"])
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
 	out := map[string]string{"path": path}
-	if detail := strings.TrimSpace(tools.FirstArg(args, "detail")); detail != "" {
+	if detail := strings.TrimSpace(args["detail"]); detail != "" {
 		if detail != "original" {
 			return nil, errors.New("detail only supports original")
 		}

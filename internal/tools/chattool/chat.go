@@ -173,14 +173,14 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 }
 
 func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	profile := strings.TrimSpace(tools.FirstArg(args, "profile", "role"))
+	profile := strings.TrimSpace(args["profile"])
 	if profile == "" {
 		return nil, errors.New("profile is required")
 	}
 	if _, ok := chatrole.DefaultRegistry().Lookup(chatrole.Role(profile)); !ok {
 		return nil, errors.New("profile is not registered")
 	}
-	objective := strings.TrimSpace(tools.FirstArg(args, "objective", "prompt", "task"))
+	objective := strings.TrimSpace(args["objective"])
 	if objective == "" {
 		return nil, errors.New("objective is required")
 	}
@@ -188,13 +188,13 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 		"profile":   profile,
 		"objective": objective,
 	}
-	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
+	if title := strings.TrimSpace(args["title"]); title != "" {
 		out["title"] = title
 	}
-	if ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref")); ref != "" {
+	if ref := strings.TrimSpace(args["milestone_ref"]); ref != "" {
 		out["milestone_ref"] = ref
 	}
-	if todoRef := strings.TrimSpace(tools.FirstArg(args, "task_ref", "task_id")); todoRef != "" {
+	if todoRef := strings.TrimSpace(args["task_ref"]); todoRef != "" {
 		out["task_ref"] = todoRef
 	}
 	return out, nil
@@ -205,12 +205,12 @@ func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	if chatID == "" {
 		return nil, errors.New("chat_id is required")
 	}
-	message := strings.TrimSpace(tools.FirstArg(args, "message", "text"))
+	message := strings.TrimSpace(args["message"])
 	if message == "" {
 		return nil, errors.New("message is required")
 	}
 	out := map[string]string{"chat_id": chatID, "message": message}
-	if steer := strings.TrimSpace(tools.FirstArg(args, "steer")); steer != "" {
+	if steer := strings.TrimSpace(args["steer"]); steer != "" {
 		value, err := strconv.ParseBool(steer)
 		if err != nil {
 			return nil, fmt.Errorf("steer: %w", err)
@@ -222,7 +222,7 @@ func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 
 func (cancelTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := optionalChatIDArg(args)
-	if hard := strings.TrimSpace(tools.FirstArg(args, "hard")); hard != "" {
+	if hard := strings.TrimSpace(args["hard"]); hard != "" {
 		value, err := strconv.ParseBool(hard)
 		if err != nil {
 			return nil, fmt.Errorf("hard: %w", err)
@@ -234,7 +234,7 @@ func (cancelTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 
 func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := optionalChatIDArg(args)
-	archived := strings.TrimSpace(tools.FirstArg(args, "archived"))
+	archived := strings.TrimSpace(args["archived"])
 	if archived == "" {
 		return nil, errors.New("archived is required")
 	}
@@ -248,7 +248,7 @@ func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, err
 
 func (renameTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := optionalChatIDArg(args)
-	title := strings.TrimSpace(tools.FirstArg(args, "title"))
+	title := strings.TrimSpace(args["title"])
 	if title == "" {
 		return nil, errors.New("title is required")
 	}
@@ -257,7 +257,7 @@ func (renameTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 }
 
 func requiredChatID(args map[string]string) string {
-	return strings.TrimPrefix(strings.TrimSpace(tools.FirstArg(args, "chat_id", "id")), "#")
+	return strings.TrimPrefix(strings.TrimSpace(args["chat_id"]), "#")
 }
 
 func optionalChatIDArg(args map[string]string) map[string]string {
@@ -269,7 +269,7 @@ func optionalChatIDArg(args map[string]string) map[string]string {
 }
 
 func normalizeOptionalBool(args map[string]string, key string) (map[string]string, error) {
-	raw := strings.TrimSpace(tools.FirstArg(args, key))
+	raw := strings.TrimSpace(args[key])
 	if raw == "" {
 		return map[string]string{}, nil
 	}

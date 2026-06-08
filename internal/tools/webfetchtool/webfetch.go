@@ -43,7 +43,7 @@ func (tool) ID() tools.ID             { return tools.WebFetch }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	rawURL := strings.TrimSpace(tools.FirstArg(args, "url", "href"))
+	rawURL := strings.TrimSpace(args["url"])
 	if rawURL == "" {
 		return nil, errors.New("url is empty")
 	}
@@ -67,7 +67,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		"url":    parsed.String(),
 		"format": string(format),
 	}
-	if rawMax := strings.TrimSpace(tools.FirstArg(args, "max_chars", "max_chars_out", "limit")); rawMax != "" {
+	if rawMax := strings.TrimSpace(args["max_chars"]); rawMax != "" {
 		value, err := tools.ParseFlexibleInt(rawMax)
 		if err != nil || value <= 0 {
 			return nil, errors.New("max_chars must be a positive integer")

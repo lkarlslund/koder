@@ -561,8 +561,8 @@ func (tool) ID() tools.ID             { return tools.CodeSearch }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	action := strings.TrimSpace(tools.FirstArg(args, "action", "mode"))
-	query := strings.TrimSpace(tools.FirstArg(args, "query", "symbol", "name"))
+	action := strings.TrimSpace(args["action"])
+	query := strings.TrimSpace(args["query"])
 	if action == "" {
 		if query != "" {
 			action = actionWorkspaceSymbol
@@ -577,30 +577,30 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if query != "" {
 		out["query"] = query
 	}
-	if path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path")); path != "" {
+	if path := tools.NormalizePathInput(args["path"]); path != "" {
 		out["path"] = path
 	}
-	if language := strings.ToLower(strings.TrimSpace(tools.FirstArg(args, "language", "lang"))); language != "" {
+	if language := strings.ToLower(strings.TrimSpace(args["language"])); language != "" {
 		if _, ok := languageByID(language); !ok {
 			return nil, fmt.Errorf("language must be one of: %s", strings.Join(languageIDs(), ", "))
 		}
 		out["language"] = language
 	}
-	if rawLine := strings.TrimSpace(tools.FirstArg(args, "line")); rawLine != "" {
+	if rawLine := strings.TrimSpace(args["line"]); rawLine != "" {
 		line, err := tools.ParseFlexibleInt(rawLine)
 		if err != nil || line <= 0 {
 			return nil, errors.New("line must be a positive integer")
 		}
 		out["line"] = strconv.Itoa(line)
 	}
-	if rawCharacter := strings.TrimSpace(tools.FirstArg(args, "character", "column", "col")); rawCharacter != "" {
+	if rawCharacter := strings.TrimSpace(args["character"]); rawCharacter != "" {
 		character, err := tools.ParseFlexibleInt(rawCharacter)
 		if err != nil || character <= 0 {
 			return nil, errors.New("character must be a positive integer")
 		}
 		out["character"] = strconv.Itoa(character)
 	}
-	if rawLimit := strings.TrimSpace(tools.FirstArg(args, "limit", "head_limit")); rawLimit != "" {
+	if rawLimit := strings.TrimSpace(args["limit"]); rawLimit != "" {
 		limit, err := tools.ParseFlexibleInt(rawLimit)
 		if err != nil || limit <= 0 {
 			return nil, errors.New("limit must be a positive integer")

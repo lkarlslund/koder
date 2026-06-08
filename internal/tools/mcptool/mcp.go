@@ -23,8 +23,8 @@ func (tool) ID() tools.ID             { return tools.MCP }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	serverID := strings.TrimSpace(tools.FirstArg(args, "server", "server_id"))
-	toolName := strings.TrimSpace(tools.FirstArg(args, "tool", "tool_name"))
+	serverID := strings.TrimSpace(args["server"])
+	toolName := strings.TrimSpace(args["tool"])
 	if serverID == "" {
 		return nil, errors.New("mcp server is required")
 	}

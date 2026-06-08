@@ -65,18 +65,18 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := map[string]string{}
-	if ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref")); ref != "" {
+	if ref := strings.TrimSpace(args["milestone_ref"]); ref != "" {
 		out["milestone_ref"] = ref
 	}
 	return out, nil
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref"))
+	ref := strings.TrimSpace(args["milestone_ref"])
 	if ref == "" {
 		return nil, fmt.Errorf("milestone_ref is empty")
 	}
-	raw := strings.TrimSpace(tools.FirstArg(args, "items"))
+	raw := strings.TrimSpace(args["items"])
 	if raw == "" {
 		return nil, fmt.Errorf("items is empty")
 	}
@@ -87,11 +87,11 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	id, err := planning.ParseTodoID(tools.FirstArg(args, "id"))
+	id, err := planning.ParseTodoID(args["id"])
 	if err != nil {
 		return nil, err
 	}
-	status, err := planning.ParseTodoStatus(tools.FirstArg(args, "status"))
+	status, err := planning.ParseTodoStatus(args["status"])
 	if err != nil {
 		return nil, err
 	}
@@ -99,12 +99,12 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		"id":     tools.FormatTodoID(id),
 		"status": status.String(),
 	}
-	note := strings.TrimSpace(tools.FirstArg(args, "note"))
+	note := strings.TrimSpace(args["note"])
 	if note == "" {
 		return nil, fmt.Errorf("note is required")
 	}
 	out["note"] = note
-	if content := strings.TrimSpace(tools.FirstArg(args, "content")); content != "" {
+	if content := strings.TrimSpace(args["content"]); content != "" {
 		out["content"] = content
 	}
 	return out, nil

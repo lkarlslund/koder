@@ -31,7 +31,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	return spec, true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	name := strings.TrimSpace(tools.FirstArg(args, "name", "skill_name", "skill"))
+	name := strings.TrimSpace(args["name"])
 	if name == "" {
 		return nil, errors.New("name is empty")
 	}

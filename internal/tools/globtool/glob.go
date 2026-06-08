@@ -29,15 +29,15 @@ func init() {
 func (tool) ID() tools.ID             { return tools.FileGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))
+	pattern := strings.TrimSpace(args["pattern"])
 	if pattern == "" {
 		return nil, errors.New("pattern is empty")
 	}
 	out := map[string]string{"pattern": pattern}
-	if root := tools.NormalizePathInput(tools.FirstArg(args, "path", "root", "dir")); root != "" {
+	if root := tools.NormalizePathInput(args["path"]); root != "" {
 		out["path"] = root
 	}
-	if rawLimit := strings.TrimSpace(tools.FirstArg(args, "limit", "count")); rawLimit != "" {
+	if rawLimit := strings.TrimSpace(args["limit"]); rawLimit != "" {
 		value, err := tools.ParseFlexibleInt(rawLimit)
 		if err != nil || value <= 0 {
 			return nil, errors.New("limit must be a positive integer")

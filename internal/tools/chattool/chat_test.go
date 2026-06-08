@@ -70,7 +70,7 @@ func TestNormalizeArgs(t *testing.T) {
 		t.Fatalf("unexpected list args: %#v", listArgs)
 	}
 
-	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "ref": " alpha ", "title": "Worker", "task_id": "task-1"})
+	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "milestone_ref": " alpha ", "title": "Worker", "task_ref": "task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

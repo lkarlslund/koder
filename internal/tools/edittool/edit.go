@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -52,9 +53,9 @@ func init() {
 func (tool) ID() tools.ID             { return tools.FileEdit }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
-	oldString := tools.FirstArg(args, "old_string", "oldString", "oldText", "old")
-	newString := tools.FirstArg(args, "new_string", "newString", "newText", "new")
+	path := tools.NormalizePathInput(args["path"])
+	oldString := args["old_string"]
+	newString := args["new_string"]
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
@@ -69,8 +70,12 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		"old_string": oldString,
 		"new_string": newString,
 	}
-	if replaceAll := strings.TrimSpace(tools.FirstArg(args, "replace_all", "replaceAll")); replaceAll != "" {
-		out["replace_all"] = replaceAll
+	if replaceAll := strings.TrimSpace(args["replace_all"]); replaceAll != "" {
+		value, err := strconv.ParseBool(replaceAll)
+		if err != nil {
+			return nil, errors.New("replace_all must be a boolean")
+		}
+		out["replace_all"] = strconv.FormatBool(value)
 	}
 	return out, nil
 }
@@ -93,7 +98,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 		return tools.Result{}, err
 	}
 	before := string(beforeBytes)
-	replaceAll := strings.EqualFold(strings.TrimSpace(req.Args["replace_all"]), "true")
+	replaceAll := req.Args["replace_all"] == "true"
 	match, err := editMatcher{
 		content:    before,
 		oldString:  req.Args["old_string"],

@@ -3,7 +3,6 @@ package bashtool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,22 +26,17 @@ func init() {
 func (tool) ID() tools.ID             { return tools.Bash }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	command := strings.TrimSpace(tools.FirstArg(args, "command", "cmd"))
+	command := strings.TrimSpace(args["command"])
 	if command == "" {
 		return nil, errors.New("command is empty")
 	}
-	for _, key := range []string{"cwd", "dir"} {
-		if strings.TrimSpace(args[key]) != "" {
-			return nil, fmt.Errorf("%s is no longer supported; use workdir", key)
-		}
-	}
 	out := map[string]string{"command": command}
-	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir")); workdir != "" {
+	if workdir := tools.NormalizePathInput(args["workdir"]); workdir != "" {
 		out["workdir"] = workdir
 	}
-	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms", "timeout")); timeout != "" {
+	if timeout := strings.TrimSpace(args["timeout_ms"]); timeout != "" {
 		ms, err := tools.ParseFlexibleInt(timeout)
-		if err != nil {
+		if err != nil || ms <= 0 {
 			return nil, errors.New("timeout_ms must be a positive integer")
 		}
 		out["timeout_ms"] = strconv.Itoa(ms)

@@ -298,7 +298,10 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 }
 
 func checkRequestPath(runtime Runtime, req Request, kind accesssettings.AccessKind) error {
-	path := strings.TrimSpace(FirstArg(req.Args, "path", "file", "file_path", "filepath", "root", "dir", "workdir"))
+	path := strings.TrimSpace(req.Args["path"])
+	if req.Tool == Bash || req.Tool == ExecCommand {
+		path = strings.TrimSpace(req.Args["workdir"])
+	}
 	if path == "" {
 		path = "."
 	}

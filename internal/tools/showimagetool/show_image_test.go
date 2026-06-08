@@ -14,7 +14,7 @@ func TestNormalizeArgsRequiresPath(t *testing.T) {
 	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {
 		t.Fatal("expected empty path error")
 	}
-	got, err := (tool{}).NormalizeArgs(map[string]string{"file_path": "images/screen.png"})
+	got, err := (tool{}).NormalizeArgs(map[string]string{"path": "images/screen.png"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -93,19 +93,6 @@ func TestPresentationIncludesPathAndLineRange(t *testing.T) {
 	}
 }
 
-func TestNormalizeRejectsLegacyAliases(t *testing.T) {
-	for _, args := range []map[string]string{
-		{"file": "README.md"},
-		{"path": "README.md", "offset": "2"},
-		{"path": "README.md", "limit": "10"},
-		{"path": "README.md", "max_lines": "10"},
-	} {
-		if _, err := (tool{}).NormalizeArgs(args); err == nil {
-			t.Fatalf("expected compatibility error for %#v", args)
-		}
-	}
-}
-
 func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "long.txt")

@@ -67,7 +67,7 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 }
 
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	raw := strings.TrimSpace(tools.FirstArg(args, "completed"))
+	raw := strings.TrimSpace(args["completed"])
 	if raw == "" {
 		return map[string]string{}, nil
 	}
@@ -79,11 +79,11 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	ref, err := planning.ParseMilestoneRef(args["ref"])
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(tools.FirstArg(args, "title"))
+	title := strings.TrimSpace(args["title"])
 	if title == "" {
 		return nil, errors.New("title is empty")
 	}
@@ -98,11 +98,11 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref, err := planning.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	ref, err := planning.ParseMilestoneRef(args["ref"])
 	if err != nil {
 		return nil, err
 	}
-	status, err := planning.ParseMilestoneStatus(tools.FirstArg(args, "status"))
+	status, err := planning.ParseMilestoneStatus(args["status"])
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		"ref":    ref,
 		"status": status.String(),
 	}
-	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
+	if title := strings.TrimSpace(args["title"]); title != "" {
 		out["title"] = title
 	}
 	if notes, ok := args["notes"]; ok {
@@ -123,7 +123,7 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 }
 
 func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	raw := strings.TrimSpace(tools.FirstArg(args, "milestones", "plan"))
+	raw := strings.TrimSpace(args["milestones"])
 	if raw == "" {
 		return nil, errors.New("milestones is empty")
 	}
@@ -131,7 +131,7 @@ func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error
 		return nil, err
 	}
 	out := map[string]string{"milestones": raw}
-	if summary := strings.TrimSpace(tools.FirstArg(args, "summary", "explanation")); summary != "" {
+	if summary := strings.TrimSpace(args["summary"]); summary != "" {
 		out["summary"] = summary
 	}
 	return out, nil

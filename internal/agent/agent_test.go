@@ -1323,8 +1323,9 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
-			"path":   "README.md",
-			"offset": "400.5",
+			"path":       "README.md",
+			"start_line": "10",
+			"end_line":   "5",
 		},
 	})
 	if err != nil {
@@ -1333,7 +1334,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if evt.Kind != domain.EventKindToolResult {
 		t.Fatalf("expected tool result event, got %#v", evt)
 	}
-	if !strings.Contains(evt.Text, "offset is no longer supported") {
+	if !strings.Contains(evt.Text, "end_line must be greater than or equal to start_line") {
 		t.Fatalf("expected normalization failure text, got %#v", evt)
 	}
 
@@ -1348,7 +1349,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != domain.PartKindToolOutput {
 		t.Fatalf("expected one tool output part, got %#v", got)
 	}
-	if !strings.Contains(got[0].Body, "offset is no longer supported") {
+	if !strings.Contains(got[0].Body, "end_line must be greater than or equal to start_line") {
 		t.Fatalf("expected persisted failure body, got %#v", got[0])
 	}
 }

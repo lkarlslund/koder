@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,12 +29,12 @@ func (tool) ID() tools.ID             { return tools.Lint }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
+	path := tools.NormalizePathInput(args["path"])
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
 	out := map[string]string{"path": path}
-	if mode := strings.ToLower(strings.TrimSpace(tools.FirstArg(args, "mode"))); mode != "" {
+	if mode := strings.ToLower(strings.TrimSpace(args["mode"])); mode != "" {
 		switch mode {
 		case "auto", "syntax", "lsp", "shell", "all":
 			out["mode"] = mode
@@ -41,10 +42,14 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 			return nil, errors.New("mode must be one of: auto, syntax, lsp, shell, all")
 		}
 	}
-	if include := strings.TrimSpace(tools.FirstArg(args, "include_existing", "includeExisting")); include != "" {
-		out["include_existing"] = include
+	if include := strings.TrimSpace(args["include_existing"]); include != "" {
+		value, err := strconv.ParseBool(include)
+		if err != nil {
+			return nil, errors.New("include_existing must be a boolean")
+		}
+		out["include_existing"] = strconv.FormatBool(value)
 	}
-	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms", "timeoutMS", "timeout")); timeout != "" {
+	if timeout := strings.TrimSpace(args["timeout_ms"]); timeout != "" {
 		value, err := tools.ParseFlexibleInt(timeout)
 		if err != nil || value <= 0 {
 			return nil, errors.New("timeout_ms must be a positive integer")
@@ -87,7 +92,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	}
 	includeExisting := true
 	if raw := strings.TrimSpace(req.Args["include_existing"]); raw != "" {
-		includeExisting = strings.EqualFold(raw, "true")
+		includeExisting = raw == "true"
 	}
 	report := codediag.CheckFile(ctx, runtime.Workdir, rel, string(data), codediag.Options{
 		Mode:            mode,

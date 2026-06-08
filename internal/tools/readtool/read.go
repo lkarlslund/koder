@@ -37,24 +37,19 @@ func init() {
 func (tool) ID() tools.ID             { return tools.FileRead }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	for _, key := range []string{"file", "file_path", "filepath", "start", "line", "offset", "end", "limit", "lines", "max_lines"} {
-		if strings.TrimSpace(args[key]) != "" {
-			return nil, fmt.Errorf("%s is no longer supported", key)
-		}
-	}
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path"))
+	path := tools.NormalizePathInput(args["path"])
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
 	out := map[string]string{"path": path}
-	startLine, err := parsePositiveArg(tools.FirstArg(args, "start_line"), "start_line")
+	startLine, err := parsePositiveArg(args["start_line"], "start_line")
 	if err != nil {
 		return nil, err
 	}
 	if startLine > 0 {
 		out["start_line"] = strconv.Itoa(startLine)
 	}
-	if endLine := tools.FirstArg(args, "end_line"); endLine != "" {
+	if endLine := args["end_line"]; endLine != "" {
 		value, err := tools.ParseFlexibleInt(endLine)
 		if err != nil || value <= 0 {
 			return nil, errors.New("end_line must be a positive integer")

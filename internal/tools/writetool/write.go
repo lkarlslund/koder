@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -29,14 +30,18 @@ func init() {
 func (tool) ID() tools.ID             { return tools.FileWrite }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
-	content := tools.FirstArg(args, "content", "text", "body")
+	path := tools.NormalizePathInput(args["path"])
+	content := args["content"]
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
 	out := map[string]string{"path": path, "content": content}
-	if forceOverwrite := strings.TrimSpace(tools.FirstArg(args, "force_overwrite", "forceOverwrite")); forceOverwrite != "" {
-		out["force_overwrite"] = forceOverwrite
+	if forceOverwrite := strings.TrimSpace(args["force_overwrite"]); forceOverwrite != "" {
+		value, err := strconv.ParseBool(forceOverwrite)
+		if err != nil {
+			return nil, errors.New("force_overwrite must be a boolean")
+		}
+		out["force_overwrite"] = strconv.FormatBool(value)
 	}
 	return out, nil
 }
@@ -51,7 +56,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	mode := os.FileMode(0o644)
 	action := "created"
 	if readErr == nil {
-		if !strings.EqualFold(strings.TrimSpace(req.Args["force_overwrite"]), "true") {
+		if req.Args["force_overwrite"] != "true" {
 			return tools.Result{}, fmt.Errorf("file_write refuses to overwrite existing file %s. Prefer file_edit for targeted changes to existing files. For larger new work, create a small initial scaffold, then add behavior iteratively with focused file_edit calls. Use force_overwrite=true only when replacing the entire file is absolutely necessary", rel)
 		}
 		if info, statErr := os.Stat(abs); statErr == nil {

@@ -94,36 +94,39 @@ func (terminateTool) BypassesPermission() bool  { return true }
 func (cleanupTool) BypassesPermission() bool    { return true }
 
 func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	cmd := strings.TrimSpace(tools.FirstArg(args, "cmd", "command"))
+	cmd := strings.TrimSpace(args["cmd"])
 	if cmd == "" {
 		return nil, errors.New("cmd is empty")
 	}
-	for _, key := range []string{"cwd", "dir"} {
-		if strings.TrimSpace(args[key]) != "" {
-			return nil, fmt.Errorf("%s is no longer supported; use workdir", key)
-		}
-	}
 	out := map[string]string{"cmd": cmd}
-	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir")); workdir != "" {
+	if workdir := tools.NormalizePathInput(args["workdir"]); workdir != "" {
 		out["workdir"] = workdir
 	}
-	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms")); timeout != "" {
+	if timeout := strings.TrimSpace(args["timeout_ms"]); timeout != "" {
 		ms, err := tools.ParseFlexibleInt(timeout)
 		if err != nil || ms < 0 {
 			return nil, errors.New("timeout_ms must be a non-negative integer")
 		}
 		out["timeout_ms"] = strconv.Itoa(ms)
 	}
-	if tty := parseBoolArg(args, "tty"); tty != "" {
+	tty, err := parseBoolArg(args, "tty")
+	if err != nil {
+		return nil, err
+	}
+	if tty != "" {
 		out["tty"] = tty
 	}
-	if shell := strings.TrimSpace(tools.FirstArg(args, "shell")); shell != "" {
+	if shell := strings.TrimSpace(args["shell"]); shell != "" {
 		out["shell"] = shell
 	}
-	if login := parseBoolArg(args, "login"); login != "" {
+	login, err := parseBoolArg(args, "login")
+	if err != nil {
+		return nil, err
+	}
+	if login != "" {
 		out["login"] = login
 	}
-	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
+	if yield := strings.TrimSpace(args["yield_time_ms"]); yield != "" {
 		ms, err := tools.ParseFlexibleInt(yield)
 		if err != nil || ms <= 0 {
 			return nil, errors.New("yield_time_ms must be a positive integer")
@@ -142,7 +145,11 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	if scope := normalizeScope(args); scope != "" {
 		out["scope"] = scope
 	}
-	if maxOutput := normalizeOptionalInt(args, "max_output_bytes"); maxOutput != "" {
+	maxOutput, err := normalizeOptionalNonNegativeInt(args, "max_output_bytes")
+	if err != nil {
+		return nil, err
+	}
+	if maxOutput != "" {
 		out["max_output_bytes"] = maxOutput
 	}
 	return out, nil
@@ -156,14 +163,18 @@ func (writeStdinTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	if chars, ok := args["chars"]; ok {
 		out["chars"] = chars
 	}
-	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
+	if yield := strings.TrimSpace(args["yield_time_ms"]); yield != "" {
 		ms, err := tools.ParseFlexibleInt(yield)
 		if err != nil || ms <= 0 {
 			return nil, errors.New("yield_time_ms must be a positive integer")
 		}
 		out["yield_time_ms"] = strconv.Itoa(ms)
 	}
-	if closeStdin := parseBoolArg(args, "close_stdin"); closeStdin != "" {
+	closeStdin, err := parseBoolArg(args, "close_stdin")
+	if err != nil {
+		return nil, err
+	}
+	if closeStdin != "" {
 		out["close_stdin"] = closeStdin
 	}
 	return out, nil
@@ -233,11 +244,11 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		Command:        req.Args["cmd"],
 		Workdir:        workdir,
 		Shell:          req.Args["shell"],
-		Login:          firstBool(req.Args["login"], true),
-		TTY:            firstBool(req.Args["tty"], false),
-		Timeout:        time.Duration(firstInt(req.Args["timeout_ms"])) * time.Millisecond,
-		YieldTime:      durationOrDefault(req.Args["yield_time_ms"], defaultYieldTime),
-		PreviewBytes:   firstInt(req.Args["max_output_bytes"]),
+		Login:          boolArg(req.Args, "login", true),
+		TTY:            boolArg(req.Args, "tty", false),
+		Timeout:        durationArg(req.Args, "timeout_ms", 0),
+		YieldTime:      durationArg(req.Args, "yield_time_ms", defaultYieldTime),
+		PreviewBytes:   intArg(req.Args, "max_output_bytes"),
 		AccessSettings: settings,
 	})
 	if err != nil {
@@ -272,7 +283,7 @@ func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
-		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -292,7 +303,7 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		Scope:     scope,
-		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -315,15 +326,15 @@ func (writeStdinTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 		ChatID:     runtime.ChatID,
 		ProcessID:  req.Args["process_id"],
 		Chars:      req.Args["chars"],
-		CloseStdin: firstBool(req.Args["close_stdin"], false),
-		MaxBytes:   firstInt(req.Args["max_output_bytes"]),
-		YieldTime:  durationOrDefault(req.Args["yield_time_ms"], defaultWriteStdinYieldTime),
+		CloseStdin: boolArg(req.Args, "close_stdin", false),
+		MaxBytes:   intArg(req.Args, "max_output_bytes"),
+		YieldTime:  durationArg(req.Args, "yield_time_ms", defaultWriteStdinYieldTime),
 	})
 	if err != nil {
 		return tools.Result{}, err
 	}
 	message := "Updated exec session stdin"
-	if req.Args["chars"] == "" && !firstBool(req.Args["close_stdin"], false) {
+	if req.Args["chars"] == "" && !boolArg(req.Args, "close_stdin", false) {
 		message = "Waited for exec session output"
 	}
 	stored := storedFromSnapshot(snap, message)
@@ -343,7 +354,7 @@ func (resizeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
 		Size:      execruntime.TerminalSize{Rows: rows, Cols: cols},
-		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -362,7 +373,7 @@ func (terminateTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
-		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -382,7 +393,7 @@ func (cleanupTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		Scope:     scope,
-		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -488,7 +499,7 @@ func storedListFromSnapshots(snaps []execruntime.Snapshot, scope, message string
 }
 
 func normalizeProcessArgs(args map[string]string, allowScope bool) (map[string]string, error) {
-	id := strings.TrimSpace(tools.FirstArg(args, "process_id"))
+	id := strings.TrimSpace(args["process_id"])
 	if id == "" {
 		return nil, errors.New("process_id is empty")
 	}
@@ -498,14 +509,18 @@ func normalizeProcessArgs(args map[string]string, allowScope bool) (map[string]s
 			out["scope"] = scope
 		}
 	}
-	if maxOutput := normalizeOptionalInt(args, "max_output_bytes"); maxOutput != "" {
+	maxOutput, err := normalizeOptionalNonNegativeInt(args, "max_output_bytes")
+	if err != nil {
+		return nil, err
+	}
+	if maxOutput != "" {
 		out["max_output_bytes"] = maxOutput
 	}
 	return out, nil
 }
 
 func normalizeScope(args map[string]string) string {
-	scope := strings.TrimSpace(tools.FirstArg(args, "scope"))
+	scope := strings.TrimSpace(args["scope"])
 	switch scope {
 	case "", string(execruntime.ScopeChat):
 		return string(execruntime.ScopeChat)
@@ -516,68 +531,67 @@ func normalizeScope(args map[string]string) string {
 	}
 }
 
-func normalizeOptionalInt(args map[string]string, key string) string {
-	raw := strings.TrimSpace(tools.FirstArg(args, key))
+func normalizeOptionalNonNegativeInt(args map[string]string, key string) (string, error) {
+	raw := strings.TrimSpace(args[key])
 	if raw == "" {
-		return ""
+		return "", nil
 	}
 	ms, err := tools.ParseFlexibleInt(raw)
 	if err != nil || ms < 0 {
-		return ""
+		return "", fmt.Errorf("%s must be a non-negative integer", key)
 	}
-	return strconv.Itoa(ms)
+	return strconv.Itoa(ms), nil
 }
 
-func parseBoolArg(args map[string]string, key string) string {
+func parseBoolArg(args map[string]string, key string) (string, error) {
 	raw := strings.TrimSpace(args[key])
 	if raw == "" {
-		return ""
+		return "", nil
 	}
 	value, err := strconv.ParseBool(raw)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("%s must be a boolean", key)
 	}
-	return strconv.FormatBool(value)
+	return strconv.FormatBool(value), nil
 }
 
-func firstBool(raw string, fallback bool) bool {
-	if strings.TrimSpace(raw) == "" {
-		return fallback
-	}
-	value, err := strconv.ParseBool(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func firstInt(raw string) int {
-	if strings.TrimSpace(raw) == "" {
+func intArg(args map[string]string, key string) int {
+	raw := strings.TrimSpace(args[key])
+	if raw == "" {
 		return 0
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0
+		panic(fmt.Sprintf("invalid normalized integer %s=%q", key, raw))
 	}
 	return value
 }
 
+func boolArg(args map[string]string, key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(args[key])
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		panic(fmt.Sprintf("invalid normalized bool %s=%q", key, raw))
+	}
+	return value
+}
+
+func durationArg(args map[string]string, key string, defaultValue time.Duration) time.Duration {
+	value := intArg(args, key)
+	if value == 0 {
+		return defaultValue
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
 func requirePositiveInt(args map[string]string, key string) (string, error) {
-	raw := strings.TrimSpace(tools.FirstArg(args, key))
+	raw := strings.TrimSpace(args[key])
 	value, err := tools.ParseFlexibleInt(raw)
 	if err != nil || value <= 0 {
 		return "", fmt.Errorf("%s must be a positive integer", key)
 	}
 	return strconv.Itoa(value), nil
-}
-
-func durationOrDefault(raw string, fallback time.Duration) time.Duration {
-	if strings.TrimSpace(raw) == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return time.Duration(value) * time.Millisecond
 }

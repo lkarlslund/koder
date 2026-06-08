@@ -37,9 +37,6 @@ func TestCommandNormalizeArgs(t *testing.T) {
 	if args["cmd"] != "sleep 1" || args["workdir"] != "sub" || args["tty"] != "true" || args["yield_time_ms"] != "250" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
-	if _, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "pwd", "dir": "sub"}); err == nil {
-		t.Fatal("expected dir compatibility error")
-	}
 }
 
 func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {

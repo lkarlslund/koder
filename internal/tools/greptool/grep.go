@@ -50,35 +50,35 @@ func (tool) ID() tools.ID             { return tools.FileGrep }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "query", "search"))
+	pattern := strings.TrimSpace(args["pattern"])
 	if pattern == "" {
 		return nil, errors.New("pattern is empty")
 	}
 	out := map[string]string{"pattern": pattern}
-	if root := tools.NormalizePathInput(tools.FirstArg(args, "path", "root", "dir")); root != "" {
+	if root := tools.NormalizePathInput(args["path"]); root != "" {
 		out["path"] = root
 	}
-	if include := strings.TrimSpace(tools.FirstArg(args, "include", "glob")); include != "" {
+	if include := strings.TrimSpace(args["include"]); include != "" {
 		out["include"] = include
 	}
-	if kind := strings.TrimSpace(tools.FirstArg(args, "type", "file_type")); kind != "" {
+	if kind := strings.TrimSpace(args["type"]); kind != "" {
 		out["type"] = kind
 	}
-	if rawMode := strings.TrimSpace(tools.FirstArg(args, "output_mode", "mode")); rawMode != "" {
+	if rawMode := strings.TrimSpace(args["output_mode"]); rawMode != "" {
 		mode := outputMode(rawMode)
 		if !validOutputMode(mode) {
 			return nil, errors.New("output_mode must be one of: content, files_with_matches, count")
 		}
 		out["output_mode"] = rawMode
 	}
-	if rawIgnoreCase := strings.TrimSpace(tools.FirstArg(args, "ignore_case", "case_insensitive", "i")); rawIgnoreCase != "" {
+	if rawIgnoreCase := strings.TrimSpace(args["ignore_case"]); rawIgnoreCase != "" {
 		ignoreCase, err := parseBool(rawIgnoreCase)
 		if err != nil {
 			return nil, errors.New("ignore_case must be true or false")
 		}
 		out["ignore_case"] = strconv.FormatBool(ignoreCase)
 	}
-	if rawLimit := strings.TrimSpace(tools.FirstArg(args, "head_limit", "limit")); rawLimit != "" {
+	if rawLimit := strings.TrimSpace(args["head_limit"]); rawLimit != "" {
 		limit, err := tools.ParseFlexibleInt(rawLimit)
 		if err != nil || limit <= 0 {
 			return nil, errors.New("head_limit must be a positive integer")

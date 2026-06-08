@@ -38,22 +38,22 @@ func init() {
 func (tool) ID() tools.ID             { return tools.WebSearch }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	query := strings.TrimSpace(tools.FirstArg(args, "query", "q", "search"))
+	query := strings.TrimSpace(args["query"])
 	if query == "" {
 		return nil, errors.New("query is empty")
 	}
 	out := map[string]string{"query": query}
-	if limit := strings.TrimSpace(tools.FirstArg(args, "limit", "count")); limit != "" {
+	if limit := strings.TrimSpace(args["limit"]); limit != "" {
 		value, err := tools.ParseFlexibleInt(limit)
 		if err != nil || value <= 0 {
 			return nil, errors.New("limit must be a positive integer")
 		}
 		out["limit"] = strconv.Itoa(value)
 	}
-	if domains := normalizeDomainList(tools.FirstArg(args, "allowed_domains", "domains", "domain")); domains != "" {
+	if domains := normalizeDomainList(args["allowed_domains"]); domains != "" {
 		out["allowed_domains"] = domains
 	}
-	if domains := normalizeDomainList(tools.FirstArg(args, "blocked_domains", "exclude_domains")); domains != "" {
+	if domains := normalizeDomainList(args["blocked_domains"]); domains != "" {
 		out["blocked_domains"] = domains
 	}
 	return out, nil
