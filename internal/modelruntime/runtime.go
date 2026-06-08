@@ -8,9 +8,11 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/toolruntime"
 )
 
 type Config struct {
@@ -21,6 +23,8 @@ type Config struct {
 	Caps     *provider.CapabilityStore
 	Agents   *agents.Manager
 	Settings *settings.Store
+	Tools    *toolruntime.Runtime
+	MCP      *mcp.Manager
 }
 
 type Runtime struct {
@@ -31,6 +35,8 @@ type Runtime struct {
 	caps     *provider.CapabilityStore
 	agents   *agents.Manager
 	settings *settings.Store
+	tools    *toolruntime.Runtime
+	mcp      *mcp.Manager
 	envMu    sync.Mutex
 	envCache map[string]string
 }
@@ -60,6 +66,8 @@ func New(cfg Config) *Runtime {
 		caps:     caps,
 		agents:   agentManager,
 		settings: settingsStore,
+		tools:    cfg.Tools,
+		mcp:      cfg.MCP,
 	}
 }
 
@@ -76,4 +84,18 @@ func (r *Runtime) UpdateConfig(cfg config.Config) {
 	r.files = attachment.NewManager(cfg.StateDir())
 	r.caps = provider.NewCapabilityStore(cfg.StateDir())
 	r.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+}
+
+func (r *Runtime) SetToolsRuntime(runtime *toolruntime.Runtime) {
+	if r == nil {
+		return
+	}
+	r.tools = runtime
+}
+
+func (r *Runtime) SetMCP(manager *mcp.Manager) {
+	if r == nil {
+		return
+	}
+	r.mcp = manager
 }

@@ -97,6 +97,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Caps:     e.caps,
 		Agents:   e.agents,
 		Settings: settingsStore,
+		MCP:      e.mcp,
 	})
 	e.registry = sessionpkg.NewRegistry(st, e.MetadataChat, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
@@ -106,6 +107,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Exec:     execRuntime,
 		MCP:      e.mcp,
 	})
+	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
 	return e
 }
 
@@ -304,7 +306,7 @@ func (e *Engine) MaxToolLoopSteps() int {
 }
 
 func (e *Engine) ClientForChat(chat domain.Chat) (*provider.Client, error) {
-	return e.clientForChat(chat)
+	return e.modelRuntime.ClientForChat(chat)
 }
 
 func (e *Engine) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, step int, out chan<- domain.Event) error {
@@ -337,11 +339,11 @@ func (e *Engine) AutoCompactAtTurnBoundary(ctx context.Context, rt *chatpkg.Chat
 }
 
 func (e *Engine) ProviderStreamingEnabled(chat domain.Chat) bool {
-	return e.providerStreamingEnabled(chat)
+	return e.modelRuntime.ProviderStreamingEnabled(chat)
 }
 
 func (e *Engine) ChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	return e.chatRequest(session, chat, messages, stream)
+	return e.modelRuntime.ChatRequest(session, chat, messages, stream)
 }
 
 func (e *Engine) NextAssistantTimelineItemForTurn(ctx context.Context, rt *chatpkg.Chat) (domain.TimelineItem, error) {
@@ -369,20 +371,15 @@ func (e *Engine) CompleteModelRequest(ctx context.Context, session domain.Sessio
 }
 
 func (e *Engine) ParseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID id.ID) chatpkg.ToolCallParseResult {
-	parsed := e.parseProviderToolCallsForTranscript(raw, sessionID)
-	return chatpkg.ToolCallParseResult{
-		Requests:  parsed.Requests,
-		ToolCalls: parsed.ToolCalls,
-		Err:       parsed.Err,
-	}
+	return e.modelRuntime.ParseProviderToolCallsForTranscript(raw, sessionID)
 }
 
 func (e *Engine) FailedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
-	return e.failedStreamedProviderToolCall(callErr)
+	return e.modelRuntime.FailedStreamedProviderToolCall(callErr)
 }
 
 func (e *Engine) RecordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
-	e.recordLifecycle(sessionID, kind, text, meta)
+	e.modelRuntime.RecordLifecycle(sessionID, kind, text, meta)
 }
 
 func (e *Engine) MaybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string, error) {
