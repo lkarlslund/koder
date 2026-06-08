@@ -2,6 +2,7 @@ package modelruntime
 
 import (
 	"path/filepath"
+	"sync"
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -30,6 +31,8 @@ type Runtime struct {
 	caps     *provider.CapabilityStore
 	agents   *agents.Manager
 	settings *settings.Store
+	envMu    sync.Mutex
+	envCache map[string]string
 }
 
 func New(cfg Config) *Runtime {

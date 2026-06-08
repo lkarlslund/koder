@@ -316,7 +316,7 @@ func (e *Engine) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, st
 }
 
 func (e *Engine) BuildConversationForTurn(ctx context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
-	return e.buildConversationForTurn(ctx, req)
+	return e.modelRuntime.BuildConversationForTurn(ctx, req)
 }
 
 func (e *Engine) AutoCompactAtTurnBoundary(ctx context.Context, rt *chatpkg.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
@@ -1340,11 +1340,7 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 }
 
 func (e *Engine) buildConversationForTurn(_ context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
-	envelope, err := e.buildPromptEnvelopeForTimeline(req.Session, req.Chat, req.Timeline, "", nil, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	return provider.SerializePromptEnvelope(envelope), nil
+	return e.modelRuntime.BuildConversationForTurn(context.Background(), req)
 }
 
 func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []domain.TimelineItem {
@@ -1372,18 +1368,7 @@ func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []dom
 }
 
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
-	if err != nil {
-		return 0, err
-	}
-	payload, err := json.Marshal(provider.SerializePromptEnvelope(envelope))
-	if err != nil {
-		return 0, err
-	}
-	if len(payload) == 0 {
-		return 0, nil
-	}
-	return len(payload) / 4, nil
+	return e.modelRuntime.EstimateContextTokensForTimeline(session, chat, timeline)
 }
 
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
@@ -1408,7 +1393,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 	}
 	timeline = chatpkg.FilterQueuedTimelineItems(timeline)
-	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
+	return e.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
 func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
