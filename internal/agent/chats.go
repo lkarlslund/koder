@@ -30,6 +30,8 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 		Prompt:  e,
 		Turns:   e,
 		Tools:   e,
+		Runtime: e,
+		Life:    e,
 		Pending: e,
 		Compact: e,
 		Errors:  e,

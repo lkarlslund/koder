@@ -132,6 +132,8 @@ type Deps struct {
 	Prompt  PromptTurnService
 	Turns   TurnLoopService
 	Tools   ToolTurnService
+	Runtime ToolRuntimeService
+	Life    ToolLifecycleService
 	Pending PendingToolService
 	Compact CompactService
 	Errors  TurnErrorHandler
@@ -203,6 +205,16 @@ type ToolTurnService interface {
 
 type PendingToolService interface {
 	ResumePendingToolsForTurn(context.Context, *Chat, chan<- domain.Event) (bool, error)
+}
+
+type ToolRuntimeService interface {
+	ToolRuntime(context.Context, *Chat) (tools.Runtime, error)
+}
+
+type ToolLifecycleService interface {
+	ToolExecutionStarted(context.Context, *Chat, tools.Request)
+	ToolExecutionFinished(context.Context, *Chat, tools.Request)
+	ToolExecutionFailed(context.Context, *Chat, tools.Request, error)
 }
 
 type CompactService interface {

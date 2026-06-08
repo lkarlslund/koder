@@ -134,6 +134,39 @@ func (e *Engine) SetExecManager(manager *execruntime.Manager) {
 	e.exec = manager
 }
 
+func (e *Engine) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runtime, error) {
+	if rt == nil {
+		return tools.Runtime{}, fmt.Errorf("chat runtime is required")
+	}
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
+	if session.ID != "" {
+		owner, err := e.LoadSession(ctx, session.ID)
+		if err != nil {
+			return tools.Runtime{}, err
+		}
+		session = owner.Snapshot().Session
+		rt.SetSession(session)
+	}
+	return e.toolRuntime(session, chat), nil
+}
+
+func (e *Engine) ToolExecutionStarted(_ context.Context, rt *chatpkg.Chat, req tools.Request) {
+	snapshot := rt.Snapshot()
+	e.recordLifecycle(snapshot.Session.ID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+}
+
+func (e *Engine) ToolExecutionFinished(_ context.Context, rt *chatpkg.Chat, req tools.Request) {
+	snapshot := rt.Snapshot()
+	e.recordLifecycle(snapshot.Session.ID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+}
+
+func (e *Engine) ToolExecutionFailed(_ context.Context, rt *chatpkg.Chat, req tools.Request, err error) {
+	snapshot := rt.Snapshot()
+	e.recordLifecycle(snapshot.Session.ID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+}
+
 func chatModel(chat domain.Chat) (string, string, error) {
 	providerID := strings.TrimSpace(chat.ProviderID)
 	modelID := strings.TrimSpace(chat.ModelID)
@@ -362,14 +395,12 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolC
 	if err != nil {
 		return false, err
 	}
-	events, execErr := e.runPreparedToolCallForTurn(ctx, rt, chat.ID, session.ID, req, func(evt domain.Event) {
-		out <- evt
-	})
+	needsApproval, execErr := rt.RunToolCalls(ctx, []tools.Request{req}, out)
 	if execErr != nil {
 		return false, execErr
 	}
-	for _, evt := range events {
-		out <- evt
+	if needsApproval {
+		return false, nil
 	}
 	if chatpkg.ShouldStop(ctx) {
 		return false, context.Canceled
@@ -381,23 +412,17 @@ func (e *Engine) DenyToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCall
 	if rt == nil {
 		return fmt.Errorf("chat runtime is required")
 	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	chat := snapshot.Chat
+	chat := rt.Snapshot().Chat
 	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
 	if err != nil {
 		return err
 	}
 	text := fmt.Sprintf("%s denied", req.Tool)
-	item, err := e.recordDeniedToolResult(ctx, session.ID, chat.ID, req, text)
+	evt, err := rt.RecordToolDenied(ctx, req, text)
 	if err != nil {
 		return err
 	}
-	item, err = rt.UpsertTimelineItem(ctx, item)
-	if err != nil {
-		return err
-	}
-	out <- domain.Event{Kind: domain.EventKindToolResult, Text: text, Tool: req.Tool, ToolCallID: req.ToolCallID, Item: item}
+	out <- evt
 	return nil
 }
 
@@ -405,14 +430,11 @@ func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, rt *chatpkg.Chat
 	if rt == nil {
 		return false, fmt.Errorf("chat runtime is required")
 	}
-	snapshot := rt.Snapshot()
-	session := snapshot.Session
-	chat := snapshot.Chat
 	calls, err := e.pendingExecutableToolCallsForTurn(ctx, rt)
 	if err != nil || len(calls) == 0 {
 		return false, err
 	}
-	needsApproval, err := e.handleModelToolCallsForTurn(ctx, session, chat, rt, calls, out)
+	needsApproval, err := rt.RunToolCalls(ctx, calls, out)
 	if err != nil {
 		return false, err
 	}
@@ -546,7 +568,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 			})
 		} else if len(parsed.ToolCalls) > 0 {
-			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+			assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 			if err != nil {
 				return chatpkg.TurnStepResult{}, err
 			}
@@ -569,7 +591,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
-			needsApproval, handledErr := e.handleModelToolCallsForTurn(ctx, session, chat, rt, calls, out)
+			needsApproval, handledErr := rt.RunToolCalls(ctx, calls, out)
 			if handledErr != nil {
 				return chatpkg.TurnStepResult{}, handledErr
 			}
@@ -589,7 +611,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 		for _, callErr := range resp.ToolCallErrors {
 			toolCalls = append(toolCalls, e.failedStreamedProviderToolCall(callErr))
 		}
-		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+		assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -602,7 +624,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 	call, plain := parseToolCall(text)
 	if call != nil {
 		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
+		assistantItem, err := rt.AppendAssistantToolRequests(ctx, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -615,12 +637,11 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 
-		evt, handledErr := e.handleModelToolCallForTurn(ctx, session, chat, rt, *call)
+		needsApproval, handledErr := rt.RunToolCalls(ctx, []tools.Request{*call}, out)
 		if handledErr != nil {
 			return chatpkg.TurnStepResult{}, handledErr
 		}
-		out <- evt
-		if evt.Kind == domain.EventKindApprovalAsk {
+		if needsApproval {
 			return chatpkg.TurnStepResult{WaitingApproval: true}, nil
 		}
 		if chatpkg.ShouldStop(ctx) {
