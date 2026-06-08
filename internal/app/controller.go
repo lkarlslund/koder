@@ -22,7 +22,6 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/version"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
@@ -355,7 +354,7 @@ type Controller struct {
 }
 
 // New constructs a browser app controller.
-func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
+func New(cfg config.Config, engine *agent.Engine) *Controller {
 	return &Controller{
 		cfg:                         cfg,
 		agent:                       engine,

@@ -157,7 +157,7 @@ func syncManagedUserAssets(ctx context.Context) error {
 }
 
 func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
-	controller := app.New(cfg, st, engine)
+	controller := app.New(cfg, engine)
 	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err
 	}

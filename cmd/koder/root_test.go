@@ -236,7 +236,7 @@ func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
 	engine := agent.New(cfg, st, nil, nil)
-	ctrl := app.New(cfg, st, engine)
+	ctrl := app.New(cfg, engine)
 	if err := ctrl.Start(context.Background(), app.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
