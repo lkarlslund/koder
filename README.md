@@ -50,16 +50,24 @@ koder doctor
 Example local provider:
 
 ```toml
-default_provider = "local-llama"
+[defaults]
+provider_id = "local-llama"
+model_id = "qwen3-coder"
+
+[compaction]
+auto_at_percent = 85
+keep_tool_calls = 2
 
 [providers.local-llama]
 name = "Local llama.cpp"
 base_url = "http://127.0.0.1:8888/v1"
-default_model = "qwen3-coder"
-context_window = 32768
-auto_compact_at = 85
 stream = true
 timeout = "10m"
+
+[[models]]
+provider_id = "local-llama"
+model_id = "qwen3-coder"
+context_window = 32768
 ```
 
 Compaction can use the active chat model or a separate configured model. This is useful when your main coding model is expensive, slow, or not ideal for summarizing long histories.
