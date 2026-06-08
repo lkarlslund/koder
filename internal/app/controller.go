@@ -399,12 +399,35 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 // State returns a detached snapshot of current browser app UI state.
 func (c *Controller) State() State {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.stateLocked()
+	selection := Selection{SessionID: c.session.ID, ChatID: c.chat.ID}
+	base := State{
+		Sessions:      slices.Clone(c.sessions),
+		Theme:         c.theme,
+		Build:         version.Current(),
+		RestartNeeded: c.restartNeeded,
+		RestartBuild:  c.restartBuild,
+		Error:         c.lastErr,
+		ProjectRoot:   c.session.ProjectRoot,
+	}
+	c.mu.RUnlock()
+	ctx := context.Background()
+	if selection.SessionID != "" {
+		if state, err := c.stateForSelection(ctx, selection, false); err == nil {
+			return state
+		}
+	}
+	if sessions, err := c.workspaceSessions(ctx); err == nil {
+		base.Sessions = sessions
+	}
+	return base
 }
 
 // StateForSelection returns a detached browser state for a single client selection.
 func (c *Controller) StateForSelection(ctx context.Context, selection Selection) (State, error) {
+	return c.stateForSelection(ctx, selection, true)
+}
+
+func (c *Controller) stateForSelection(ctx context.Context, selection Selection, touch bool) (State, error) {
 	c.mu.RLock()
 	base := State{
 		Sessions:      slices.Clone(c.sessions),
@@ -423,7 +446,7 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 	if selection.SessionID == "" {
 		return base, nil
 	}
-	owner, session, chatRecord, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	owner, session, chatRecord, rt, err := c.resolveStateRuntime(ctx, selection, touch)
 	if err != nil {
 		return State{}, err
 	}
@@ -450,8 +473,10 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 			statuses[chatID] = sidebarStatusFromSnapshot(item)
 		}
 	}
-	snapshots[chatRecord.ID] = snapshot
-	statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
+	if chatRecord.ID != "" {
+		snapshots[chatRecord.ID] = snapshot
+		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
+	}
 	return State{
 		Session:       session,
 		Sessions:      base.Sessions,
@@ -464,7 +489,7 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 		Milestones:    ownerSnapshot.Plan,
 		Todos:         slices.Clone(ownerSnapshot.Todos),
 		TodosByRef:    cloneTodosByRef(ownerSnapshot.TodosByRef),
-		Workspace:     workspacepkg.Status{ProjectRoot: session.ProjectRoot},
+		Workspace:     c.workspaceStatusForSession(session),
 		ContextWindow: c.contextWindowForChat(chatRecord),
 		ModelInfo:     c.modelInfoForChat(chatRecord),
 		Theme:         base.Theme,
@@ -474,6 +499,60 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 		RestartBuild:  base.RestartBuild,
 		Error:         base.Error,
 	}, nil
+}
+
+func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selection, touch bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
+	if touch {
+		return c.resolveSelectedRuntime(ctx, selection, true)
+	}
+	if selection.SessionID == "" {
+		return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, err
+	}
+	ownerSnapshot := owner.Snapshot()
+	session := ownerSnapshot.Session
+	if session.ID == "" {
+		return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session %s not found", selection.SessionID)
+	}
+	if !c.sessionInWorkspace(session) {
+		return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+	}
+	chatRecord := domain.Chat{}
+	if selection.ChatID != "" {
+		var ok bool
+		chatRecord, ok = chatByID(ownerSnapshot.Chats, selection.ChatID)
+		if !ok {
+			return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("chat %s not found", selection.ChatID)
+		}
+	} else {
+		chatRecord = newestOpenChat(ownerSnapshot.Chats)
+	}
+	if chatRecord.ID == "" {
+		return owner, session, domain.Chat{}, nil, nil
+	}
+	var rt *chat.Chat
+	if _, ok := ownerSnapshot.Snapshots[chatRecord.ID]; !ok {
+		if loaded, err := owner.Chat(ctx, chatRecord.ID); err == nil {
+			rt = loaded
+		}
+	}
+	return owner, session, chatRecord, rt, nil
+}
+
+func (c *Controller) workspaceStatusForSession(session domain.Session) workspacepkg.Status {
+	c.mu.RLock()
+	status := c.workspace
+	c.mu.RUnlock()
+	if status.ProjectRoot != "" && session.ID != "" && status.ProjectRoot == session.ProjectRoot {
+		return status
+	}
+	return workspacepkg.Status{ProjectRoot: session.ProjectRoot}
 }
 
 // TimelinePage returns a transcript page for a chat in an explicitly selected session.
@@ -576,60 +655,6 @@ func (c *Controller) ForkChatForSelection(ctx context.Context, selection Selecti
 	return snapshot.Chat, nil
 }
 
-func (c *Controller) populateStateSnapshotsLocked(state *State) {
-	for idx := range state.Chats {
-		if state.Chats[idx].ID == c.chat.ID {
-			state.Chats[idx] = c.chat
-			break
-		}
-	}
-	selectedChats := make(map[id.ID]bool, len(state.Chats))
-	for _, chatRecord := range state.Chats {
-		selectedChats[chatRecord.ID] = true
-	}
-	for chatID, snapshot := range c.snapshots {
-		if snapshot.Chat.ID == "" {
-			snapshot.Chat.ID = chatID
-		}
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		state.Snapshots[chatID] = snapshot
-		if chatID == c.chat.ID {
-			state.Snapshot = snapshot
-		}
-		if selectedChats[snapshot.Chat.ID] && !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
-			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
-		}
-	}
-	for chatID, rt := range c.runtimes {
-		if rt == nil {
-			continue
-		}
-		if _, ok := state.Snapshots[chatID]; ok {
-			continue
-		}
-		snapshot := rt.Snapshot()
-		if snapshot.Chat.ID == "" {
-			snapshot.Chat.ID = chatID
-		}
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		state.Snapshots[chatID] = snapshot
-		if chatID == c.chat.ID {
-			state.Snapshot = snapshot
-		}
-		if selectedChats[snapshot.Chat.ID] && !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
-			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
-		}
-	}
-	if state.Snapshot.Chat.ID == "" && c.runtime != nil {
-		snapshot := c.runtime.Snapshot()
-		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
-		state.Snapshot = snapshot
-		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
-			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
-		}
-	}
-}
-
 // MarkRestartNeeded tells web clients that a newer binary is ready but not running.
 func (c *Controller) MarkRestartNeeded(build RestartBuildInfo) {
 	if c == nil {
@@ -646,32 +671,6 @@ func (c *Controller) MarkRestartNeeded(build RestartBuildInfo) {
 	c.restartBuild = build
 	c.mu.Unlock()
 	c.broadcast("restart_delta", map[string]any{"restart_needed": true, "restart_build": build})
-}
-
-func (c *Controller) stateLocked() State {
-	state := State{
-		Session:       c.session,
-		Sessions:      slices.Clone(c.sessions),
-		Chats:         slices.Clone(c.chats),
-		ChatStatuses:  c.chatStatusesLocked(),
-		ActiveChatID:  c.chat.ID,
-		Access:        c.accessStateLocked(),
-		Snapshots:     map[id.ID]chat.Snapshot{},
-		Milestones:    c.milestone,
-		Todos:         slices.Clone(c.todos),
-		TodosByRef:    cloneTodosByRef(c.todosByRef),
-		Workspace:     c.workspace,
-		ContextWindow: c.contextWindowLocked(),
-		ModelInfo:     c.modelInfoLocked(),
-		Theme:         c.theme,
-		ProjectRoot:   c.session.ProjectRoot,
-		Build:         version.Current(),
-		RestartNeeded: c.restartNeeded,
-		RestartBuild:  c.restartBuild,
-		Error:         c.lastErr,
-	}
-	c.populateStateSnapshotsLocked(&state)
-	return state
 }
 
 // Subscribe registers for pushed UI updates.
@@ -1989,38 +1988,8 @@ func chatStatusesForChats(chats []domain.Chat, statuses map[id.ID]ChatSidebarSta
 	return out
 }
 
-func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
-	out := make([]ChatSidebarStatus, 0, len(c.chats))
-	for _, item := range c.chats {
-		status, ok := c.statuses[item.ID]
-		if !ok {
-			status = idleChatSidebarStatus(item.ID)
-		}
-		out = append(out, status)
-	}
-	return out
-}
-
 func idleChatSidebarStatus(chatID id.ID) ChatSidebarStatus {
 	return ChatSidebarStatus{ChatID: chatID, Status: string(chat.StatusIdle), StatusText: "Idle"}
-}
-
-func sidebarStatusFromUpdate(update chat.Update) ChatSidebarStatus {
-	status := update.Status
-	if status == "" {
-		status = update.Snapshot.Status
-	}
-	text := strings.TrimSpace(update.StatusText)
-	if text == "" {
-		text = strings.TrimSpace(update.Snapshot.StatusText)
-	}
-	return sidebarStatusFromSnapshot(chat.Snapshot{
-		Chat:       update.Snapshot.Chat,
-		Status:     status,
-		StatusText: text,
-		Active:     update.Active || update.Snapshot.Active,
-		Approvals:  update.Snapshot.Approvals,
-	})
 }
 
 func sidebarStatusFromSnapshot(snapshot chat.Snapshot) ChatSidebarStatus {
@@ -2040,31 +2009,6 @@ func sidebarStatusFromSnapshot(snapshot chat.Snapshot) ChatSidebarStatus {
 		PendingApprovals: len(snapshot.Approvals),
 		StatusText:       text,
 	}
-}
-
-func mergeChatSidebarStatus(statuses []ChatSidebarStatus, status ChatSidebarStatus) []ChatSidebarStatus {
-	if status.ChatID == "" {
-		return statuses
-	}
-	for idx := range statuses {
-		if statuses[idx].ChatID == status.ChatID {
-			statuses[idx] = status
-			return statuses
-		}
-	}
-	return append(statuses, status)
-}
-
-func hasChatSidebarStatus(statuses []ChatSidebarStatus, chatID id.ID) bool {
-	if chatID == "" {
-		return false
-	}
-	for _, status := range statuses {
-		if status.ChatID == chatID {
-			return true
-		}
-	}
-	return false
 }
 
 func chatSidebarStatusText(status string) string {
@@ -2152,17 +2096,6 @@ func (c *Controller) resolveSelectedChat(ctx context.Context, selection Selectio
 	return owner, session, chatRecord, nil
 }
 
-func (c *Controller) accessStateLocked() AccessState {
-	settings := c.session.AccessSettings
-	if accesssettings.IsZero(settings) {
-		settings = c.cfg.Access
-	}
-	return AccessState{
-		Settings: accesssettings.Normalize(settings),
-		Presets:  accesssettings.Presets(),
-	}
-}
-
 func (c *Controller) accessStateForSession(session domain.Session) AccessState {
 	settings := session.AccessSettings
 	if accesssettings.IsZero(settings) {
@@ -2174,48 +2107,6 @@ func (c *Controller) accessStateForSession(session domain.Session) AccessState {
 		Settings: accesssettings.Normalize(settings),
 		Presets:  accesssettings.Presets(),
 	}
-}
-
-func (c *Controller) contextWindowLocked() int {
-	providerID := strings.TrimSpace(c.chat.ProviderID)
-	modelID := strings.TrimSpace(c.chat.ModelID)
-	if providerID != "" && modelID != "" {
-		return c.cfg.ContextWindow(providerID, modelID)
-	}
-	if strings.TrimSpace(c.cfg.DefaultProvider) != "" && strings.TrimSpace(c.cfg.DefaultModel) != "" {
-		return c.cfg.ContextWindow(c.cfg.DefaultProvider, c.cfg.DefaultModel)
-	}
-	return 32768
-}
-
-func (c *Controller) modelInfoLocked() ModelInfo {
-	providerID := strings.TrimSpace(c.chat.ProviderID)
-	modelID := strings.TrimSpace(c.chat.ModelID)
-	sourceProviderID, sourceModelID := c.cfg.ResolveModel(providerID, modelID)
-	providerCfg, ok := c.cfg.Provider(sourceProviderID)
-	if !ok {
-		providerCfg = config.Provider{}
-	}
-	info := ModelInfo{
-		ProviderID:       providerID,
-		ModelID:          modelID,
-		SourceProviderID: sourceProviderID,
-		SourceModelID:    sourceModelID,
-		ContextWindow:    c.contextWindowLocked(),
-		SupportsTools:    true,
-	}
-	if sourceModelID == "" {
-		return info
-	}
-	enriched, err := provider.NewCapabilityStore(c.cfg.StateDir()).EnrichModel(sourceProviderID, providerCfg, domain.Model{ID: sourceModelID})
-	if err != nil {
-		return info
-	}
-	info.SupportsImages = enriched.SupportsImages
-	info.SupportsPDFs = enriched.SupportsPDFs
-	info.CapabilitiesKnown = enriched.CapabilitiesKnown
-	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
-	return info
 }
 
 func (c *Controller) broadcast(typ string, payload any) {
