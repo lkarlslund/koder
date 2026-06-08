@@ -99,7 +99,7 @@ type queuedSteerBoundaryRunner struct {
 
 func depsForFake(st *store.Store, runner any) Deps {
 	deps := Deps{Store: st}
-	if model, ok := runner.(ModelOps); ok {
+	if model, ok := runner.(ModelRuntime); ok {
 		deps.Model = model
 	}
 	if tools, ok := runner.(ToolTurnService); ok {

@@ -16,7 +16,7 @@ import (
 const AfterToolResultContinuationPrompt = "Continue from the latest tool result. If you learned a meaningful fact or changed direction, include one short visible progress sentence before the next tool call. Do not expose hidden reasoning. Either produce a visible answer for the user or make the next tool call."
 
 type modelTurnLoop struct {
-	model                ModelOps
+	model                ModelRuntime
 	session              domain.Session
 	tracker              ToolLoopTracker
 	autoContinuedBadStop bool

@@ -130,7 +130,7 @@ type Chat struct {
 
 type Deps struct {
 	Store   *store.Store
-	Model   ModelOps
+	Model   ModelRuntime
 	Tools   ToolTurnService
 	Runtime ToolRuntimeService
 	Life    ToolLifecycleService
@@ -232,7 +232,7 @@ type ToolCallParseResult struct {
 	Err       error
 }
 
-type ModelOps interface {
+type ModelRuntime interface {
 	PreparePromptTurn(context.Context, *Chat, domain.QueuedInput, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
 	PrepareContinueTurn(context.Context, *Chat, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
 	MaxToolLoopSteps() int
