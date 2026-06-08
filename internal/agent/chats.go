@@ -15,13 +15,6 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	return chatpkg.Load(ctx, session, chatRecord, e.ChatDeps(), nil)
 }
 
-func (e *Engine) MetadataChat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
-	if chatRecord.ID == "" {
-		return nil, fmt.Errorf("chat id is required")
-	}
-	return chatpkg.LoadMetadata(ctx, session, chatRecord, e.ChatDeps(), nil)
-}
-
 func (e *Engine) ChatDeps() chatpkg.Deps {
 	return chatpkg.Deps{
 		Store:   e.store,
