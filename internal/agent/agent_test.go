@@ -7053,7 +7053,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 				}
 			}
 		case domain.Notice:
-			if content.Kind == "loop_pause" && content.Reason == string(continuationPauseReasonRepeatedTool) {
+			if content.Kind == "loop_pause" && content.Reason == string(chatpkg.ContinuationPauseReasonRepeatedTool) {
 				sawPauseNotice = true
 			}
 		}
@@ -7069,9 +7069,9 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
 	t.Parallel()
 
-	tracker := toolLoopTracker{}
+	tracker := chatpkg.ToolLoopTracker{}
 	for _, path := range []string{"one.txt", "two.txt", "three.txt"} {
-		if pause, ok := tracker.trackCalls([]tools.Request{{
+		if pause, ok := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindFileRead,
 			Args: map[string]string{"path": path},
 		}}); ok {
@@ -7079,19 +7079,19 @@ func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
 		}
 	}
 
-	for idx := range repeatedToolLoopThreshold {
-		pause, ok := tracker.trackCalls([]tools.Request{{
+	for idx := range chatpkg.RepeatedToolLoopThreshold {
+		pause, ok := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindFileRead,
 			Args: map[string]string{"path": "same.txt"},
 		}})
-		if idx < repeatedToolLoopThreshold-1 && ok {
+		if idx < chatpkg.RepeatedToolLoopThreshold-1 && ok {
 			t.Fatalf("did not expect pause before threshold, got %#v", pause)
 		}
-		if idx == repeatedToolLoopThreshold-1 {
+		if idx == chatpkg.RepeatedToolLoopThreshold-1 {
 			if !ok {
 				t.Fatal("expected pause at identical-call threshold")
 			}
-			if pause.Reason != continuationPauseReasonRepeatedTool {
+			if pause.Reason != chatpkg.ContinuationPauseReasonRepeatedTool {
 				t.Fatalf("unexpected pause reason: %#v", pause)
 			}
 		}
@@ -7101,9 +7101,9 @@ func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
 func TestToolLoopTrackerAllowsRepeatedExecWriteStdinWaits(t *testing.T) {
 	t.Parallel()
 
-	tracker := toolLoopTracker{}
-	for range repeatedToolLoopThreshold + 1 {
-		if pause, ok := tracker.trackCalls([]tools.Request{{
+	tracker := chatpkg.ToolLoopTracker{}
+	for range chatpkg.RepeatedToolLoopThreshold + 1 {
+		if pause, ok := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindExecWriteStdin,
 			Args: map[string]string{"process_id": "exec_1", "chars": ""},
 		}}); ok {
@@ -7111,15 +7111,15 @@ func TestToolLoopTrackerAllowsRepeatedExecWriteStdinWaits(t *testing.T) {
 		}
 	}
 
-	for idx := range repeatedToolLoopThreshold {
-		pause, ok := tracker.trackCalls([]tools.Request{{
+	for idx := range chatpkg.RepeatedToolLoopThreshold {
+		pause, ok := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindExecStatus,
 			Args: map[string]string{"process_id": "exec_1"},
 		}})
-		if idx < repeatedToolLoopThreshold-1 && ok {
+		if idx < chatpkg.RepeatedToolLoopThreshold-1 && ok {
 			t.Fatalf("did not expect exec_status pause before threshold, got %#v", pause)
 		}
-		if idx == repeatedToolLoopThreshold-1 && !ok {
+		if idx == chatpkg.RepeatedToolLoopThreshold-1 && !ok {
 			t.Fatal("expected repeated exec_status to pause")
 		}
 	}
@@ -7173,7 +7173,7 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
-		if notice.Kind == "loop_pause" && notice.Reason == string(continuationPauseReasonProviderRefusal) {
+		if notice.Kind == "loop_pause" && notice.Reason == string(chatpkg.ContinuationPauseReasonProviderRefusal) {
 			return
 		}
 	}
@@ -7535,7 +7535,7 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
-		if notice.Kind == "loop_pause" && notice.Reason == string(continuationPauseReasonTurnLimit) && notice.Limit == 2 {
+		if notice.Kind == "loop_pause" && notice.Reason == string(chatpkg.ContinuationPauseReasonTurnLimit) && notice.Limit == 2 {
 			return
 		}
 	}

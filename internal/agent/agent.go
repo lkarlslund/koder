@@ -469,7 +469,7 @@ func (e *Engine) pendingExecutableToolCallsForTurn(ctx context.Context, rt *chat
 type engineTurnLoop struct {
 	e                    *Engine
 	session              domain.Session
-	tracker              toolLoopTracker
+	tracker              chatpkg.ToolLoopTracker
 	autoContinuedBadStop bool
 	skipAutoCompactOnce  bool
 }
@@ -480,10 +480,9 @@ func (l *engineTurnLoop) MaxSteps() int {
 
 func (l *engineTurnLoop) PauseLimit(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event) {
 	snapshot := rt.Snapshot()
-	chat := snapshot.Chat
 	session := snapshot.Session
-	l.e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
-		Reason: continuationPauseReasonTurnLimit,
+	l.e.pauseContinuation(ctx, rt, session.ID, chatpkg.ContinuationPause{
+		Reason: chatpkg.ContinuationPauseReasonTurnLimit,
 		Limit:  l.e.maxToolLoopSteps(),
 		Body:   fmt.Sprintf("Paused continuation after reaching the model tool-turn limit (%d).", l.e.maxToolLoopSteps()),
 	}, out)
@@ -586,8 +585,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 					Continue: true,
 				}, nil
 			}
-			if pause, ok := l.tracker.trackCalls(calls); ok {
-				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+			if pause, ok := l.tracker.TrackCalls(calls); ok {
+				e.pauseContinuation(ctx, rt, session.ID, pause, out)
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
 			needsApproval, handledErr := rt.RunToolCalls(ctx, calls, out)
@@ -628,8 +627,8 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 			return chatpkg.TurnStepResult{}, err
 		}
 		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Item: assistantItem}
-		if pause, ok := l.tracker.trackCalls([]tools.Request{*call}); ok {
-			e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+		if pause, ok := l.tracker.TrackCalls([]tools.Request{*call}); ok {
+			e.pauseContinuation(ctx, rt, session.ID, pause, out)
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 		if chatpkg.ShouldStop(ctx) {
@@ -650,7 +649,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 			Continue: true,
 		}, nil
 	}
-	l.tracker.reset()
+	l.tracker.Reset()
 
 	if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
 		if strings.TrimSpace(reasoning) != "" {
@@ -659,9 +658,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, 
 				TurnInstructions: turnInstructionBlocks("", afterToolResultContinuationPrompt),
 			}, nil
 		}
-		e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
-			Reason: continuationPauseReasonProviderRefusal,
-			Body:   providerRefusalPauseBody(reasoning),
+		e.pauseContinuation(ctx, rt, session.ID, chatpkg.ContinuationPause{
+			Reason: chatpkg.ContinuationPauseReasonProviderRefusal,
+			Body:   chatpkg.ProviderRefusalPauseBody(reasoning),
 		}, out)
 		return chatpkg.TurnStepResult{Done: true}, nil
 	}
@@ -1501,138 +1500,14 @@ type transcriptNotice struct {
 	Limit    int    `json:"limit,omitempty"`
 }
 
-type continuationPauseReason string
-
-const (
-	continuationPauseReasonRepeatedTool    continuationPauseReason = "repeated_tool"
-	continuationPauseReasonTurnLimit       continuationPauseReason = "turn_limit"
-	continuationPauseReasonProviderRefusal continuationPauseReason = "provider_refusal"
-)
-
-const repeatedToolLoopThreshold = 3
-
-type continuationPause struct {
-	Reason   continuationPauseReason
-	Tool     domain.ToolKind
-	Count    int
-	Limit    int
-	Body     string
-	Subtitle string
-}
-
-type toolLoopTracker struct {
-	lastSignature string
-	lastTool      domain.ToolKind
-	repeatCount   int
-}
-
-func (t *toolLoopTracker) reset() {
-	t.lastSignature = ""
-	t.lastTool = ""
-	t.repeatCount = 0
-}
-
-func (t *toolLoopTracker) trackCalls(calls []tools.Request) (continuationPause, bool) {
-	if len(calls) != 1 {
-		t.reset()
-		return continuationPause{}, false
-	}
-	signature := toolLoopSignature(calls[0])
-	if signature == "" {
-		t.reset()
-		return continuationPause{}, false
-	}
-	if signature == t.lastSignature {
-		t.repeatCount++
-	} else {
-		t.lastSignature = signature
-		t.lastTool = calls[0].Tool
-		t.repeatCount = 1
-	}
-	if t.repeatCount < repeatedToolLoopThreshold {
-		return continuationPause{}, false
-	}
-	toolName := calls[0].Tool.DisplayName()
-	return continuationPause{
-		Reason:   continuationPauseReasonRepeatedTool,
-		Tool:     calls[0].Tool,
-		Count:    t.repeatCount,
-		Subtitle: fmt.Sprintf("Repeated identical %s calls", toolName),
-		Body: fmt.Sprintf(
-			"Paused continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to the result.",
-			t.repeatCount,
-			toolName,
-		),
-	}, true
-}
-
-func toolLoopSignature(req tools.Request) string {
-	if req.Tool == domain.ToolKindExecWriteStdin && strings.TrimSpace(req.Args["chars"]) == "" && strings.TrimSpace(req.Args["close_stdin"]) == "" {
-		return ""
-	}
-	return req.Tool.String() + "\x00" + req.ArgumentsJSON()
-}
-
-func providerRefusalPauseBody(reasoning string) string {
-	body := "Paused continuation because the provider ended the turn without any text or tool call after tool results."
-	if strings.TrimSpace(reasoning) == "" {
-		return body
-	}
-	return body + "\n\nProvider reasoning:\n" + strings.TrimSpace(reasoning)
-}
-
-func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID id.ID, pause continuationPause, out chan<- domain.Event) {
+func (e *Engine) pauseContinuation(ctx context.Context, rt *chatpkg.Chat, sessionID id.ID, pause chatpkg.ContinuationPause, out chan<- domain.Event) {
 	body := strings.TrimSpace(pause.Body)
 	if body == "" {
 		body = "Paused continuation."
 	}
-	title := "Continuation paused"
-	subtitle := strings.TrimSpace(pause.Subtitle)
-	if subtitle == "" {
-		subtitle = continuationPauseSubtitle(pause)
-	}
-	e.recordLifecycle(sessionID, "model_turn_paused", body, map[string]string{
-		"reason": string(pause.Reason),
-		"tool":   pause.Tool.String(),
-		"count":  strconv.Itoa(pause.Count),
-		"limit":  strconv.Itoa(pause.Limit),
-	})
-	item, ok := e.persistTranscriptNotice(ctx, chatID, sessionID, body, transcriptNotice{
-		Kind:     "loop_pause",
-		Severity: "warning",
-		Reason:   string(pause.Reason),
-		Title:    title,
-		Subtitle: subtitle,
-		Tool:     pause.Tool.String(),
-		Count:    pause.Count,
-		Limit:    pause.Limit,
-	})
-	if out != nil {
-		evt := domain.Event{Kind: domain.EventKindStatus, Text: body}
-		if ok {
-			evt.Item = item
-		}
-		out <- evt
-		out <- domain.Event{Kind: domain.EventKindMessageDone}
-	}
-}
-
-func continuationPauseSubtitle(pause continuationPause) string {
-	switch pause.Reason {
-	case continuationPauseReasonRepeatedTool:
-		if pause.Tool != "" {
-			return fmt.Sprintf("Repeated identical %s calls", pause.Tool.DisplayName())
-		}
-		return "Repeated identical tool calls"
-	case continuationPauseReasonTurnLimit:
-		if pause.Limit > 0 {
-			return fmt.Sprintf("Turn limit reached (%d)", pause.Limit)
-		}
-		return "Turn limit reached"
-	case continuationPauseReasonProviderRefusal:
-		return "Provider stopped continuation"
-	default:
-		return "Continuation stopped"
+	e.recordLifecycle(sessionID, "model_turn_paused", body, chatpkg.ContinuationPauseMeta(pause))
+	if rt != nil {
+		rt.PauseContinuation(ctx, pause, out)
 	}
 }
 
