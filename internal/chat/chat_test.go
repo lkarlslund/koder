@@ -92,24 +92,14 @@ type queuedSteerBoundaryRunner struct {
 	step1Done    chan struct{}
 
 	mu            sync.Mutex
+	calls         int
 	step1Timeline []domain.TimelineItem
-}
-
-type queuedSteerBoundaryLoop struct {
-	runner *queuedSteerBoundaryRunner
-}
-
-type fakeTurnLoop struct {
-	next func() <-chan domain.Event
 }
 
 func depsForFake(st *store.Store, runner any) Deps {
 	deps := Deps{Store: st}
-	if prompt, ok := runner.(PromptTurnService); ok {
-		deps.Prompt = prompt
-	}
-	if turns, ok := runner.(TurnLoopService); ok {
-		deps.Turns = turns
+	if model, ok := runner.(ModelOps); ok {
+		deps.Model = model
 	}
 	if tools, ok := runner.(ToolTurnService); ok {
 		deps.Tools = tools
@@ -120,26 +110,13 @@ func depsForFake(st *store.Store, runner any) Deps {
 	if compact, ok := runner.(CompactService); ok {
 		deps.Compact = compact
 	}
-	if errors, ok := runner.(TurnErrorHandler); ok {
-		deps.Errors = errors
-	}
 	return deps
 }
 
-func (f fakeTurnLoop) MaxSteps() int { return 1 }
-
-func (f fakeTurnLoop) PauseLimit(context.Context, *Chat, chan<- domain.Event) {}
-
-func (f fakeTurnLoop) Step(_ context.Context, _ *Chat, _ int, _ []provider.InstructionBlock, out chan<- domain.Event) (TurnStepResult, error) {
-	events := f.next()
-	waitingApproval := false
+func forwardFakeEvents(events <-chan domain.Event, out chan<- domain.Event) {
 	for evt := range events {
-		if evt.Kind == domain.EventKindApprovalAsk {
-			waitingApproval = true
-		}
 		out <- evt
 	}
-	return TurnStepResult{Done: !waitingApproval, WaitingApproval: waitingApproval}, nil
 }
 
 func (f *queuedSteerBoundaryRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
@@ -155,27 +132,42 @@ func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *Chat, 
 	return nil, nil
 }
 
-func (f *queuedSteerBoundaryRunner) NewTurnLoop(*Chat) TurnLoop {
-	return queuedSteerBoundaryLoop{runner: f}
+func (f *queuedSteerBoundaryRunner) MaxToolLoopSteps() int { return 2 }
+
+func (f *queuedSteerBoundaryRunner) CompleteModelRequest(_ context.Context, _ domain.Session, chat domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 1 {
+		close(f.step0Started)
+		<-f.continueStep
+		return ModelResponse{
+			ToolCallErrors: []provider.ToolCallError{{
+				Message: "fake tool result",
+				ToolCall: provider.ToolCall{
+					ID:   "fake-call",
+					Type: "function",
+					Function: provider.FunctionCall{
+						Name:      "fake_tool",
+						Arguments: "{}",
+					},
+				},
+			}},
+		}, nil
+	}
+	_ = chat
+	close(f.step1Done)
+	return ModelResponse{Text: "done"}, nil
 }
 
-func (queuedSteerBoundaryLoop) MaxSteps() int { return 2 }
-
-func (queuedSteerBoundaryLoop) PauseLimit(context.Context, *Chat, chan<- domain.Event) {}
-
-func (l queuedSteerBoundaryLoop) Step(_ context.Context, rt *Chat, step int, _ []provider.InstructionBlock, _ chan<- domain.Event) (TurnStepResult, error) {
-	switch step {
-	case 0:
-		close(l.runner.step0Started)
-		<-l.runner.continueStep
-		return TurnStepResult{Continue: true}, nil
-	default:
-		l.runner.mu.Lock()
-		l.runner.step1Timeline = rt.SnapshotTimeline()
-		l.runner.mu.Unlock()
-		close(l.runner.step1Done)
-		return TurnStepResult{Done: true}, nil
+func (f *queuedSteerBoundaryRunner) BuildConversationForTurn(_ context.Context, rt *Chat, _ []provider.InstructionBlock) ([]provider.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.calls > 0 {
+		f.step1Timeline = rt.SnapshotTimeline()
 	}
+	return nil, nil
 }
 
 func (f *cancelAwareRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
@@ -193,9 +185,62 @@ func (f *cancelAwareRunner) PrepareContinueTurn(ctx context.Context, _ *Chat, _ 
 	return nil, nil
 }
 
-func (f *cancelAwareRunner) NewTurnLoop(*Chat) TurnLoop {
-	return fakeTurnLoop{next: func() <-chan domain.Event { return f.events }}
+func (f *cancelAwareRunner) MaxToolLoopSteps() int { return 1 }
+
+func (f *cancelAwareRunner) ClientForChat(domain.Chat) (*provider.Client, error) { return nil, nil }
+
+func (f *cancelAwareRunner) BeginModelTurn(context.Context, id.ID, id.ID, int, chan<- domain.Event) error {
+	return nil
 }
+
+func (f *cancelAwareRunner) BuildConversationForTurn(context.Context, *Chat, []provider.InstructionBlock) ([]provider.Message, error) {
+	return nil, nil
+}
+
+func (f *cancelAwareRunner) AutoCompactAtTurnBoundary(context.Context, *Chat, *provider.Client, []provider.Message, chan<- domain.Event) (bool, error) {
+	return false, nil
+}
+
+func (f *cancelAwareRunner) ProviderStreamingEnabled(domain.Chat) bool { return false }
+
+func (f *cancelAwareRunner) ChatRequest(domain.Session, domain.Chat, []provider.Message, bool) provider.ChatRequest {
+	return provider.ChatRequest{}
+}
+
+func (f *cancelAwareRunner) NextAssistantTimelineItemForTurn(_ context.Context, rt *Chat) (domain.TimelineItem, error) {
+	return domain.TimelineItem{ChatID: rt.Snapshot().Chat.ID}, nil
+}
+
+func (f *cancelAwareRunner) CompleteModelRequest(ctx context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, out chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	f.ctxSeen <- ctx
+	forwardFakeEvents(f.events, out)
+	return ModelResponse{Text: "done"}, nil
+}
+
+func (f *cancelAwareRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
+	return ToolCallParseResult{}
+}
+
+func (f *cancelAwareRunner) FailedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
+	return domain.ToolCall{
+		ToolCallID: domain.ToolCallID(callErr.ToolCall.ID),
+		Tool:       domain.ToolKind(callErr.ToolCall.Function.Name),
+		Status:     domain.ToolStatusErrored,
+		Error:      &domain.ToolError{Message: callErr.Message},
+	}
+}
+
+func (f *cancelAwareRunner) RecordLifecycle(id.ID, string, string, map[string]string) {}
+
+func (f *cancelAwareRunner) MaybeUpdateChatTitle(context.Context, id.ID) (string, error) {
+	return "", nil
+}
+
+func (f *cancelAwareRunner) MaybeUpdateSessionTitle(context.Context, domain.Session, domain.Chat, *provider.Client) (string, error) {
+	return "", nil
+}
+
+func (f *cancelAwareRunner) AutoContinueBadStopEnabled() bool { return false }
 
 func (f *runtimeFakeRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.mu.Lock()
@@ -271,10 +316,6 @@ func (f *runtimeFakeRunner) PrepareContinueTurn(_ context.Context, rt *Chat, not
 	return nil, nil
 }
 
-func (f *runtimeFakeRunner) NewTurnLoop(*Chat) TurnLoop {
-	return fakeTurnLoop{next: f.nextEvents}
-}
-
 func (f *runtimeFakeRunner) nextEvents() <-chan domain.Event {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -287,6 +328,109 @@ func (f *runtimeFakeRunner) nextEvents() <-chan domain.Event {
 	f.events = f.events[1:]
 	return evt
 }
+
+func (f *runtimeFakeRunner) MaxToolLoopSteps() int { return 1 }
+
+func (f *runtimeFakeRunner) ClientForChat(domain.Chat) (*provider.Client, error) { return nil, nil }
+
+func (f *runtimeFakeRunner) BeginModelTurn(context.Context, id.ID, id.ID, int, chan<- domain.Event) error {
+	return nil
+}
+
+func (f *runtimeFakeRunner) BuildConversationForTurn(context.Context, *Chat, []provider.InstructionBlock) ([]provider.Message, error) {
+	return nil, nil
+}
+
+func (f *runtimeFakeRunner) AutoCompactAtTurnBoundary(context.Context, *Chat, *provider.Client, []provider.Message, chan<- domain.Event) (bool, error) {
+	return false, nil
+}
+
+func (f *runtimeFakeRunner) ProviderStreamingEnabled(domain.Chat) bool { return false }
+
+func (f *runtimeFakeRunner) ChatRequest(domain.Session, domain.Chat, []provider.Message, bool) provider.ChatRequest {
+	return provider.ChatRequest{}
+}
+
+func (f *runtimeFakeRunner) NextAssistantTimelineItemForTurn(_ context.Context, rt *Chat) (domain.TimelineItem, error) {
+	return domain.TimelineItem{ChatID: rt.Snapshot().Chat.ID}, nil
+}
+
+func (f *runtimeFakeRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, out chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	forwardFakeEvents(f.nextEvents(), out)
+	return ModelResponse{Text: "done"}, nil
+}
+
+func (f *runtimeFakeRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
+	return ToolCallParseResult{}
+}
+
+func (f *runtimeFakeRunner) FailedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
+	return domain.ToolCall{
+		ToolCallID: domain.ToolCallID(callErr.ToolCall.ID),
+		Tool:       domain.ToolKind(callErr.ToolCall.Function.Name),
+		Status:     domain.ToolStatusErrored,
+		Error:      &domain.ToolError{Message: callErr.Message},
+	}
+}
+
+func (f *runtimeFakeRunner) RecordLifecycle(id.ID, string, string, map[string]string) {}
+
+func (f *runtimeFakeRunner) MaybeUpdateChatTitle(context.Context, id.ID) (string, error) {
+	return "", nil
+}
+
+func (f *runtimeFakeRunner) MaybeUpdateSessionTitle(context.Context, domain.Session, domain.Chat, *provider.Client) (string, error) {
+	return "", nil
+}
+
+func (f *runtimeFakeRunner) AutoContinueBadStopEnabled() bool { return false }
+
+func (f *queuedSteerBoundaryRunner) ClientForChat(domain.Chat) (*provider.Client, error) {
+	return nil, nil
+}
+
+func (f *queuedSteerBoundaryRunner) BeginModelTurn(context.Context, id.ID, id.ID, int, chan<- domain.Event) error {
+	return nil
+}
+
+func (f *queuedSteerBoundaryRunner) AutoCompactAtTurnBoundary(context.Context, *Chat, *provider.Client, []provider.Message, chan<- domain.Event) (bool, error) {
+	return false, nil
+}
+
+func (f *queuedSteerBoundaryRunner) ProviderStreamingEnabled(domain.Chat) bool { return false }
+
+func (f *queuedSteerBoundaryRunner) ChatRequest(domain.Session, domain.Chat, []provider.Message, bool) provider.ChatRequest {
+	return provider.ChatRequest{}
+}
+
+func (f *queuedSteerBoundaryRunner) NextAssistantTimelineItemForTurn(_ context.Context, rt *Chat) (domain.TimelineItem, error) {
+	return domain.TimelineItem{ChatID: rt.Snapshot().Chat.ID}, nil
+}
+
+func (f *queuedSteerBoundaryRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
+	return ToolCallParseResult{}
+}
+
+func (f *queuedSteerBoundaryRunner) FailedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
+	return domain.ToolCall{
+		ToolCallID: domain.ToolCallID(callErr.ToolCall.ID),
+		Tool:       domain.ToolKind(callErr.ToolCall.Function.Name),
+		Status:     domain.ToolStatusErrored,
+		Error:      &domain.ToolError{Message: callErr.Message},
+	}
+}
+
+func (f *queuedSteerBoundaryRunner) RecordLifecycle(id.ID, string, string, map[string]string) {}
+
+func (f *queuedSteerBoundaryRunner) MaybeUpdateChatTitle(context.Context, id.ID) (string, error) {
+	return "", nil
+}
+
+func (f *queuedSteerBoundaryRunner) MaybeUpdateSessionTitle(context.Context, domain.Session, domain.Chat, *provider.Client) (string, error) {
+	return "", nil
+}
+
+func (f *queuedSteerBoundaryRunner) AutoContinueBadStopEnabled() bool { return false }
 
 func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *Chat, _ string, _ *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
 	f.mu.Lock()

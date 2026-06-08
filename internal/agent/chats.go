@@ -27,14 +27,12 @@ func (e *Engine) MetadataChat(ctx context.Context, session domain.Session, chatR
 func (e *Engine) ChatDeps() chatpkg.Deps {
 	return chatpkg.Deps{
 		Store:   e.store,
-		Prompt:  e,
-		Turns:   e,
+		Model:   e,
 		Tools:   e,
 		Runtime: e,
 		Life:    e,
 		Pending: e,
 		Compact: e,
-		Errors:  e,
 	}
 }
 

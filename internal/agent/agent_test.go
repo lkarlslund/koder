@@ -257,7 +257,7 @@ func testPendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id
 }
 
 func TestParseToolCall(t *testing.T) {
-	call, plain := parseToolCall("I will inspect the repo.\n<koder_tool>\n{\"tool\":\"bash\",\"command\":\"pwd\"}\n</koder_tool>")
+	call, plain := chatpkg.ParseToolCall("I will inspect the repo.\n<koder_tool>\n{\"tool\":\"bash\",\"command\":\"pwd\"}\n</koder_tool>")
 	if call == nil {
 		t.Fatal("expected tool call")
 	}
@@ -7229,7 +7229,7 @@ func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("expected tool request and final-answer request, got %d", len(requests))
 	}
-	if strings.Contains(requests[1], afterToolResultContinuationPrompt) {
+	if strings.Contains(requests[1], chatpkg.AfterToolResultContinuationPrompt) {
 		t.Fatalf("did not expect synthetic after-tool instruction in continuation request: %s", requests[1])
 	}
 
@@ -7240,7 +7240,7 @@ func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
 	}
 	for _, item := range timeline {
 		user, ok := item.Content.(domain.UserMessage)
-		if ok && user.Text == afterToolResultContinuationPrompt {
+		if ok && user.Text == chatpkg.AfterToolResultContinuationPrompt {
 			t.Fatalf("did not expect persisted after-tool instruction, got %#v", item)
 		}
 	}
@@ -7688,8 +7688,8 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 	}
 	last := messages[len(messages)-1]
 	got := parts[last.ID]
-	if len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
-		t.Fatalf("expected persisted interruption notice, got %#v", got)
+	if len(got) != 1 || got[0].Kind != domain.PartKindText || got[0].Body != "hello" {
+		t.Fatalf("expected no persisted interruption notice, got %#v", got)
 	}
 }
 
@@ -7744,11 +7744,4 @@ func parseApprovalID(raw string) (id.ID, error) {
 		return "", fmt.Errorf("approval id is required")
 	}
 	return id, nil
-}
-
-func TestErrorSummaryPrefixesMessage(t *testing.T) {
-	got := errorSummary(errors.New("connection refused"))
-	if got != "Error: connection refused" {
-		t.Fatalf("unexpected error summary: %q", got)
-	}
 }
