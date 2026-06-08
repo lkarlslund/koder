@@ -167,16 +167,11 @@ func chatModel(chat domain.Chat) (string, string, error) {
 }
 
 func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
-	providerID, modelID, err := chatModel(chat)
+	model, err := e.settings.Model(chat)
 	if err != nil {
 		return nil, err
 	}
-	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
-	providerCfg, ok := e.cfg.Provider(providerID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", providerID)
-	}
-	return provider.New(providerID, providerCfg, e.debug)
+	return provider.New(model.SourceProviderID, model.Provider, e.debug)
 }
 
 func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions string, out chan<- domain.Event) error {
@@ -524,10 +519,20 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 }
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	providerID, modelID, _ := chatModel(chat)
-	_, modelID = e.cfg.ResolveModel(providerID, modelID)
-	providerCfg := e.providerConfigForChat(chat)
-	extraBody := provider.RequestExtraBody(providerCfg, e.modelConfigForChat(chat))
+	modelID := strings.TrimSpace(chat.ModelID)
+	providerCfg := config.Provider{}
+	modelCfg := config.ModelConfig{}
+	if model, err := e.settings.Model(chat); err == nil {
+		modelID = model.SourceModelID
+		providerCfg = model.Provider
+		modelCfg = model.Model
+	} else {
+		providerID, fallbackModelID, _ := chatModel(chat)
+		_, modelID = e.cfg.ResolveModel(providerID, fallbackModelID)
+		providerCfg = e.providerConfigForChat(chat)
+		modelCfg = e.modelConfigForChat(chat)
+	}
+	extraBody := provider.RequestExtraBody(providerCfg, modelCfg)
 	extraBody = provider.WithLlamaCacheAffinity(extraBody, providerCfg, session.ID, chat.ID)
 	req := provider.ChatRequest{
 		SessionID:          session.ID,
@@ -550,6 +555,9 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 }
 
 func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
+	if model, err := e.settings.Model(chat); err == nil {
+		return model.Provider
+	}
 	providerID, modelID, _ := chatModel(chat)
 	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
 	cfg, _ := e.cfg.Provider(providerID)
@@ -604,12 +612,19 @@ func (e *Engine) modelPresetForChat(chat domain.Chat) string {
 }
 
 func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
+	if model, err := e.settings.Model(chat); err == nil {
+		return model.Model
+	}
 	return modelConfigForRequest(e.cfg, chat.ProviderID, chat.ModelID)
 }
 
 func (e *Engine) reasoningContentForResponse(ctx context.Context, chat domain.Chat, chatClient *provider.Client, reasoning string, job cavemanJob, events chan<- domain.Event) (domain.ReasoningContent, error) {
 	result := domain.ReasoningContent{Text: reasoning, Tokens: tokenestimate.Text(reasoning)}
-	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+	thinking, err := e.settings.Thinking(chat, e.cfg.Thinking.CavemanPrompt, e.preserveThinkingEnabled(chat))
+	if err != nil {
+		return domain.ReasoningContent{}, err
+	}
+	if strings.TrimSpace(reasoning) == "" || !thinking.CavemanEnabled {
 		return result, nil
 	}
 	if !job.Valid() {
@@ -636,42 +651,34 @@ func (e *Engine) startCavemanThinking(ctx context.Context, chat domain.Chat, cha
 	if !e.shouldCavemanThinking(reasoning) {
 		return cavemanJob{}, nil
 	}
-	providerID := strings.TrimSpace(e.cfg.Thinking.CavemanProviderID)
-	modelID := strings.TrimSpace(e.cfg.Thinking.CavemanModelID)
-	if providerID == "" && modelID == "" {
-		providerID = strings.TrimSpace(chat.ProviderID)
-		modelID = strings.TrimSpace(chat.ModelID)
+	thinking, err := e.settings.Thinking(chat, e.cfg.Thinking.CavemanPrompt, e.preserveThinkingEnabled(chat))
+	if err != nil {
+		return cavemanJob{}, err
 	}
-	if providerID == "" || modelID == "" {
-		return cavemanJob{}, fmt.Errorf("caveman thinking model must be set or use a chat with provider and model")
-	}
-	selectedProviderID := providerID
-	selectedModelID := modelID
-	providerID, modelID = e.cfg.ResolveModel(selectedProviderID, selectedModelID)
+	providerID := thinking.Model.ProviderID
+	modelID := thinking.Model.ModelID
 	client := chatClient
-	chatProviderID, chatModelID := e.cfg.ResolveModel(chat.ProviderID, chat.ModelID)
+	chatModel, err := e.settings.Model(chat)
+	if err != nil {
+		return cavemanJob{}, err
+	}
+	chatProviderID, chatModelID := chatModel.Model.ProviderID, chatModel.Model.ModelID
 	if providerID != chatProviderID || modelID != chatModelID || client == nil {
-		providerCfg, ok := e.cfg.Provider(providerID)
-		if !ok {
-			return cavemanJob{}, fmt.Errorf("caveman thinking provider %q is not configured", providerID)
-		}
-		var err error
-		client, err = provider.New(providerID, providerCfg, e.debug)
+		client, err = provider.New(providerID, thinking.Provider, e.debug)
 		if err != nil {
 			return cavemanJob{}, err
 		}
 	}
-	providerCfg, _ := e.cfg.Provider(providerID)
 	req := provider.ChatRequest{
 		SessionID: chat.SessionID,
 		ChatID:    chat.ID,
 		Model:     modelID,
-		Messages:  cavemanThinkingMessages(e.cfg.Thinking.CavemanPrompt, reasoning),
+		Messages:  cavemanThinkingMessages(thinking.Prompt, reasoning),
 		Stream:    true,
-		ExtraBody: cavemanThinkingExtraBody(providerCfg, modelConfigForRequest(e.cfg, providerID, modelID)),
+		ExtraBody: cavemanThinkingExtraBody(thinking.Provider, thinking.Model),
 	}
 	if e.caveman == nil {
-		e.caveman = newCavemanService(e.cfg.Thinking.CavemanParallelism)
+		e.caveman = newCavemanService(thinking.Parallelism)
 	}
 	job := e.caveman.Submit(ctx, func(jobCtx context.Context) (string, error) {
 		resp, err := e.completeCavemanThinking(jobCtx, providerID, client, req, events)
@@ -733,10 +740,11 @@ func (e *Engine) awaitOutstandingCaveman(ctx context.Context, chatID id.ID, out 
 }
 
 func (e *Engine) shouldCavemanThinking(reasoning string) bool {
-	if strings.TrimSpace(reasoning) == "" || !e.cfg.Thinking.CavemanEnabled {
+	thinking := e.settings.Snapshot().Thinking
+	if strings.TrimSpace(reasoning) == "" || !thinking.CavemanEnabled {
 		return false
 	}
-	minTokens := e.cfg.Thinking.CavemanMinTokens
+	minTokens := thinking.CavemanMinTokens
 	if minTokens <= 0 {
 		minTokens = config.DefaultCavemanMinTokens
 	}
@@ -872,8 +880,11 @@ func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
 }
 
 func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
-	_, modelID := e.cfg.ResolveModel(chat.ProviderID, chat.ModelID)
-	return provider.PreserveThinkingEnabled(modelID, e.modelPresetForChat(chat))
+	model, err := e.settings.Model(chat)
+	if err != nil {
+		return false
+	}
+	return provider.PreserveThinkingEnabled(model.SourceModelID, strings.TrimSpace(model.Model.ModelPreset))
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {
@@ -1966,7 +1977,7 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 }
 
 func (e *Engine) compactionKeepToolCalls() int {
-	return config.NormalizeCompactionKeepToolCalls(e.cfg.Compaction.KeepToolCalls)
+	return config.NormalizeCompactionKeepToolCalls(e.settings.Snapshot().Compaction.KeepToolCalls)
 }
 
 func (e *Engine) systemPrompt() string {
@@ -2028,7 +2039,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 }
 
 func (e *Engine) autoCompactThreshold() int {
-	return max(1, e.cfg.Compaction.AutoAtPercent)
+	return max(1, e.settings.Snapshot().Compaction.AutoAtPercent)
 }
 
 func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
@@ -2039,10 +2050,11 @@ func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
 	if !chat.ContextTokensKnown {
 		return 0, false
 	}
-	if !e.cfg.HasUsableProvider(chat.ProviderID) {
+	model, err := e.settings.Model(chat)
+	if err != nil {
 		return 0, false
 	}
-	return contextUsagePercent(chat.LastKnownContextTokens, e.cfg.ContextWindow(chat.ProviderID, chat.ModelID))
+	return contextUsagePercent(chat.LastKnownContextTokens, model.ContextWindow)
 }
 
 func contextUsagePercent(tokens, contextWindow int) (int, bool) {
@@ -2227,23 +2239,26 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
 	next := chat
 	next.WorkflowRole = chatrole.Compaction
-	providerID := strings.TrimSpace(e.cfg.Compaction.ProviderID)
-	modelID := strings.TrimSpace(e.cfg.Compaction.ModelID)
-	if providerID == "" && modelID == "" {
+	cfg := e.settings.Snapshot()
+	if strings.TrimSpace(cfg.Compaction.ProviderID) == "" && strings.TrimSpace(cfg.Compaction.ModelID) == "" {
 		return next, client, nil
 	}
-	if providerID == "" || modelID == "" {
-		return domain.Chat{}, nil, fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
-	}
-	providerCfg, ok := e.cfg.Provider(providerID)
-	if !ok || providerCfg.Disabled {
-		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
-	}
-	next.ProviderID = providerID
-	next.ModelID = modelID
-	compactionClient, err := provider.New(providerID, providerCfg, e.debug)
+	compaction, err := e.settings.Compaction(chat, e.compactPrompt())
 	if err != nil {
-		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", providerID, err)
+		providerID := strings.TrimSpace(cfg.Compaction.ProviderID)
+		if providerID == "" {
+			providerID = strings.TrimSpace(chat.ProviderID)
+		}
+		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled: %w", providerID, err)
+	}
+	if compaction.Provider.Disabled {
+		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is disabled", compaction.Model.ProviderID)
+	}
+	next.ProviderID = compaction.ProviderID
+	next.ModelID = compaction.ModelID
+	compactionClient, err := provider.New(compaction.Model.ProviderID, compaction.Provider, e.debug)
+	if err != nil {
+		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", compaction.Model.ProviderID, err)
 	}
 	return next, compactionClient, nil
 }
@@ -2314,7 +2329,13 @@ func (e *Engine) compactionRequestWithinContext(chat domain.Chat, req provider.C
 }
 
 func (e *Engine) compactionRequestTokenBudget(chat domain.Chat) int {
-	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
+	model, err := e.settings.Model(chat)
+	contextWindow := 0
+	if err == nil {
+		contextWindow = model.ContextWindow
+	} else {
+		contextWindow = e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
+	}
 	if contextWindow <= 0 {
 		return 0
 	}
