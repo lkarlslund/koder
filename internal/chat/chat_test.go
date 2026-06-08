@@ -103,9 +103,9 @@ func depsForFake(st *store.Store, runner any) Deps {
 
 func (f fakeTurnLoop) MaxSteps() int { return 1 }
 
-func (f fakeTurnLoop) PauseLimit(context.Context, *TurnState, chan<- domain.Event) {}
+func (f fakeTurnLoop) PauseLimit(context.Context, *Chat, chan<- domain.Event) {}
 
-func (f fakeTurnLoop) Step(_ context.Context, _ *TurnState, _ int, _ []provider.InstructionBlock, out chan<- domain.Event) (TurnStepResult, error) {
+func (f fakeTurnLoop) Step(_ context.Context, _ *Chat, _ int, _ []provider.InstructionBlock, out chan<- domain.Event) (TurnStepResult, error) {
 	events := f.next()
 	waitingApproval := false
 	for evt := range events {
@@ -117,8 +117,8 @@ func (f fakeTurnLoop) Step(_ context.Context, _ *TurnState, _ int, _ []provider.
 	return TurnStepResult{Done: !waitingApproval, WaitingApproval: waitingApproval}, nil
 }
 
-func (f *queuedSteerBoundaryRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+func (f *queuedSteerBoundaryRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	item, err := rt.AppendUserMessageForInput(ctx, input, domain.UserMessage{Text: prompt})
 	if err != nil {
 		return nil, err
 	}
@@ -126,19 +126,19 @@ func (f *queuedSteerBoundaryRunner) PreparePromptTurn(ctx context.Context, turn 
 	return nil, nil
 }
 
-func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *Chat, string, chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	return nil, nil
 }
 
-func (f *queuedSteerBoundaryRunner) NewTurnLoop(*TurnState) TurnLoop {
+func (f *queuedSteerBoundaryRunner) NewTurnLoop(*Chat) TurnLoop {
 	return queuedSteerBoundaryLoop{runner: f}
 }
 
 func (queuedSteerBoundaryLoop) MaxSteps() int { return 2 }
 
-func (queuedSteerBoundaryLoop) PauseLimit(context.Context, *TurnState, chan<- domain.Event) {}
+func (queuedSteerBoundaryLoop) PauseLimit(context.Context, *Chat, chan<- domain.Event) {}
 
-func (l queuedSteerBoundaryLoop) Step(_ context.Context, turn *TurnState, step int, _ []provider.InstructionBlock, _ chan<- domain.Event) (TurnStepResult, error) {
+func (l queuedSteerBoundaryLoop) Step(_ context.Context, rt *Chat, step int, _ []provider.InstructionBlock, _ chan<- domain.Event) (TurnStepResult, error) {
 	switch step {
 	case 0:
 		close(l.runner.step0Started)
@@ -146,16 +146,16 @@ func (l queuedSteerBoundaryLoop) Step(_ context.Context, turn *TurnState, step i
 		return TurnStepResult{Continue: true}, nil
 	default:
 		l.runner.mu.Lock()
-		l.runner.step1Timeline = turn.Timeline()
+		l.runner.step1Timeline = rt.SnapshotTimeline()
 		l.runner.mu.Unlock()
 		close(l.runner.step1Done)
 		return TurnStepResult{Done: true}, nil
 	}
 }
 
-func (f *cancelAwareRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *cancelAwareRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.ctxSeen <- ctx
-	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	item, err := rt.AppendUserMessageForInput(ctx, input, domain.UserMessage{Text: prompt})
 	if err != nil {
 		return nil, err
 	}
@@ -163,40 +163,40 @@ func (f *cancelAwareRunner) PreparePromptTurn(ctx context.Context, turn *TurnSta
 	return nil, nil
 }
 
-func (f *cancelAwareRunner) PrepareContinueTurn(ctx context.Context, _ *TurnState, _ string, _ chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *cancelAwareRunner) PrepareContinueTurn(ctx context.Context, _ *Chat, _ string, _ chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.ctxSeen <- ctx
 	return nil, nil
 }
 
-func (f *cancelAwareRunner) NewTurnLoop(*TurnState) TurnLoop {
+func (f *cancelAwareRunner) NewTurnLoop(*Chat) TurnLoop {
 	return fakeTurnLoop{next: func() <-chan domain.Event { return f.events }}
 }
 
-func (f *runtimeFakeRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *runtimeFakeRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.mu.Lock()
 	f.promptCalls++
 	f.prompts = append(f.prompts, prompt)
 	f.promptNotes = append(f.promptNotes, note)
 	f.mu.Unlock()
-	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	item, err := rt.AppendUserMessageForInput(ctx, input, domain.UserMessage{Text: prompt})
 	if err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
-	f.promptTimeline = append(f.promptTimeline, turn.Timeline())
+	f.promptTimeline = append(f.promptTimeline, rt.SnapshotTimeline())
 	f.mu.Unlock()
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: item}
 	return nil, nil
 }
 
-func (f *turnPromptFakeRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *turnPromptFakeRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.mu.Lock()
 	f.promptCalls++
 	f.prompts = append(f.prompts, prompt)
 	f.promptNotes = append(f.promptNotes, note)
 	f.mu.Unlock()
 
-	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	item, err := rt.AppendUserMessageForInput(ctx, input, domain.UserMessage{Text: prompt})
 	if err != nil {
 		return nil, err
 	}
@@ -205,8 +205,8 @@ func (f *turnPromptFakeRunner) PreparePromptTurn(ctx context.Context, turn *Turn
 	return nil, nil
 }
 
-func (f *controlledTurnPromptRunner) PreparePromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+func (f *controlledTurnPromptRunner) PreparePromptTurn(ctx context.Context, rt *Chat, input domain.QueuedInput, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	item, err := rt.AppendUserMessageForInput(ctx, input, domain.UserMessage{Text: prompt})
 	if err != nil {
 		return nil, err
 	}
@@ -237,16 +237,16 @@ func (f *controlledTurnPromptRunner) promptCallCount() int {
 	return f.calls
 }
 
-func (f *runtimeFakeRunner) PrepareContinueTurn(_ context.Context, turn *TurnState, note string, _ chan<- domain.Event) ([]provider.InstructionBlock, error) {
+func (f *runtimeFakeRunner) PrepareContinueTurn(_ context.Context, rt *Chat, note string, _ chan<- domain.Event) ([]provider.InstructionBlock, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.continueCalls++
 	f.continueNotes = append(f.continueNotes, note)
-	f.turnTimelines = append(f.turnTimelines, len(turn.Timeline()))
+	f.turnTimelines = append(f.turnTimelines, len(rt.SnapshotTimeline()))
 	return nil, nil
 }
 
-func (f *runtimeFakeRunner) NewTurnLoop(*TurnState) TurnLoop {
+func (f *runtimeFakeRunner) NewTurnLoop(*Chat) TurnLoop {
 	return fakeTurnLoop{next: f.nextEvents}
 }
 
@@ -263,7 +263,7 @@ func (f *runtimeFakeRunner) nextEvents() <-chan domain.Event {
 	return evt
 }
 
-func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *TurnState, _ string, _ *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
+func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *Chat, _ string, _ *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
 	f.mu.Lock()
 	f.approveCalls++
 	f.mu.Unlock()
@@ -273,7 +273,7 @@ func (f *runtimeFakeRunner) ApproveToolForTurn(_ context.Context, _ *TurnState, 
 	return false, nil
 }
 
-func (f *runtimeFakeRunner) DenyToolForTurn(_ context.Context, _ *TurnState, _ string, out chan<- domain.Event) error {
+func (f *runtimeFakeRunner) DenyToolForTurn(_ context.Context, _ *Chat, _ string, out chan<- domain.Event) error {
 	f.mu.Lock()
 	f.denyCalls++
 	f.mu.Unlock()
@@ -283,7 +283,7 @@ func (f *runtimeFakeRunner) DenyToolForTurn(_ context.Context, _ *TurnState, _ s
 	return nil
 }
 
-func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(ctx context.Context, turn *TurnState, out chan<- domain.Event) (bool, error) {
+func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(ctx context.Context, rt *Chat, out chan<- domain.Event) (bool, error) {
 	f.mu.Lock()
 	f.resumeCalls++
 	shouldContinue := f.continueAfterResume
@@ -297,8 +297,8 @@ func (f *pendingToolFakeRunner) ResumePendingToolsForTurn(ctx context.Context, t
 		return false, nil
 	}
 	for evt := range events {
-		if evt.Kind == domain.EventKindToolResult && evt.Item.ID == "" && turn != nil {
-			item, err := turn.chat.RecordToolResult(ctx, evt.Tool, evt.ToolCallID, nil, domain.ToolResult{
+		if evt.Kind == domain.EventKindToolResult && evt.Item.ID == "" && rt != nil {
+			item, err := rt.RecordToolResult(ctx, evt.Tool, evt.ToolCallID, nil, domain.ToolResult{
 				Text:   evt.Text,
 				Status: domain.ToolResultStatusOK,
 			})

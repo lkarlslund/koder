@@ -137,12 +137,3 @@ func (r *Chat) attachToolOutcome(ctx context.Context, req tools.Request, result 
 func isInterruptedToolError(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
-
-// RunToolCall executes one prepared tool request and records the result through
-// the live chat owner.
-func (t *TurnState) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools.Request, emit func(domain.Event)) ([]domain.Event, error) {
-	if t == nil || t.chat == nil {
-		return nil, fmt.Errorf("turn state is required")
-	}
-	return t.chat.RunToolCall(ctx, runtime, req, emit)
-}

@@ -188,21 +188,21 @@ type TurnStepResult struct {
 
 type TurnLoop interface {
 	MaxSteps() int
-	Step(context.Context, *TurnState, int, []provider.InstructionBlock, chan<- domain.Event) (TurnStepResult, error)
-	PauseLimit(context.Context, *TurnState, chan<- domain.Event)
+	Step(context.Context, *Chat, int, []provider.InstructionBlock, chan<- domain.Event) (TurnStepResult, error)
+	PauseLimit(context.Context, *Chat, chan<- domain.Event)
 }
 
 type TurnLoopService interface {
-	NewTurnLoop(*TurnState) TurnLoop
+	NewTurnLoop(*Chat) TurnLoop
 }
 
 type ToolTurnService interface {
-	ApproveToolForTurn(context.Context, *TurnState, string, *accesssettings.PermissionOverride, chan<- domain.Event) (bool, error)
-	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
+	ApproveToolForTurn(context.Context, *Chat, string, *accesssettings.PermissionOverride, chan<- domain.Event) (bool, error)
+	DenyToolForTurn(context.Context, *Chat, string, chan<- domain.Event) error
 }
 
 type PendingToolService interface {
-	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
+	ResumePendingToolsForTurn(context.Context, *Chat, chan<- domain.Event) (bool, error)
 }
 
 type CompactService interface {
@@ -210,12 +210,12 @@ type CompactService interface {
 }
 
 type PromptTurnService interface {
-	PreparePromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
-	PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+	PreparePromptTurn(context.Context, *Chat, domain.QueuedInput, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+	PrepareContinueTurn(context.Context, *Chat, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
 }
 
 type TurnErrorHandler interface {
-	HandleTurnError(context.Context, *TurnState, chan<- domain.Event, error)
+	HandleTurnError(context.Context, *Chat, chan<- domain.Event, error)
 }
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
@@ -329,83 +329,16 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 	return c, nil
 }
 
-// TurnState exposes the live chat state for an active model turn.
-type TurnState struct {
-	chat       *Chat
-	input      domain.QueuedInput
-	skipQueued bool
-}
-
-func (r *Chat) turnState() *TurnState {
-	return &TurnState{chat: r}
-}
-
-func (r *Chat) turnStateForInput(input domain.QueuedInput) *TurnState {
-	return &TurnState{chat: r, input: input}
-}
-
-func (r *Chat) turnStateWithoutQueued() *TurnState {
-	return &TurnState{chat: r, skipQueued: true}
-}
-
-// Session returns the live session metadata for the turn.
-func (t *TurnState) Session() domain.Session {
-	if t == nil || t.chat == nil {
-		return domain.Session{}
-	}
-	t.chat.mu.RLock()
-	defer t.chat.mu.RUnlock()
-	return t.chat.session
-}
-
-// SetSession replaces the live session metadata for this turn.
-func (t *TurnState) SetSession(session domain.Session) {
-	if t == nil || t.chat == nil {
-		return
-	}
-	t.chat.SetSession(session)
-}
-
-// Chat returns the live chat metadata for the turn.
-func (t *TurnState) Chat() domain.Chat {
-	if t == nil || t.chat == nil {
-		return domain.Chat{}
-	}
-	t.chat.mu.RLock()
-	defer t.chat.mu.RUnlock()
-	chat := t.chat.chat
-	if t.skipQueued {
-		chat.QueuedInputs = nil
-	} else {
-		chat.QueuedInputs = cloneQueuedInputs(t.chat.queue)
-	}
-	return chat
-}
-
-// Timeline returns the live transcript snapshot for the turn.
-func (t *TurnState) Timeline() []domain.TimelineItem {
-	if t == nil || t.chat == nil {
+func (r *Chat) SnapshotTimeline() []domain.TimelineItem {
+	if r == nil {
 		return nil
 	}
-	t.chat.mu.RLock()
-	defer t.chat.mu.RUnlock()
-	if t.chat.state == nil {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.state == nil {
 		return nil
 	}
-	return t.chat.state.SnapshotTimeline()
-}
-
-// ExcludesQueuedInputs reports whether this turn intentionally hides queued future inputs.
-func (t *TurnState) ExcludesQueuedInputs() bool {
-	return t != nil && t.skipQueued
-}
-
-// PendingExecutableToolCalls returns pending tool calls from the live transcript.
-func (t *TurnState) PendingExecutableToolCalls(ctx context.Context) ([]domain.ToolCall, error) {
-	if t == nil || t.chat == nil {
-		return nil, fmt.Errorf("turn state is required")
-	}
-	return t.chat.PendingExecutableToolCalls(ctx)
+	return r.state.SnapshotTimeline()
 }
 
 // PendingExecutableToolCalls returns pending tool calls from the live transcript.
@@ -440,11 +373,15 @@ func (r *Chat) PendingExecutableToolCalls(ctx context.Context) ([]domain.ToolCal
 }
 
 // AppendUserMessage records a user message in the live transcript.
-func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+func (r *Chat) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
+	return r.AppendUserMessageForInput(ctx, domain.QueuedInput{}, user)
+}
+
+// AppendUserMessageForInput records a queued user message in the live transcript.
+func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.QueuedInput, user domain.UserMessage) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
-	r := t.chat
 	now := time.Now().UTC()
 	text := strings.TrimSpace(user.Text)
 	r.mu.Lock()
@@ -454,10 +391,10 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	if strings.TrimSpace(user.Source) == "" {
 		user.Source = domain.UserMessageSourceUser
 	}
-	if t.input.ID != "" {
-		user.QueueID = t.input.ID
-		if !t.input.CreatedAt.IsZero() {
-			user.QueuedAt = t.input.CreatedAt
+	if input.ID != "" {
+		user.QueueID = input.ID
+		if !input.CreatedAt.IsZero() {
+			user.QueuedAt = input.CreatedAt
 		}
 	}
 	seq := int64(1)
@@ -494,57 +431,25 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	return item, nil
 }
 
-// AppendTimelineContent records a new timeline entry through the live chat owner.
-func (t *TurnState) AppendTimelineContent(ctx context.Context, content domain.TimelineContent) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.AppendTimelineContent(ctx, content)
-}
-
-// AppendAssistantToolCalls records a completed assistant item through the live chat owner.
-func (t *TurnState) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.AppendAssistantToolCalls(ctx, item, calls, text, reasoning, usage)
-}
-
-// NextAssistantItem returns the next live assistant timeline identity.
-func (t *TurnState) NextAssistantItem() domain.TimelineItem {
-	if t == nil || t.chat == nil {
+func (r *Chat) NextAssistantItem() domain.TimelineItem {
+	if r == nil {
 		return domain.TimelineItem{}
 	}
 	now := time.Now().UTC()
-	t.chat.mu.RLock()
-	defer t.chat.mu.RUnlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	seq := int64(1)
-	if t.chat.state != nil {
-		seq = int64(len(t.chat.state.Timeline()) + 1)
+	if r.state != nil {
+		seq = int64(len(r.state.Timeline()) + 1)
 	}
 	return domain.TimelineItem{
 		ID:        NewTimelineID(now),
-		ChatID:    t.chat.chat.ID,
+		ChatID:    r.chat.ID,
 		Seq:       seq,
 		Content:   domain.AssistantMessage{},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-}
-
-// UpsertTimelineItem records a timeline item in live memory and storage.
-func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem) (domain.TimelineItem, error) {
-	if t == nil || t.chat == nil {
-		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
-	}
-	return t.chat.UpsertTimelineItem(ctx, item)
-}
-
-func (t *TurnState) ResetContextAndTokenUsage(ctx context.Context) error {
-	if t == nil || t.chat == nil {
-		return fmt.Errorf("turn state is required")
-	}
-	return t.chat.ResetContextAndTokenUsage(ctx)
 }
 
 // UpsertTimelineItem records a timeline item in live memory and storage.
@@ -585,11 +490,10 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 }
 
 // ApplyNextSteer removes and records queued turn-boundary messages.
-func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
-	if t == nil || t.chat == nil || t.skipQueued {
-		return domain.TimelineItem{}, false, nil
+func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
+	if r == nil {
+		return domain.TimelineItem{}, false, fmt.Errorf("chat runtime is required")
 	}
-	r := t.chat
 	now := time.Now().UTC()
 	r.mu.Lock()
 	var steers []domain.QueuedInput
@@ -682,14 +586,6 @@ func userMessageForSteers(steers []domain.QueuedInput) domain.UserMessage {
 	}
 	user.Text = strings.Join(texts, "\n\n")
 	return user
-}
-
-// SetContextUsage records the latest context-token usage on the live chat.
-func (t *TurnState) SetContextUsage(ctx context.Context, usage domain.Usage) error {
-	if t == nil || t.chat == nil {
-		return fmt.Errorf("turn state is required")
-	}
-	return t.chat.SetContextUsage(ctx, usage)
 }
 
 // SetContextUsage records the latest context-token usage on the live chat.
@@ -985,7 +881,7 @@ func (r *Chat) Compact(instructions string) error {
 	go func() {
 		defer close(out)
 		if err := service.CompactChat(ctx, r, instructions, out); err != nil {
-			r.handleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, out, err)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -2204,20 +2100,19 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
-	turn := r.turnState()
 	go func() {
 		defer close(out)
-		shouldContinue, err := service.ApproveToolForTurn(ctx, turn, toolCallID, rule, out)
+		shouldContinue, err := service.ApproveToolForTurn(ctx, r, toolCallID, rule, out)
 		if err != nil {
-			r.handleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, out, err)
 			return
 		}
 		if shouldContinue {
 			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
+				r.handleTurnError(ctx, out, fmt.Errorf("turn loop service is not configured"))
 				return
 			}
-			r.continueTurnLoop(ctx, r.deps.Turns, turn, nil, out)
+			r.continueTurnLoop(ctx, r.deps.Turns, nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -2246,8 +2141,8 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		if err := service.DenyToolForTurn(ctx, r.turnState(), toolCallID, out); err != nil {
-			r.handleTurnError(ctx, r.turnState(), out, err)
+		if err := service.DenyToolForTurn(ctx, r, toolCallID, out); err != nil {
+			r.handleTurnError(ctx, out, err)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -2319,20 +2214,19 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 
 	out := make(chan domain.Event, 32)
-	turn := r.turnStateWithoutQueued()
 	go func() {
 		defer close(out)
-		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, turn, out)
+		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, r, out)
 		if err != nil {
-			r.handleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, out, err)
 			return
 		}
 		if shouldContinue {
 			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
+				r.handleTurnError(ctx, out, fmt.Errorf("turn loop service is not configured"))
 				return
 			}
-			r.continueTurnLoop(ctx, r.deps.Turns, turn, nil, out)
+			r.continueTurnLoop(ctx, r.deps.Turns, nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -2774,7 +2668,7 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	delete(r.queueNotes, item.ID)
 	r.mu.Unlock()
 	if service := r.deps.Turns; service != nil {
-		r.runTurnLoop(ctx, service, r.turnStateForInput(item), item, note)
+		r.runTurnLoop(ctx, service, item, note)
 		return
 	}
 	err := fmt.Errorf("turn loop service is not configured")
@@ -2789,7 +2683,7 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {
+func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, item domain.QueuedInput, note string) {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
@@ -2799,35 +2693,35 @@ func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *T
 		)
 		promptService := r.deps.Prompt
 		if promptService == nil {
-			r.handleTurnError(ctx, turn, out, fmt.Errorf("prompt preparation service is not configured"))
+			r.handleTurnError(ctx, out, fmt.Errorf("prompt preparation service is not configured"))
 			return
 		}
 		switch domain.DeliveryForQueuedInput(item) {
 		case domain.QueuedInputDeliveryContinue:
-			turnInstructions, err = promptService.PrepareContinueTurn(ctx, turn, note, out)
+			turnInstructions, err = promptService.PrepareContinueTurn(ctx, r, note, out)
 		default:
-			turnInstructions, err = promptService.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
+			turnInstructions, err = promptService.PreparePromptTurn(ctx, r, item, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
 		}
 		if err != nil {
-			r.handleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, out, err)
 			return
 		}
-		r.continueTurnLoop(ctx, service, turn, turnInstructions, out)
+		r.continueTurnLoop(ctx, service, turnInstructions, out)
 	}()
 	r.forwardTurnEvents(out)
 }
 
-func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) {
-	loop := service.NewTurnLoop(turn)
+func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) {
+	loop := service.NewTurnLoop(r)
 	if loop == nil {
-		r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
+		r.handleTurnError(ctx, out, fmt.Errorf("turn loop service is not configured"))
 		return
 	}
 	for step := 0; step < loop.MaxSteps(); step++ {
 		if step > 0 {
-			item, applied, err := turn.ApplyNextSteer(ctx)
+			item, applied, err := r.ApplyNextSteer(ctx)
 			if err != nil {
-				r.handleTurnError(ctx, turn, out, err)
+				r.handleTurnError(ctx, out, err)
 				return
 			}
 			if applied {
@@ -2840,9 +2734,9 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 				}
 			}
 		}
-		result, err := loop.Step(ctx, turn, step, turnInstructions, out)
+		result, err := loop.Step(ctx, r, step, turnInstructions, out)
 		if err != nil {
-			r.handleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, out, err)
 			return
 		}
 		if result.WaitingApproval || result.Done {
@@ -2853,12 +2747,12 @@ func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, tu
 		}
 		turnInstructions = result.TurnInstructions
 	}
-	loop.PauseLimit(ctx, turn, out)
+	loop.PauseLimit(ctx, r, out)
 }
 
-func (r *Chat) handleTurnError(ctx context.Context, turn *TurnState, out chan<- domain.Event, err error) {
+func (r *Chat) handleTurnError(ctx context.Context, out chan<- domain.Event, err error) {
 	if r.deps.Errors != nil {
-		r.deps.Errors.HandleTurnError(ctx, turn, out, err)
+		r.deps.Errors.HandleTurnError(ctx, r, out, err)
 		return
 	}
 	out <- domain.Event{Kind: domain.EventKindError, Err: err}

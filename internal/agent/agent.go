@@ -232,12 +232,13 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 	return e.chatRequest(session, chat, messages, false), nil
 }
 
-func (e *Engine) PreparePromptTurn(ctx context.Context, turn *chatpkg.TurnState, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	if turn == nil {
-		return nil, fmt.Errorf("turn state is required")
+func (e *Engine) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input domain.QueuedInput, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("chat runtime is required")
 	}
-	session := turn.Session()
-	chat := turn.Chat()
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
 	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
@@ -245,13 +246,13 @@ func (e *Engine) PreparePromptTurn(ctx context.Context, turn *chatpkg.TurnState,
 	if err != nil {
 		return nil, err
 	}
-	userItem, err := turn.AppendUserMessage(ctx, user)
+	userItem, err := rt.AppendUserMessageForInput(ctx, input, user)
 	if err != nil {
 		return nil, err
 	}
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: userItem}
 	e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
-	chat = turn.Chat()
+	chat = rt.Snapshot().Chat
 	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
@@ -263,18 +264,19 @@ func (e *Engine) PreparePromptTurn(ctx context.Context, turn *chatpkg.TurnState,
 	if err != nil {
 		return nil, err
 	}
-	turn.SetSession(session)
-	chat = turn.Chat()
+	rt.SetSession(session)
+	chat = rt.Snapshot().Chat
 	e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
 	return turnInstructionBlocks(note, ""), nil
 }
 
-func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnState, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	if turn == nil {
-		return nil, fmt.Errorf("turn state is required")
+func (e *Engine) PrepareContinueTurn(ctx context.Context, rt *chatpkg.Chat, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("chat runtime is required")
 	}
-	session := turn.Session()
-	chat := turn.Chat()
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
 	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
@@ -286,7 +288,7 @@ func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnStat
 	if err != nil {
 		return nil, err
 	}
-	turn.SetSession(session)
+	rt.SetSession(session)
 	if strings.TrimSpace(note) != "" {
 		e.recordLifecycle(session.ID, "continue_with_note", note, nil)
 	} else {
@@ -295,22 +297,23 @@ func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnStat
 	return turnInstructionBlocks(note, "Continue from where you left off."), nil
 }
 
-func (e *Engine) NewTurnLoop(turn *chatpkg.TurnState) chatpkg.TurnLoop {
+func (e *Engine) NewTurnLoop(rt *chatpkg.Chat) chatpkg.TurnLoop {
 	session := domain.Session{}
-	if turn != nil {
-		session = turn.Session()
+	if rt != nil {
+		session = rt.Snapshot().Session
 	}
 	return &engineTurnLoop{e: e, session: session}
 }
 
-func (e *Engine) HandleTurnError(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event, err error) {
+func (e *Engine) HandleTurnError(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event, err error) {
 	if err == nil {
 		return
 	}
 	sessionID, chatID := id.ID(""), id.ID("")
-	if turn != nil {
-		sessionID = turn.Session().ID
-		chatID = turn.Chat().ID
+	if rt != nil {
+		snapshot := rt.Snapshot()
+		sessionID = snapshot.Session.ID
+		chatID = snapshot.Chat.ID
 	}
 	if interruptedErr(err) {
 		e.emitInterrupted(out, chatID, sessionID)
@@ -319,11 +322,12 @@ func (e *Engine) HandleTurnError(ctx context.Context, turn *chatpkg.TurnState, o
 	e.emitAssistantError(ctx, out, chatID, sessionID, err)
 }
 
-func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
-	if turn == nil {
-		return false, fmt.Errorf("turn state is required")
+func (e *Engine) ApproveToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
+	if rt == nil {
+		return false, fmt.Errorf("chat runtime is required")
 	}
-	session := turn.Session()
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
 	if rule != nil {
 		next := *rule
 		next.Pattern = strings.TrimSpace(next.Pattern)
@@ -343,7 +347,7 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 		if err != nil {
 			return false, err
 		}
-		turn.SetSession(session)
+		rt.SetSession(session)
 		out <- domain.Event{
 			Kind: domain.EventKindStatus,
 			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
@@ -353,11 +357,12 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 			},
 		}
 	}
-	req, err := e.requestForToolCall(ctx, turn.Chat().ID, toolCallID)
+	chat := rt.Snapshot().Chat
+	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
 	if err != nil {
 		return false, err
 	}
-	events, execErr := e.runPreparedToolCallForTurn(ctx, turn, turn.Chat().ID, session.ID, req, func(evt domain.Event) {
+	events, execErr := e.runPreparedToolCallForTurn(ctx, rt, chat.ID, session.ID, req, func(evt domain.Event) {
 		out <- evt
 	})
 	if execErr != nil {
@@ -372,20 +377,23 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 	return true, nil
 }
 
-func (e *Engine) DenyToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, out chan<- domain.Event) error {
-	if turn == nil {
-		return fmt.Errorf("turn state is required")
+func (e *Engine) DenyToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, out chan<- domain.Event) error {
+	if rt == nil {
+		return fmt.Errorf("chat runtime is required")
 	}
-	req, err := e.requestForToolCall(ctx, turn.Chat().ID, toolCallID)
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
+	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
 	if err != nil {
 		return err
 	}
 	text := fmt.Sprintf("%s denied", req.Tool)
-	item, err := e.recordDeniedToolResult(ctx, turn.Session().ID, turn.Chat().ID, req, text)
+	item, err := e.recordDeniedToolResult(ctx, session.ID, chat.ID, req, text)
 	if err != nil {
 		return err
 	}
-	item, err = turn.UpsertTimelineItem(ctx, item)
+	item, err = rt.UpsertTimelineItem(ctx, item)
 	if err != nil {
 		return err
 	}
@@ -393,17 +401,18 @@ func (e *Engine) DenyToolForTurn(ctx context.Context, turn *chatpkg.TurnState, t
 	return nil
 }
 
-func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) (bool, error) {
-	if turn == nil {
-		return false, fmt.Errorf("turn state is required")
+func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event) (bool, error) {
+	if rt == nil {
+		return false, fmt.Errorf("chat runtime is required")
 	}
-	session := turn.Session()
-	chat := turn.Chat()
-	calls, err := e.pendingExecutableToolCallsForTurn(ctx, turn)
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
+	calls, err := e.pendingExecutableToolCallsForTurn(ctx, rt)
 	if err != nil || len(calls) == 0 {
 		return false, err
 	}
-	needsApproval, err := e.handleModelToolCallsForTurn(ctx, session, chat, turn, calls, out)
+	needsApproval, err := e.handleModelToolCallsForTurn(ctx, session, chat, rt, calls, out)
 	if err != nil {
 		return false, err
 	}
@@ -413,11 +422,11 @@ func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.Tu
 	return true, nil
 }
 
-func (e *Engine) pendingExecutableToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState) ([]tools.Request, error) {
-	if turn == nil {
-		return nil, fmt.Errorf("turn state is required")
+func (e *Engine) pendingExecutableToolCallsForTurn(ctx context.Context, rt *chatpkg.Chat) ([]tools.Request, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("chat runtime is required")
 	}
-	calls, err := turn.PendingExecutableToolCalls(ctx)
+	calls, err := rt.PendingExecutableToolCalls(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -448,9 +457,10 @@ func (l *engineTurnLoop) MaxSteps() int {
 	return l.e.maxToolLoopSteps()
 }
 
-func (l *engineTurnLoop) PauseLimit(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) {
-	chat := turn.Chat()
-	session := turn.Session()
+func (l *engineTurnLoop) PauseLimit(ctx context.Context, rt *chatpkg.Chat, out chan<- domain.Event) {
+	snapshot := rt.Snapshot()
+	chat := snapshot.Chat
+	session := snapshot.Session
 	l.e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
 		Reason: continuationPauseReasonTurnLimit,
 		Limit:  l.e.maxToolLoopSteps(),
@@ -458,16 +468,16 @@ func (l *engineTurnLoop) PauseLimit(ctx context.Context, turn *chatpkg.TurnState
 	}, out)
 }
 
-func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, steps int, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) (chatpkg.TurnStepResult, error) {
+func (l *engineTurnLoop) Step(ctx context.Context, rt *chatpkg.Chat, steps int, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) (chatpkg.TurnStepResult, error) {
 	e := l.e
-	if turn == nil {
-		return chatpkg.TurnStepResult{}, fmt.Errorf("turn state is required")
+	if rt == nil {
+		return chatpkg.TurnStepResult{}, fmt.Errorf("chat runtime is required")
 	}
 	session := l.session
 	if session.ID == "" {
-		session = turn.Session()
+		session = rt.Snapshot().Session
 	}
-	chat := turn.Chat()
+	chat := rt.Snapshot().Chat
 	client, err := e.clientForChat(chat)
 	if err != nil {
 		return chatpkg.TurnStepResult{}, err
@@ -476,17 +486,17 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		return chatpkg.TurnStepResult{}, err
 	}
 	e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-	if err := e.materializeTurnInstructions(ctx, turn, turnInstructions, out); err != nil {
+	if err := e.materializeTurnInstructions(ctx, rt, turnInstructions, out); err != nil {
 		return chatpkg.TurnStepResult{}, err
 	}
-	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, turnInstructions)
+	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, rt, turnInstructions)
 	if buildErr != nil {
 		return chatpkg.TurnStepResult{}, buildErr
 	}
 	if l.skipAutoCompactOnce {
 		l.skipAutoCompactOnce = false
 	} else {
-		compacted, compactErr := e.autoCompactAtTurnBoundary(ctx, session, chat, turn, client, messages, out)
+		compacted, compactErr := e.autoCompactAtTurnBoundary(ctx, session, chat, rt, client, messages, out)
 		if compactErr != nil {
 			return chatpkg.TurnStepResult{}, compactErr
 		}
@@ -497,7 +507,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			session = owner.Snapshot().Session
 			l.session = session
-			turn.SetSession(session)
+			rt.SetSession(session)
 			l.skipAutoCompactOnce = true
 			return chatpkg.TurnStepResult{
 				Continue:         true,
@@ -508,7 +518,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 
 	stream := e.providerStreamingEnabled(chat)
 	req := e.chatRequest(session, chat, messages, stream)
-	assistantItem, itemErr := e.nextAssistantTimelineItemForTurn(ctx, chat.ID, turn)
+	assistantItem, itemErr := e.nextAssistantTimelineItemForTurn(ctx, chat.ID, rt)
 	if itemErr != nil {
 		return chatpkg.TurnStepResult{}, itemErr
 	}
@@ -536,13 +546,13 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 			})
 		} else if len(parsed.ToolCalls) > 0 {
-			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+			assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 			if err != nil {
 				return chatpkg.TurnStepResult{}, err
 			}
 			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
 			if resp.Usage.HasAnyTokens() {
-				if err := turn.SetContextUsage(ctx, resp.Usage); err != nil {
+				if err := rt.SetContextUsage(ctx, resp.Usage); err != nil {
 					return chatpkg.TurnStepResult{}, err
 				}
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
@@ -559,7 +569,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return chatpkg.TurnStepResult{Done: true}, nil
 			}
-			needsApproval, handledErr := e.handleModelToolCallsForTurn(ctx, session, chat, turn, calls, out)
+			needsApproval, handledErr := e.handleModelToolCallsForTurn(ctx, session, chat, rt, calls, out)
 			if handledErr != nil {
 				return chatpkg.TurnStepResult{}, handledErr
 			}
@@ -579,7 +589,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 		for _, callErr := range resp.ToolCallErrors {
 			toolCalls = append(toolCalls, e.failedStreamedProviderToolCall(callErr))
 		}
-		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+		assistantItem, err := e.persistAssistantToolCallRecordsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -592,7 +602,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	call, plain := parseToolCall(text)
 	if call != nil {
 		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
+		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, rt, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
@@ -605,7 +615,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			return chatpkg.TurnStepResult{Done: true}, nil
 		}
 
-		evt, handledErr := e.handleModelToolCallForTurn(ctx, session, chat, turn, *call)
+		evt, handledErr := e.handleModelToolCallForTurn(ctx, session, chat, rt, *call)
 		if handledErr != nil {
 			return chatpkg.TurnStepResult{}, handledErr
 		}
@@ -650,7 +660,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage
-		if err := turn.SetContextUsage(ctx, usage); err != nil {
+		if err := rt.SetContextUsage(ctx, usage); err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
 		if !streamed {
@@ -670,7 +680,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	}
 	assistantItem.UpdatedAt = now
 	assistantItem.Seal(time.Now().UTC())
-	updated, updateErr := turn.UpsertTimelineItem(ctx, assistantItem)
+	updated, updateErr := rt.UpsertTimelineItem(ctx, assistantItem)
 	if updateErr != nil {
 		return chatpkg.TurnStepResult{}, updateErr
 	}
@@ -1810,35 +1820,11 @@ func (e *Engine) chatWithRetry(ctx context.Context, session domain.Session, chat
 	}
 }
 
-func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID id.ID) (domain.TimelineItem, error) {
-	now := time.Now().UTC()
-	chatRecord, err := e.chatByID(ctx, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
+func (e *Engine) nextAssistantTimelineItemForTurn(_ context.Context, _ id.ID, rt *chatpkg.Chat) (domain.TimelineItem, error) {
+	if rt == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
-	rt, err := e.chatOwner(ctx, chatRecord.SessionID, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	items, err := rt.Timeline(ctx)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return domain.TimelineItem{
-		ID:        chatpkg.NewTimelineID(now),
-		ChatID:    chatID,
-		Seq:       int64(len(items) + 1),
-		Content:   domain.AssistantMessage{},
-		CreatedAt: now,
-		UpdatedAt: now,
-	}, nil
-}
-
-func (e *Engine) nextAssistantTimelineItemForTurn(ctx context.Context, chatID id.ID, turn *chatpkg.TurnState) (domain.TimelineItem, error) {
-	if turn != nil {
-		return turn.NextAssistantItem(), nil
-	}
-	return e.nextAssistantTimelineItem(ctx, chatID)
+	return rt.NextAssistantItem(), nil
 }
 
 func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
@@ -1908,13 +1894,16 @@ func turnInstructionBlocks(note string, continuePrompt string) []provider.Instru
 	return out
 }
 
-func (e *Engine) materializeTurnInstructions(ctx context.Context, turn *chatpkg.TurnState, blocks []provider.InstructionBlock, out chan<- domain.Event) error {
+func (e *Engine) materializeTurnInstructions(ctx context.Context, rt *chatpkg.Chat, blocks []provider.InstructionBlock, out chan<- domain.Event) error {
+	if rt == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
 	for _, block := range blocks {
 		user, ok := turnInstructionUserMessage(block)
 		if !ok {
 			continue
 		}
-		item, err := turn.AppendUserMessage(ctx, user)
+		item, err := rt.AppendUserMessage(ctx, user)
 		if err != nil {
 			return err
 		}
@@ -1952,14 +1941,11 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
-	if turn == nil {
-		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, turnInstructions)
+func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("chat runtime is required")
 	}
-	timeline := filterQueuedTimelineItems(turn.Timeline())
-	if turn.ExcludesQueuedInputs() {
-		timeline = filterFutureUserMessagesAfterToolCall(timeline)
-	}
+	timeline := filterQueuedTimelineItems(rt.SnapshotTimeline())
 	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		return nil, err
@@ -2397,11 +2383,6 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	return runtime
 }
 
-func (e *Engine) toolRuntimeForTurn(session domain.Session, chat domain.Chat, turn *chatpkg.TurnState) tools.Runtime {
-	runtime := e.toolRuntime(session, chat)
-	return runtime
-}
-
 type codeIntelFileTracker struct {
 	root string
 }
@@ -2719,7 +2700,7 @@ func parseToolCall(text string) (*tools.Request, string) {
 	return &call, plain
 }
 
-func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
+func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
 	threshold := e.autoCompactThreshold()
 	used, ok := e.autoCompactUsagePercent(chat, messages)
 	if !ok || used < threshold {
@@ -2728,7 +2709,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% known context used", used)}
 	}
-	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", "", out); err != nil {
+	if err := e.compactTurnSession(ctx, session, chat, rt, client, "auto", "", out); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -2855,16 +2836,16 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 	return nil
 }
 
-func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
-	if turn == nil {
-		return fmt.Errorf("turn state is required")
+func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
+	if rt == nil {
+		return fmt.Errorf("chat runtime is required")
 	}
 	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
 	}
 
-	timeline := turn.Timeline()
+	timeline := rt.SnapshotTimeline()
 	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
 	if err != nil {
 		return err
@@ -2887,7 +2868,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			BeforeContextTokens: beforeContextTokens,
 		},
 	}
-	compactionItem, err = turn.UpsertTimelineItem(ctx, compactionItem)
+	compactionItem, err = rt.UpsertTimelineItem(ctx, compactionItem)
 	if err != nil {
 		return err
 	}
@@ -2905,7 +2886,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			compactionItem.Seal(compactionItem.UpdatedAt)
 		}
 		var updateErr error
-		compactionItem, updateErr = turn.UpsertTimelineItem(ctx, compactionItem)
+		compactionItem, updateErr = rt.UpsertTimelineItem(ctx, compactionItem)
 		return updateErr
 	}
 	if out != nil {
@@ -2933,7 +2914,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
-	if err := turn.ResetContextAndTokenUsage(ctx); err != nil {
+	if err := rt.ResetContextAndTokenUsage(ctx); err != nil {
 		return err
 	}
 	if out != nil {
@@ -3533,10 +3514,14 @@ func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, 
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
-	return e.handleModelToolCallForTurn(ctx, session, chat, nil, req)
+	rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
+	if err != nil {
+		return domain.Event{}, err
+	}
+	return e.handleModelToolCallForTurn(ctx, session, chat, rt, req)
 }
 
-func (e *Engine) handleModelToolCallForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, req tools.Request) (domain.Event, error) {
+func (e *Engine) handleModelToolCallForTurn(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, req tools.Request) (domain.Event, error) {
 	prepared, err := e.prepareModelToolCall(ctx, session, chat, req)
 	if err != nil {
 		return domain.Event{}, err
@@ -3544,7 +3529,7 @@ func (e *Engine) handleModelToolCallForTurn(ctx context.Context, session domain.
 	if !prepared.run {
 		return prepared.event, nil
 	}
-	events, err := e.runPreparedToolCallForTurn(ctx, turn, prepared.chatID, prepared.sessionID, prepared.req, nil)
+	events, err := e.runPreparedToolCallForTurn(ctx, rt, prepared.chatID, prepared.sessionID, prepared.req, nil)
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -3700,26 +3685,30 @@ func (e *Engine) persistAssistantToolCallRecords(ctx context.Context, chatID, se
 	return rt.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
 }
 
-func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, rt *chatpkg.Chat, chatID, sessionID id.ID, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
 	}
-	return e.persistAssistantToolCallRecordsForTurn(ctx, turn, chatID, sessionID, item, toolCalls, text, reasoning, usage)
+	return e.persistAssistantToolCallRecordsForTurn(ctx, rt, chatID, sessionID, item, toolCalls, text, reasoning, usage)
 }
 
-func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
-	if turn == nil {
-		return e.persistAssistantToolCallRecords(ctx, chatID, sessionID, item, toolCalls, text, reasoning, usage)
+func (e *Engine) persistAssistantToolCallRecordsForTurn(ctx context.Context, rt *chatpkg.Chat, chatID, sessionID id.ID, item domain.TimelineItem, toolCalls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+	if rt == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
-	return turn.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
+	return rt.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
 }
 
 func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
-	return e.handleModelToolCallsForTurn(ctx, session, chat, nil, calls, out)
+	rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
+	if err != nil {
+		return false, err
+	}
+	return e.handleModelToolCallsForTurn(ctx, session, chat, rt, calls, out)
 }
 
-func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, calls []tools.Request, out chan<- domain.Event) (bool, error) {
+func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
 	if len(calls) == 0 {
 		return false, nil
 	}
@@ -3755,7 +3744,7 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 			continue
 		}
 		go func(item preparedToolCall) {
-			events, err := e.runPreparedToolCallForTurn(ctx, turn, item.chatID, item.sessionID, item.req, func(evt domain.Event) {
+			events, err := e.runPreparedToolCallForTurn(ctx, rt, item.chatID, item.sessionID, item.req, func(evt domain.Event) {
 				out <- evt
 			})
 			results <- completedToolCall{events: events, err: err}
@@ -3792,7 +3781,7 @@ func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain
 	if chatpkg.ShouldStop(ctx) {
 		return needsApproval, nil
 	}
-	if err := e.appendLintMessageForTouchedFiles(ctx, session, chat, turn, orderedTouchedFiles(touched), out); err != nil {
+	if err := e.appendLintMessageForTouchedFiles(ctx, session, chat, rt, orderedTouchedFiles(touched), out); err != nil {
 		return needsApproval, err
 	}
 	return needsApproval, nil
@@ -3859,13 +3848,13 @@ func orderedTouchedFiles(files map[string]struct{}) []string {
 	return out
 }
 
-func (e *Engine) appendLintMessageForTouchedFiles(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, paths []string, out chan<- domain.Event) error {
+func (e *Engine) appendLintMessageForTouchedFiles(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, paths []string, out chan<- domain.Event) error {
 	if len(paths) == 0 {
 		return nil
 	}
 	root := strings.TrimSpace(session.ProjectRoot)
-	if turn != nil && root == "" {
-		root = strings.TrimSpace(turn.Session().ProjectRoot)
+	if rt != nil && root == "" {
+		root = strings.TrimSpace(rt.Snapshot().Session.ProjectRoot)
 	}
 	if root == "" {
 		return nil
@@ -3875,7 +3864,7 @@ func (e *Engine) appendLintMessageForTouchedFiles(ctx context.Context, session d
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	item, err := e.appendLintTimelineItem(ctx, turn, chat, domain.LintMessage{Text: text, Files: paths})
+	item, err := e.appendLintTimelineItem(ctx, rt, chat, domain.LintMessage{Text: text, Files: paths})
 	if err != nil {
 		return err
 	}
@@ -3914,22 +3903,10 @@ func lintTouchedFiles(ctx context.Context, root string, paths []string) codediag
 	return report
 }
 
-func (e *Engine) appendLintTimelineItem(ctx context.Context, turn *chatpkg.TurnState, chat domain.Chat, lint domain.LintMessage) (domain.TimelineItem, error) {
+func (e *Engine) appendLintTimelineItem(ctx context.Context, rt *chatpkg.Chat, chat domain.Chat, lint domain.LintMessage) (domain.TimelineItem, error) {
 	now := time.Now().UTC()
-	if turn != nil {
-		item := domain.TimelineItem{
-			ID:        chatpkg.NewTimelineID(now),
-			ChatID:    turn.Chat().ID,
-			Content:   lint,
-			CreatedAt: now,
-			UpdatedAt: now,
-			SealedAt:  now,
-		}
-		return turn.UpsertTimelineItem(ctx, item)
-	}
-	rt, err := e.chatOwner(ctx, chat.SessionID, chat.ID)
-	if err != nil {
-		return domain.TimelineItem{}, err
+	if rt == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
 	item, err := rt.AppendTimelineContent(ctx, lint)
 	if err != nil {
@@ -4085,54 +4062,28 @@ func (e *Engine) effectiveToolStates(session domain.Session) map[domain.ToolKind
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {
-	return e.runPreparedToolCallForTurn(ctx, nil, chatID, sessionID, req, nil)
+	rt, err := e.chatOwner(ctx, sessionID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	return e.runPreparedToolCallForTurn(ctx, rt, chatID, sessionID, req, nil)
 }
 
-func (e *Engine) runPreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID id.ID, req tools.Request, emit func(domain.Event)) ([]domain.Event, error) {
+func (e *Engine) runPreparedToolCallForTurn(ctx context.Context, rt *chatpkg.Chat, chatID, sessionID id.ID, req tools.Request, emit func(domain.Event)) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
-	var (
-		session domain.Session
-		chat    domain.Chat
-		rt      *chatpkg.Chat
-	)
-	if turn != nil {
-		session = turn.Session()
-		chat = turn.Chat()
-	} else {
-		var chatErr error
-		session, chat, chatErr = e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
-		if chatErr != nil {
-			return nil, chatErr
-		}
+	if rt == nil {
+		return nil, fmt.Errorf("chat runtime is required")
 	}
+	snapshot := rt.Snapshot()
+	session := snapshot.Session
+	chat := snapshot.Chat
 	if session.ID != "" {
-		loaded, err := e.LoadSession(ctx, session.ID)
-		if err != nil {
+		if _, err := e.LoadSession(ctx, session.ID); err != nil {
 			return nil, err
 		}
-		if turn == nil {
-			rt, err = loaded.Chat(ctx, chat.ID)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
-	runtime := e.toolRuntimeForTurn(session, chat, turn)
-	var (
-		events []domain.Event
-		err    error
-	)
-	if turn != nil {
-		events, err = turn.RunToolCall(ctx, runtime, req, emit)
-	} else {
-		if rt == nil {
-			rt, err = e.chatOwner(ctx, sessionID, chatID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		events, err = rt.RunToolCall(ctx, runtime, req, emit)
-	}
+	runtime := e.toolRuntime(session, chat)
+	events, err := rt.RunToolCall(ctx, runtime, req, emit)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 		return nil, err
