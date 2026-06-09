@@ -1137,6 +1137,15 @@ func (r *Chat) Status() (Status, string, bool) {
 	return r.status, r.statusText, r.active
 }
 
+func (r *Chat) HasLoadedTimeline() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.timelineLoaded
+}
+
 func (r *Chat) ContextSize() domain.ContextUsage {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

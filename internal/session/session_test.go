@@ -267,7 +267,7 @@ func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) 
 	}
 }
 
-func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
+func TestSessionLoadDoesNotHydrateChatRuntimes(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -290,6 +290,9 @@ func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected no hydrated chat runtimes on session load, got %d", got)
+	}
 	firstRuntime, err := owner.Chat(ctx, first.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -301,8 +304,75 @@ func TestSessionHydratesAllChatRuntimesOnce(t *testing.T) {
 	if firstRuntime != firstRuntimeAgain {
 		t.Fatalf("expected first chat runtime to be reused from memory")
 	}
-	if _, ok := owner.Snapshot().Snapshots[second.ID]; !ok {
-		t.Fatalf("expected second chat to hydrate during session load")
+	snapshot := owner.Snapshot()
+	if _, ok := snapshot.Snapshots[first.ID]; !ok {
+		t.Fatalf("expected first chat to hydrate on demand")
+	}
+	if _, ok := snapshot.Snapshots[second.ID]; ok {
+		t.Fatalf("expected second chat to stay stored until requested")
+	}
+}
+
+func TestSessionTimelinePageDoesNotHydrateChatRuntime(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{Session: sessionRecord, Title: "stored", Role: chatrole.Orchestrator, Position: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testAppendTimeline(ctx, st, sessionRecord, chatRecord, domain.UserMessage{Text: "from store"}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := owner.TimelinePage(ctx, chatRecord.ID, "", 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one stored timeline item, got %d", len(page.Items))
+	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected transcript paging to avoid hydrating chat runtimes, got %d runtimes", got)
+	}
+}
+
+func TestSessionShutdownOnlyTouchesHydratedRuntimes(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{Session: sessionRecord, Title: "stored", Role: chatrole.Orchestrator, Position: -1}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected no runtimes before shutdown, got %d", got)
+	}
+	if err := owner.Shutdown(ctx, chatpkg.CancelReasonRestartInterrupt); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected shutdown to avoid hydrating stored chats, got %d runtimes", got)
 	}
 }
 

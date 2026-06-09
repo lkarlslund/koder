@@ -115,15 +115,6 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 		tasks:      slices.Clone(tasks),
 		subs:       map[int]chan Event{},
 	}
-	for _, chatRecord := range owner.chats {
-		rt, err := owner.chatsSrc.LoadMetadata(ctx, owner.session, chatRecord)
-		if err != nil {
-			return nil, err
-		}
-		if rt != nil {
-			owner.trackRuntimeLocked(chatRecord.ID, rt)
-		}
-	}
 	return owner, nil
 }
 
@@ -257,6 +248,15 @@ func (s *Session) Chat(ctx context.Context, chatID id.ID) (*chatpkg.Chat, error)
 	return rt, nil
 }
 
+func (s *Session) runtime(chatID id.ID) *chatpkg.Chat {
+	if s == nil || chatID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runtimes[chatID]
+}
+
 // TimelinePage returns persisted transcript items for a chat owned by this session.
 func (s *Session) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (chatpkg.TimelinePage, error) {
 	if s == nil {
@@ -271,11 +271,10 @@ func (s *Session) TimelinePage(ctx context.Context, chatID, before id.ID, limit 
 	if !ok {
 		return chatpkg.TimelinePage{}, fmt.Errorf("chat %s not found", chatID)
 	}
-	rt, err := s.Chat(ctx, chatID)
-	if err != nil {
-		return chatpkg.TimelinePage{}, err
+	if rt := s.runtime(chatID); rt != nil && rt.HasLoadedTimeline() {
+		return rt.TimelinePage(ctx, before, limit, all)
 	}
-	return rt.TimelinePage(ctx, before, limit, all)
+	return s.chatsSrc.TimelinePage(ctx, chatID, before, limit, all)
 }
 
 // NewChat creates a new orchestrator chat under parentChatID.

@@ -242,14 +242,19 @@ func (c *Controller) debugChatFromOwnerSnapshot(snapshot sessionpkg.SessionSnaps
 	runtimeByChat := debugRuntimeChatsByID(runtime)
 	queueLen := len(chatRecord.QueuedInputs)
 	approvals := debugsrv.PendingApprovalsFromTimeline(chatRecord, timeline)
+	chatSnapshot, hydrated := snapshot.Snapshots[chatRecord.ID]
+	hydration := "stored"
+	if hydrated {
+		hydration = "live"
+	}
 	out := debugsrv.SessionChatDebug{
 		ID:                         chatRecord.ID,
 		SessionID:                  chatRecord.SessionID,
 		Title:                      chatRecord.Title,
 		WorkflowRole:               string(chatRecord.WorkflowRole),
 		Archived:                   chatRecord.Archived,
-		Hydration:                  "live",
-		Hydrated:                   true,
+		Hydration:                  hydration,
+		Hydrated:                   hydrated,
 		QueueLen:                   queueLen,
 		TimelineCount:              len(timeline),
 		PendingApprovals:           len(approvals),
@@ -259,7 +264,7 @@ func (c *Controller) debugChatFromOwnerSnapshot(snapshot sessionpkg.SessionSnaps
 		ContextTokensKnown:         chatRecord.ContextTokensKnown,
 		LastMessage:                chatRecord.LastMessage,
 	}
-	if chatSnapshot, ok := snapshot.Snapshots[chatRecord.ID]; ok {
+	if hydrated {
 		out.QueueLen = len(chatSnapshot.QueuedInputs)
 		out.PendingApprovals = len(chatSnapshot.Approvals)
 	}

@@ -116,6 +116,14 @@ func (s *Source) DeleteSessionData(ctx context.Context, sessionID id.ID) error {
 	return deleteSessionData(ctx, deps.Store, sessionID)
 }
 
+func (s *Source) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	return timelinePageForChat(ctx, deps.Store, chatID, before, limit, all)
+}
+
 func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
 		Namespace: "timeline",
