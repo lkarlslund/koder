@@ -53,6 +53,97 @@
       });
       return template.innerHTML;
     }
+    function isEscapedAt(text, index) {
+      let slashes = 0;
+      for (let i = index - 1; i >= 0 && text[i] === '\\'; i--) slashes++;
+      return slashes % 2 === 1;
+    }
+    function findUnescaped(text, needle, start) {
+      for (let i = start; i >= 0 && i < text.length; i++) {
+        if (text.startsWith(needle, i) && !isEscapedAt(text, i)) return i;
+      }
+      return -1;
+    }
+    function mathTokenAt(text, index) {
+      const starts = [
+        {open: '$$', close: '$$', display: true},
+        {open: '\\[', close: '\\]', display: true},
+        {open: '\\(', close: '\\)', display: false},
+        {open: '$', close: '$', display: false}
+      ];
+      for (const spec of starts) {
+        if (!text.startsWith(spec.open, index) || isEscapedAt(text, index)) continue;
+        const start = index + spec.open.length;
+        if (spec.open === '$' && /\s/.test(text[start] || '')) continue;
+        const end = findUnescaped(text, spec.close, start);
+        if (end < 0) return null;
+        const body = text.slice(start, end);
+        if (!body.trim()) return null;
+        if (spec.open === '$' && /\s/.test(body[body.length - 1] || '')) return null;
+        return {start: index, end: end + spec.close.length, body, display: spec.display};
+      }
+      return null;
+    }
+    function renderMathHTML(source, displayMode) {
+      if (!window.katex) return escapeHTML(source);
+      try {
+        return katex.renderToString(source, {
+          displayMode,
+          throwOnError: false,
+          strict: 'ignore',
+          trust: false,
+          output: 'html'
+        });
+      } catch (_) {
+        return escapeHTML(displayMode ? '$$' + source + '$$' : '$' + source + '$');
+      }
+    }
+    function renderMathTextNode(node) {
+      const text = node.textContent || '';
+      if (!/[\\$]/.test(text)) return;
+      const fragment = document.createDocumentFragment();
+      let offset = 0;
+      let changed = false;
+      while (offset < text.length) {
+        let token = null;
+        let tokenStart = -1;
+        for (let i = offset; i < text.length; i++) {
+          token = mathTokenAt(text, i);
+          if (token) {
+            tokenStart = i;
+            break;
+          }
+        }
+        if (!token) break;
+        if (tokenStart > offset) fragment.append(document.createTextNode(text.slice(offset, tokenStart)));
+        const span = document.createElement(token.display ? 'div' : 'span');
+        span.className = token.display ? 'koder-math koder-math-display' : 'koder-math koder-math-inline';
+        span.innerHTML = renderMathHTML(token.body, token.display);
+        fragment.append(span);
+        offset = token.end;
+        changed = true;
+      }
+      if (!changed) return;
+      if (offset < text.length) fragment.append(document.createTextNode(text.slice(offset)));
+      node.replaceWith(fragment);
+    }
+    function renderMathInHTML(html) {
+      if (!html || !window.katex) return html;
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      const ignored = 'pre, code, kbd, samp, script, style, .katex, .mermaid-diagram';
+      const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!/[\\$]/.test(node.textContent || '')) return NodeFilter.FILTER_REJECT;
+          if (node.parentElement?.closest(ignored)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(renderMathTextNode);
+      return template.innerHTML;
+    }
     function byteCount(value) {
       const source = String(value || '');
       if (window.TextEncoder) return new TextEncoder().encode(source).length;
@@ -217,6 +308,7 @@
         let html = marked.parse(source);
         html = sanitizeHTML(html);
         if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
+        html = renderMathInHTML(html);
         html = highlightMarkdownCode(html);
         return sanitizeHTML(html);
       });

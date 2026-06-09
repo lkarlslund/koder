@@ -272,6 +272,8 @@
     .settings-inline-status { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); align-items: center; gap: .75rem; padding: .65rem .75rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); }
     .settings-prompt, .settings-json { min-height: 14rem; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
+    .koder-math-inline { display: inline; }
+    .koder-math-display { overflow-x: auto; overflow-y: hidden; margin: .75rem 0; padding-bottom: .15rem; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
     @media (max-width: 900px) {
       .app-shell { grid-template-columns: 1fr; }

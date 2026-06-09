@@ -1084,6 +1084,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `/assets/vendor/highlight/highlight.min.js`) {
 		t.Fatalf("expected highlight.js to be loaded from vendored assets")
 	}
+	if !strings.Contains(fullPage, `/assets/vendor/katex/katex.min.css`) ||
+		!strings.Contains(fullPage, `/assets/vendor/katex/katex.min.js`) {
+		t.Fatalf("expected KaTeX to be loaded from vendored assets")
+	}
 	if !strings.Contains(fullPage, `/assets/vendor/mermaid/mermaid.min.js`) {
 		t.Fatalf("expected Mermaid to be loaded from vendored assets")
 	}
@@ -1132,6 +1136,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
+	}
+	if !strings.Contains(fullPage, `katex.renderToString`) ||
+		!strings.Contains(fullPage, `renderMathInHTML(html)`) ||
+		!strings.Contains(fullPage, `koder-math-inline`) ||
+		!strings.Contains(fullPage, `pre, code, kbd, samp`) {
+		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
 	}
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeDiagramSVG`) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams and sanitize SVG output")
@@ -1746,6 +1756,9 @@ func TestVendoredAssetsServe(t *testing.T) {
 		{path: "/assets/vendor/bootstrap-icons/font/fonts/bootstrap-icons.woff2", want: ""},
 		{path: "/assets/vendor/alpine/cdn.min.js", want: "Alpine"},
 		{path: "/assets/vendor/marked/marked.umd.js", want: "marked"},
+		{path: "/assets/vendor/katex/katex.min.css", want: "KaTeX"},
+		{path: "/assets/vendor/katex/katex.min.js", want: "katex"},
+		{path: "/assets/vendor/katex/fonts/KaTeX_Main-Regular.woff2", want: ""},
 		{path: "/assets/vendor/mermaid/mermaid.min.js", want: "mermaid"},
 	} {
 		resp, err := http.Get(srv.URL() + tc.path)
