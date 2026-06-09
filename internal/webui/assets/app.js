@@ -17,6 +17,15 @@
         FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'foreignObject']
       });
     }
+    function sanitizeMermaidSVG(html) {
+      if (!window.DOMPurify) return html;
+      return DOMPurify.sanitize(html, {
+        USE_PROFILES: {svg: true, svgFilters: true, html: true},
+        ADD_TAGS: ['style', 'foreignObject', 'foreignobject', 'div', 'span', 'p', 'br', 'b', 'strong', 'i', 'em'],
+        ADD_ATTR: ['class', 'style', 'xmlns'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']
+      });
+    }
     function highlightMarkdownCode(html) {
       if (!window.hljs || !html) return html;
       const template = document.createElement('template');
@@ -177,7 +186,7 @@
         theme: 'base',
         themeVariables: koderMermaidThemeVariables(dark),
         themeCSS: koderMermaidThemeCSS(dark),
-        flowchart: {htmlLabels: false, curve: 'basis'}
+        flowchart: {htmlLabels: true, curve: 'basis'}
       });
       window.koderMermaidTheme = theme;
     }
@@ -349,7 +358,7 @@
         const id = 'mermaid-' + Math.random().toString(36).slice(2);
         try {
           const result = await mermaid.render(id, source);
-          diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeDiagramSVG(result.svg || '') + '</div>' + diagramExpandButton('Mermaid diagram');
+          diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>' + diagramExpandButton('Mermaid diagram');
           diagram.dataset.mermaidState = 'done';
           if (result.bindFunctions) result.bindFunctions(diagram);
         } catch (err) {
@@ -886,7 +895,7 @@
           if (trigger.matches('.mermaid-diagram .media-expand-button')) {
             const diagram = trigger.closest('.mermaid-diagram');
             const svg = diagram?.querySelector('.mermaid-diagram-content svg');
-            this.openSVGLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+            this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
             return;
           }
           if (trigger.dataset.lightboxSvg) {
@@ -903,6 +912,11 @@
           html = sanitizeDiagramSVG(html || '');
           if (!html) return;
           this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'SVG preview', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        },
+        openMermaidLightbox(html, title, meta) {
+          html = sanitizeMermaidSVG(html || '');
+          if (!html) return;
+          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
         },
         closeImageLightbox() {
           this.imageLightbox = {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};

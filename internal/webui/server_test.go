@@ -1144,8 +1144,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `pre, code, kbd, samp`) {
 		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
 	}
-	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeDiagramSVG`) {
-		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams and sanitize SVG output")
+	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
+		!strings.Contains(fullPage, `flowchart: {htmlLabels: true`) ||
+		!strings.Contains(fullPage, `openMermaidLightbox`) {
+		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams with sanitized html labels")
 	}
 	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
 		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) {
