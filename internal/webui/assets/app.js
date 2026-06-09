@@ -23,6 +23,8 @@
         USE_PROFILES: {svg: true, svgFilters: true, html: true},
         ADD_TAGS: ['style', 'foreignObject', 'foreignobject', 'div', 'span', 'p', 'br', 'b', 'strong', 'i', 'em'],
         ADD_ATTR: ['class', 'style', 'xmlns'],
+        HTML_INTEGRATION_POINTS: {foreignobject: true},
+        FORBID_CONTENTS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
         FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']
       });
     }
@@ -292,6 +294,7 @@
       };
       return `
         .label, .label text, .nodeLabel, .edgeLabel, .edgeLabel p, .cluster-label, .cluster-label text,
+        .nodeLabel p, .nodeLabel div, .nodeLabel span, .cluster-label p, .cluster-label div, .cluster-label span,
         .actor, .actor-line, .messageText, .loopText, .noteText, .taskText, .sectionTitle,
         .legend, .legend text, text {
           fill: ${colors.text} !important;
