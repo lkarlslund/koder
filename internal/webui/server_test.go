@@ -1145,7 +1145,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
 	}
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
-		!strings.Contains(fullPage, `flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: false}`) ||
+		!strings.Contains(fullPage, `flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: true}`) ||
 		!strings.Contains(fullPage, `HTML_INTEGRATION_POINTS: {foreignobject: true}`) ||
 		!strings.Contains(fullPage, `ADD_TAGS: ['foreignobject']`) ||
 		!strings.Contains(fullPage, `FORBID_CONTENTS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']`) ||
@@ -1457,6 +1457,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `themeVariables: koderMermaidThemeVariables(dark)`) ||
 		!strings.Contains(fullPage, `themeCSS: koderMermaidThemeCSS(dark)`) ||
 		!strings.Contains(fullPage, `fontSize: '16px'`) ||
+		!strings.Contains(fullPage, `.mermaid-diagram svg { display: block; width: 100%; max-width: 100%; min-width: 0;`) ||
 		!strings.Contains(fullPage, `.mermaid-diagram svg text { font-size: 16px; }`) ||
 		!strings.Contains(fullPage, `markMermaidThemeDirty`) {
 		t.Fatalf("expected mermaid rendering to use owned readable theme variables/css and rerender on theme changes")

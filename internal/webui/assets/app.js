@@ -187,7 +187,7 @@
         theme: 'base',
         themeVariables: koderMermaidThemeVariables(dark),
         themeCSS: koderMermaidThemeCSS(dark),
-        flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: false}
+        flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: true}
       });
       window.koderMermaidTheme = theme;
     }
