@@ -21,6 +21,14 @@ const (
 
 const RepeatedToolLoopThreshold = 3
 
+type ToolLoopAction uint8
+
+const (
+	ToolLoopAllow ToolLoopAction = iota
+	ToolLoopDeny
+	ToolLoopStop
+)
+
 type ContinuationPause struct {
 	Reason   ContinuationPauseReason
 	Tool     domain.ToolKind
@@ -42,15 +50,15 @@ func (t *ToolLoopTracker) Reset() {
 	t.repeatCount = 0
 }
 
-func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ContinuationPause, bool) {
+func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, ContinuationPause) {
 	if len(calls) != 1 {
 		t.Reset()
-		return ContinuationPause{}, false
+		return ToolLoopAllow, ContinuationPause{}
 	}
 	signature := toolLoopSignature(calls[0])
 	if signature == "" {
 		t.Reset()
-		return ContinuationPause{}, false
+		return ToolLoopAllow, ContinuationPause{}
 	}
 	if signature == t.lastSignature {
 		t.repeatCount++
@@ -60,20 +68,40 @@ func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ContinuationPause, 
 		t.repeatCount = 1
 	}
 	if t.repeatCount < RepeatedToolLoopThreshold {
-		return ContinuationPause{}, false
+		return ToolLoopAllow, ContinuationPause{}
 	}
 	toolName := calls[0].Tool.DisplayName()
-	return ContinuationPause{
+	pause := ContinuationPause{
 		Reason:   ContinuationPauseReasonRepeatedTool,
 		Tool:     calls[0].Tool,
 		Count:    t.repeatCount,
 		Subtitle: fmt.Sprintf("Repeated identical %s calls", toolName),
 		Body: fmt.Sprintf(
-			"Paused continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to the result.",
+			"Stopped continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to prior results.",
 			t.repeatCount,
 			toolName,
 		),
-	}, true
+	}
+	if t.repeatCount == RepeatedToolLoopThreshold {
+		return ToolLoopDeny, pause
+	}
+	return ToolLoopStop, pause
+}
+
+func RepeatedToolDeniedMessage(pause ContinuationPause) string {
+	toolName := strings.TrimSpace(pause.Tool.DisplayName())
+	if toolName == "" {
+		toolName = "tool"
+	}
+	count := pause.Count
+	if count <= 0 {
+		count = RepeatedToolLoopThreshold
+	}
+	return fmt.Sprintf(
+		"Denied repeated %s call: this is identical call %d with the same input. Use the prior tool result already in this chat, or choose a different tool or different arguments.",
+		toolName,
+		count,
+	)
 }
 
 func toolLoopSignature(req tools.Request) string {

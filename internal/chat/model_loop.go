@@ -128,9 +128,8 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 			if len(calls) == 0 {
 				return TurnStepResult{Continue: true}, nil
 			}
-			if pause, ok := l.tracker.TrackCalls(calls); ok {
-				l.pauseContinuation(ctx, rt, session.ID, pause, out)
-				return TurnStepResult{Done: true}, nil
+			if result, handled, err := l.handleRepeatedToolCall(ctx, rt, session.ID, calls, out); handled || err != nil {
+				return result, err
 			}
 			needsApproval, handledErr := rt.RunToolCalls(ctx, calls, out)
 			if handledErr != nil {
@@ -166,9 +165,8 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 			return TurnStepResult{}, err
 		}
 		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Item: assistantItem}
-		if pause, ok := l.tracker.TrackCalls([]tools.Request{*call}); ok {
-			l.pauseContinuation(ctx, rt, session.ID, pause, out)
-			return TurnStepResult{Done: true}, nil
+		if result, handled, err := l.handleRepeatedToolCall(ctx, rt, session.ID, []tools.Request{*call}, out); handled || err != nil {
+			return result, err
 		}
 		if ShouldStop(ctx) {
 			return TurnStepResult{Done: true}, nil
@@ -269,6 +267,32 @@ func (l *modelTurnLoop) pauseContinuation(ctx context.Context, rt *Chat, session
 	}
 	l.model.RecordLifecycle(sessionID, "model_turn_paused", body, ContinuationPauseMeta(pause))
 	rt.PauseContinuation(ctx, pause, out)
+}
+
+func (l *modelTurnLoop) handleRepeatedToolCall(ctx context.Context, rt *Chat, sessionID id.ID, calls []tools.Request, out chan<- domain.Event) (TurnStepResult, bool, error) {
+	action, pause := l.tracker.TrackCalls(calls)
+	switch action {
+	case ToolLoopAllow:
+		return TurnStepResult{}, false, nil
+	case ToolLoopDeny, ToolLoopStop:
+		if len(calls) != 1 {
+			return TurnStepResult{}, true, fmt.Errorf("repeated tool guard expected one call, got %d", len(calls))
+		}
+		evt, err := rt.RecordToolDenied(ctx, calls[0], RepeatedToolDeniedMessage(pause))
+		if err != nil {
+			return TurnStepResult{}, true, err
+		}
+		if out != nil {
+			out <- evt
+		}
+		if action == ToolLoopDeny {
+			return TurnStepResult{Continue: true}, true, nil
+		}
+		l.pauseContinuation(ctx, rt, sessionID, pause, out)
+		return TurnStepResult{Done: true}, true, nil
+	default:
+		return TurnStepResult{}, true, fmt.Errorf("unsupported repeated tool action %d", action)
+	}
 }
 
 func TurnInstructionBlocks(note string, continuePrompt string) []provider.InstructionBlock {

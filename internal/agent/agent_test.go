@@ -6676,7 +6676,7 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	}
 }
 
-func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
+func TestRunPromptDeniesRepeatedIdenticalToolCallsThenStops(t *testing.T) {
 	t.Parallel()
 
 	workdir := t.TempDir()
@@ -6709,6 +6709,10 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := setSessionProjectRoot(context.Background(), st, session.ID, workdir); err != nil {
+		t.Fatal(err)
+	}
+	session.ProjectRoot = workdir
 
 	events := runLivePromptDefault(t, engine, st, session, "loop")
 
@@ -6731,6 +6735,9 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	if !sawPauseStatusItem {
 		t.Fatal("expected repeated-tool pause status to include persisted notice item for live transcript updates")
 	}
+	if requests != 4 {
+		t.Fatalf("expected provider to receive warning feedback before final stop, got %d requests", requests)
+	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -6738,6 +6745,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	var toolOutputs int
+	var deniedOutputs int
 	var sawPauseNotice bool
 	for _, item := range timeline {
 		switch content := item.Content.(type) {
@@ -6746,6 +6754,12 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 				if tool.Result != nil || tool.Error != nil {
 					toolOutputs++
 				}
+				if tool.Status == domain.ToolStatusDenied {
+					deniedOutputs++
+					if tool.Result == nil || !strings.Contains(tool.Result.Text, "Use the prior tool result") {
+						t.Fatalf("expected denied loop tool to tell model to use prior results, got %#v", tool.Result)
+					}
+				}
 			}
 		case domain.Notice:
 			if content.Kind == "loop_pause" && content.Reason == string(chatpkg.ContinuationPauseReasonRepeatedTool) {
@@ -6753,8 +6767,11 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 			}
 		}
 	}
-	if toolOutputs != 2 {
-		t.Fatalf("expected only two executed tool outputs before pause, got %d", toolOutputs)
+	if toolOutputs != 4 {
+		t.Fatalf("expected two executed and two denied tool outputs, got %d", toolOutputs)
+	}
+	if deniedOutputs != 2 {
+		t.Fatalf("expected third and fourth identical calls to be denied, got %d denied outputs", deniedOutputs)
 	}
 	if !sawPauseNotice {
 		t.Fatal("expected persisted repeated-tool pause notice")
@@ -6766,29 +6783,32 @@ func TestToolLoopTrackerRequiresIdenticalArguments(t *testing.T) {
 
 	tracker := chatpkg.ToolLoopTracker{}
 	for _, path := range []string{"one.txt", "two.txt", "three.txt"} {
-		if pause, ok := tracker.TrackCalls([]tools.Request{{
+		if action, pause := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindFileRead,
 			Args: map[string]string{"path": path},
-		}}); ok {
-			t.Fatalf("did not expect pause for different arguments, got %#v", pause)
+		}}); action != chatpkg.ToolLoopAllow {
+			t.Fatalf("did not expect action for different arguments, got %v %#v", action, pause)
 		}
 	}
 
-	for idx := range chatpkg.RepeatedToolLoopThreshold {
-		pause, ok := tracker.TrackCalls([]tools.Request{{
+	for idx := range chatpkg.RepeatedToolLoopThreshold + 1 {
+		action, pause := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindFileRead,
 			Args: map[string]string{"path": "same.txt"},
 		}})
-		if idx < chatpkg.RepeatedToolLoopThreshold-1 && ok {
-			t.Fatalf("did not expect pause before threshold, got %#v", pause)
+		if idx < chatpkg.RepeatedToolLoopThreshold-1 && action != chatpkg.ToolLoopAllow {
+			t.Fatalf("did not expect action before threshold, got %v %#v", action, pause)
 		}
 		if idx == chatpkg.RepeatedToolLoopThreshold-1 {
-			if !ok {
-				t.Fatal("expected pause at identical-call threshold")
+			if action != chatpkg.ToolLoopDeny {
+				t.Fatalf("expected deny at identical-call threshold, got %v", action)
 			}
 			if pause.Reason != chatpkg.ContinuationPauseReasonRepeatedTool {
 				t.Fatalf("unexpected pause reason: %#v", pause)
 			}
+		}
+		if idx == chatpkg.RepeatedToolLoopThreshold && action != chatpkg.ToolLoopStop {
+			t.Fatalf("expected stop after denied warning was ignored, got %v", action)
 		}
 	}
 }
@@ -6798,24 +6818,24 @@ func TestToolLoopTrackerAllowsRepeatedExecWriteStdinWaits(t *testing.T) {
 
 	tracker := chatpkg.ToolLoopTracker{}
 	for range chatpkg.RepeatedToolLoopThreshold + 1 {
-		if pause, ok := tracker.TrackCalls([]tools.Request{{
+		if action, pause := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindExecWriteStdin,
 			Args: map[string]string{"process_id": "exec_1", "chars": ""},
-		}}); ok {
-			t.Fatalf("did not expect pause for empty exec_write_stdin wait, got %#v", pause)
+		}}); action != chatpkg.ToolLoopAllow {
+			t.Fatalf("did not expect action for empty exec_write_stdin wait, got %v %#v", action, pause)
 		}
 	}
 
 	for idx := range chatpkg.RepeatedToolLoopThreshold {
-		pause, ok := tracker.TrackCalls([]tools.Request{{
+		action, pause := tracker.TrackCalls([]tools.Request{{
 			Tool: domain.ToolKindExecStatus,
 			Args: map[string]string{"process_id": "exec_1"},
 		}})
-		if idx < chatpkg.RepeatedToolLoopThreshold-1 && ok {
-			t.Fatalf("did not expect exec_status pause before threshold, got %#v", pause)
+		if idx < chatpkg.RepeatedToolLoopThreshold-1 && action != chatpkg.ToolLoopAllow {
+			t.Fatalf("did not expect exec_status action before threshold, got %v %#v", action, pause)
 		}
-		if idx == chatpkg.RepeatedToolLoopThreshold-1 && !ok {
-			t.Fatal("expected repeated exec_status to pause")
+		if idx == chatpkg.RepeatedToolLoopThreshold-1 && action != chatpkg.ToolLoopDeny {
+			t.Fatalf("expected repeated exec_status to be denied, got %v", action)
 		}
 	}
 }
