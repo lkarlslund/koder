@@ -176,6 +176,7 @@
         securityLevel: 'strict',
         theme: 'base',
         themeVariables: koderMermaidThemeVariables(dark),
+        themeCSS: koderMermaidThemeCSS(dark),
         flowchart: {htmlLabels: false, curve: 'basis'}
       });
       window.koderMermaidTheme = theme;
@@ -253,6 +254,85 @@
         labelBoxBorderColor: '#0d6efd',
         labelTextColor: '#212529',
       };
+    }
+    function koderMermaidThemeCSS(dark) {
+      const colors = dark ? {
+        canvas: '#212529',
+        panel: '#2b3035',
+        panelAlt: '#343a40',
+        panelWarm: '#4a3900',
+        border: '#8ab4f8',
+        borderAlt: '#66d9ef',
+        text: '#f8f9fa',
+        muted: '#c6d3e1',
+        noteText: '#fff3cd',
+        danger: '#ff8ba0',
+        success: '#75d79f',
+      } : {
+        canvas: '#ffffff',
+        panel: '#ffffff',
+        panelAlt: '#f1f5f9',
+        panelWarm: '#fff3cd',
+        border: '#0d6efd',
+        borderAlt: '#0aa2c0',
+        text: '#212529',
+        muted: '#495057',
+        noteText: '#212529',
+        danger: '#dc3545',
+        success: '#198754',
+      };
+      return `
+        .label, .label text, .nodeLabel, .edgeLabel, .edgeLabel p, .cluster-label, .cluster-label text,
+        .actor, .actor-line, .messageText, .loopText, .noteText, .taskText, .sectionTitle,
+        .legend, .legend text, text {
+          fill: ${colors.text} !important;
+          color: ${colors.text} !important;
+          font-size: 16px !important;
+        }
+        .node rect, .node circle, .node ellipse, .node polygon, .node path,
+        .flowchart-label, .label-container, .actor, .state, .er.entityBox {
+          fill: ${colors.panel} !important;
+          stroke: ${colors.border} !important;
+          color: ${colors.text} !important;
+        }
+        .cluster rect, .section, .grid .tick, .timeline-section {
+          fill: ${colors.panelAlt} !important;
+          stroke: ${colors.border} !important;
+        }
+        .edgeLabel, .edgeLabel rect, .labelBkg, .labelBox {
+          background-color: ${colors.canvas} !important;
+          fill: ${colors.canvas} !important;
+          color: ${colors.text} !important;
+        }
+        .edgePath .path, .flowchart-link, .messageLine0, .messageLine1, .transition,
+        .relationshipLine, .commit-id, line, path.path {
+          stroke: ${colors.muted} !important;
+        }
+        marker path, marker polygon {
+          fill: ${colors.muted} !important;
+          stroke: ${colors.muted} !important;
+        }
+        .note, .note rect {
+          fill: ${colors.panelWarm} !important;
+          stroke: ${colors.borderAlt} !important;
+        }
+        .noteText, .noteText tspan {
+          fill: ${colors.noteText} !important;
+          color: ${colors.noteText} !important;
+        }
+        .activation0, .activation1, .activation2 {
+          fill: ${colors.panelAlt} !important;
+          stroke: ${colors.borderAlt} !important;
+        }
+        .today, .done0, .done1 {
+          fill: ${colors.success} !important;
+          stroke: ${colors.success} !important;
+        }
+        .crit0, .crit1, .active0, .active1 {
+          fill: ${colors.danger} !important;
+          stroke: ${colors.danger} !important;
+        }
+      `;
     }
     function diagramExpandButton(title) {
       return '<button type="button" class="media-expand-button" title="Expand ' + escapeHTML(title) + '"><i class="bi bi-arrows-angle-expand"></i></button>';
