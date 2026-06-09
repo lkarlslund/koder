@@ -102,6 +102,7 @@ type ModelOption struct {
 	SourceProviderID string `json:"source_provider_id,omitempty"`
 	SourceModelID    string `json:"source_model_id,omitempty"`
 	OwnedBy          string `json:"owned_by,omitempty"`
+	ContextWindow    int    `json:"context_window,omitempty"`
 	Detected         bool   `json:"detected"`
 	Custom           bool   `json:"custom"`
 	BackingDetected  bool   `json:"backing_detected"`

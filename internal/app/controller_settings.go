@@ -338,6 +338,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			SourceProviderID: providerID,
 			SourceModelID:    modelID,
 			OwnedBy:          strings.TrimSpace(model.OwnedBy),
+			ContextWindow:    model.ContextWindow,
 			Detected:         true,
 			BackingDetected:  true,
 			Editable:         false,
@@ -403,6 +404,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			SourceProviderID: sourceProviderID,
 			SourceModelID:    model.SourceModelID,
 			OwnedBy:          strings.TrimSpace(source.OwnedBy),
+			ContextWindow:    model.ContextWindow,
 			Custom:           true,
 			BackingDetected:  sourceDetected,
 			Editable:         true,
@@ -564,7 +566,7 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		return
 	}
 	contextWindow := existing.ContextWindow
-	if !existingOK || contextWindow <= 0 || contextWindow == 32768 {
+	if provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing)) {
 		if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
 			contextWindow = detected
 		}

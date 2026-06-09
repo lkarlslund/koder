@@ -496,7 +496,7 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote"},{"id":"a-model"}]}`)
+		fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote","max_model_len":65536},{"id":"a-model","status":{"args":["llama-server","--ctx-size","49152"]}}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -529,8 +529,14 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	if !custom.Custom || !custom.Editable || !custom.BackingDetected || custom.SourceModelID != "z-model" {
 		t.Fatalf("expected custom option with detected backing model, got %#v", custom)
 	}
+	if custom.ContextWindow != 65536 {
+		t.Fatalf("expected custom context window 65536, got %#v", custom)
+	}
 	if options[1].Editable || !options[1].Detected {
 		t.Fatalf("expected detected model to be read-only, got %#v", options[1])
+	}
+	if options[1].ContextWindow != 49152 || options[2].ContextWindow != 65536 {
+		t.Fatalf("expected detected model context windows, got %#v", options)
 	}
 }
 
@@ -886,9 +892,49 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "live-model" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":65536}}`))
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"live-model","status":{"args":["llama-server","--ctx-size","131072"]}}]}`))
+		default:
+			t.Fatalf("unexpected model server path: %s", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "live-model"
+		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "live-model", ContextWindow: 131072})
+	})
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	if err := ctrl.SetModelForSelection(ctx, selection, "test", "live-model"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	if state.ContextWindow != 65536 || state.ModelInfo.ContextWindow != 65536 {
+		t.Fatalf("expected refreshed live context window 65536, got state=%d info=%#v", state.ContextWindow, state.ModelInfo)
+	}
+}
+
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/props":
+			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
 		default:

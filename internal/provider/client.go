@@ -379,7 +379,11 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 
 	models := make([]domain.Model, 0, len(payload.Data))
 	for _, item := range payload.Data {
-		models = append(models, domain.Model{ID: item.ID, OwnedBy: item.OwnedBy})
+		models = append(models, domain.Model{
+			ID:            item.ID,
+			OwnedBy:       item.OwnedBy,
+			ContextWindow: listedModelContextWindow(item.MaxModelLen, item.Status.Args, item.Status.Preset),
+		})
 	}
 	return models, nil
 }
@@ -412,14 +416,18 @@ func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (
 		if strings.TrimSpace(item.ID) != modelID {
 			continue
 		}
-		if item.MaxModelLen > 0 {
-			return item.MaxModelLen, nil
-		}
-		if n := contextWindowFromModelStatus(item.Status.Args, item.Status.Preset); n > 0 {
+		if n := listedModelContextWindow(item.MaxModelLen, item.Status.Args, item.Status.Preset); n > 0 {
 			return n, nil
 		}
 	}
 	return 0, nil
+}
+
+func listedModelContextWindow(maxModelLen int, args []string, preset string) int {
+	if maxModelLen > 0 {
+		return maxModelLen
+	}
+	return contextWindowFromModelStatus(args, preset)
 }
 
 func contextWindowFromModelStatus(args []string, preset string) int {
@@ -477,22 +485,20 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 		if err != nil {
 			return 0, err
 		}
+		props, err := client.Props(ctx, modelID)
+		if err == nil {
+			if props.DefaultGenerationSettings.NCtx > 0 {
+				return props.DefaultGenerationSettings.NCtx, nil
+			}
+		} else if !isOptionalContextWindowProbeError(err) {
+			return 0, err
+		}
 		maxModelLen, err := client.DetectModelContextWindow(ctx, modelID)
 		if err == nil {
 			if maxModelLen > 0 {
 				return maxModelLen, nil
 			}
 		} else if !isOptionalContextWindowProbeError(err) {
-			return 0, err
-		}
-		props, err := client.Props(ctx, modelID)
-		if err == nil {
-			if props.DefaultGenerationSettings.NCtx > 0 {
-				return props.DefaultGenerationSettings.NCtx, nil
-			}
-			return 32768, nil
-		}
-		if !isOptionalContextWindowProbeError(err) {
 			return 0, err
 		}
 	}

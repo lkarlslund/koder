@@ -456,6 +456,7 @@ type Part struct {
 type Model struct {
 	ID                string
 	OwnedBy           string
+	ContextWindow     int
 	SupportsImages    bool
 	SupportsPDFs      bool
 	CapabilitySource  string
