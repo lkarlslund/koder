@@ -336,6 +336,7 @@ type Controller struct {
 	session                     domain.Session
 	chat                        domain.Chat
 	workspace                   workspacepkg.Status
+	workspaceSnapshot           func(context.Context, string) (workspacepkg.Status, error)
 	workspaceWatchCancel        context.CancelFunc
 	workspaceRefreshMinInterval time.Duration
 	lastWorkspaceRefresh        time.Time
@@ -360,22 +361,28 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		agent:                       engine,
 		theme:                       normalizeTheme(cfg.UI.Theme),
 		subs:                        map[int]chan Event{},
+		workspaceSnapshot:           workspacepkg.Snapshot,
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 	}
 }
 
-// Start loads the initial session/chat and attaches the live chat runtime.
+// Start initializes global browser state. Sessions are activated by explicit
+// client selection or creation, not by process startup.
 func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot string) error {
+	_ = ctx
+	_ = mode
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
-	session, err := c.initialSession(ctx, mode, projectRoot)
-	if err != nil {
-		return err
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
 	}
-	if err := c.loadSession(ctx, session.ID, ""); err != nil {
-		return err
-	}
+	c.mu.Lock()
+	c.session = domain.Session{ProjectRoot: strings.TrimSpace(projectRoot)}
+	c.chat = domain.Chat{}
+	c.workspace = workspacepkg.Status{ProjectRoot: strings.TrimSpace(projectRoot)}
+	c.lastErr = ""
+	c.mu.Unlock()
 	return nil
 }
 
@@ -517,13 +524,7 @@ func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selectio
 	if chatRecord.ID == "" {
 		return owner, session, domain.Chat{}, nil, nil
 	}
-	var rt *chat.Chat
-	if _, ok := ownerSnapshot.Snapshots[chatRecord.ID]; !ok {
-		if loaded, err := owner.Chat(ctx, chatRecord.ID); err == nil {
-			rt = loaded
-		}
-	}
-	return owner, session, chatRecord, rt, nil
+	return owner, session, chatRecord, nil, nil
 }
 
 func (c *Controller) workspaceStatusForSession(session domain.Session) workspacepkg.Status {
@@ -1473,7 +1474,11 @@ func (c *Controller) requestWorkspaceRefresh(ctx context.Context, sessionID id.I
 	c.lastWorkspaceRefresh = now
 	c.mu.Unlock()
 
-	status, err := workspacepkg.Snapshot(ctx, projectRoot)
+	snapshot := c.workspaceSnapshot
+	if snapshot == nil {
+		snapshot = workspacepkg.Snapshot
+	}
+	status, err := snapshot(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -1860,15 +1865,17 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	c.lastErr = ""
 	c.mu.Unlock()
 
-	if err := c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshInitial); err != nil {
-		return err
-	}
 	c.replaceWorkspaceWatcher(session.ID, session.ProjectRoot)
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	for _, loaded := range runtimes {
 		loaded.Kick()
 	}
 	c.broadcast("snapshot", c.State())
+	go func(sessionID id.ID, projectRoot string) {
+		if err := c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshInitial); err != nil {
+			slog.Warn("initial workspace refresh failed", "session_id", sessionID, "project_root", projectRoot, "error", err)
+		}
+	}(session.ID, session.ProjectRoot)
 	return nil
 }
 

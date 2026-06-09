@@ -48,7 +48,8 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(ctrl.State().Session.ID), nil)
+	state := selectedTestState(t, ctrl)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(state.Session.ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 
 func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
-	firstID := ctrl.State().Session.ID
+	firstID := selectedTestState(t, ctrl).Session.ID
 	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
@@ -183,7 +184,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 
 func TestWebSocketClientsKeepIndependentSessionSelections(t *testing.T) {
 	ctrl := newTestController(t)
-	firstID := ctrl.State().Session.ID
+	firstID := selectedTestState(t, ctrl).Session.ID
 	second, err := ctrl.CreateSession(context.Background(), "Second", t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
@@ -270,7 +271,7 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 	if payload.ID != 7 {
 		t.Fatalf("expected response id 7, got %d", payload.ID)
 	}
-	if payload.Result.ActiveID != ctrl.State().Session.ID || len(payload.Result.Sessions) != 1 {
+	if payload.Result.ActiveID != "" || len(payload.Result.Sessions) != 1 {
 		t.Fatalf("unexpected sessions response: %#v", payload.Result)
 	}
 }
@@ -360,7 +361,7 @@ func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
 
 func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
-	activeID := ctrl.State().Session.ID
+	activeID := selectedTestState(t, ctrl).Session.ID
 	staleID := id.ID("019e72fa-1cb8-73ef-a5ca-247275f3f62f")
 	if staleID == activeID {
 		t.Fatal("test stale id unexpectedly matches active session")
@@ -406,8 +407,8 @@ func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	if len(resp.Result.State.Sessions) == 0 || !strings.Contains(resp.Result.State.Error, string(staleID)) {
 		t.Fatalf("expected welcome state with sessions and stale session message, got %#v", resp.Result.State)
 	}
-	if got := ctrl.State().Session.ID; got != activeID {
-		t.Fatalf("expected stale session hello not to switch active session from %s, got %s", activeID, got)
+	if got := ctrl.State().Session.ID; got != "" {
+		t.Fatalf("expected stale session hello not to activate a global session, got %s", got)
 	}
 }
 
@@ -719,9 +720,8 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if len(clients) != 1 || clients[0].ID != clientID || !clients[0].Connected {
 		t.Fatalf("expected registered debug client %q, got %#v", clientID, clients)
 	}
-	chats := recorder.Chats()
-	if len(chats) == 0 || chats[0].ID == "" {
-		t.Fatalf("expected debug chat records after hello, got %#v", chats)
+	if chats := recorder.Chats(); len(chats) != 0 {
+		t.Fatalf("expected welcome hello to avoid activating debug chats, got %#v", chats)
 	}
 }
 
@@ -749,8 +749,9 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	}
 	result := hello.Result.(map[string]any)
 	clientID := result["client_id"].(string)
-	activeChatID := ctrl.State().ActiveChatID
-	update := fmt.Sprintf(`{"id":2,"method":"client_state","params":{"selected_session":"%s","selected_chat":"%s","document_visible":true,"window_focused":true,"composer_focused":true,"viewport_width":120,"viewport_height":40,"stick_to_bottom":true,"open_dialog":"models","interrupt_visible":true,"interrupt_armed":true}}`, ctrl.State().Session.ID, activeChatID)
+	state := selectedTestState(t, ctrl)
+	activeChatID := state.ActiveChatID
+	update := fmt.Sprintf(`{"id":2,"method":"client_state","params":{"selected_session":"%s","selected_chat":"%s","document_visible":true,"window_focused":true,"composer_focused":true,"viewport_width":120,"viewport_height":40,"stick_to_bottom":true,"open_dialog":"models","interrupt_visible":true,"interrupt_armed":true}}`, state.Session.ID, activeChatID)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(update)); err != nil {
 		t.Fatalf("write client_state: %v", err)
 	}
@@ -1812,7 +1813,7 @@ func TestAssetHashIncludesVendoredAssets(t *testing.T) {
 
 func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	ctrl := newTestController(t)
-	sessionID := ctrl.State().Session.ID
+	sessionID := selectedTestState(t, ctrl).Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -1855,8 +1856,9 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 
 func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	ctrl := newTestController(t)
-	sessionID := ctrl.State().Session.ID
-	firstID := ctrl.State().ActiveChatID
+	state := selectedTestState(t, ctrl)
+	sessionID := state.Session.ID
+	firstID := state.ActiveChatID
 	second, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "side chat")
 	if err != nil {
 		t.Fatalf("new chat: %v", err)
@@ -1965,8 +1967,9 @@ func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
 
 func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	ctrl := newTestController(t)
-	sessionID := ctrl.State().Session.ID
-	firstID := ctrl.State().ActiveChatID
+	state := selectedTestState(t, ctrl)
+	sessionID := state.Session.ID
+	firstID := state.ActiveChatID
 	second, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "second")
 	if err != nil {
 		t.Fatalf("new second chat: %v", err)
@@ -2010,7 +2013,7 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	if !resp.Result.Reordered {
 		t.Fatal("expected reorder_chats acknowledgement")
 	}
-	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	state, err = ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("state for session: %v", err)
 	}
@@ -2030,8 +2033,9 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 
 func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	ctrl := newTestController(t)
-	sessionID := ctrl.State().Session.ID
-	firstID := ctrl.State().ActiveChatID
+	state := selectedTestState(t, ctrl)
+	sessionID := state.Session.ID
+	firstID := state.ActiveChatID
 	deleted, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: sessionID, ChatID: firstID}, "side chat")
 	if err != nil {
 		t.Fatalf("new chat: %v", err)
@@ -2069,7 +2073,7 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	if resp.Result.ActiveChatID == "" || resp.Result.ActiveChatID == deletedID {
 		t.Fatalf("expected delete_chat response to select a different chat, got %s", resp.Result.ActiveChatID)
 	}
-	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	state, err = ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("state for session: %v", err)
 	}
@@ -2089,7 +2093,7 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 
 func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testing.T) {
 	ctrl := newTestController(t)
-	initialID := ctrl.State().Session.ID
+	initialID := selectedTestState(t, ctrl).Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
@@ -2121,7 +2125,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	if !listResp.OK {
 		t.Fatalf("expected list_sessions ok, got %s", listResp.Error)
 	}
-	if listResp.Result.ActiveID != initialID || len(listResp.Result.Sessions) != 1 || listResp.Result.Sessions[0].ID != initialID {
+	if listResp.Result.ActiveID != "" || len(listResp.Result.Sessions) != 1 || listResp.Result.Sessions[0].ID != initialID {
 		t.Fatalf("unexpected initial session list: %#v", listResp.Result)
 	}
 
@@ -2321,7 +2325,8 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(ctrl.State().Session.ID), nil)
+	state := selectedTestState(t, ctrl)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(state.Session.ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -2676,7 +2681,26 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 	if err := ctrl.Start(context.Background(), app.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	if _, err := ctrl.CreateSession(context.Background(), "Test Session", workdir, false); err != nil {
+		t.Fatalf("create test session: %v", err)
+	}
 	return ctrl
+}
+
+func selectedTestState(t *testing.T, ctrl *app.Controller) app.State {
+	t.Helper()
+	sessions, err := ctrl.Sessions(context.Background())
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessions.Sessions) == 0 {
+		t.Fatal("expected test session")
+	}
+	state, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: sessions.Sessions[0].ID})
+	if err != nil {
+		t.Fatalf("state for test session: %v", err)
+	}
+	return state
 }
 
 func readMessage(t *testing.T, ctx context.Context, conn *websocket.Conn) []byte {

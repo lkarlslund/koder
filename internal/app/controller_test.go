@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,20 +153,28 @@ func newSelectedChat(t *testing.T, ctrl *Controller, selection Selection, title 
 	return chatRecord
 }
 
-func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
-	ctrl, _ := newTestController(t)
+func TestControllerStartDoesNotActivateSession(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
+	if err := ctrl.Start(context.Background(), StartupModeNew, t.TempDir()); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
 
 	state := ctrl.State()
-	if state.Session.ID == "" {
-		t.Fatal("expected active session")
+	if state.Session.ID != "" {
+		t.Fatalf("expected no active session on startup, got %s", state.Session.ID)
 	}
-	if state.ActiveChatID == "" {
-		t.Fatal("expected active chat")
-	}
-	if len(state.ChatStatuses) == 0 {
-		t.Fatal("expected chat sidebar statuses")
+	if state.ActiveChatID != "" {
+		t.Fatalf("expected no active chat on startup, got %s", state.ActiveChatID)
 	}
 	select {
 	case event := <-events:
@@ -1010,6 +1016,7 @@ func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	activateTestSession(t, ctrl, workdir)
 	settings := accesssettings.LockedDown()
 	selection := controllerSelection(ctrl)
 	if err := ctrl.SetAccessSettingsForSelection(context.Background(), selection, settings); err != nil {
@@ -1102,8 +1109,11 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeResume, workspaceA); err != nil {
 		t.Fatalf("start resume: %v", err)
 	}
-	if got := ctrl.State().Session.ID; got != sessionB.ID {
-		t.Fatalf("expected newest session %s, got %s", sessionB.ID, got)
+	if got := ctrl.State().Session.ID; got != "" {
+		t.Fatalf("expected no active session at startup, got %s", got)
+	}
+	if _, err := ctrl.StateForSelection(ctx, Selection{SessionID: sessionB.ID}); err != nil {
+		t.Fatalf("state for workspace b session: %v", err)
 	}
 	sessionState, err := ctrl.Sessions(ctx)
 	if err != nil {
@@ -1173,325 +1183,6 @@ func TestControllerStateForSelectionDoesNotSwitchControllerState(t *testing.T) {
 	}
 }
 
-func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testing.T) {
-	var requests atomic.Int32
-	var requestBodies atomic.Value
-	requestBodies.Store([]string(nil))
-	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read request body: %v", err)
-		}
-		current := requestBodies.Load().([]string)
-		requestBodies.Store(append(current, string(body)))
-		requests.Add(1)
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"resumed"}}],"usage":{"total_tokens":1}}`))
-	}))
-	defer providerServer.Close()
-
-	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.Tools.Enabled[domain.ToolKindBash] = true
-	cfg.Defaults.ProviderID = "test"
-	cfg.Defaults.ModelID = "model"
-	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: providerServer.URL + "/v1"},
-	}
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
-	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
-	workdir := t.TempDir()
-	session, err := modeltest.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
-		t.Fatalf("workspace: %v", err)
-	}
-	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
-	if err != nil {
-		t.Fatalf("default chat: %v", err)
-	}
-	chatRecord.AutoRestart = true
-	if err := testUpdateChat(ctx, st, chatRecord); err != nil {
-		t.Fatalf("mark auto restart: %v", err)
-	}
-	if _, err := testAppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
-		ToolCallID: "call_1",
-		Tool:       domain.ToolKindBash,
-		Args:       map[string]string{"command": "printf resumed-tool"},
-		Status:     domain.ToolStatusPending,
-	}}, "", domain.Usage{}); err != nil {
-		t.Fatalf("append pending tool call: %v", err)
-	}
-	engine := agent.New(cfg, st, nil, nil)
-	ctrl := New(cfg, engine)
-	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
-		t.Fatalf("start controller: %v", err)
-	}
-	if got := ctrl.State().Session.ID; got != session.ID {
-		t.Fatalf("expected restart interrupted session %s, got %s", session.ID, got)
-	}
-	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistant, ok := timeline[0].Content.(domain.AssistantMessage)
-	if !ok {
-		t.Fatalf("expected assistant tool item, got %T", timeline[0].Content)
-	}
-	call := assistant.ToolByID("call_1")
-	if call == nil || call.Status != domain.ToolStatusErrored || call.Error == nil || call.Error.Code != domain.NoticeReasonProcessRestart {
-		t.Fatalf("expected pending process-interrupted tool to be marked failed, got %#v", call)
-	}
-	deadline := time.After(2 * time.Second)
-	for requests.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for auto resume provider request; state=%#v", ctrl.State())
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	bodies := requestBodies.Load().([]string)
-	if len(bodies) == 0 {
-		t.Fatal("expected captured provider request")
-	}
-	if strings.Contains(bodies[0], "Session update:") || strings.Contains(bodies[0], "process was restarting") {
-		t.Fatalf("expected restart continuation without interruption note, got %s", bodies[0])
-	}
-	chatRecord, err = testGetChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chatRecord.AutoRestart {
-		t.Fatalf("expected auto-restart marker to be cleared, got %#v", chatRecord)
-	}
-}
-
-func TestControllerStartupNewResumesRestartInterruptedChatBeforeQueuedUserInput(t *testing.T) {
-	var requestBodies atomic.Value
-	requestBodies.Store([]string(nil))
-	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read request body: %v", err)
-		}
-		current := requestBodies.Load().([]string)
-		requestBodies.Store(append(current, string(body)))
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"handled user queue"}}],"usage":{"total_tokens":1}}`))
-	}))
-	defer providerServer.Close()
-
-	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.Defaults.ProviderID = "test"
-	cfg.Defaults.ModelID = "model"
-	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: providerServer.URL + "/v1"},
-	}
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
-	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
-	workdir := t.TempDir()
-	session, err := modeltest.CreateSession(ctx, st, "Interrupted Session", "test", "model", nil)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
-		t.Fatalf("workspace: %v", err)
-	}
-	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
-	if err != nil {
-		t.Fatalf("default chat: %v", err)
-	}
-	chatRecord.AutoRestart = true
-	if err := testUpdateChat(ctx, st, chatRecord); err != nil {
-		t.Fatalf("mark auto restart: %v", err)
-	}
-	if err := testSetChatQueuedInputs(ctx, st, chatRecord.ID, []domain.QueuedInput{{
-		ID:        id.New(),
-		Kind:      domain.QueuedInputKindQueued,
-		Delivery:  domain.QueuedInputDeliveryNextTurn,
-		Origin:    domain.QueuedInputOriginUser,
-		Text:      "run the user request",
-		Source:    domain.UserMessageSourceUser,
-		CreatedAt: time.Now().UTC(),
-	}}); err != nil {
-		t.Fatalf("queue user input: %v", err)
-	}
-	engine := agent.New(cfg, st, nil, nil)
-	ctrl := New(cfg, engine)
-	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
-		t.Fatalf("start controller: %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for len(requestBodies.Load().([]string)) < 2 {
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for restart continuation and queued user provider requests")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	bodies := requestBodies.Load().([]string)
-	if strings.Contains(bodies[0], "process was restarting") {
-		t.Fatalf("did not expect restart auto-resume note in provider request, got %s", bodies[0])
-	}
-	body := bodies[len(bodies)-1]
-	if !strings.Contains(body, "run the user request") {
-		t.Fatalf("expected queued user request in provider request, got %s", body)
-	}
-	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sawAutoResume bool
-	for _, item := range timeline {
-		user, ok := item.Content.(domain.UserMessage)
-		if !ok || user.Source != domain.UserMessageSourceAutoResume {
-			continue
-		}
-		if user.Text != "Continue from where you left off." {
-			t.Fatalf("unexpected auto-resume user message, got %#v", user)
-		}
-		sawAutoResume = true
-	}
-	if !sawAutoResume {
-		t.Fatalf("expected visible auto-resume user message, got %#v", timeline)
-	}
-	chatRecord, err = testGetChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chatRecord.AutoRestart {
-		t.Fatalf("expected auto-restart marker to be cleared, got %#v", chatRecord)
-	}
-}
-
-func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.Defaults.ProviderID = "test"
-	cfg.Defaults.ModelID = "model"
-	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
-	workdir := t.TempDir()
-	session, err := modeltest.CreateSession(ctx, st, "Session", "test", "model", nil)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
-		t.Fatalf("workspace: %v", err)
-	}
-	chatRecord, err := modeltest.DefaultChat(ctx, st, session.ID)
-	if err != nil {
-		t.Fatalf("default chat: %v", err)
-	}
-	if _, err := testAppendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
-		ToolCallID: "call_exec",
-		Tool:       domain.ToolKindExecCommand,
-		Args:       map[string]string{"cmd": "sleep 60"},
-		Status:     domain.ToolStatusRunning,
-	}}, "", domain.Usage{}); err != nil {
-		t.Fatalf("append running tool call: %v", err)
-	}
-
-	engine := agent.New(cfg, st, nil, nil)
-	ctrl := New(cfg, engine)
-	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
-		t.Fatalf("start controller: %v", err)
-	}
-	timeline, err := testTimelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistant, ok := timeline[0].Content.(domain.AssistantMessage)
-	if !ok {
-		t.Fatalf("expected assistant tool item, got %T", timeline[0].Content)
-	}
-	call := assistant.ToolByID("call_exec")
-	if call == nil || call.Status != domain.ToolStatusErrored || call.Error == nil || !strings.Contains(call.Error.Message, "restarted") {
-		t.Fatalf("expected stale running tool to be marked failed, got %#v", call)
-	}
-}
-
-func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
-	cfg.Defaults.ProviderID = "test"
-	cfg.Defaults.ModelID = "model"
-	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
-	workdir := t.TempDir()
-	sessionA, err := modeltest.CreateSession(ctx, st, "Older", "test", "model", nil)
-	if err != nil {
-		t.Fatalf("create older session: %v", err)
-	}
-	if err := setSessionProjectRoot(ctx, st, sessionA.ID, workdir); err != nil {
-		t.Fatalf("workspace older: %v", err)
-	}
-	sessionB, err := modeltest.CreateSession(ctx, st, "Last Used", "test", "model", nil)
-	if err != nil {
-		t.Fatalf("create last session: %v", err)
-	}
-	if err := setSessionProjectRoot(ctx, st, sessionB.ID, workdir); err != nil {
-		t.Fatalf("workspace last: %v", err)
-	}
-	if _, err := modeltest.TouchSession(ctx, st, sessionB.ID); err != nil {
-		t.Fatalf("touch last session: %v", err)
-	}
-	defaultChat, err := modeltest.DefaultChat(ctx, st, sessionB.ID)
-	if err != nil {
-		t.Fatalf("default chat: %v", err)
-	}
-	if _, err := modeltest.CreateChat(ctx, st, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
-		t.Fatalf("create side chat: %v", err)
-	}
-	defaultChat.UpdatedAt = time.Now().UTC().Add(time.Hour)
-	if err := testUpdateChat(ctx, st, defaultChat); err != nil {
-		t.Fatalf("mark default chat last used: %v", err)
-	}
-
-	engine := agent.New(cfg, st, nil, nil)
-	ctrl := New(cfg, engine)
-	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
-		t.Fatalf("start controller: %v", err)
-	}
-	state := ctrl.State()
-	if got := state.Session.ID; got != sessionB.ID {
-		t.Fatalf("expected last session %s, got %s", sessionB.ID, got)
-	}
-	if got := state.ActiveChatID; got != defaultChat.ID {
-		t.Fatalf("expected last chat %s, got %s", defaultChat.ID, got)
-	}
-}
-
 func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
@@ -1508,6 +1199,7 @@ func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	activateTestSession(t, ctrl, workdir)
 	selection := controllerSelection(ctrl)
 	first := selection.ChatID
 	_ = newSelectedChat(t, ctrl, selection, "Side")
@@ -1519,7 +1211,11 @@ func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	if err := next.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("restart controller: %v", err)
 	}
-	if got := next.State().ActiveChatID; got != first {
+	state, err := next.StateForSelection(ctx, Selection{SessionID: selection.SessionID})
+	if err != nil {
+		t.Fatalf("state after restart: %v", err)
+	}
+	if got := state.ActiveChatID; got != first {
 		t.Fatalf("expected restarted controller to focus chat %s, got %s", first, got)
 	}
 }
@@ -1540,7 +1236,7 @@ func TestControllerSelectedSessionPersistsLastUsedSession(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	first := ctrl.State().Session.ID
+	first := activateTestSession(t, ctrl, workdir).ID
 	if _, err := ctrl.CreateSession(ctx, "Second", workdir, false); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -1552,7 +1248,13 @@ func TestControllerSelectedSessionPersistsLastUsedSession(t *testing.T) {
 	if err := next.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("restart controller: %v", err)
 	}
-	if got := next.State().Session.ID; got != first {
+	if _, err := next.StateForSelection(ctx, Selection{SessionID: first}); err != nil {
+		t.Fatalf("state after restart: %v", err)
+	}
+	if got := next.State().Session.ID; got != "" {
+		t.Fatalf("expected restarted controller to avoid startup session activation, got %s", got)
+	}
+	if got := first; got == "" {
 		t.Fatalf("expected restarted controller to resume session %s, got %s", first, got)
 	}
 }
@@ -1589,6 +1291,10 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	session := activateTestSession(t, ctrl, workdir)
+	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+		t.Fatalf("refresh workspace: %v", err)
+	}
 
 	state := ctrl.State()
 	if !state.Workspace.Available {
@@ -1603,7 +1309,7 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ctrl.RefreshWorkspace(ctx); err != nil {
+	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
 		t.Fatalf("refresh workspace: %v", err)
 	}
 	deadline := time.After(time.Second)
@@ -1617,6 +1323,53 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 			t.Fatal("expected workspace delta")
 		}
 	}
+}
+
+func TestControllerStartDoesNotWaitForWorkspaceSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workdir := t.TempDir()
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+		select {
+		case <-snapshotStarted:
+		default:
+			close(snapshotStarted)
+		}
+		<-releaseSnapshot
+		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+	}
+
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- ctrl.Start(ctx, StartupModeNew, workdir)
+	}()
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("start controller: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("controller start waited for workspace snapshot")
+	}
+	select {
+	case <-snapshotStarted:
+		t.Fatal("workspace snapshot should not start until a session is activated")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseSnapshot)
 }
 
 func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
@@ -1646,6 +1399,7 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	session := activateTestSession(t, ctrl, workdir)
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
 	ctrl.mu.Lock()
@@ -1654,6 +1408,9 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+		t.Fatalf("refresh workspace: %v", err)
 	}
 
 	staleSeen := false
@@ -1701,6 +1458,7 @@ func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execru
 	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	activateTestSession(t, ctrl, workdir)
 	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	return ctrl, st, execManager
 }
@@ -1733,8 +1491,21 @@ func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Cont
 	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
+	activateTestSession(t, ctrl, projectRoot)
 	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	return ctrl, st
+}
+
+func activateTestSession(t *testing.T, ctrl *Controller, projectRoot string) domain.Session {
+	t.Helper()
+	session, err := ctrl.CreateSession(context.Background(), "New Session", projectRoot, false)
+	if err != nil {
+		t.Fatalf("create test session: %v", err)
+	}
+	if err := ctrl.loadSession(context.Background(), session.ID, ""); err != nil {
+		t.Fatalf("activate test session: %v", err)
+	}
+	return session
 }
 
 func TestNewestSessionUsesUpdatedAtThenID(t *testing.T) {
