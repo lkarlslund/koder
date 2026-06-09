@@ -1147,6 +1147,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
 		!strings.Contains(fullPage, `flowchart: {htmlLabels: true`) ||
 		!strings.Contains(fullPage, `HTML_INTEGRATION_POINTS: {foreignobject: true}`) ||
+		!strings.Contains(fullPage, `ADD_TAGS: ['foreignobject']`) ||
 		!strings.Contains(fullPage, `FORBID_CONTENTS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']`) ||
 		!strings.Contains(fullPage, `openMermaidLightbox`) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams with sanitized html labels")

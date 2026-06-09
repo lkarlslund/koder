@@ -20,9 +20,8 @@
     function sanitizeMermaidSVG(html) {
       if (!window.DOMPurify) return html;
       return DOMPurify.sanitize(html, {
-        USE_PROFILES: {svg: true, svgFilters: true, html: true},
-        ADD_TAGS: ['style', 'foreignObject', 'foreignobject', 'div', 'span', 'p', 'br', 'b', 'strong', 'i', 'em'],
-        ADD_ATTR: ['class', 'style', 'xmlns'],
+        ADD_TAGS: ['foreignobject'],
+        ADD_ATTR: ['dominant-baseline'],
         HTML_INTEGRATION_POINTS: {foreignobject: true},
         FORBID_CONTENTS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
         FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']
