@@ -1638,6 +1638,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `list_sessions`) {
 		t.Fatalf("expected session dialog to list sessions")
 	}
+	if !strings.Contains(fullPage, `normalizeSessionState(result)`) ||
+		!strings.Contains(fullPage, `source.sessions || source.Sessions || []`) {
+		t.Fatalf("expected session list state to normalize rpc and snapshot shapes")
+	}
 	if !strings.Contains(fullPage, `switch_session`) {
 		t.Fatalf("expected session dialog to switch sessions")
 	}

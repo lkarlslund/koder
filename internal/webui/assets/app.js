@@ -1595,7 +1595,7 @@
             this.restartHardRequested = false;
           }
           if (this.welcomeMode()) {
-            this.sessionState = {active_id: 0, project_root: this.state.project_root || this.state.ProjectRoot || '', sessions: this.state.sessions || this.state.Sessions || []};
+            this.sessionState = this.normalizeSessionState(this.state);
           }
           this.syncSessionURL();
           if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
@@ -3084,21 +3084,30 @@
         openSessionDialog() {
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
-          this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, project_root: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
+          this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });
         },
         closeSessionDialog() { this.showSessions = false; this.closeSessionEditor(); this.reportClientStateSoon(); },
         loadWelcomeSessions() {
           this.rpc('list_sessions', {}).then(result => {
-            this.sessionState = result || {active_id: 0, project_root: '', sessions: []};
-            this.state.sessions = this.sessionState.sessions || [];
+            this.sessionState = this.normalizeSessionState(result);
+            this.state.sessions = this.sessionState.sessions;
             this.state.Sessions = this.state.sessions;
             this.state.project_root = this.sessionState.project_root || this.state.project_root || '';
             this.state.ProjectRoot = this.state.project_root;
           }).catch(err => this.showToast(err.message));
         },
+        normalizeSessionState(value) {
+          const source = value || {};
+          const sessions = source.sessions || source.Sessions || [];
+          return {
+            active_id: source.active_id || source.ActiveID || '',
+            project_root: source.project_root || source.ProjectRoot || '',
+            sessions: Array.isArray(sessions) ? sessions : [],
+          };
+        },
         sessionRows() {
           if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
-          return this.state.sessions || this.state.Sessions || this.sessionState.sessions || [];
+          return this.normalizeSessionState(this.state).sessions || this.sessionState.sessions || [];
         },
         activeSessionID() { return this.currentSessionID(); },
         currentSession() { return this.state.session || this.state.Session || {}; },
@@ -3120,7 +3129,7 @@
           this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
         beginCreateSessionFromWelcome() {
-          this.sessionState = {active_id: 0, project_root: this.state.project_root || this.state.ProjectRoot || '', sessions: this.state.sessions || this.state.Sessions || []};
+          this.sessionState = this.normalizeSessionState(this.state);
           this.beginCreateSession();
         },
         beginCreateSession() {
@@ -3156,7 +3165,7 @@
               this.applyState(s);
               return this.rpc('list_sessions', {});
             }).then(result => {
-              this.sessionState = result || this.sessionState;
+              this.sessionState = this.normalizeSessionState(result || this.sessionState);
               this.closeSessionEditor();
             });
             return;
@@ -3188,7 +3197,7 @@
           this.rpc('delete_session', {session_id: id}).then(s => {
             this.applyState(s);
             return this.rpc('list_sessions', {});
-          }).then(result => { this.sessionState = result || this.sessionState; });
+          }).then(result => { this.sessionState = this.normalizeSessionState(result || this.sessionState); });
         },
         openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },
