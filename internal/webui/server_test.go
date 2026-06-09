@@ -1145,7 +1145,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
 	}
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
-		!strings.Contains(fullPage, `flowchart: {htmlLabels: true`) ||
+		!strings.Contains(fullPage, `flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: false}`) ||
 		!strings.Contains(fullPage, `HTML_INTEGRATION_POINTS: {foreignobject: true}`) ||
 		!strings.Contains(fullPage, `ADD_TAGS: ['foreignobject']`) ||
 		!strings.Contains(fullPage, `FORBID_CONTENTS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button']`) ||
