@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -83,7 +84,7 @@ type Status struct {
 	Role               chatrole.Role
 	Archived           bool
 	ActiveMilestoneRef string
-	AssignedTodoRef    id.ID
+	AssignedTodoRef    string
 	State              RunState
 	Status             string
 	Busy               bool
@@ -98,7 +99,7 @@ type StartRequest struct {
 	Objective    string
 	Title        string
 	MilestoneRef string
-	TodoRef      id.ID
+	TodoRef      string
 }
 
 type UpdateRequest struct {
@@ -195,7 +196,11 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 		out["milestone_key"] = ref
 	}
 	if todoRef := strings.TrimSpace(args["task_key"]); todoRef != "" {
-		out["task_key"] = todoRef
+		key, err := planning.ParseTodoKey(todoRef)
+		if err != nil {
+			return nil, err
+		}
+		out["task_key"] = key
 	}
 	return out, nil
 }
@@ -344,7 +349,7 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_key"],
-		TodoRef:      id.ID(req.Args["task_key"]),
+		TodoRef:      req.Args["task_key"],
 	})
 	if err != nil {
 		return tools.Result{}, err

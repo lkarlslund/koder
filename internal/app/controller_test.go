@@ -484,7 +484,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTodoRef == id.ID(planning.TodoKey(todos[0])) {
+		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTodoRef == planning.TodoKey(todos[0]) {
 			found = true
 			break
 		}

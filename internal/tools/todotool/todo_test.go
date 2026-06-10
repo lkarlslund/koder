@@ -7,7 +7,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
@@ -17,12 +16,15 @@ import (
 )
 
 func TestTodoUpdateItemParsesTaskKey(t *testing.T) {
-	id, err := planning.ParseTodoKey("T001")
+	id, err := planning.ParseTodoKey("M001T001")
 	if err != nil {
 		t.Fatalf("expected task key to parse, got %v", err)
 	}
-	if id != "T001" {
+	if id != "M001T001" {
 		t.Fatalf("expected parsed task key, got %s", id)
+	}
+	if _, err := planning.ParseTodoKey("M001"); err == nil {
+		t.Fatal("expected milestone key to be rejected as task key")
 	}
 }
 
@@ -323,7 +325,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		WorkflowRole:          chatrole.Execution,
 		ActiveMilestoneRef:    "M001",
 		AssignedTodoBucketRef: "M001",
-		AssignedTodoRef:       id.ID(planning.TodoKey(todos[0])),
+		AssignedTodoRef:       planning.TodoKey(todos[0]),
 	}
 	runtime := tools.Runtime{
 		SessionID:             session.ID,

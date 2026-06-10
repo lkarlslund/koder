@@ -289,7 +289,7 @@ type Chat struct {
 	ToolStates             ToolStates
 	ActiveMilestoneRef     string
 	AssignedTodoBucketRef  string
-	AssignedTodoRef        ID
+	AssignedTodoRef        string
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
 	TokenUsage             Usage

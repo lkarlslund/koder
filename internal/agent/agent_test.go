@@ -3592,7 +3592,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 		switch len(requests) {
 		case 1:
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the task.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tasks_update\",\"arguments\":\"{\\\"task_key\\\":\\\"T001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"I'll update the task.\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"tasks_update\",\"arguments\":\"{\\\"task_key\\\":\\\"M001T001\\\",\\\"status\\\":\\\"bogus\\\"}\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"I saw the tool error."}}],"usage":{"total_tokens":1}}`))

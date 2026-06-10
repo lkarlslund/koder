@@ -971,7 +971,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 		return nil, err
 	}
 	items := make([]planning.TodoItem, 0, len(contents))
-	nextKey := nextTodoKey(allTodos)
+	nextKey := nextTodoKey(allTodos, milestoneRef)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
@@ -988,7 +988,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
-		nextKey = incrementPlanningKey(nextKey, "T")
+		nextKey = incrementTodoKey(nextKey, milestoneRef)
 	}
 	for _, item := range items {
 		if err := s.planSrc.SaveTodo(ctx, item); err != nil {
@@ -1009,7 +1009,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
+func (s *Session) UpdateTodoItem(ctx context.Context, todoID string, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	if s == nil {
 		return planning.TodoItem{}, fmt.Errorf("session is required")
 	}
@@ -1020,7 +1020,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	found := false
 	for milestoneRef, todos := range s.todosByRef {
 		for _, candidate := range todos {
-			if planning.TodoKey(candidate) == string(todoID) || candidate.ID == todoID {
+			if planning.TodoKey(candidate) == todoID {
 				item = candidate
 				ref = milestoneRef
 				found = true
@@ -1049,7 +1049,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	s.mu.Lock()
 	todos := slices.Clone(s.todosByRef[ref])
 	for idx := range todos {
-		if planning.TodoKey(todos[idx]) == string(todoID) || todos[idx].ID == todoID {
+		if planning.TodoKey(todos[idx]) == todoID {
 			todos[idx] = item
 			break
 		}
@@ -1157,7 +1157,7 @@ func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, miles
 	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
 }
 
-func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
+func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID string, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
 	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
 		return planning.TodoItem{}, fmt.Errorf("chat is scoped to task %q", assigned)
 	}
@@ -1168,7 +1168,7 @@ func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status
 		}
 		found := false
 		for _, item := range todos {
-			if item.ID == todoID || planning.TodoKey(item) == string(todoID) {
+			if planning.TodoKey(item) == todoID {
 				found = true
 				break
 			}
@@ -1224,8 +1224,8 @@ func assignedMilestoneRef(chat domain.Chat) string {
 	return assigned
 }
 
-func assignedTodoRef(chat domain.Chat) id.ID {
-	return id.ID(strings.TrimSpace(string(chat.AssignedTodoRef)))
+func assignedTodoRef(chat domain.Chat) string {
+	return strings.TrimSpace(chat.AssignedTodoRef)
 }
 
 func (s *Session) requireSession(sessionID id.ID) error {
@@ -1405,27 +1405,29 @@ func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
 	return out
 }
 
-func nextTodoKey(items []planning.TodoItem) string {
+func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
 	next := 1
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
-		if !strings.HasPrefix(key, "T") {
+		prefix := strings.TrimSpace(milestoneKey) + "T"
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		var n int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(key, "T"), "%d", &n); err == nil && n >= next {
+		if _, err := fmt.Sscanf(strings.TrimPrefix(key, prefix), "%d", &n); err == nil && n >= next {
 			next = n + 1
 		}
 	}
-	return fmt.Sprintf("T%03d", next)
+	return planning.ScopedTodoKey(milestoneKey, next)
 }
 
-func incrementPlanningKey(key, prefix string) string {
+func incrementTodoKey(key, milestoneKey string) string {
+	prefix := strings.TrimSpace(milestoneKey) + "T"
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return prefix + "001"
+		return planning.ScopedTodoKey(milestoneKey, 1)
 	}
-	return fmt.Sprintf("%s%03d", prefix, n+1)
+	return planning.ScopedTodoKey(milestoneKey, n+1)
 }
 
 var _ tools.SessionControl = (*Session)(nil)

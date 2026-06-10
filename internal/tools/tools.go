@@ -139,7 +139,7 @@ type Runtime struct {
 	ChatRole              chatrole.Role
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
-	AssignedTodoRef       id.ID
+	AssignedTodoRef       string
 	SessionControl        SessionControl
 	TaskControl           TaskControl
 	Services              map[string]any

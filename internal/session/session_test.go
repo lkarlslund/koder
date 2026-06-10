@@ -159,7 +159,7 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTodoRef: id.ID(planning.TodoKey(todos[0]))})
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTodoRef: planning.TodoKey(todos[0])})
 	listed, err := control.ListTodos(ctx, sessionRecord.ID, "M001")
 	if err != nil {
 		t.Fatal(err)

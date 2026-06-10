@@ -19,7 +19,7 @@ type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
 	AddTodoItems(context.Context, id.ID, string, []string) ([]planning.TodoItem, error)
-	UpdateTodoItem(context.Context, id.ID, planning.TodoStatus, string, string) (planning.TodoItem, error)
+	UpdateTodoItem(context.Context, string, planning.TodoStatus, string, string) (planning.TodoItem, error)
 	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
 }
 
@@ -57,13 +57,13 @@ func AssignedMilestoneRef(runtime Runtime) string {
 	return assigned
 }
 
-func AssignedTodoRef(runtime Runtime) id.ID {
-	return id.ID(strings.TrimSpace(string(runtime.AssignedTodoRef)))
+func AssignedTodoRef(runtime Runtime) string {
+	return strings.TrimSpace(runtime.AssignedTodoRef)
 }
 
-func TodoScopeAllows(runtime Runtime, todoID id.ID) error {
+func TodoScopeAllows(runtime Runtime, todoID string) error {
 	assigned := AssignedTodoRef(runtime)
-	if assigned == "" || todoID == assigned || string(todoID) == string(assigned) {
+	if assigned == "" || todoID == assigned {
 		return nil
 	}
 	return fmt.Errorf("chat is scoped to task %q", assigned)
@@ -76,7 +76,7 @@ func ScopedTodos(runtime Runtime, todos []planning.TodoItem) []planning.TodoItem
 	}
 	out := make([]planning.TodoItem, 0, 1)
 	for _, item := range todos {
-		if item.ID == assigned || planning.TodoKey(item) == string(assigned) {
+		if planning.TodoKey(item) == assigned {
 			out = append(out, item)
 			break
 		}
@@ -215,4 +215,4 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	return text
 }
 
-func FormatTodoID(id id.ID) string { return id }
+func FormatTodoID(key string) string { return key }

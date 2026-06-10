@@ -222,7 +222,7 @@ type ChatStoredItem struct {
 	Archived           bool   `json:"archived,omitempty"`
 	QueuedInputs       int    `json:"queued_inputs,omitempty"`
 	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
-	AssignedTodoRef    id.ID  `json:"assigned_todo_ref,omitempty"`
+	AssignedTodoRef    string `json:"assigned_todo_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`
 }
 

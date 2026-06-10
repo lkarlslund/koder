@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +94,14 @@ func TodoKey(item TodoItem) string {
 	return strings.TrimSpace(string(item.ID))
 }
 
+func ScopedTodoKey(milestoneKey string, n int) string {
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	if milestoneKey == "" || n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%sT%03d", milestoneKey, n)
+}
+
 func NormalizePlanKeys(plan Plan) (Plan, bool) {
 	next := plan
 	next.Milestones = slices.Clone(plan.Milestones)
@@ -137,18 +146,21 @@ func NormalizePlanKeys(plan Plan) (Plan, bool) {
 func NormalizeTodosKeys(items []TodoItem, milestoneKeys map[string]string) ([]TodoItem, bool) {
 	next := slices.Clone(items)
 	changed := false
-	nextTaskNumber := nextTodoKeyNumber(next)
 	for idx := range next {
 		item := &next[idx]
-		if strings.TrimSpace(item.Key) == "" {
-			item.Key = formatPlanningKey("T", nextTaskNumber)
-			nextTaskNumber++
-			changed = true
-		}
-		item.Key = strings.TrimSpace(item.Key)
 		milestoneRef := strings.TrimSpace(item.MilestoneRef)
 		if replacement := milestoneKeys[milestoneRef]; replacement != "" && replacement != milestoneRef {
 			item.MilestoneRef = replacement
+			milestoneRef = replacement
+			changed = true
+		}
+		oldKey := strings.TrimSpace(item.Key)
+		item.Key = normalizeTodoKeyForMilestone(item.Key, milestoneRef)
+		if item.Key != oldKey {
+			changed = true
+		}
+		if item.Key == "" {
+			item.Key = nextTodoKey(next, milestoneRef)
 			changed = true
 		}
 	}
@@ -185,14 +197,40 @@ func nextPlanningKeyNumber(items []Milestone, prefix string) int {
 	return next
 }
 
-func nextTodoKeyNumber(items []TodoItem) int {
+func nextTodoKey(items []TodoItem, milestoneKey string) string {
+	return ScopedTodoKey(milestoneKey, nextTodoKeyNumber(items, milestoneKey))
+}
+
+func nextTodoKeyNumber(items []TodoItem, milestoneKey string) int {
 	next := 1
 	for _, item := range items {
-		if n, ok := parsePlanningKey(item.Key, "T"); ok && n >= next {
+		if n, ok := parseTodoKeyNumber(item.Key, milestoneKey); ok && n >= next {
 			next = n + 1
 		}
 	}
 	return next
+}
+
+func normalizeTodoKeyForMilestone(raw, milestoneKey string) string {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return ""
+	}
+	if _, ok := parseTodoKeyNumber(key, milestoneKey); ok {
+		return key
+	}
+	if n, ok := parsePlanningKey(key, "T"); ok {
+		return ScopedTodoKey(milestoneKey, n)
+	}
+	return key
+}
+
+func parseTodoKeyNumber(raw, milestoneKey string) (int, bool) {
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	if milestoneKey == "" {
+		return 0, false
+	}
+	return parsePlanningKey(raw, milestoneKey+"T")
 }
 
 func formatPlanningKey(prefix string, n int) string {
@@ -204,8 +242,8 @@ func parsePlanningKey(raw, prefix string) (int, bool) {
 	if !strings.HasPrefix(raw, prefix) {
 		return 0, false
 	}
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(raw, prefix), "%d", &n); err != nil || n <= 0 {
+	n, err := strconv.Atoi(strings.TrimPrefix(raw, prefix))
+	if err != nil || n <= 0 {
 		return 0, false
 	}
 	return n, true
@@ -370,10 +408,20 @@ func ParseTodoAddItems(raw string) ([]string, error) {
 	return out, nil
 }
 
-func ParseTodoKey(raw string) (id.ID, error) {
+func ParseTodoKey(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", errors.New("task_key is required")
+	}
+	milestonePart, taskPart, ok := strings.Cut(value, "T")
+	if !ok || milestonePart == "" || taskPart == "" {
+		return "", fmt.Errorf("invalid task_key %q: expected M###T###", raw)
+	}
+	if _, ok := parsePlanningKey(milestonePart, "M"); !ok {
+		return "", fmt.Errorf("invalid task_key %q: expected M###T###", raw)
+	}
+	if _, ok := parsePlanningKey("T"+taskPart, "T"); !ok {
+		return "", fmt.Errorf("invalid task_key %q: expected M###T###", raw)
 	}
 	return value, nil
 }

@@ -70,7 +70,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		return chattool.Status{}, err
 	}
 	milestoneRef := strings.TrimSpace(req.MilestoneRef)
-	todoRef := id.ID(strings.TrimSpace(string(req.TodoRef)))
+	todoRef := strings.TrimSpace(req.TodoRef)
 	var scopedTodo *planning.TodoItem
 	if todoRef != "" {
 		todo, err := sessionTodoByID(ctx, c.session, sessionID, plan, todoRef)
@@ -285,7 +285,7 @@ func (s *Session) childIdleNotification(ctx context.Context, chatRecord domain.C
 		todos, err := s.ListTodos(ctx, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
 		if err == nil {
 			for _, todo := range todos {
-				if todo.ID == chatRecord.AssignedTodoRef || planning.TodoKey(todo) == string(chatRecord.AssignedTodoRef) {
+				if planning.TodoKey(todo) == chatRecord.AssignedTodoRef {
 					return fmt.Sprintf("%s Assigned task %s is %s.", text, planning.TodoKey(todo), todo.Status)
 				}
 			}
@@ -367,14 +367,14 @@ func ensureChatOperationOwner(ownerChatID id.ID, target domain.Chat) error {
 
 func sessionTodoByID(ctx context.Context, owner interface {
 	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
-}, sessionID id.ID, plan planning.Plan, todoID id.ID) (planning.TodoItem, error) {
+}, sessionID id.ID, plan planning.Plan, todoID string) (planning.TodoItem, error) {
 	for _, milestone := range plan.Milestones {
 		todos, err := owner.ListTodos(ctx, sessionID, planning.MilestoneKey(milestone))
 		if err != nil {
 			return planning.TodoItem{}, err
 		}
 		for _, todo := range todos {
-			if todo.ID == todoID || planning.TodoKey(todo) == string(todoID) {
+			if planning.TodoKey(todo) == todoID {
 				return todo, nil
 			}
 		}
@@ -384,7 +384,7 @@ func sessionTodoByID(ctx context.Context, owner interface {
 		return planning.TodoItem{}, err
 	}
 	for _, todo := range todos {
-		if todo.ID == todoID || planning.TodoKey(todo) == string(todoID) {
+		if planning.TodoKey(todo) == todoID {
 			return todo, nil
 		}
 	}
