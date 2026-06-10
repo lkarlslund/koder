@@ -1273,8 +1273,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `function readRangeLabel(args, data)`) ||
 		!strings.Contains(fullPage, `if (!requestedStart && !requestedEnd) return ''`) ||
-		!strings.Contains(fullPage, `return renderCompactBlock(readTitle(path, args, data), lines)`) {
-		t.Fatalf("expected read tool rendering to include requested line ranges")
+		!strings.Contains(fullPage, `case 'file_read': return readTitle(path, args, data)`) ||
+		!strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'file_read') return ''`) {
+		t.Fatalf("expected read tool rendering to show a single title line with requested line ranges")
 	}
 	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) {
 		t.Fatalf("expected transcript rows to use item ids directly")

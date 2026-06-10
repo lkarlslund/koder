@@ -764,6 +764,7 @@
     }
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
+      if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       const values = [];
       if (args.command) values.push(args.command);
@@ -838,10 +839,7 @@
         return renderDiffBlock(title, diff) + (diagnostics ? renderCompactBlock('Diagnostics', diagnostics, 'tool-result-body-mono') : '');
       }
       if (kind === 'file_read') {
-        const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'read';
-        const storedLines = data.lines || data.Lines || [];
-        const lines = storedLines.length ? storedLines.map(line => (line.number || line.Number || '') + ': ' + (line.text || line.Text || '')) : toolResultText(tool);
-        return renderCompactBlock(readTitle(path, args, data), lines);
+        return '';
       }
       if (kind === 'bash') {
         return renderCompactBlock('Output', firstValue(data, ['output', 'Output']) || toolResultText(tool));
