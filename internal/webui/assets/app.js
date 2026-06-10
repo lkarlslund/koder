@@ -631,17 +631,61 @@
       return renderCompactBlock(title, lines);
     }
     function renderDiffBlock(title, diff) {
-      const rows = splitLines(diff).map(line => {
-        const cls = 'tool-diff-line ' + diffLineClass(line);
-        return '<div class="' + cls + '" title="' + escapeHTML(line || '') + '">' + escapeHTML(line || ' ') + '</div>';
+      const rows = diffRows(diff).map(row => {
+        const cls = 'tool-diff-line ' + row.cls;
+        return '<div class="' + cls + '" title="' + escapeHTML(row.text || '') + '">' +
+          '<span class="tool-diff-line-no">' + escapeHTML(row.oldLine || '') + '</span>' +
+          '<span class="tool-diff-line-no">' + escapeHTML(row.newLine || '') + '</span>' +
+          '<span class="tool-diff-text">' + escapeHTML(row.text || ' ') + '</span>' +
+          '</div>';
       }).join('');
       return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
     }
+    function diffRows(diff) {
+      let oldLine = null;
+      let newLine = null;
+      const rows = [];
+      splitLines(diff).forEach(line => {
+        const hunk = parseDiffHunk(line);
+        if (hunk) {
+          oldLine = hunk.oldStart;
+          newLine = hunk.newStart;
+          return;
+        }
+        if (skipDiffFileLine(line)) return;
+        const cls = diffLineClass(line);
+        const row = {cls, text: line, oldLine: '', newLine: ''};
+        if (oldLine !== null && newLine !== null) {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            row.newLine = String(newLine);
+            newLine++;
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            row.oldLine = String(oldLine);
+            oldLine++;
+          } else {
+            row.oldLine = String(oldLine);
+            row.newLine = String(newLine);
+            oldLine++;
+            newLine++;
+          }
+        }
+        rows.push(row);
+      });
+      return rows;
+    }
+    function parseDiffHunk(line) {
+      const match = String(line || '').match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (!match) return null;
+      return {oldStart: Number(match[1]), newStart: Number(match[2])};
+    }
+    function skipDiffFileLine(line) {
+      const text = String(line || '');
+      return text.startsWith('--- ') || text.startsWith('+++ ');
+    }
     function diffLineClass(line) {
       const text = String(line || '');
-      if (text.startsWith('diff --git ') || text.startsWith('--- ') || text.startsWith('+++ ')) return 'tool-diff-file';
+      if (text.startsWith('diff --git ')) return 'tool-diff-file';
       if (text.startsWith('index ') || text.startsWith('new file mode ') || text.startsWith('deleted file mode ') || text.startsWith('similarity index ') || text.startsWith('rename from ') || text.startsWith('rename to ')) return 'tool-diff-index';
-      if (text.startsWith('@@')) return 'tool-diff-hunk';
       if (text.startsWith('+') && !text.startsWith('+++')) return 'tool-diff-add';
       if (text.startsWith('-') && !text.startsWith('---')) return 'tool-diff-del';
       if (text === '') return 'tool-diff-empty';

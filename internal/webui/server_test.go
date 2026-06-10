@@ -1167,9 +1167,10 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `class="tool-preview small text-secondary text-truncate"`) ||
 		!strings.Contains(fullPage, `.tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }`) ||
-		!strings.Contains(fullPage, `.tool-diff-line { padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: pre; }`) ||
+		!strings.Contains(fullPage, `.tool-diff-line { display: grid; grid-template-columns: 3.25rem 3.25rem minmax(0, 1fr);`) ||
+		!strings.Contains(fullPage, `.tool-diff-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`) ||
 		!strings.Contains(fullPage, `escapeHTML(line.text || '')`) ||
-		!strings.Contains(fullPage, `escapeHTML(line || '')`) {
+		!strings.Contains(fullPage, `escapeHTML(row.text || '')`) {
 		t.Fatalf("expected tool previews and result rows to stay to one visible line")
 	}
 	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) {
@@ -1186,8 +1187,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `code.language-diff`) ||
 		!strings.Contains(fullPage, `renderDiffBlock('Diff', diff)`) ||
 		!strings.Contains(fullPage, `diffLineClass(line)`) ||
+		!strings.Contains(fullPage, `parseDiffHunk(line)`) ||
+		!strings.Contains(fullPage, `skipDiffFileLine(line)`) ||
+		!strings.Contains(fullPage, `tool-diff-line-no`) ||
 		!strings.Contains(fullPage, `tool-diff-file`) ||
-		!strings.Contains(fullPage, `tool-diff-hunk`) ||
 		!strings.Contains(fullPage, `tool-diff-add`) ||
 		!strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
