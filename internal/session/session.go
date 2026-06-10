@@ -94,6 +94,12 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 	if err != nil {
 		return nil, err
 	}
+	plan, planChanged := planning.NormalizePlanKeys(plan)
+	if planChanged {
+		if err := planSrc.SavePlan(ctx, plan); err != nil {
+			return nil, err
+		}
+	}
 	todosByRef, err := loadTodosByRef(ctx, planSrc, sessionID, plan)
 	if err != nil {
 		return nil, err
@@ -122,7 +128,7 @@ func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 	out := map[string][]planning.TodoItem{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
-		ref := strings.TrimSpace(milestone.Ref)
+		ref := strings.TrimSpace(planning.MilestoneKey(milestone))
 		if ref == "" {
 			continue
 		}
@@ -135,6 +141,14 @@ func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 	items, err := planSrc.ListTodos(ctx, sessionID, "")
 	if err != nil {
 		return nil, err
+	}
+	items, changed := planning.NormalizeTodosKeys(items, planning.MilestoneKeyAliases(plan))
+	if changed {
+		for _, item := range items {
+			if err := planSrc.SaveTodo(ctx, item); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, item := range items {
 		ref := strings.TrimSpace(item.MilestoneRef)
@@ -928,6 +942,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
+	plan, _ = planning.NormalizePlanKeys(plan)
 	if err := s.planSrc.SavePlan(ctx, plan); err != nil {
 		return planning.Plan{}, err
 	}
@@ -950,11 +965,13 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	s.mu.RLock()
 	existing := slices.Clone(s.todosByRef[milestoneRef])
 	position := len(existing)
+	allTodos := flattenTodos(s.todosByRef)
 	s.mu.RUnlock()
 	if err := planning.ValidateNoDuplicateTodoContent(existing, contents); err != nil {
 		return nil, err
 	}
 	items := make([]planning.TodoItem, 0, len(contents))
+	nextKey := nextTodoKey(allTodos)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
@@ -962,6 +979,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 		}
 		items = append(items, planning.TodoItem{
 			ID:           id.New(),
+			Key:          nextKey,
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
@@ -970,6 +988,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
+		nextKey = incrementPlanningKey(nextKey, "T")
 	}
 	for _, item := range items {
 		if err := s.planSrc.SaveTodo(ctx, item); err != nil {
@@ -985,7 +1004,7 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRe
 	todos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
-	slog.Info("tasks added", "session_id", sessionID, "milestone_ref", milestoneRef, "count", len(items))
+	slog.Info("tasks added", "session_id", sessionID, "milestone_key", milestoneRef, "count", len(items))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: todos, TodosByRef: todosByRef})
 	return slices.Clone(items), nil
 }
@@ -1001,7 +1020,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	found := false
 	for milestoneRef, todos := range s.todosByRef {
 		for _, candidate := range todos {
-			if candidate.ID == todoID {
+			if planning.TodoKey(candidate) == string(todoID) || candidate.ID == todoID {
 				item = candidate
 				ref = milestoneRef
 				found = true
@@ -1030,7 +1049,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	s.mu.Lock()
 	todos := slices.Clone(s.todosByRef[ref])
 	for idx := range todos {
-		if todos[idx].ID == todoID {
+		if planning.TodoKey(todos[idx]) == string(todoID) || todos[idx].ID == todoID {
 			todos[idx] = item
 			break
 		}
@@ -1041,7 +1060,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID id.ID, status plann
 	allTodos := flattenTodos(s.todosByRef)
 	todosByRef := cloneTodosByRef(s.todosByRef)
 	s.mu.Unlock()
-	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "milestone_ref", ref, "status", item.Status, "note_bytes", len(item.Note))
+	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "task_key", item.Key, "milestone_key", ref, "status", item.Status, "note_bytes", len(item.Note))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: allTodos, TodosByRef: todosByRef})
 	return item, nil
 }
@@ -1106,7 +1125,7 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	if ref == "" {
 		return p.session.SetMilestonePlan(ctx, sessionID, summary, milestones)
 	}
-	if len(milestones) != 1 || milestones[0].Ref != ref {
+	if len(milestones) != 1 || planning.MilestoneKey(milestones[0]) != ref {
 		return planning.Plan{}, fmt.Errorf("chat is scoped to milestone %q", ref)
 	}
 	current, err := p.session.GetMilestonePlan(ctx, sessionID)
@@ -1115,7 +1134,7 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	}
 	found := false
 	for idx := range current.Milestones {
-		if current.Milestones[idx].Ref == ref {
+		if planning.MilestoneKey(current.Milestones[idx]) == ref {
 			current.Milestones[idx] = milestones[0]
 			found = true
 			break
@@ -1149,7 +1168,7 @@ func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID id.ID, status
 		}
 		found := false
 		for _, item := range todos {
-			if item.ID == todoID {
+			if item.ID == todoID || planning.TodoKey(item) == string(todoID) {
 				found = true
 				break
 			}
@@ -1384,6 +1403,29 @@ func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
 	return out
+}
+
+func nextTodoKey(items []planning.TodoItem) string {
+	next := 1
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if !strings.HasPrefix(key, "T") {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(key, "T"), "%d", &n); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	return fmt.Sprintf("T%03d", next)
+}
+
+func incrementPlanningKey(key, prefix string) string {
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
+		return prefix + "001"
+	}
+	return fmt.Sprintf("%s%03d", prefix, n+1)
 }
 
 var _ tools.SessionControl = (*Session)(nil)

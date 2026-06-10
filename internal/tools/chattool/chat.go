@@ -23,8 +23,8 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or task_ref to scope what the child chat can see. A task_ref scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"task_ref":{"type":"string","description":"Optional task UUID to scope the child chat to one task"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Usage:       "Start a background child chat using a registered chat profile. Use milestone_key or task_key to scope what the child chat can see. A task_key scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_key":{"type":"string","description":"Optional milestone key to scope the child chat"},"task_key":{"type":"string","description":"Optional task key to scope the child chat to one task"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(sendTool{}, tools.ToolSpec{
@@ -191,11 +191,11 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if title := strings.TrimSpace(args["title"]); title != "" {
 		out["title"] = title
 	}
-	if ref := strings.TrimSpace(args["milestone_ref"]); ref != "" {
-		out["milestone_ref"] = ref
+	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
+		out["milestone_key"] = ref
 	}
-	if todoRef := strings.TrimSpace(args["task_ref"]); todoRef != "" {
-		out["task_ref"] = todoRef
+	if todoRef := strings.TrimSpace(args["task_key"]); todoRef != "" {
+		out["task_key"] = todoRef
 	}
 	return out, nil
 }
@@ -343,8 +343,8 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Profile:      chatrole.Role(req.Args["profile"]),
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
-		MilestoneRef: req.Args["milestone_ref"],
-		TodoRef:      id.ID(req.Args["task_ref"]),
+		MilestoneRef: req.Args["milestone_key"],
+		TodoRef:      id.ID(req.Args["task_key"]),
 	})
 	if err != nil {
 		return tools.Result{}, err

@@ -2362,11 +2362,11 @@
           return (this.milestoneStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' milestones';
         },
         milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },
-        milestoneRef(m) { return m.Ref || m.ref || ''; },
+        milestoneRef(m) { return m.Key || m.key || m.Ref || m.ref || ''; },
         milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
         milestoneStatus(m) { return m.Status || m.status || 'pending'; },
         milestoneNotes(m) { return m.Notes || m.notes || ''; },
-        milestoneDependsOnRef(m) { return m.DependsOnRef || m.depends_on_ref || ''; },
+        milestoneDependsOnRef(m) { return m.DependsOnKey || m.depends_on_key || m.DependsOnRef || m.depends_on_ref || ''; },
         milestoneTreeTitle(node) {
           const notes = this.milestoneNotes(node.milestone);
           if (!node.orphan) return notes;

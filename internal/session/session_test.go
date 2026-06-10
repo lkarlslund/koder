@@ -114,12 +114,12 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha"})
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001"})
 	plan, err := control.GetMilestonePlan(ctx, sessionRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Milestones) != 1 || plan.Milestones[0].Ref != "alpha" {
+	if len(plan.Milestones) != 1 || planning.MilestoneKey(plan.Milestones[0]) != "M001" {
 		t.Fatalf("expected alpha-only plan, got %#v", plan.Milestones)
 	}
 	todos, err := control.ListTodos(ctx, sessionRecord.ID, "")
@@ -129,10 +129,10 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if len(todos) != 1 || todos[0].ID != alphaTodos[0].ID {
 		t.Fatalf("expected alpha-only tasks, got %#v", todos)
 	}
-	if _, err := control.ListTodos(ctx, sessionRecord.ID, "beta"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
+	if _, err := control.ListTodos(ctx, sessionRecord.ID, "M002"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
 		t.Fatalf("expected beta scope error, got %v", err)
 	}
-	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, "", "starting work"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "alpha"`) {
+	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, "", "starting work"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
 		t.Fatalf("expected beta update scope error, got %v", err)
 	}
 }
@@ -159,15 +159,15 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", AssignedTodoRef: todos[0].ID})
-	listed, err := control.ListTodos(ctx, sessionRecord.ID, "alpha")
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTodoRef: id.ID(planning.TodoKey(todos[0]))})
+	listed, err := control.ListTodos(ctx, sessionRecord.ID, "M001")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(listed) != 1 || listed[0].ID != todos[0].ID {
 		t.Fatalf("expected assigned task only, got %#v", listed)
 	}
-	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "alpha", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "M001", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
 		t.Fatalf("expected add task scope error, got %v", err)
 	}
 }

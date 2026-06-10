@@ -2,6 +2,7 @@ package tooltest
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ func (c SessionControl) GetMilestonePlan(ctx context.Context, sessionID id.ID) (
 
 func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	plan := planning.Plan{SessionID: sessionID, Summary: strings.TrimSpace(summary), Milestones: append([]planning.Milestone(nil), milestones...), UpdatedAt: time.Now().UTC()}
+	plan, _ = planning.NormalizePlanKeys(plan)
 	if err := modeltest.PutPlan(ctx, c.Store, plan); err != nil {
 		return planning.Plan{}, err
 	}
@@ -37,13 +39,19 @@ func (c SessionControl) AddTodoItems(ctx context.Context, sessionID id.ID, ref s
 	if err != nil {
 		return nil, err
 	}
+	all, err := modeltest.ListTodos(ctx, c.Store, sessionID, "")
+	if err != nil {
+		return nil, err
+	}
 	out := make([]planning.TodoItem, 0, len(items))
+	nextKey := nextTodoKey(all)
 	for _, content := range items {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: strings.TrimSpace(ref), Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		out = append(out, planning.TodoItem{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: strings.TrimSpace(ref), Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementPlanningKey(nextKey, "T")
 	}
 	for _, item := range out {
 		if err := modeltest.PutTodo(ctx, c.Store, item); err != nil {
@@ -74,6 +82,29 @@ func (c SessionControl) UpdateTodoItem(ctx context.Context, id id.ID, status pla
 
 func (c SessionControl) ListTodos(ctx context.Context, sessionID id.ID, ref string) ([]planning.TodoItem, error) {
 	return modeltest.ListTodos(ctx, c.Store, sessionID, ref)
+}
+
+func nextTodoKey(items []planning.TodoItem) string {
+	next := 1
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if !strings.HasPrefix(key, "T") {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(key, "T"), "%d", &n); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	return fmt.Sprintf("T%03d", next)
+}
+
+func incrementPlanningKey(key, prefix string) string {
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
+		return prefix + "001"
+	}
+	return fmt.Sprintf("%s%03d", prefix, n+1)
 }
 
 func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {

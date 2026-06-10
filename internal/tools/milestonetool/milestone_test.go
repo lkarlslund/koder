@@ -55,17 +55,17 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "sometimes"}); err == nil {
 		t.Fatal("expected invalid completed boolean error")
 	}
-	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "title": "Alpha", "depends_on_ref": "root"})
+	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"title": "Alpha", "depends_on_key": "root"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if added["ref"] != "alpha" || added["title"] != "Alpha" || added["depends_on_ref"] != "root" {
+	if added["title"] != "Alpha" || added["depends_on_key"] != "root" {
 		t.Fatalf("unexpected add args: %#v", added)
 	}
 	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("expected missing ref error")
+		t.Fatal("expected missing title error")
 	}
-	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha"}); err == nil {
+	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha"}); err == nil {
 		t.Fatal("expected missing status error")
 	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
@@ -74,11 +74,11 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected plan definition to be disabled in execution chats")
 	}
-	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled", "depends_on_ref": ""})
+	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha", "status": "cancelled", "depends_on_key": ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated["status"] != planning.MilestoneStatusCancelled.String() || updated["depends_on_ref"] != "" {
+	if updated["status"] != planning.MilestoneStatusCancelled.String() || updated["depends_on_key"] != "" {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
@@ -105,15 +105,6 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if len(got) != 2 || got[1].Position != 1 {
 		t.Fatalf("unexpected appended milestones: %#v", got)
 	}
-	if err := ensureMilestoneRefsAvailable(existing, added); err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureMilestoneRefsAvailable(existing, []planning.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
-		t.Fatal("expected duplicate ref error")
-	}
-	if err := ensureMilestoneRefsAvailable(existing, []planning.Milestone{{Ref: "beta", Title: "  alpha  "}}); err == nil {
-		t.Fatal("expected duplicate title error")
-	}
 	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusExecuting},
@@ -139,16 +130,16 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	}
 }
 
-func TestMilestoneAddRejectsDuplicateTitle(t *testing.T) {
+func TestMilestoneAddAllowsDuplicateTitle(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
 	req := tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "beta", "title": "  alpha  "},
+		Args: map[string]string{"title": "  alpha  "},
 	}
 	_, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: req})
-	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
-		t.Fatalf("expected duplicate milestone title error, got %v", err)
+	if err != nil {
+		t.Fatalf("expected duplicate milestone title to be allowed, got %v", err)
 	}
 }
 
@@ -172,24 +163,24 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 			{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
 			{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
 		},
-	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done", "depends_on_ref": "beta"}}, milestoneActor{})
+	}, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed", "notes": "done", "depends_on_key": "beta"}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" || plan.Milestones[0].DependsOnRef != "beta" {
 		t.Fatalf("unexpected updated plan: %#v", plan)
 	}
-	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": ""}}, milestoneActor{})
+	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed", "depends_on_key": ""}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Milestones[0].DependsOnRef != "" {
 		t.Fatalf("expected dependency to be cleared, got %#v", plan.Milestones[0])
 	}
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "depends_on_ref": "alpha"}}, milestoneActor{}); err == nil {
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed", "depends_on_key": "alpha"}}, milestoneActor{}); err == nil {
 		t.Fatal("expected self dependency error")
 	}
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, milestoneActor{}); err == nil {
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "missing", "status": "completed"}}, milestoneActor{}); err == nil {
 		t.Fatal("expected missing milestone error")
 	}
 }
@@ -204,7 +195,7 @@ func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "ready"}}, milestoneActor{})
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "ready"}}, milestoneActor{})
 	if err != nil {
 		t.Fatalf("expected status update to ignore existing duplicate titles, got %v", err)
 	}
@@ -212,9 +203,9 @@ func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
 		t.Fatalf("expected alpha to be ready, got %#v", updated.Milestones[0])
 	}
 
-	_, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "gamma", "status": "pending", "title": " shared "}}, milestoneActor{})
-	if err == nil || !strings.Contains(err.Error(), "duplicate milestone title") {
-		t.Fatalf("expected title collision error, got %v", err)
+	_, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "gamma", "status": "pending", "title": " shared "}}, milestoneActor{})
+	if err != nil {
+		t.Fatalf("expected duplicate milestone title to be allowed, got %v", err)
 	}
 }
 
@@ -227,7 +218,7 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}}, milestoneActor{})
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "beta", "status": "executing"}}, milestoneActor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,14 +237,14 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 		},
 	}
 
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, milestoneActor{
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed"}}, milestoneActor{
 		ID:   otherID,
 		Role: chatrole.Execution,
 	}); err == nil || !strings.Contains(err.Error(), "owned by chat") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, milestoneActor{
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed"}}, milestoneActor{
 		ID:   ownerID,
 		Role: chatrole.Execution,
 	})
@@ -274,7 +265,7 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "executing"}}, milestoneActor{
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "executing"}}, milestoneActor{
 		ID:   ownerID,
 		Role: chatrole.Execution,
 	})
@@ -289,7 +280,7 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	runtime.ChatRole = chatrole.Execution
-	runtime.ActiveMilestoneRef = "beta"
+	runtime.ActiveMilestoneRef = "M002"
 	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusExecuting, Position: 1},
@@ -307,7 +298,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 
 	result, err = (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "beta", "status": "completed"},
+		Args: map[string]string{"milestone_key": "M002", "status": "completed"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -317,14 +308,14 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	}
 	if _, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "alpha", "status": "completed"},
-	}}); err == nil || !strings.Contains(err.Error(), `scoped to milestone "beta"`) {
+		Args: map[string]string{"milestone_key": "M001", "status": "completed"},
+	}}); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M002"`) {
 		t.Fatalf("expected scoped milestone error, got %v", err)
 	}
 
 	finalized, err := (updateItemTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "beta", "status": "executing"},
+		Args: map[string]string{"milestone_key": "M002", "status": "executing"},
 	}, tools.Result{Output: result.Output, Stored: result.Stored})
 	if err != nil {
 		t.Fatal(err)
@@ -337,13 +328,13 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	if _, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"Write tests"}); err != nil {
+	if _, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M001", []string{"Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "alpha", "status": "completed"},
+		Args: map[string]string{"milestone_key": "M001", "status": "completed"},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
 		t.Fatalf("expected completion guard error, got %v", err)
@@ -351,7 +342,7 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 
 	if _, err := (updateItemTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "alpha", "status": "completed"},
+		Args: map[string]string{"milestone_key": "M001", "status": "completed"},
 	}, tools.Result{Output: "done"}); err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
 		t.Fatalf("expected persist completion guard error, got %v", err)
 	}
@@ -360,7 +351,7 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	items, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "alpha", []string{"Write tests"})
+	items, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M001", []string{"Write tests"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +361,7 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 
 	result, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "alpha", "status": "completed"},
+		Args: map[string]string{"milestone_key": "M001", "status": "completed"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -389,7 +380,7 @@ func TestListAndAddExecute(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "beta", []string{"First", "Second"})
+	betaTodos, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M002", []string{"First", "Second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,10 +398,10 @@ func TestListAndAddExecute(t *testing.T) {
 	if !strings.Contains(result.Output, "Milestones summary: 1 ready, 1 executing, 1 completed") {
 		t.Fatalf("expected milestone status summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "- [ready] Beta (beta) - tasks: 1 pending, 1 completed") {
+	if !strings.Contains(result.Output, "- [ready] Beta (M002) - tasks: 1 pending, 1 completed") {
 		t.Fatalf("expected beta task summary, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "  - [executing] Gamma (gamma) - no tasks added to milestone") {
+	if !strings.Contains(result.Output, "  - [executing] Gamma (M003) - no tasks added to milestone") {
 		t.Fatalf("expected indented gamma task summary, got %q", result.Output)
 	}
 
@@ -427,7 +418,7 @@ func TestListAndAddExecute(t *testing.T) {
 
 	result, err = (addItemsTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "delta", "title": "Delta", "depends_on_ref": "beta"},
+		Args: map[string]string{"title": "Delta", "depends_on_key": "M002"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +428,7 @@ func TestListAndAddExecute(t *testing.T) {
 	}
 	if _, err := (addItemsTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "epsilon", "title": "Epsilon", "depends_on_ref": "missing"},
+		Args: map[string]string{"title": "Epsilon", "depends_on_key": "missing"},
 	}}); err == nil || !strings.Contains(err.Error(), "unknown milestone") {
 		t.Fatalf("expected unknown dependency error, got %v", err)
 	}
@@ -449,7 +440,7 @@ func TestAddAndWritePersist(t *testing.T) {
 
 	if _, err := (addItemsTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
-		Args: map[string]string{"ref": "beta", "title": "Beta", "depends_on_ref": "alpha"},
+		Args: map[string]string{"title": "Beta", "depends_on_key": "M001"},
 	}, tools.Result{Output: "added"}); err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +448,7 @@ func TestAddAndWritePersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Milestones) != 2 || plan.Milestones[1].Ref != "beta" || plan.Milestones[1].Status != planning.MilestoneStatusPending || plan.Milestones[1].DependsOnRef != "alpha" {
+	if len(plan.Milestones) != 2 || planning.MilestoneKey(plan.Milestones[1]) != "M002" || plan.Milestones[1].Status != planning.MilestoneStatusPending || plan.Milestones[1].DependsOnRef != "M001" {
 		t.Fatalf("expected blank pending milestone to be created, got %#v", plan)
 	}
 
@@ -474,7 +465,7 @@ func TestAddAndWritePersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Summary != "New plan" || len(plan.Milestones) != 1 || plan.Milestones[0].Ref != "gamma" {
+	if plan.Summary != "New plan" || len(plan.Milestones) != 1 || planning.MilestoneKey(plan.Milestones[0]) != "M001" {
 		t.Fatalf("unexpected persisted plan: %#v", plan)
 	}
 }

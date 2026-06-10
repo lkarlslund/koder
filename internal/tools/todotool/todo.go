@@ -14,29 +14,29 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List tasks",
 		Description: "Read the task list for a milestone.",
-		Usage:       "Read the task list for a milestone. If milestone_ref is omitted, this reads the current assigned milestone's tasks.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
+		Usage:       "Read the task list for a milestone. If milestone_key is omitted, this reads the current assigned milestone's tasks.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add tasks",
 		Description: "Append new pending tasks to a milestone.",
 		Usage:       "Append new pending tasks to a milestone's task list. Use this to break down the current milestone into concrete execution steps. This rejects duplicate task content already present in the milestone; update existing tasks instead of adding duplicates.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these tasks"},"items":{"type":"array","description":"New tasks to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key that owns these tasks"},"items":{"type":"array","description":"New tasks to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_key","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update task",
 		Description: "Update one task's status, note, or content.",
-		Usage:       "Update one task's status and add a short note explaining what changed or why. Use the exact UUID id returned by task_list, task_fetch_next, or tasks_add. Do not invent numeric ids. Keep at most one task in_progress in a milestone. When marking completed, note what was completed in one concise sentence.",
-		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Task UUID returned by task_list, task_fetch_next, or tasks_add"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status","note"],"additionalProperties":false}`,
+		Usage:       "Update one task's status and add a short note explaining what changed or why. Use the exact task_key returned by task_list, task_fetch_next, or tasks_add. Do not invent keys. Keep at most one task in_progress in a milestone. When marking completed, note what was completed in one concise sentence.",
+		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Task key returned by task_list, task_fetch_next, or tasks_add"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["task_key","status","note"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
 		Title:       "Fetch next task",
 		Description: "Find the next task to work on.",
 		Usage:       "Find the next task to work on for a milestone. If there is already an in_progress task, it is returned. Otherwise the first pending task is returned. If all tasks are done, this returns the finished list and a message telling you to move to the next milestone or break it down into tasks.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
@@ -65,16 +65,16 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := map[string]string{}
-	if ref := strings.TrimSpace(args["milestone_ref"]); ref != "" {
-		out["milestone_ref"] = ref
+	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
+		out["milestone_key"] = ref
 	}
 	return out, nil
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	ref := strings.TrimSpace(args["milestone_ref"])
+	ref := strings.TrimSpace(args["milestone_key"])
 	if ref == "" {
-		return nil, fmt.Errorf("milestone_ref is empty")
+		return nil, fmt.Errorf("milestone_key is empty")
 	}
 	raw := strings.TrimSpace(args["items"])
 	if raw == "" {
@@ -83,11 +83,11 @@ func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, er
 	if _, err := planning.ParseTodoAddItems(raw); err != nil {
 		return nil, err
 	}
-	return map[string]string{"milestone_ref": ref, "items": raw}, nil
+	return map[string]string{"milestone_key": ref, "items": raw}, nil
 }
 
 func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	id, err := planning.ParseTodoID(args["id"])
+	key, err := planning.ParseTodoKey(args["task_key"])
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +96,8 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		return nil, err
 	}
 	out := map[string]string{
-		"id":     tools.FormatTodoID(id),
-		"status": status.String(),
+		"task_key": tools.FormatTodoID(key),
+		"status":   status.String(),
 	}
 	note := strings.TrimSpace(args["note"])
 	if note == "" {
@@ -115,14 +115,14 @@ func (fetchNextTool) NormalizeArgs(args map[string]string) (map[string]string, e
 }
 
 func (listTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "List tasks")
+	return milestonePreview(req.Args["milestone_key"], "List tasks")
 }
 func (addItemsTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "Add tasks")
+	return milestonePreview(req.Args["milestone_key"], "Add tasks")
 }
-func (updateItemTool) Preview(req tools.Request) string { return "Update task " + req.Args["id"] }
+func (updateItemTool) Preview(req tools.Request) string { return "Update task " + req.Args["task_key"] }
 func (fetchNextTool) Preview(req tools.Request) string {
-	return milestonePreview(req.Args["milestone_ref"], "Fetch next task")
+	return milestonePreview(req.Args["milestone_key"], "Fetch next task")
 }
 
 func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -131,7 +131,7 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -151,7 +151,7 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -190,8 +190,8 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 	if err != nil {
 		return tools.Result{}, err
 	}
-	id, _ := planning.ParseTodoID(req.Args["id"])
-	if err := tools.TodoScopeAllows(runtime, id); err != nil {
+	taskKey, _ := planning.ParseTodoKey(req.Args["task_key"])
+	if err := tools.TodoScopeAllows(runtime, taskKey); err != nil {
 		return tools.Result{}, err
 	}
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
@@ -203,15 +203,16 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 		return tools.Result{}, err
 	}
 	for _, milestone := range plan.Milestones {
-		if allowedRef != "" && milestone.Ref != allowedRef {
+		milestoneKey := planning.MilestoneKey(milestone)
+		if allowedRef != "" && milestoneKey != allowedRef {
 			continue
 		}
-		todos, err := control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+		todos, err := control.ListTodos(ctx, runtime.SessionID, milestoneKey)
 		if err != nil {
 			return tools.Result{}, err
 		}
 		for idx := range todos {
-			if todos[idx].ID != id {
+			if planning.TodoKey(todos[idx]) != taskKey {
 				continue
 			}
 			todoStatus, err := planning.ParseTodoStatus(req.Args["status"])
@@ -225,17 +226,17 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, taskKey, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
 				return tools.Result{}, err
 			}
-			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+			todos, err = control.ListTodos(ctx, runtime.SessionID, milestoneKey)
 			if err != nil {
 				return tools.Result{}, err
 			}
-			return tools.TodoBucketResultWithTitle(milestone.Ref, milestone.Title, todos, ""), nil
+			return tools.TodoBucketResultWithTitle(milestoneKey, milestone.Title, todos, ""), nil
 		}
 	}
-	return tools.Result{}, fmt.Errorf("task %s not found", id)
+	return tools.Result{}, fmt.Errorf("task %s not found", taskKey)
 }
 
 func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -244,7 +245,7 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -288,7 +289,7 @@ func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req t
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -308,21 +309,21 @@ func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, r
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := ensureMilestoneAcceptsTodos(plan, req.Args["milestone_ref"]); err != nil {
+	if err := ensureMilestoneAcceptsTodos(plan, req.Args["milestone_key"]); err != nil {
 		return tools.Result{}, err
 	}
-	existing, err := control.ListTodos(ctx, runtime.SessionID, req.Args["milestone_ref"])
+	existing, err := control.ListTodos(ctx, runtime.SessionID, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
 	if err := planning.ValidateNoDuplicateTodoContent(existing, items); err != nil {
 		return tools.Result{}, err
 	}
-	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_ref"], items)
+	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_key"], items)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := tools.TodoStoredResult(plan, req.Args["milestone_ref"], created, "")
+	stored := tools.TodoStoredResult(plan, req.Args["milestone_key"], created, "")
 	result.Stored = stored
 	result.Output = tools.FormatTodoOutput(stored)
 	return result, nil
@@ -332,13 +333,14 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	id, _ := planning.ParseTodoID(req.Args["id"])
+	taskKey, _ := planning.ParseTodoKey(req.Args["task_key"])
 	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	for _, milestone := range plan.Milestones {
-		todos, err := control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+		milestoneKey := planning.MilestoneKey(milestone)
+		todos, err := control.ListTodos(ctx, runtime.SessionID, milestoneKey)
 		if err != nil {
 			return tools.Result{}, err
 		}
@@ -347,7 +349,7 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 			return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
 		}
 		for idx := range todos {
-			if todos[idx].ID != id {
+			if planning.TodoKey(todos[idx]) != taskKey {
 				continue
 			}
 			todos[idx].Status = todoStatus
@@ -357,25 +359,25 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, taskKey, todoStatus, req.Args["content"], req.Args["note"]); err != nil {
 				return tools.Result{}, err
 			}
-			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+			todos, err = control.ListTodos(ctx, runtime.SessionID, milestoneKey)
 			if err != nil {
 				return tools.Result{}, err
 			}
-			result.Stored = tools.TodoStoredResult(plan, milestone.Ref, todos, "")
+			result.Stored = tools.TodoStoredResult(plan, milestoneKey, todos, "")
 			return result, nil
 		}
 	}
-	return tools.Result{}, fmt.Errorf("task %s not found", id)
+	return tools.Result{}, fmt.Errorf("task %s not found", taskKey)
 }
 func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -399,12 +401,12 @@ func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, 
 func ensureMilestoneAcceptsTodos(plan planning.Plan, ref string) error {
 	ref = strings.TrimSpace(ref)
 	for _, milestone := range plan.Milestones {
-		if milestone.Ref != ref {
+		if planning.MilestoneKey(milestone) != ref {
 			continue
 		}
 		switch milestone.Status {
 		case planning.MilestoneStatusCompleted, planning.MilestoneStatusCancelled:
-			return fmt.Errorf("milestone %q is %s; cannot add tasks. To reopen this milestone, first call milestone_update with status=ready, then add tasks", milestone.Ref, milestone.Status.String())
+			return fmt.Errorf("milestone %q is %s; cannot add tasks. To reopen this milestone, first call milestone_update with status=ready, then add tasks", planning.MilestoneKey(milestone), milestone.Status.String())
 		}
 		return nil
 	}
@@ -420,9 +422,9 @@ func persistedTodoBucket(ctx context.Context, control tools.SessionControl, sess
 	if ref == "" {
 		active, ok := planning.ActiveMilestone(plan)
 		if !ok {
-			return planning.Plan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_ref")
+			return planning.Plan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_key")
 		}
-		ref = active.Ref
+		ref = planning.MilestoneKey(active)
 	}
 	todos, err := control.ListTodos(ctx, sessionID, ref)
 	if err != nil {

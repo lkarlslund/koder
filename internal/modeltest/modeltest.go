@@ -194,6 +194,7 @@ func PutPlan(ctx context.Context, st *store.Store, plan planning.Plan) error {
 	if plan.UpdatedAt.IsZero() {
 		plan.UpdatedAt = time.Now().UTC()
 	}
+	plan, _ = planning.NormalizePlanKeys(plan)
 	return PlanCollection(st).Put(ctx, plan)
 }
 
@@ -210,14 +211,20 @@ func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, ref str
 	if err != nil {
 		return nil, err
 	}
+	all, err := ListTodos(ctx, st, sessionID, "")
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	items := make([]planning.TodoItem, 0, len(contents))
+	nextKey := nextTodoKey(all)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{ID: id.NewAt(now), SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		items = append(items, planning.TodoItem{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementPlanningKey(nextKey, "T")
 	}
 	for _, item := range items {
 		if err := TodoCollection(st).Put(ctx, item); err != nil {
@@ -232,6 +239,17 @@ func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error
 }
 
 func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoItem, error) {
+	if strings.HasPrefix(strings.TrimSpace(string(todoID)), "T") {
+		items, err := TodoCollection(st).List(ctx, store.All[planning.TodoItem]())
+		if err != nil {
+			return planning.TodoItem{}, err
+		}
+		for _, item := range items {
+			if planning.TodoKey(item) == string(todoID) {
+				return item, nil
+			}
+		}
+	}
 	return TodoCollection(st).Get(ctx, todoID)
 }
 
@@ -265,6 +283,29 @@ func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, ref string
 	}
 	planning.SortTodos(items)
 	return items, nil
+}
+
+func nextTodoKey(items []planning.TodoItem) string {
+	next := 1
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if !strings.HasPrefix(key, "T") {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(key, "T"), "%d", &n); err == nil && n >= next {
+			next = n + 1
+		}
+	}
+	return fmt.Sprintf("T%03d", next)
+}
+
+func incrementPlanningKey(key, prefix string) string {
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
+		return prefix + "001"
+	}
+	return fmt.Sprintf("%s%03d", prefix, n+1)
 }
 
 func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {

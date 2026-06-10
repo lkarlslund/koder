@@ -95,7 +95,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		}
 	}
 	if role == chatrole.Execution && milestoneRef == "" {
-		return chattool.Status{}, fmt.Errorf("execution chat requires milestone_ref or task_ref")
+		return chattool.Status{}, fmt.Errorf("execution chat requires milestone_key or task_key")
 	}
 	if role == chatrole.Execution && milestone.Status != planning.MilestoneStatusReady {
 		return chattool.Status{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
@@ -285,8 +285,8 @@ func (s *Session) childIdleNotification(ctx context.Context, chatRecord domain.C
 		todos, err := s.ListTodos(ctx, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
 		if err == nil {
 			for _, todo := range todos {
-				if todo.ID == chatRecord.AssignedTodoRef {
-					return fmt.Sprintf("%s Assigned task #%s is %s.", text, todo.ID, todo.Status)
+				if todo.ID == chatRecord.AssignedTodoRef || planning.TodoKey(todo) == string(chatRecord.AssignedTodoRef) {
+					return fmt.Sprintf("%s Assigned task %s is %s.", text, planning.TodoKey(todo), todo.Status)
 				}
 			}
 		}
@@ -319,19 +319,19 @@ func (s *Session) bootstrapPrompt(ctx context.Context, sessionID id.ID, mileston
 		"Objective:",
 		strings.TrimSpace(objective),
 	}
-	if milestone.Ref != "" {
-		todos, _ := s.ListTodos(ctx, sessionID, milestone.Ref)
+	if planning.MilestoneKey(milestone) != "" {
+		todos, _ := s.ListTodos(ctx, sessionID, planning.MilestoneKey(milestone))
 		if scopedTodo != nil {
 			todos = []planning.TodoItem{*scopedTodo}
 		}
 		lines = append(lines,
 			"",
-			fmt.Sprintf("Milestone ref: %s", milestone.Ref),
+			fmt.Sprintf("Milestone key: %s", planning.MilestoneKey(milestone)),
 			fmt.Sprintf("Milestone title: %s", milestone.Title),
 			fmt.Sprintf("Milestone status: %s", milestone.Status),
 		)
 		if scopedTodo != nil {
-			lines = append(lines, fmt.Sprintf("Task scope: %s", scopedTodo.ID))
+			lines = append(lines, fmt.Sprintf("Task scope: %s", planning.TodoKey(*scopedTodo)))
 		}
 		if notes := strings.TrimSpace(milestone.Notes); notes != "" {
 			lines = append(lines, "Milestone notes:", notes)
@@ -341,7 +341,7 @@ func (s *Session) bootstrapPrompt(ctx context.Context, sessionID id.ID, mileston
 		} else {
 			lines = append(lines, "Current tasks:")
 			for _, item := range todos {
-				lines = append(lines, fmt.Sprintf("- [%s] #%s %s", item.Status, item.ID, item.Content))
+				lines = append(lines, fmt.Sprintf("- [%s] %s %s", item.Status, planning.TodoKey(item), item.Content))
 			}
 		}
 	}
@@ -369,12 +369,12 @@ func sessionTodoByID(ctx context.Context, owner interface {
 	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
 }, sessionID id.ID, plan planning.Plan, todoID id.ID) (planning.TodoItem, error) {
 	for _, milestone := range plan.Milestones {
-		todos, err := owner.ListTodos(ctx, sessionID, milestone.Ref)
+		todos, err := owner.ListTodos(ctx, sessionID, planning.MilestoneKey(milestone))
 		if err != nil {
 			return planning.TodoItem{}, err
 		}
 		for _, todo := range todos {
-			if todo.ID == todoID {
+			if todo.ID == todoID || planning.TodoKey(todo) == string(todoID) {
 				return todo, nil
 			}
 		}
@@ -384,7 +384,7 @@ func sessionTodoByID(ctx context.Context, owner interface {
 		return planning.TodoItem{}, err
 	}
 	for _, todo := range todos {
-		if todo.ID == todoID {
+		if todo.ID == todoID || planning.TodoKey(todo) == string(todoID) {
 			return todo, nil
 		}
 	}
@@ -396,7 +396,7 @@ func updateMilestoneStatus(plan planning.Plan, ref string, status planning.Miles
 	next.Milestones = slices.Clone(plan.Milestones)
 	found := false
 	for idx := range next.Milestones {
-		if next.Milestones[idx].Ref != ref {
+		if planning.MilestoneKey(next.Milestones[idx]) != ref {
 			continue
 		}
 		found = true
@@ -439,7 +439,7 @@ func defaultChildChatTitle(role domain.WorkflowRole, milestone planning.Mileston
 
 func milestoneByRef(plan planning.Plan, ref string) (planning.Milestone, bool) {
 	for _, milestone := range plan.Milestones {
-		if milestone.Ref == ref {
+		if planning.MilestoneKey(milestone) == ref {
 			return milestone, true
 		}
 	}

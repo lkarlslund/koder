@@ -70,11 +70,11 @@ func TestNormalizeArgs(t *testing.T) {
 		t.Fatalf("unexpected list args: %#v", listArgs)
 	}
 
-	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "milestone_ref": " alpha ", "title": "Worker", "task_ref": "task-1"})
+	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "milestone_key": " alpha ", "title": "Worker", "task_key": "task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_ref"] != "alpha" || args["title"] != "Worker" || args["task_ref"] != "task-1" {
+	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_key"] != "alpha" || args["title"] != "Worker" || args["task_key"] != "task-1" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
 	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "missing", "objective": "do it"}); err == nil || !strings.Contains(err.Error(), "not registered") {
@@ -175,7 +175,7 @@ func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	}}}
 	result, err := (startTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatStart,
-		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_ref": "alpha", "title": "Worker"},
+		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_key": "alpha", "title": "Worker"},
 	}})
 	if err != nil {
 		t.Fatal(err)

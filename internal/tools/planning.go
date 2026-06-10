@@ -63,7 +63,7 @@ func AssignedTodoRef(runtime Runtime) id.ID {
 
 func TodoScopeAllows(runtime Runtime, todoID id.ID) error {
 	assigned := AssignedTodoRef(runtime)
-	if assigned == "" || todoID == assigned {
+	if assigned == "" || todoID == assigned || string(todoID) == string(assigned) {
 		return nil
 	}
 	return fmt.Errorf("chat is scoped to task %q", assigned)
@@ -76,7 +76,7 @@ func ScopedTodos(runtime Runtime, todos []planning.TodoItem) []planning.TodoItem
 	}
 	out := make([]planning.TodoItem, 0, 1)
 	for _, item := range todos {
-		if item.ID == assigned {
+		if item.ID == assigned || planning.TodoKey(item) == string(assigned) {
 			out = append(out, item)
 			break
 		}
@@ -92,7 +92,7 @@ func ScopedMilestonePlan(runtime Runtime, plan planning.Plan) planning.Plan {
 	scoped := plan
 	scoped.Milestones = nil
 	for _, milestone := range plan.Milestones {
-		if milestone.Ref == assigned {
+		if planning.MilestoneKey(milestone) == assigned {
 			scoped.Milestones = []planning.Milestone{milestone}
 			return scoped
 		}
@@ -116,13 +116,16 @@ func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[st
 			ownerChatID = *item.OwnerChatID
 		}
 		items = append(items, MilestoneStoredItem{
+			ID:           item.ID,
+			Key:          planning.MilestoneKey(item),
 			Ref:          item.Ref,
 			Title:        item.Title,
 			Status:       item.Status.String(),
 			Notes:        item.Notes,
+			DependsOnKey: planning.MilestoneDependsOnKey(item),
 			DependsOnRef: item.DependsOnRef,
 			OwnerChatID:  ownerChatID,
-			TodoSummary:  summaries[item.Ref],
+			TodoSummary:  summaries[planning.MilestoneKey(item)],
 		})
 	}
 	return MilestonePlanStoredResult{
@@ -136,12 +139,14 @@ func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem,
 	for _, item := range todos {
 		items = append(items, TodoStoredItem{
 			ID:      item.ID,
+			Key:     planning.TodoKey(item),
 			Content: item.Content,
 			Note:    item.Note,
 			Status:  item.Status.String(),
 		})
 	}
 	return TodoListStoredResult{
+		MilestoneKey:   ref,
 		MilestoneRef:   ref,
 		MilestoneTitle: planning.MilestoneTitle(plan, ref),
 		Message:        message,
@@ -179,7 +184,7 @@ func TodoBucketResultWithTitle(ref, title string, todos []planning.TodoItem, mes
 	return Result{
 		Output: output,
 		Meta: map[string]string{
-			"milestone_ref": ref,
+			"milestone_key": ref,
 			"todo_count":    fmt.Sprintf("%d", len(stored.Items)),
 		},
 		Stored: stored,
