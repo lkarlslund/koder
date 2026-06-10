@@ -771,7 +771,7 @@ func TestSystemPromptMentionsBrowserMarkdownAndDiagrams(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := string(data)
-	for _, want := range []string{"browser interface", "GitHub-flavored Markdown", "Mermaid diagrams", "inline SVG"} {
+	for _, want := range []string{"browser interface", "GitHub-flavored Markdown", "Mermaid diagrams", "Do not wait for the user to ask for a diagram", "inline SVG", "LaTeX math syntax"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected system prompt to mention %q", want)
 		}
