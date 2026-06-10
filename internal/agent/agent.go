@@ -1679,16 +1679,6 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 		return provider.ChatRequest{}, "", err
 	}
 	req := e.compactionChatRequest(session, chat, messages, instructions, stream)
-	if e.compactionRequestWithinContext(chat, req) {
-		return req, firstKeptItemID, nil
-	}
-	fittedReq, fittedFirstKeptItemID, ok, err := e.fitCompactionRequestToContext(session, chat, timeline, instructions, stream, base, keepStart)
-	if err != nil {
-		return provider.ChatRequest{}, "", err
-	}
-	if ok {
-		return fittedReq, fittedFirstKeptItemID, nil
-	}
 	return req, firstKeptItemID, nil
 }
 
@@ -1697,68 +1687,6 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 		Role:    provider.RoleUser,
 		Content: e.compactPromptWithInstructions(instructions),
 	}), stream)
-}
-
-func (e *Engine) fitCompactionRequestToContext(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool, base compactionCutBase, keepStart int) (provider.ChatRequest, string, bool, error) {
-	if e.compactionRequestTokenBudget(chat) <= 0 {
-		return provider.ChatRequest{}, "", false, nil
-	}
-	low := max(0, min(base.MinKeepStart, keepStart))
-	high := max(0, min(keepStart, len(timeline)))
-	var bestReq provider.ChatRequest
-	var bestFirstKeptItemID string
-	var bestFound bool
-	for low <= high {
-		mid := low + (high-low)/2
-		messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, mid, base)
-		if err != nil {
-			return provider.ChatRequest{}, "", false, err
-		}
-		req := e.compactionChatRequest(session, chat, messages, instructions, stream)
-		if e.compactionRequestWithinContext(chat, req) {
-			bestReq = req
-			bestFirstKeptItemID = firstKeptItemID
-			bestFound = true
-			low = mid + 1
-			continue
-		}
-		high = mid - 1
-	}
-	return bestReq, bestFirstKeptItemID, bestFound, nil
-}
-
-func (e *Engine) compactionRequestWithinContext(chat domain.Chat, req provider.ChatRequest) bool {
-	budget := e.compactionRequestTokenBudget(chat)
-	if budget <= 0 {
-		return true
-	}
-	return estimatedRequestTokens(req) <= budget
-}
-
-func (e *Engine) compactionRequestTokenBudget(chat domain.Chat) int {
-	model, err := e.settings.Model(chat)
-	contextWindow := 0
-	if err == nil {
-		contextWindow = model.ContextWindow
-	} else {
-		contextWindow = e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
-	}
-	if contextWindow <= 0 {
-		return 0
-	}
-	reserve := max(512, min(8192, contextWindow/50))
-	if contextWindow <= reserve {
-		return max(1, contextWindow)
-	}
-	return contextWindow - reserve
-}
-
-func estimatedRequestTokens(req provider.ChatRequest) int {
-	data, err := json.Marshal(req)
-	if err != nil || len(data) == 0 {
-		return 0
-	}
-	return (len(data) + 2) / 3
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {

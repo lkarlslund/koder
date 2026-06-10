@@ -5346,7 +5346,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	}
 }
 
-func TestBuildCompactionRequestRecutsWhenRequestExceedsContext(t *testing.T) {
+func TestBuildCompactionRequestKeepsConfiguredReplayBoundary(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Compaction.AutoAtPercent = 80
 	cfg.Compaction.KeepToolCalls = 1
@@ -5373,16 +5373,10 @@ func TestBuildCompactionRequestRecutsWhenRequestExceedsContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !engine.compactionRequestWithinContext(chat, req) {
-		t.Fatalf("expected fitted compaction request within budget, estimated=%d budget=%d", estimatedRequestTokens(req), engine.compactionRequestTokenBudget(chat))
-	}
 	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == firstKept })
-	if idx <= 0 || idx >= len(timeline) {
-		t.Fatalf("expected recut first kept item inside timeline, got %q at %d", firstKept, idx)
-	}
-	originalKeepStart := preservedTimelineToolCallTailStart(timeline, engine.compactionKeepToolCalls())
-	if idx >= originalKeepStart {
-		t.Fatalf("expected fitted request to preserve a larger tail, first kept index=%d original=%d", idx, originalKeepStart)
+	want := preservedTimelineToolCallTailStart(timeline, engine.compactionKeepToolCalls())
+	if idx != want {
+		t.Fatalf("expected compaction boundary to stay at configured preserved tail, got %d want %d", idx, want)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
