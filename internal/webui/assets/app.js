@@ -46,6 +46,20 @@
       });
       return template.innerHTML;
     }
+    function renderMarkdownDiffBlocks(html) {
+      if (!html) return html;
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      template.content.querySelectorAll('pre code.language-diff').forEach(code => {
+        const diff = code.textContent || '';
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tool-result tool-diff-markdown';
+        wrapper.innerHTML = renderDiffBlock('Diff', diff);
+        const pre = code.closest('pre');
+        if (pre) pre.replaceWith(wrapper);
+      });
+      return template.innerHTML;
+    }
     function renderMermaidPlaceholders(html) {
       const template = document.createElement('template');
       template.innerHTML = html;
@@ -401,6 +415,7 @@
         if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
         html = renderMathInHTML(html);
         html = highlightMarkdownCode(html);
+        html = renderMarkdownDiffBlocks(html);
         return sanitizeHTML(html);
       });
     }
@@ -617,13 +632,20 @@
     }
     function renderDiffBlock(title, diff) {
       const rows = splitLines(diff).map(line => {
-        let cls = 'tool-diff-line';
-        if (line.startsWith('+') && !line.startsWith('+++')) cls += ' tool-diff-add';
-        else if (line.startsWith('-') && !line.startsWith('---')) cls += ' tool-diff-del';
-        else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) cls += ' tool-diff-meta';
+        const cls = 'tool-diff-line ' + diffLineClass(line);
         return '<div class="' + cls + '" title="' + escapeHTML(line || '') + '">' + escapeHTML(line || ' ') + '</div>';
       }).join('');
       return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
+    }
+    function diffLineClass(line) {
+      const text = String(line || '');
+      if (text.startsWith('diff --git ') || text.startsWith('--- ') || text.startsWith('+++ ')) return 'tool-diff-file';
+      if (text.startsWith('index ') || text.startsWith('new file mode ') || text.startsWith('deleted file mode ') || text.startsWith('similarity index ') || text.startsWith('rename from ') || text.startsWith('rename to ')) return 'tool-diff-index';
+      if (text.startsWith('@@')) return 'tool-diff-hunk';
+      if (text.startsWith('+') && !text.startsWith('+++')) return 'tool-diff-add';
+      if (text.startsWith('-') && !text.startsWith('---')) return 'tool-diff-del';
+      if (text === '') return 'tool-diff-empty';
+      return 'tool-diff-context';
     }
     function imageResultSource(data) {
       const path = firstValue(data, ['path', 'Path']);

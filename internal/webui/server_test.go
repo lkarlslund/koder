@@ -1181,7 +1181,15 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `case 'process_restart': return 'process restarting'`) {
 		t.Fatalf("expected interruption notices to render readable reason text")
 	}
-	if !strings.Contains(fullPage, `function renderDiffBlock(title, diff)`) || !strings.Contains(fullPage, `tool-diff-add`) || !strings.Contains(fullPage, `tool-diff-del`) {
+	if !strings.Contains(fullPage, `function renderDiffBlock(title, diff)`) ||
+		!strings.Contains(fullPage, `function renderMarkdownDiffBlocks(html)`) ||
+		!strings.Contains(fullPage, `code.language-diff`) ||
+		!strings.Contains(fullPage, `renderDiffBlock('Diff', diff)`) ||
+		!strings.Contains(fullPage, `diffLineClass(line)`) ||
+		!strings.Contains(fullPage, `tool-diff-file`) ||
+		!strings.Contains(fullPage, `tool-diff-hunk`) ||
+		!strings.Contains(fullPage, `tool-diff-add`) ||
+		!strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
 	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2)`) {

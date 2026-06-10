@@ -154,10 +154,14 @@
     .tool-result-body-mono { font-family: var(--bs-font-monospace); }
     .tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
     .tool-result-omitted { color: var(--bs-secondary-color); font-style: italic; }
+    .tool-diff-markdown { margin: .75rem 0; }
     .tool-diff-line { padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+    .tool-diff-file, .tool-diff-index { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); font-weight: 600; }
+    .tool-diff-hunk { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    .tool-diff-context { color: var(--bs-body-color); }
     .tool-diff-add { background: rgba(var(--bs-success-rgb), .18); color: var(--bs-success-text-emphasis); }
     .tool-diff-del { background: rgba(var(--bs-danger-rgb), .18); color: var(--bs-danger-text-emphasis); }
-    .tool-diff-meta { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
+    .tool-diff-empty { color: var(--bs-secondary-color); }
     .tool-image-result { font-family: var(--bs-body-font-family); white-space: normal; }
     .tool-image-preview { position: relative; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); overflow: hidden; cursor: zoom-in; }
     .tool-image-thumb { width: 5.5rem; height: 5.5rem; }
