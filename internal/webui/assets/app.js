@@ -1450,6 +1450,7 @@
           const seq = active ? ++this.scrollRestoreSeq : this.scrollRestoreSeq;
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[id] || snapshots[String(id)] || {};
+          const wasStreaming = this.snapshotIsStreaming(current);
           const next = {...current};
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
@@ -1483,6 +1484,7 @@
           if (delta.error) this.error = delta.error;
           this.syncInterruptArmed();
           if (active && delta.item) this.maybeSpeakTimelineItem(delta.item, next);
+          if (active && wasStreaming && !this.snapshotIsStreaming(next)) this.maybeSpeakLatestAssistant(next);
           if (active) {
             this.afterTranscriptDOMUpdate(() => {
               if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
@@ -3115,6 +3117,17 @@
           if (!id || !text || this.ttsSpokenItems[id] === text) return;
           this.ttsSpokenItems = {...this.ttsSpokenItems, [id]: text};
           this.speakText(text);
+        },
+        maybeSpeakLatestAssistant(snapshot) {
+          const timeline = snapshot?.Timeline || snapshot?.timeline || [];
+          for (let i = timeline.length - 1; i >= 0; i--) {
+            const item = timeline[i];
+            const kind = String(item?.kind || item?.Kind || '').trim();
+            if (kind === 'assistant') {
+              this.maybeSpeakTimelineItem(item, snapshot);
+              return;
+            }
+          }
         },
         speakText(text) {
           this.rpc('tts_speech', {text}).then(result => {
