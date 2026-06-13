@@ -1333,6 +1333,7 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	engine := agent.New(cfg, st, nil, nil)
 	ctrl := New(cfg, engine)
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
@@ -1367,6 +1368,56 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 		case <-deadline:
 			t.Fatal("expected workspace delta")
 		}
+	}
+}
+
+func TestControllerRefreshWorkspaceUsesSelectedSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	for _, workdir := range []string{workspaceA, workspaceB} {
+		runGit(t, workdir, "init")
+		runGit(t, workdir, "config", "user.email", "test@example.com")
+		runGit(t, workdir, "config", "user.name", "Test User")
+		if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, workdir, "add", "tracked.txt")
+		runGit(t, workdir, "commit", "-m", "initial")
+	}
+	if err := os.WriteFile(filepath.Join(workspaceA, "tracked.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	if err := ctrl.Start(ctx, StartupModeNew, workspaceA); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	sessionA := activateTestSession(t, ctrl, workspaceA)
+	sessionB := activateTestSession(t, ctrl, workspaceB)
+	if ctrl.State().Session.ID != sessionB.ID {
+		t.Fatalf("expected controller mirror to point at session b")
+	}
+
+	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: sessionA.ID}); err != nil {
+		t.Fatalf("refresh selected workspace: %v", err)
+	}
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: sessionA.ID})
+	if err != nil {
+		t.Fatalf("state for session a: %v", err)
+	}
+	if !state.Workspace.Available || state.Workspace.ProjectRoot != workspaceA || state.Workspace.Modified != 1 {
+		t.Fatalf("expected session a git status, got %#v", state.Workspace)
 	}
 }
 
@@ -1445,17 +1496,14 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	session := activateTestSession(t, ctrl, workdir)
+	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+		t.Fatalf("initial refresh workspace: %v", err)
+	}
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
-	ctrl.mu.Lock()
-	ctrl.lastWorkspaceRefresh = time.Now()
-	ctrl.mu.Unlock()
 
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
-		t.Fatalf("refresh workspace: %v", err)
 	}
 
 	staleSeen := false

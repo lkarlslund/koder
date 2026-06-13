@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
+	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
 // EventKind identifies a session-owned state mutation.
@@ -62,6 +63,12 @@ type Session struct {
 	plan        planning.Plan
 	tasksByRef  map[string][]planning.Task
 	legacyTasks []planning.LegacyTask
+	workspace   workspacepkg.Status
+
+	workspaceRefreshTimer   *time.Timer
+	workspaceRefreshPending bool
+	lastWorkspaceRefresh    time.Time
+	workspaceWatchCancel    context.CancelFunc
 
 	subsMu  sync.Mutex
 	nextSub int
@@ -119,6 +126,7 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 		plan:        plan,
 		tasksByRef:  tasksByRef,
 		legacyTasks: slices.Clone(legacyTasks),
+		workspace:   workspacepkg.Status{ProjectRoot: session.ProjectRoot},
 		subs:        map[int]chan Event{},
 	}
 	return owner, nil
@@ -194,6 +202,157 @@ func (s *Session) Snapshot() SessionSnapshot {
 		TasksByRef:  cloneTasksByRef(s.tasksByRef),
 		LegacyTasks: slices.Clone(s.legacyTasks),
 	}
+}
+
+// WorkspaceStatus returns the latest workspace metadata known for this session.
+func (s *Session) WorkspaceStatus() workspacepkg.Status {
+	if s == nil {
+		return workspacepkg.Status{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status := s.workspace
+	if status.ProjectRoot == "" {
+		status.ProjectRoot = s.session.ProjectRoot
+	}
+	return status
+}
+
+// RefreshWorkspace refreshes workspace metadata owned by this session.
+func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Context, string) (workspacepkg.Status, error), minInterval time.Duration, force bool, onChange func(workspacepkg.Status)) error {
+	if s == nil {
+		return fmt.Errorf("session is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if snapshot == nil {
+		snapshot = workspacepkg.Snapshot
+	}
+	if minInterval <= 0 {
+		minInterval = 10 * time.Second
+	}
+	now := time.Now()
+	var staleStatus workspacepkg.Status
+	var broadcastStale bool
+	var delay time.Duration
+
+	s.mu.Lock()
+	projectRoot := strings.TrimSpace(s.session.ProjectRoot)
+	if projectRoot == "" {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.workspace.ProjectRoot == "" {
+		s.workspace.ProjectRoot = projectRoot
+	}
+	due := force || s.lastWorkspaceRefresh.IsZero() || now.Sub(s.lastWorkspaceRefresh) >= minInterval
+	if !due {
+		if !s.workspace.Stale {
+			s.workspace.Stale = true
+			staleStatus = s.workspace
+			broadcastStale = true
+		}
+		delay = minInterval - now.Sub(s.lastWorkspaceRefresh)
+		if delay < 0 {
+			delay = 0
+		}
+		if !s.workspaceRefreshPending {
+			s.workspaceRefreshPending = true
+			s.workspaceRefreshTimer = time.AfterFunc(delay, func() {
+				_ = s.RefreshWorkspace(context.Background(), snapshot, minInterval, true, onChange)
+			})
+		}
+		s.mu.Unlock()
+		if broadcastStale && onChange != nil {
+			onChange(staleStatus)
+		}
+		return nil
+	}
+	if s.workspaceRefreshTimer != nil {
+		s.workspaceRefreshTimer.Stop()
+		s.workspaceRefreshTimer = nil
+	}
+	s.workspaceRefreshPending = false
+	s.lastWorkspaceRefresh = now
+	s.mu.Unlock()
+
+	status, err := snapshot(ctx, projectRoot)
+	if err != nil {
+		return err
+	}
+	status.Stale = false
+
+	s.mu.Lock()
+	changed := workspaceSignature(s.workspace) != workspaceSignature(status)
+	s.workspace = status
+	if !status.RefreshedAt.IsZero() {
+		s.lastWorkspaceRefresh = status.RefreshedAt
+	}
+	s.mu.Unlock()
+	if changed && onChange != nil {
+		onChange(status)
+	}
+	return nil
+}
+
+// ReplaceWorkspaceWatcher starts file watching for this session's workspace.
+func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string) (workspacepkg.Status, error), minInterval time.Duration, onChange func(workspacepkg.Status)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.workspaceWatchCancel != nil {
+		s.mu.Unlock()
+		return
+	}
+	projectRoot := strings.TrimSpace(s.session.ProjectRoot)
+	s.mu.Unlock()
+	if projectRoot == "" {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := workspacepkg.Watch(ctx, projectRoot)
+	if err != nil {
+		cancel()
+		return
+	}
+	s.mu.Lock()
+	s.workspaceWatchCancel = cancel
+	s.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		for range watcher.Events() {
+			_ = s.RefreshWorkspace(context.Background(), snapshot, minInterval, false, onChange)
+		}
+	}()
+}
+
+func workspaceSignature(status workspacepkg.Status) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
+		status.Available,
+		status.ProjectRoot,
+		status.AgentsChecksum,
+		status.Stale,
+		status.Branch,
+		status.Upstream,
+		status.Summary,
+		status.Added,
+		status.Modified,
+		status.Deleted,
+		status.Untracked,
+	))
+	for _, file := range status.Files {
+		b.WriteString(file.Code)
+		b.WriteByte('\t')
+		b.WriteString(file.Path)
+		b.WriteByte('\t')
+		b.WriteString(fmt.Sprintf("%d/%d\n", file.Additions, file.Deletions))
+	}
+	return b.String()
 }
 
 // Subscribe registers for session-owned state mutations.
@@ -900,6 +1059,17 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 		}
 	}
 	s.mu.RUnlock()
+	s.mu.Lock()
+	if s.workspaceRefreshTimer != nil {
+		s.workspaceRefreshTimer.Stop()
+		s.workspaceRefreshTimer = nil
+	}
+	s.workspaceRefreshPending = false
+	if s.workspaceWatchCancel != nil {
+		s.workspaceWatchCancel()
+		s.workspaceWatchCancel = nil
+	}
+	s.mu.Unlock()
 	s.subsMu.Lock()
 	subs := make([]chan Event, 0, len(s.subs))
 	for _, ch := range s.subs {

@@ -349,11 +349,7 @@ type Controller struct {
 	chat                        domain.Chat
 	workspace                   workspacepkg.Status
 	workspaceSnapshot           func(context.Context, string) (workspacepkg.Status, error)
-	workspaceWatchCancel        context.CancelFunc
 	workspaceRefreshMinInterval time.Duration
-	lastWorkspaceRefresh        time.Time
-	workspaceRefreshTimer       *time.Timer
-	workspaceRefreshPending     bool
 	theme                       string
 	lastErr                     string
 	restartNeeded               bool
@@ -463,6 +459,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 	if snapshot.Session.ID == "" {
 		snapshot.Session = session
 	}
+	c.ensureSessionWorkspace(owner)
 	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
 	statuses := idleStatusesForChats(ownerSnapshot.Chats)
 	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
@@ -489,7 +486,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 		Milestones:    ownerSnapshot.Plan,
 		Tasks:         slices.Clone(ownerSnapshot.Tasks),
 		TasksByRef:    cloneTasksByRef(ownerSnapshot.TasksByRef),
-		Workspace:     c.workspaceStatusForSession(session),
+		Workspace:     owner.WorkspaceStatus(),
 		ContextWindow: c.contextWindowForChat(chatRecord),
 		ModelInfo:     c.modelInfoForChat(chatRecord),
 		Theme:         base.Theme,
@@ -537,16 +534,6 @@ func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selectio
 		return owner, session, domain.Chat{}, nil, nil
 	}
 	return owner, session, chatRecord, nil, nil
-}
-
-func (c *Controller) workspaceStatusForSession(session domain.Session) workspacepkg.Status {
-	c.mu.RLock()
-	status := c.workspace
-	c.mu.RUnlock()
-	if status.ProjectRoot != "" && session.ID != "" && status.ProjectRoot == session.ProjectRoot {
-		return status
-	}
-	return workspacepkg.Status{ProjectRoot: session.ProjectRoot}
 }
 
 // TimelinePage returns a transcript page for a chat in an explicitly selected session.
@@ -1012,10 +999,6 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	defer c.shutdownMu.Unlock()
 
 	c.mu.Lock()
-	if c.workspaceRefreshTimer != nil {
-		c.workspaceRefreshTimer.Stop()
-		c.workspaceRefreshTimer = nil
-	}
 	agent := c.agent
 	c.mu.Unlock()
 	if agent == nil {
@@ -1410,15 +1393,6 @@ const (
 	workspaceRefreshTimer
 )
 
-// RefreshWorkspace requests a workspace metadata scan and publishes an event on change.
-func (c *Controller) RefreshWorkspace(ctx context.Context) error {
-	c.mu.RLock()
-	sessionID := c.session.ID
-	projectRoot := c.session.ProjectRoot
-	c.mu.RUnlock()
-	return c.requestWorkspaceRefresh(ctx, sessionID, projectRoot, workspaceRefreshUser)
-}
-
 // RefreshWorkspaceForSelection requests a workspace scan for the selected session.
 func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) error {
 	if selection.SessionID == "" {
@@ -1435,111 +1409,70 @@ func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
 	}
-	return c.requestWorkspaceRefresh(ctx, session.ID, session.ProjectRoot, workspaceRefreshUser)
+	return c.refreshSessionWorkspace(ctx, owner, workspaceRefreshUser)
 }
 
-func (c *Controller) requestWorkspaceRefresh(ctx context.Context, sessionID id.ID, projectRoot string, trigger workspaceRefreshTrigger) error {
-	if ctx == nil {
-		ctx = context.Background()
+func (c *Controller) refreshSessionWorkspace(ctx context.Context, owner *sessionpkg.Session, trigger workspaceRefreshTrigger) error {
+	if owner == nil {
+		return fmt.Errorf("session is required")
 	}
-	now := time.Now()
-	var staleStatus workspacepkg.Status
-	var broadcastStale bool
-	var delay time.Duration
-	c.mu.Lock()
-	if c.session.ID != sessionID || c.session.ProjectRoot != projectRoot {
-		c.mu.Unlock()
-		return nil
-	}
+	sessionID := owner.Snapshot().Session.ID
 	minInterval := c.workspaceRefreshMinInterval
 	if minInterval <= 0 {
 		minInterval = defaultWorkspaceRefreshMinInterval
 	}
-	due := trigger == workspaceRefreshInitial || c.lastWorkspaceRefresh.IsZero() || now.Sub(c.lastWorkspaceRefresh) >= minInterval
-	if !due {
-		if !c.workspace.Stale {
-			c.workspace.Stale = true
-			staleStatus = c.workspace
-			broadcastStale = true
-		}
-		delay = minInterval - now.Sub(c.lastWorkspaceRefresh)
-		if delay < 0 {
-			delay = 0
-		}
-		if !c.workspaceRefreshPending {
-			c.workspaceRefreshPending = true
-			c.workspaceRefreshTimer = time.AfterFunc(delay, func() {
-				_ = c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshTimer)
-			})
-		}
-		c.mu.Unlock()
-		if broadcastStale {
-			c.broadcastWorkspace(staleStatus)
-		}
-		return nil
-	}
-	if c.workspaceRefreshTimer != nil {
-		c.workspaceRefreshTimer.Stop()
-		c.workspaceRefreshTimer = nil
-	}
-	c.workspaceRefreshPending = false
-	c.lastWorkspaceRefresh = now
-	c.mu.Unlock()
-
 	snapshot := c.workspaceSnapshot
 	if snapshot == nil {
 		snapshot = workspacepkg.Snapshot
 	}
-	status, err := snapshot(ctx, projectRoot)
-	if err != nil {
-		return err
-	}
-	status.Stale = false
-	c.mu.Lock()
-	if c.session.ID != sessionID || c.session.ProjectRoot != projectRoot {
+	force := trigger == workspaceRefreshInitial || trigger == workspaceRefreshUser || trigger == workspaceRefreshTimer
+	return owner.RefreshWorkspace(ctx, snapshot, minInterval, force, func(status workspacepkg.Status) {
+		c.mu.Lock()
+		c.workspace = status
 		c.mu.Unlock()
-		return nil
-	}
-	changed := workspaceSignature(c.workspace) != workspaceSignature(status)
-	c.workspace = status
-	if !status.RefreshedAt.IsZero() {
-		c.lastWorkspaceRefresh = status.RefreshedAt
-	}
-	c.mu.Unlock()
-	if changed {
-		c.broadcastWorkspace(status)
-	}
-	return nil
+		c.broadcastWorkspace(sessionID, status)
+	})
 }
 
-func (c *Controller) broadcastWorkspace(status workspacepkg.Status) {
-	c.broadcast("workspace_delta", map[string]any{"workspace_status": status})
-}
-
-func (c *Controller) replaceWorkspaceWatcher(sessionID id.ID, projectRoot string) {
-	c.mu.Lock()
-	if c.workspaceWatchCancel != nil {
-		c.workspaceWatchCancel()
-		c.workspaceWatchCancel = nil
-	}
-	c.mu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	watcher, err := workspacepkg.Watch(ctx, projectRoot)
-	if err != nil {
-		cancel()
+func (c *Controller) ensureSessionWorkspace(owner *sessionpkg.Session) {
+	if owner == nil {
 		return
 	}
-	c.mu.Lock()
-	c.workspaceWatchCancel = cancel
-	c.mu.Unlock()
+	status := owner.WorkspaceStatus()
+	c.replaceWorkspaceWatcher(owner)
+	if status.RefreshedAt.IsZero() {
+		go func() {
+			if err := c.refreshSessionWorkspace(context.Background(), owner, workspaceRefreshInitial); err != nil {
+				snapshot := owner.Snapshot()
+				slog.Warn("initial workspace refresh failed", "session_id", snapshot.Session.ID, "project_root", snapshot.Session.ProjectRoot, "error", err)
+			}
+		}()
+	}
+}
 
-	go func() {
-		defer cancel()
-		for range watcher.Events() {
-			_ = c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshWatcher)
-		}
-	}()
+func (c *Controller) broadcastWorkspace(sessionID id.ID, status workspacepkg.Status) {
+	c.broadcast("workspace_delta", map[string]any{"session_id": sessionID, "workspace_status": status})
+}
+
+func (c *Controller) replaceWorkspaceWatcher(owner *sessionpkg.Session) {
+	if owner == nil {
+		return
+	}
+	sessionID := owner.Snapshot().Session.ID
+	minInterval := c.workspaceRefreshMinInterval
+	if minInterval <= 0 {
+		minInterval = defaultWorkspaceRefreshMinInterval
+	}
+	snapshot := c.workspaceSnapshot
+	if snapshot == nil {
+		snapshot = workspacepkg.Snapshot
+	}
+	owner.ReplaceWorkspaceWatcher(snapshot, minInterval, func(status workspacepkg.Status) {
+		c.mu.Lock()
+		c.workspace = status
+		c.mu.Unlock()
+		c.broadcastWorkspace(sessionID, status)
+	})
 }
 
 // CompleteComposer returns command, skill, and reference completions for the current composer token.
@@ -1867,27 +1800,16 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	c.mu.Lock()
 	c.session = session
 	c.chat = chatRecord
-	c.workspace = workspacepkg.Status{ProjectRoot: session.ProjectRoot}
-	c.lastWorkspaceRefresh = time.Time{}
-	if c.workspaceRefreshTimer != nil {
-		c.workspaceRefreshTimer.Stop()
-		c.workspaceRefreshTimer = nil
-	}
-	c.workspaceRefreshPending = false
+	c.workspace = owner.WorkspaceStatus()
 	c.lastErr = ""
 	c.mu.Unlock()
 
-	c.replaceWorkspaceWatcher(session.ID, session.ProjectRoot)
+	c.ensureSessionWorkspace(owner)
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	for _, loaded := range runtimes {
 		loaded.Kick()
 	}
 	c.broadcast("snapshot", c.State())
-	go func(sessionID id.ID, projectRoot string) {
-		if err := c.requestWorkspaceRefresh(context.Background(), sessionID, projectRoot, workspaceRefreshInitial); err != nil {
-			slog.Warn("initial workspace refresh failed", "session_id", sessionID, "project_root", projectRoot, "error", err)
-		}
-	}(session.ID, session.ProjectRoot)
 	return nil
 }
 
@@ -2211,31 +2133,6 @@ func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) id.ID {
 		}
 	}
 	return ""
-}
-
-func workspaceSignature(status workspacepkg.Status) string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
-		status.Available,
-		status.ProjectRoot,
-		status.AgentsChecksum,
-		status.Stale,
-		status.Branch,
-		status.Upstream,
-		status.Summary,
-		status.Added,
-		status.Modified,
-		status.Deleted,
-		status.Untracked,
-	))
-	for _, file := range status.Files {
-		b.WriteString(file.Code)
-		b.WriteByte('\t')
-		b.WriteString(file.Path)
-		b.WriteByte('\t')
-		b.WriteString(fmt.Sprintf("%d/%d\n", file.Additions, file.Deletions))
-	}
-	return b.String()
 }
 
 // Touch avoids stale-session ordering when a renderer action changes state.

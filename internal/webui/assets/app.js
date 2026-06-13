@@ -1432,6 +1432,8 @@
         },
         applyWorkspaceDelta(delta) {
           if (!delta) return;
+          const sessionID = String(delta.session_id || delta.SessionID || '').trim();
+          if (sessionID && sessionID !== this.currentSessionID()) return;
           const status = delta.workspace_status || delta.Workspace || delta.workspace;
           if (status === undefined) return;
           this.state.workspace_status = status;
