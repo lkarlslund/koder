@@ -1710,7 +1710,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `settings-prompt`) ||
 		!strings.Contains(fullPage, `resetPrompt(prompt.target)`) ||
 		!strings.Contains(fullPage, `modelOptionValue(model)`) ||
-		!strings.Contains(fullPage, `$el.value = compactionModelValue()`) {
+		!strings.Contains(fullPage, `openSettingsModelPicker({kind: 'compaction'`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'thinking'`) ||

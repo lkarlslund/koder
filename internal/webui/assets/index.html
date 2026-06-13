@@ -519,12 +519,12 @@
     </section>
   </div>
 
-  <div class="modal-backdrop-lite" x-show="showModels" x-transition @keydown.escape.window="closeModelDialog()" style="display: none;">
+  <div class="modal-backdrop-lite" :class="{'modal-backdrop-nested': modelPickerTarget}" x-show="showModels" x-transition @keydown.escape.window="closeModelDialog()" style="display: none;">
     <section class="model-dialog bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div>
-          <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Select model</div>
-          <div class="small text-secondary" x-text="activeProvider() + ' / ' + activeModel()"></div>
+          <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> <span x-text="modelPickerTitle()"></span></div>
+          <div class="small text-secondary" x-text="modelPickerSubtitle()"></div>
         </div>
         <div class="d-flex align-items-center gap-2">
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Refresh models" @click="refreshModelOptions()" :disabled="modelLoading"><i class="bi bi-arrow-clockwise"></i></button>
@@ -543,7 +543,7 @@
             <div class="list-group-item text-secondary">No models match the filter</div>
           </template>
           <template x-for="model in filteredModels()" :key="model.provider_id + '/' + model.model_id">
-            <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': model.current}" @click="selectModel(model)">
+            <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': modelPickerModelCurrent(model)}" @click="selectModel(model)">
               <span class="text-start">
                 <span class="fw-semibold" x-text="model.model_id"></span>
                 <span class="d-block small opacity-75">
@@ -558,11 +558,11 @@
                   <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
                 </span>
               </span>
-              <i class="bi bi-check-lg" x-show="model.current"></i>
+              <i class="bi bi-check-lg" x-show="modelPickerModelCurrent(model)"></i>
             </button>
           </template>
         </div>
-        <form class="model-settings-panel border-start" @submit.prevent="saveActiveModelSettings()">
+        <form class="model-settings-panel border-start" x-show="!modelPickerTarget" @submit.prevent="saveActiveModelSettings()">
           <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
             <div>
               <div class="fw-semibold">Chat settings</div>
@@ -823,12 +823,11 @@
             <div>
               <div class="row g-3" x-show="settingsTab === 'general'">
                 <div class="col-md-6">
-                  <label class="form-label small text-secondary">Default provider</label>
-                  <input class="form-control" x-model="settings.general.default_provider" autocomplete="off">
-                </div>
-                <div class="col-md-6">
                   <label class="form-label small text-secondary">Default model</label>
-                  <input class="form-control" x-model="settings.general.default_model" autocomplete="off">
+                  <div class="input-group">
+                    <input class="form-control" :value="defaultModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button>
+                  </div>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Theme</label>
@@ -861,12 +860,11 @@
                 </div>
                 <div class="col-md-8">
                   <label class="form-label small text-secondary">TTS model</label>
-                  <select class="form-select" :value="ttsModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = ttsModelValue(); })" @change="setTTSModelValue($event.target.value)">
-                    <option value="">First detected TTS model</option>
-                    <template x-for="model in ttsModelOptions()" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
-                    </template>
-                  </select>
+                  <div class="input-group">
+                    <input class="form-control" :value="ttsModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'tts', title: 'TTS model', subtitle: 'Speech output'})"><i class="bi bi-search"></i></button>
+                    <button class="btn btn-outline-secondary" type="button" @click="setTTSModelValue('')"><i class="bi bi-stars"></i></button>
+                  </div>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Voice</label>
@@ -913,12 +911,11 @@
                 </div>
                 <div class="col-md-8">
                   <label class="form-label small text-secondary">Compaction model</label>
-                  <select class="form-select" :value="compactionModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = compactionModelValue(); })" @change="setCompactionModelValue($event.target.value)">
-                    <option value="chat">Chat model</option>
-                    <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
-                    </template>
-                  </select>
+                  <div class="input-group">
+                    <input class="form-control" :value="compactionModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'compaction', title: 'Compaction model', subtitle: 'Chat compaction', chatOnly: true})"><i class="bi bi-search"></i></button>
+                    <button class="btn btn-outline-secondary" type="button" @click="setCompactionModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
+                  </div>
                 </div>
               </div>
 
@@ -932,12 +929,11 @@
                 </div>
                 <div class="col-md-8">
                   <label class="form-label small text-secondary">Caveman model</label>
-                  <select class="form-select" :value="thinkingModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = thinkingModelValue(); })" @change="setThinkingModelValue($event.target.value)">
-                    <option value="chat">Chat model</option>
-                    <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
-                    </template>
-                  </select>
+                  <div class="input-group">
+                    <input class="form-control" :value="thinkingModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'thinking', title: 'Caveman model', subtitle: 'Thinking helper', chatOnly: true})"><i class="bi bi-search"></i></button>
+                    <button class="btn btn-outline-secondary" type="button" @click="setThinkingModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
+                  </div>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Minimum thinking tokens</label>
@@ -995,11 +991,10 @@
               <div x-show="settingsTab === 'models'">
                 <div class="mb-3">
                   <label class="form-label small text-secondary">Default model for new sessions</label>
-                  <select class="form-select" :value="defaultModelValue()" x-effect="settings?.models; $nextTick(() => { ensureDetectedDefaultModel(); $el.value = defaultModelValue(); })" @change="setDefaultModelValue($event.target.value)">
-                    <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
-                    </template>
-                  </select>
+                  <div class="input-group">
+                    <input class="form-control" :value="defaultModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button>
+                  </div>
                 </div>
                 <div class="settings-list-header">
                   <div>

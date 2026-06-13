@@ -885,7 +885,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
-        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
+        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -3251,12 +3251,20 @@
           this.rpc('set_access_settings', this.accessDraft).then(() => { this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
         },
         openModelDialog() {
+          this.modelPickerTarget = null;
           this.showModels = true; this.modelQuery = ''; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
           this.closeMobileSidebar();
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.refreshModelOptions();
           this.loadActiveModelSettings();
+        },
+        openSettingsModelPicker(target) {
+          this.modelPickerTarget = Object.assign({kind: ''}, target || {});
+          this.showModels = true; this.modelQuery = ''; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.reportClientStateSoon();
+          this.$nextTick(() => this.$refs.modelSearch?.focus());
+          this.refreshModelOptions();
         },
         refreshModelOptions() {
           this.modelLoading = true; this.modelOptions = [];
@@ -3265,14 +3273,19 @@
             .catch(err => { this.showToast(err.message); })
             .finally(() => { this.modelLoading = false; });
         },
-        closeModelDialog() { this.showModels = false; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
+        closeModelDialog() { this.showModels = false; this.modelPickerTarget = null; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
         filteredModels() {
           const q = this.modelQuery.trim().toLowerCase();
-          const models = this.modelOptions || [];
+          const models = this.modelPickerModels();
           if (!q) return models;
           return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.source_provider_id, m.source_model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
         },
         selectModel(model) {
+          if (this.modelPickerTarget) {
+            this.applyModelPickerSelection(model);
+            this.closeModelDialog();
+            return;
+          }
           if (model && model.supports_chat === false) {
             this.showToast('This model supports TTS output, not chat completions.');
             return;
@@ -3281,6 +3294,45 @@
             this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {current: item.provider_id === model.provider_id && item.model_id === model.model_id}));
             this.loadModelSettings(model.provider_id, model.model_id);
           });
+        },
+        modelPickerTitle() {
+          if (!this.modelPickerTarget) return 'Select model';
+          return this.modelPickerTarget.title || 'Select model';
+        },
+        modelPickerSubtitle() {
+          if (!this.modelPickerTarget) return this.activeProvider() + ' / ' + this.activeModel();
+          return this.modelPickerTarget.subtitle || 'Settings';
+        },
+        modelPickerCurrentValue() {
+          const target = this.modelPickerTarget;
+          if (!target) return JSON.stringify([this.activeProvider() || '', this.activeModel() || '']);
+          if (target.kind === 'default') return this.defaultModelValue();
+          if (target.kind === 'tts') return this.ttsModelValue();
+          if (target.kind === 'compaction') return this.compactionModelValue();
+          if (target.kind === 'thinking') return this.thinkingModelValue();
+          return '';
+        },
+        modelPickerModels() {
+          const models = this.modelOptions || [];
+          const target = this.modelPickerTarget;
+          if (target?.kind === 'tts') {
+            const current = this.modelPickerCurrentValue();
+            return models.filter(model => model.supports_tts || this.modelOptionValue(model) === current);
+          }
+          if (target?.chatOnly) return models.filter(model => model.supports_chat !== false);
+          return models;
+        },
+        modelPickerModelCurrent(model) {
+          if (!model) return false;
+          return this.modelOptionValue(model) === this.modelPickerCurrentValue();
+        },
+        applyModelPickerSelection(model) {
+          if (!model || !this.modelPickerTarget) return;
+          const value = this.modelOptionValue(model);
+          if (this.modelPickerTarget.kind === 'default') this.setDefaultModelValue(value);
+          if (this.modelPickerTarget.kind === 'tts') this.setTTSModelValue(value);
+          if (this.modelPickerTarget.kind === 'compaction') this.setCompactionModelValue(value);
+          if (this.modelPickerTarget.kind === 'thinking') this.setThinkingModelValue(value);
         },
         blankableNumber(value) {
           if (value === null || value === undefined || value === '') return null;
@@ -3660,6 +3712,22 @@
           if (model.custom && model.backing_detected === false) suffix.push('source missing');
           return suffix.length ? label + ' (' + suffix.join(', ') + ')' : label;
         },
+        labelForModelValue(value, fallback = '') {
+          if (!value) return fallback;
+          const model = (this.settings?.models || this.modelOptions || []).find(item => this.modelOptionValue(item) === value);
+          if (model) return this.modelOptionLabel(model);
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
+          return parts[0] || parts[1] ? (parts[0] || '-') + ' / ' + (parts[1] || '-') : fallback;
+        },
+        ttsModelLabel() { return this.labelForModelValue(this.ttsModelValue(), 'First detected TTS model'); },
+        compactionModelLabel() { return this.compactionModelValue() === 'chat' ? 'Chat model' : this.labelForModelValue(this.compactionModelValue(), 'Chat model'); },
+        thinkingModelLabel() { return this.thinkingModelValue() === 'chat' ? 'Chat model' : this.labelForModelValue(this.thinkingModelValue(), 'Chat model'); },
+        defaultModelLabel() { return this.labelForModelValue(this.defaultModelValue(), 'No default model'); },
         setCompactionModelValue(value) {
           if (!this.settings?.compaction) return;
           if (value === 'chat') {
