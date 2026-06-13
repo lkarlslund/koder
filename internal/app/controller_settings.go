@@ -329,8 +329,13 @@ func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
 }
 
-// SynthesizeSpeech renders text with the first configured TTS-capable model.
+// SynthesizeSpeech renders text with the configured TTS model.
 func (c *Controller) SynthesizeSpeech(ctx context.Context, text string) (TTSSpeech, error) {
+	return c.SynthesizeSpeechWithTTS(ctx, text, nil)
+}
+
+// SynthesizeSpeechWithTTS renders text with optional unsaved TTS preferences.
+func (c *Controller) SynthesizeSpeechWithTTS(ctx context.Context, text string, prefs *TTSPreferences) (TTSSpeech, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return TTSSpeech{}, fmt.Errorf("tts text is required")
@@ -338,6 +343,13 @@ func (c *Controller) SynthesizeSpeech(ctx context.Context, text string) (TTSSpee
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
+	if prefs != nil {
+		tts, err := configTTSFromPreference(*prefs)
+		if err != nil {
+			return TTSSpeech{}, err
+		}
+		cfg.UI.TTS = tts
+	}
 	sourceProviderID := strings.TrimSpace(cfg.UI.TTS.ProviderID)
 	sourceModelID := strings.TrimSpace(cfg.UI.TTS.ModelID)
 	if sourceProviderID == "" || sourceModelID == "" {

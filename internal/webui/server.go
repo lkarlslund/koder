@@ -940,12 +940,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]any{"models": options}, nil
 	case "tts_speech":
 		var in struct {
-			Text string `json:"text"`
+			Text string              `json:"text"`
+			TTS  *app.TTSPreferences `json:"tts"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		speech, err := s.controller.SynthesizeSpeech(ctx, in.Text)
+		speech, err := s.controller.SynthesizeSpeechWithTTS(ctx, in.Text, in.TTS)
 		if err != nil {
 			return nil, err
 		}

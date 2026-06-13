@@ -894,7 +894,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -3118,6 +3118,10 @@
         },
         speakText(text) {
           this.rpc('tts_speech', {text}).then(result => {
+            this.playTTSAudioResult(result);
+          }).catch(err => this.showToast(err.message || 'TTS failed'));
+        },
+        playTTSAudioResult(result) {
             const audioBase64 = result.audio_base64 || result.AudioBase64 || '';
             if (!audioBase64) return;
             if (this.ttsAudio) {
@@ -3128,7 +3132,20 @@
             const audio = new Audio('data:' + contentType + ';base64,' + audioBase64);
             this.ttsAudio = audio;
             audio.play().catch(err => this.showToast(err.message || 'TTS playback failed'));
-          }).catch(err => this.showToast(err.message || 'TTS failed'));
+        },
+        testTTSOutput() {
+          const text = String(this.ttsTestText || '').trim();
+          if (!text || this.ttsTestBusy) return;
+          this.ttsTestBusy = true;
+          const tts = Object.assign({}, this.settings?.ui?.tts || {});
+          this.rpc('tts_speech', {text, tts}).then(result => {
+            this.playTTSAudioResult(result);
+            this.showToast('TTS test played');
+          }).catch(err => {
+            this.showToast(err.message || 'TTS test failed');
+          }).finally(() => {
+            this.ttsTestBusy = false;
+          });
         },
         activeAccessSettings() { return this.state.access?.settings || this.state.Access?.Settings || {}; },
         accessPresets() { return this.state.access?.presets || this.state.Access?.Presets || []; },

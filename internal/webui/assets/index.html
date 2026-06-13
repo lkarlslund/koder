@@ -887,6 +887,15 @@
                   <label class="form-label small text-secondary">PCM sample rate</label>
                   <input class="form-control" type="number" min="8000" max="192000" step="1000" x-model.number="settings.ui.tts.pcm_sample_rate">
                 </div>
+                <div class="col-md-9">
+                  <label class="form-label small text-secondary">Test text</label>
+                  <input class="form-control" x-model="ttsTestText" autocomplete="off">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                  <button class="btn btn-outline-primary w-100" type="button" @click="testTTSOutput()" :disabled="ttsTestBusy || !String(ttsTestText || '').trim()">
+                    <i class="bi bi-play-fill me-1"></i><span x-text="ttsTestBusy ? 'Testing...' : 'Test'"></span>
+                  </button>
+                </div>
               </div>
 
               <div class="row g-3" x-show="settingsTab === 'compaction'">
