@@ -2653,6 +2653,54 @@
         },
         gitStatus() { return this.state.workspace_status || this.state.Workspace || {}; },
         gitFiles() { return this.gitStatus().files || this.gitStatus().Files || []; },
+        gitTreeRows() {
+          const root = {kind: 'dir', name: '', path: '', children: new Map(), file: {additions: 0, deletions: 0, files: 0}};
+          for (const file of this.gitFiles()) {
+            const path = String(file.path || file.Path || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+            if (!path) continue;
+            const parts = path.split('/').filter(Boolean);
+            let node = root;
+            parts.forEach((part, idx) => {
+              const isLeaf = idx === parts.length - 1;
+              const childPath = parts.slice(0, idx + 1).join('/');
+              if (!node.children.has(part)) {
+                node.children.set(part, {kind: isLeaf ? 'file' : 'dir', name: part, path: childPath, children: new Map(), file: {path: childPath, additions: 0, deletions: 0, files: 0}});
+              }
+              const child = node.children.get(part);
+              if (isLeaf) {
+                child.kind = 'file';
+                child.file = file;
+              }
+              node = child;
+            });
+          }
+          this.aggregateGitTreeNode(root);
+          const rows = [];
+          const walk = (node, depth) => {
+            const children = Array.from(node.children.values()).sort((a, b) => {
+              if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            });
+            for (const child of children) {
+              rows.push({key: child.kind + ':' + child.path, kind: child.kind, name: child.name, path: child.path, depth, file: child.file});
+              if (child.kind === 'dir') walk(child, depth + 1);
+            }
+          };
+          walk(root, 0);
+          return rows;
+        },
+        aggregateGitTreeNode(node) {
+          if (!node || node.kind !== 'dir') return node?.file || {};
+          const summary = {path: node.path, code: '', additions: 0, deletions: 0, files: 0};
+          for (const child of node.children.values()) {
+            const file = child.kind === 'dir' ? this.aggregateGitTreeNode(child) : child.file;
+            summary.additions += this.gitAdditions(file);
+            summary.deletions += this.gitDeletions(file);
+            summary.files += child.kind === 'dir' ? this.gitFileCount(file) : 1;
+          }
+          node.file = summary;
+          return summary;
+        },
         gitFileCode(file) { return file.code || file.Code || ''; },
         gitAdditions(file) { return file.additions ?? file.Additions ?? 0; },
         gitDeletions(file) { return file.deletions ?? file.Deletions ?? 0; },

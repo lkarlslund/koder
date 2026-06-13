@@ -227,6 +227,8 @@
     .git-file.git-modified { border-left-color: var(--bs-warning); }
     .git-file.git-deleted, .diff-del { color: var(--bs-danger-text-emphasis); }
     .git-file.git-untracked { color: var(--bs-info-text-emphasis); }
+    .git-tree-row { --git-tree-depth: 0; }
+    .git-tree-name { display: inline-block; min-width: 0; padding-left: calc(var(--git-tree-depth) * .85rem); }
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
     .model-dialog { width: min(980px, 100%); max-height: min(760px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-dialog-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); overflow: hidden; }

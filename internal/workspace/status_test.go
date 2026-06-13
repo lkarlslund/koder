@@ -41,17 +41,23 @@ func TestParseStatus(t *testing.T) {
 	}
 }
 
-func TestParseStatusAggregatesUntrackedDirectoryStats(t *testing.T) {
+func TestParseStatusExpandsUntrackedDirectoryStats(t *testing.T) {
 	raw := "## main\n?? pkg/e2e/\n"
 	got := parseStatus(raw, "", map[string]FileStatus{
 		"pkg/e2e/a.go": {Path: "pkg/e2e/a.go", Additions: 10, Files: 1},
 		"pkg/e2e/b.go": {Path: "pkg/e2e/b.go", Additions: 20, Files: 1},
 	})
-	if len(got.Files) != 1 {
+	if len(got.Files) != 2 {
 		t.Fatalf("unexpected files: %#v", got.Files)
 	}
-	if got.Files[0].Additions != 30 || got.Files[0].Files != 2 {
-		t.Fatalf("expected aggregated untracked directory stats, got %#v", got.Files[0])
+	if got.Files[0].Path != "pkg/e2e/a.go" || got.Files[0].Code != "??" || got.Files[0].Additions != 10 || got.Files[0].Files != 1 {
+		t.Fatalf("expected first untracked directory file, got %#v", got.Files[0])
+	}
+	if got.Files[1].Path != "pkg/e2e/b.go" || got.Files[1].Code != "??" || got.Files[1].Additions != 20 || got.Files[1].Files != 1 {
+		t.Fatalf("expected second untracked directory file, got %#v", got.Files[1])
+	}
+	if got.Untracked != 2 {
+		t.Fatalf("expected untracked file count, got %#v", got)
 	}
 }
 

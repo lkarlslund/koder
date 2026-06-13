@@ -407,15 +407,19 @@
         </template>
         <template x-if="gitStatus().available">
           <div class="sidebar-compact-block">
-            <div class="list-group list-group-flush sidebar-list" x-show="gitFiles().length > 0">
-              <template x-for="file in gitFiles()" :key="file.path || file.Path">
-                <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">
+            <div class="list-group list-group-flush sidebar-list" x-show="gitTreeRows().length > 0">
+              <template x-for="row in gitTreeRows()" :key="row.key">
+                <div class="list-group-item bg-transparent px-0 py-1 git-file git-tree-row" :class="gitFileClass(row.file)" :style="'--git-tree-depth:' + row.depth">
                   <div class="d-flex align-items-start justify-content-between gap-2">
-                    <span class="text-break"><span class="badge me-1" :class="gitCodeBadge(file)" x-text="gitFileCode(file)"></span><span x-text="file.path || file.Path"></span></span>
-                    <span class="small text-nowrap" x-show="gitFileStatsText(file)">
-                      <span class="diff-add" x-show="gitAdditions(file)" x-text="'+' + gitAdditions(file)"></span>
-                      <span class="diff-del ms-1" x-show="gitDeletions(file)" x-text="'-' + gitDeletions(file)"></span>
-                      <span class="text-secondary ms-1" x-show="gitFileCount(file) > 1" x-text="gitFileCount(file) + ' files'"></span>
+                    <span class="text-break git-tree-name">
+                      <i class="bi me-1 text-secondary" :class="row.kind === 'dir' ? 'bi-folder2' : 'bi-file-earmark'"></i>
+                      <span class="badge me-1" x-show="row.kind !== 'dir'" :class="gitCodeBadge(row.file)" x-text="gitFileCode(row.file)"></span>
+                      <span x-text="row.name"></span>
+                    </span>
+                    <span class="small text-nowrap" x-show="gitFileStatsText(row.file)">
+                      <span class="diff-add" x-show="gitAdditions(row.file)" x-text="'+' + gitAdditions(row.file)"></span>
+                      <span class="diff-del ms-1" x-show="gitDeletions(row.file)" x-text="'-' + gitDeletions(row.file)"></span>
+                      <span class="text-secondary ms-1" x-show="gitFileCount(row.file) > 1" x-text="gitFileCount(row.file) + ' files'"></span>
                     </span>
                   </div>
                 </div>

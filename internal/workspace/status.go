@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,6 +86,16 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 			continue
 		}
 		file := parseFileLine(line)
+		if file.Code == "??" && strings.HasSuffix(strings.TrimSpace(file.Path), "/") {
+			expanded := untrackedFilesForPath(file.Path, untrackedStats)
+			if len(expanded) > 0 {
+				for _, item := range expanded {
+					status.Files = append(status.Files, item)
+					status.Untracked++
+				}
+				continue
+			}
+		}
 		if stat, ok := numstats[file.Path]; ok {
 			file.Additions = stat.Additions
 			file.Deletions = stat.Deletions
@@ -108,6 +119,25 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 		}
 	}
 	return status
+}
+
+func untrackedFilesForPath(path string, stats map[string]FileStatus) []FileStatus {
+	if len(stats) == 0 {
+		return nil
+	}
+	prefix := strings.TrimSuffix(strings.TrimSpace(path), "/") + "/"
+	out := make([]FileStatus, 0)
+	for _, stat := range stats {
+		if strings.HasPrefix(stat.Path, prefix) {
+			stat.Code = "??"
+			stat.Files = 1
+			out = append(out, stat)
+		}
+	}
+	slices.SortFunc(out, func(a, b FileStatus) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+	return out
 }
 
 func untrackedFileStats(ctx context.Context, root string) map[string]FileStatus {
