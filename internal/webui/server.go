@@ -691,10 +691,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return map[string]bool{"started": true}, s.controller.CompactForSelection(ctx, s.appSelection(clientID), in.Instructions)
 	case "refresh_workspace":
-		if err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID)); err != nil {
+		status, err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID))
+		if err != nil {
 			return nil, err
 		}
-		return map[string]bool{"started": true}, nil
+		return map[string]any{"workspace_status": status}, nil
 	case "load_timeline":
 		var in struct {
 			ChatID id.ID `json:"chat_id"`

@@ -1410,22 +1410,25 @@ const (
 )
 
 // RefreshWorkspaceForSelection requests a workspace scan for the selected session.
-func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) error {
+func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) (workspacepkg.Status, error) {
 	if selection.SessionID == "" {
-		return fmt.Errorf("session id is required")
+		return workspacepkg.Status{}, fmt.Errorf("session id is required")
 	}
 	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
+		return workspacepkg.Status{}, fmt.Errorf("no chat agent")
 	}
 	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
 	if err != nil {
-		return err
+		return workspacepkg.Status{}, err
 	}
 	session := owner.Snapshot().Session
 	if !c.sessionInWorkspace(session) {
-		return fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+		return workspacepkg.Status{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
 	}
-	return c.refreshSessionWorkspace(ctx, owner, workspaceRefreshUser)
+	if err := c.refreshSessionWorkspace(ctx, owner, workspaceRefreshUser); err != nil {
+		return workspacepkg.Status{}, err
+	}
+	return owner.WorkspaceStatus(), nil
 }
 
 func (c *Controller) refreshSessionWorkspace(ctx context.Context, owner *sessionpkg.Session, trigger workspaceRefreshTrigger) error {

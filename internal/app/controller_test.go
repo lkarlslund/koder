@@ -1338,7 +1338,7 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	session := activateTestSession(t, ctrl, workdir)
-	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
 		t.Fatalf("refresh workspace: %v", err)
 	}
 
@@ -1355,7 +1355,7 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
 		t.Fatalf("refresh workspace: %v", err)
 	}
 	deadline := time.After(time.Second)
@@ -1409,7 +1409,7 @@ func TestControllerRefreshWorkspaceUsesSelectedSession(t *testing.T) {
 		t.Fatalf("expected controller mirror to point at session b")
 	}
 
-	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: sessionA.ID}); err != nil {
+	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: sessionA.ID}); err != nil {
 		t.Fatalf("refresh selected workspace: %v", err)
 	}
 	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: sessionA.ID})
@@ -1468,7 +1468,7 @@ func TestControllerStartDoesNotWaitForWorkspaceSnapshot(t *testing.T) {
 	close(releaseSnapshot)
 }
 
-func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
+func TestControllerWorkspaceWatcherRefreshesChangedStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	workdir := t.TempDir()
@@ -1496,7 +1496,7 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	session := activateTestSession(t, ctrl, workdir)
-	if err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
 		t.Fatalf("initial refresh workspace: %v", err)
 	}
 	events, unsub := ctrl.Subscribe()
@@ -1506,7 +1506,6 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	staleSeen := false
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
@@ -1515,15 +1514,11 @@ func TestControllerWorkspaceWatcherMarksStaleThenRefreshes(t *testing.T) {
 				continue
 			}
 			status := event.Payload.(map[string]any)["workspace_status"].(workspacepkg.Status)
-			if status.Stale {
-				staleSeen = true
-				continue
-			}
-			if staleSeen && status.Modified == 1 {
+			if !status.Stale && status.Modified == 1 {
 				return
 			}
 		case <-deadline:
-			t.Fatalf("expected stale and refreshed workspace deltas, staleSeen=%v state=%#v", staleSeen, ctrl.State().Workspace)
+			t.Fatalf("expected refreshed workspace delta, state=%#v", ctrl.State().Workspace)
 		}
 	}
 }

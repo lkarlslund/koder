@@ -325,7 +325,7 @@ func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string)
 	go func() {
 		defer cancel()
 		for range watcher.Events() {
-			_ = s.RefreshWorkspace(context.Background(), snapshot, minInterval, false, onChange)
+			_ = s.RefreshWorkspace(context.Background(), snapshot, minInterval, true, onChange)
 		}
 	}()
 }

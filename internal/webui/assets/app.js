@@ -2731,7 +2731,13 @@
           if (code.includes('M') || code.includes('R') || code.includes('C')) return 'text-bg-warning';
           return 'text-bg-secondary';
         },
-        refreshWorkspace() { this.rpc('refresh_workspace', {}); this.closeMobileSidebar(); },
+        refreshWorkspace() {
+          this.rpc('refresh_workspace', {}).then(result => {
+            const status = result?.workspace_status || result?.WorkspaceStatus || result?.workspace || result?.Workspace;
+            if (status !== undefined) this.applyWorkspaceDelta({workspace_status: status});
+          }).catch(err => this.showToast(err.message || 'refresh workspace failed'));
+          this.closeMobileSidebar();
+        },
         toolIcon(kind) {
           if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
