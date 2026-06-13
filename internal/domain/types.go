@@ -9,7 +9,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-//go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -trimprefix=MessageRole,PartKind,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -transform=snake -json -text -values -output=messagerole_enumer.go
+//go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -trimprefix=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -transform=snake -json -text -values -output=messagerole_enumer.go
 type MessageRole uint8
 
 const (
@@ -194,13 +194,13 @@ const (
 	ApprovalStatusDenied
 )
 
-type TaskStatus uint8
+type LegacyTaskStatus uint8
 
 const (
-	TaskStatusPending TaskStatus = iota
-	TaskStatusInProgress
-	TaskStatusCompleted
-	TaskStatusCancelled
+	LegacyTaskStatusPending LegacyTaskStatus = iota
+	LegacyTaskStatusInProgress
+	LegacyTaskStatusCompleted
+	LegacyTaskStatusCancelled
 )
 
 type MilestoneStatus uint8
@@ -215,12 +215,13 @@ const (
 	MilestoneStatusCancelled
 )
 
-type TodoStatus uint8
+type TaskStatus uint8
 
 const (
-	TodoStatusPending TodoStatus = iota
-	TodoStatusInProgress
-	TodoStatusCompleted
+	TaskStatusPending TaskStatus = iota
+	TaskStatusInProgress
+	TaskStatusCompleted
+	TaskStatusCancelled
 )
 
 type EventKind uint8
@@ -288,8 +289,8 @@ type Chat struct {
 	PermissionProfile      string
 	ToolStates             ToolStates
 	ActiveMilestoneRef     string
-	AssignedTodoBucketRef  string
-	AssignedTodoRef        string
+	AssignedTaskBucketRef  string
+	AssignedTaskRef        string
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
 	TokenUsage             Usage

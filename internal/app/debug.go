@@ -57,14 +57,14 @@ func (c *Controller) DebugSession(ctx context.Context, sessionID id.ID, runtime 
 		return debugsrv.SessionDetail{}, err
 	}
 	return debugsrv.SessionDetail{
-		Debug:     debug,
-		Session:   snapshot.Session,
-		Chats:     slices.Clone(snapshot.Chats),
-		Timeline:  timeline,
-		Approvals: approvals,
-		Plan:      snapshot.Plan,
-		Todos:     slices.Clone(snapshot.Todos),
-		Tasks:     slices.Clone(snapshot.Tasks),
+		Debug:       debug,
+		Session:     snapshot.Session,
+		Chats:       slices.Clone(snapshot.Chats),
+		Timeline:    timeline,
+		Approvals:   approvals,
+		Plan:        snapshot.Plan,
+		Tasks:       slices.Clone(snapshot.Tasks),
+		LegacyTasks: slices.Clone(snapshot.LegacyTasks),
 	}, nil
 }
 
@@ -139,20 +139,20 @@ func (c *Controller) Milestones(ctx context.Context, sessionID id.ID) (planning.
 	return owner.Snapshot().Plan, nil
 }
 
-func (c *Controller) Todos(ctx context.Context, sessionID id.ID) ([]planning.TodoItem, error) {
-	owner, err := c.debugOwner(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return slices.Clone(owner.Snapshot().Todos), nil
-}
-
 func (c *Controller) Tasks(ctx context.Context, sessionID id.ID) ([]planning.Task, error) {
 	owner, err := c.debugOwner(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	return slices.Clone(owner.Snapshot().Tasks), nil
+}
+
+func (c *Controller) LegacyTasks(ctx context.Context, sessionID id.ID) ([]planning.LegacyTask, error) {
+	owner, err := c.debugOwner(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(owner.Snapshot().LegacyTasks), nil
 }
 
 func (c *Controller) ResolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error) {

@@ -12,15 +12,15 @@ import (
 )
 
 type TaskControl interface {
-	AddTask(context.Context, id.ID, string, planning.TaskStatus) (planning.Task, error)
+	AddTask(context.Context, id.ID, string, planning.LegacyTaskStatus) (planning.LegacyTask, error)
 }
 
 type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
-	AddTodoItems(context.Context, id.ID, string, []string) ([]planning.TodoItem, error)
-	UpdateTodoItem(context.Context, string, planning.TodoStatus, string, string) (planning.TodoItem, error)
-	ListTodos(context.Context, id.ID, string) ([]planning.TodoItem, error)
+	AddTasks(context.Context, id.ID, string, []string) ([]planning.Task, error)
+	UpdateTask(context.Context, string, planning.TaskStatus, string, string) (planning.Task, error)
+	ListTasks(context.Context, id.ID, string) ([]planning.Task, error)
 }
 
 func RequireSessionControl(runtime Runtime) (SessionControl, error) {
@@ -52,31 +52,31 @@ func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 func AssignedMilestoneRef(runtime Runtime) string {
 	assigned := strings.TrimSpace(runtime.ActiveMilestoneRef)
 	if assigned == "" {
-		assigned = strings.TrimSpace(runtime.AssignedTodoBucketRef)
+		assigned = strings.TrimSpace(runtime.AssignedTaskBucketRef)
 	}
 	return assigned
 }
 
-func AssignedTodoRef(runtime Runtime) string {
-	return strings.TrimSpace(runtime.AssignedTodoRef)
+func AssignedTaskRef(runtime Runtime) string {
+	return strings.TrimSpace(runtime.AssignedTaskRef)
 }
 
-func TodoScopeAllows(runtime Runtime, todoID string) error {
-	assigned := AssignedTodoRef(runtime)
-	if assigned == "" || todoID == assigned {
+func TaskScopeAllows(runtime Runtime, taskID string) error {
+	assigned := AssignedTaskRef(runtime)
+	if assigned == "" || taskID == assigned {
 		return nil
 	}
 	return fmt.Errorf("chat is scoped to task %q", assigned)
 }
 
-func ScopedTodos(runtime Runtime, todos []planning.TodoItem) []planning.TodoItem {
-	assigned := AssignedTodoRef(runtime)
+func ScopedTasks(runtime Runtime, tasks []planning.Task) []planning.Task {
+	assigned := AssignedTaskRef(runtime)
 	if assigned == "" {
-		return todos
+		return tasks
 	}
-	out := make([]planning.TodoItem, 0, 1)
-	for _, item := range todos {
-		if planning.TodoKey(item) == assigned {
+	out := make([]planning.Task, 0, 1)
+	for _, item := range tasks {
+		if planning.TaskKey(item) == assigned {
 			out = append(out, item)
 			break
 		}
@@ -105,10 +105,10 @@ func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
 }
 
 func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
-	return MilestoneStoredResultWithTodoSummaries(plan, nil)
+	return MilestoneStoredResultWithTaskSummaries(plan, nil)
 }
 
-func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[string]string) MilestonePlanStoredResult {
+func MilestoneStoredResultWithTaskSummaries(plan planning.Plan, summaries map[string]string) MilestonePlanStoredResult {
 	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
 	for _, item := range plan.Milestones {
 		ownerChatID := ""
@@ -125,7 +125,7 @@ func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[st
 			DependsOnKey: planning.MilestoneDependsOnKey(item),
 			DependsOnRef: item.DependsOnRef,
 			OwnerChatID:  ownerChatID,
-			TodoSummary:  summaries[planning.MilestoneKey(item)],
+			TaskSummary:  summaries[planning.MilestoneKey(item)],
 		})
 	}
 	return MilestonePlanStoredResult{
@@ -134,18 +134,18 @@ func MilestoneStoredResultWithTodoSummaries(plan planning.Plan, summaries map[st
 	}
 }
 
-func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem, message string) TodoListStoredResult {
-	items := make([]TodoStoredItem, 0, len(todos))
-	for _, item := range todos {
-		items = append(items, TodoStoredItem{
+func BuildTaskListStoredResult(plan planning.Plan, ref string, tasks []planning.Task, message string) TaskListStoredResult {
+	items := make([]TaskStoredItem, 0, len(tasks))
+	for _, item := range tasks {
+		items = append(items, TaskStoredItem{
 			ID:      item.ID,
-			Key:     planning.TodoKey(item),
+			Key:     planning.TaskKey(item),
 			Content: item.Content,
 			Note:    item.Note,
 			Status:  item.Status.String(),
 		})
 	}
-	return TodoListStoredResult{
+	return TaskListStoredResult{
 		MilestoneKey:   ref,
 		MilestoneRef:   ref,
 		MilestoneTitle: planning.MilestoneTitle(plan, ref),
@@ -155,11 +155,11 @@ func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem,
 }
 
 func MilestonePlanResult(plan planning.Plan) Result {
-	return MilestonePlanResultWithTodoSummaries(plan, nil)
+	return MilestonePlanResultWithTaskSummaries(plan, nil)
 }
 
-func MilestonePlanResultWithTodoSummaries(plan planning.Plan, summaries map[string]string) Result {
-	stored := MilestoneStoredResultWithTodoSummaries(plan, summaries)
+func MilestonePlanResultWithTaskSummaries(plan planning.Plan, summaries map[string]string) Result {
+	stored := MilestoneStoredResultWithTaskSummaries(plan, summaries)
 	output := FormatMilestoneOutput(stored)
 	if strings.TrimSpace(output) == "" {
 		output = "No milestones defined."
@@ -171,13 +171,13 @@ func MilestonePlanResultWithTodoSummaries(plan planning.Plan, summaries map[stri
 	}
 }
 
-func TodoBucketResult(plan planning.Plan, ref string, todos []planning.TodoItem, message string) Result {
-	return TodoBucketResultWithTitle(ref, planning.MilestoneTitle(plan, ref), todos, message)
+func TaskBucketResult(plan planning.Plan, ref string, tasks []planning.Task, message string) Result {
+	return TaskBucketResultWithTitle(ref, planning.MilestoneTitle(plan, ref), tasks, message)
 }
 
-func TodoBucketResultWithTitle(ref, title string, todos []planning.TodoItem, message string) Result {
-	stored := TodoStoredResult(planning.Plan{Milestones: []planning.Milestone{{Ref: ref, Title: title}}}, ref, todos, message)
-	output := FormatTodoOutput(stored)
+func TaskBucketResultWithTitle(ref, title string, tasks []planning.Task, message string) Result {
+	stored := BuildTaskListStoredResult(planning.Plan{Milestones: []planning.Milestone{{Ref: ref, Title: title}}}, ref, tasks, message)
+	output := FormatTaskOutput(stored)
 	if strings.TrimSpace(output) == "" {
 		output = "No tasks found."
 	}
@@ -185,7 +185,7 @@ func TodoBucketResultWithTitle(ref, title string, todos []planning.TodoItem, mes
 		Output: output,
 		Meta: map[string]string{
 			"milestone_key": ref,
-			"todo_count":    fmt.Sprintf("%d", len(stored.Items)),
+			"task_count":    fmt.Sprintf("%d", len(stored.Items)),
 		},
 		Stored: stored,
 	}
@@ -203,7 +203,7 @@ func FormatMilestoneOutput(result MilestonePlanStoredResult) string {
 	return text
 }
 
-func FormatTodoOutput(result TodoListStoredResult) string {
+func FormatTaskOutput(result TaskListStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
 		Kind: domain.PartKindToolOutput,
 		Payload: domain.ToolOutputPayload{
@@ -215,4 +215,4 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	return text
 }
 
-func FormatTodoID(key string) string { return key }
+func FormatTaskID(key string) string { return key }

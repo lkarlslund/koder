@@ -53,18 +53,6 @@ func PlanCollection(st *store.Store) store.Collection[planning.Plan] {
 	})
 }
 
-func TodoCollection(st *store.Store) store.Collection[planning.TodoItem] {
-	return store.NewCollection(st, store.CollectionSpec[planning.TodoItem]{
-		Namespace: "todos",
-		GetID:     func(v planning.TodoItem) string { return v.ID },
-		SetID:     func(v *planning.TodoItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[planning.TodoItem]{
-			{Name: "session", Value: func(v planning.TodoItem) string { return v.SessionID }},
-			{Name: "milestone", Value: func(v planning.TodoItem) string { return v.SessionID + "/" + v.MilestoneRef }},
-		},
-	})
-}
-
 func TaskCollection(st *store.Store) store.Collection[planning.Task] {
 	return store.NewCollection(st, store.CollectionSpec[planning.Task]{
 		Namespace: "tasks",
@@ -72,6 +60,18 @@ func TaskCollection(st *store.Store) store.Collection[planning.Task] {
 		SetID:     func(v *planning.Task, id string) { v.ID = id },
 		Indexes: []store.IndexSpec[planning.Task]{
 			{Name: "session", Value: func(v planning.Task) string { return v.SessionID }},
+			{Name: "milestone", Value: func(v planning.Task) string { return v.SessionID + "/" + v.MilestoneRef }},
+		},
+	})
+}
+
+func LegacyTaskCollection(st *store.Store) store.Collection[planning.LegacyTask] {
+	return store.NewCollection(st, store.CollectionSpec[planning.LegacyTask]{
+		Namespace: "legacy-tasks",
+		GetID:     func(v planning.LegacyTask) string { return v.ID },
+		SetID:     func(v *planning.LegacyTask, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[planning.LegacyTask]{
+			{Name: "session", Value: func(v planning.LegacyTask) string { return v.SessionID }},
 		},
 	})
 }
@@ -206,57 +206,57 @@ func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Pl
 	return plan, nil
 }
 
-func AddTodoItems(ctx context.Context, st *store.Store, sessionID id.ID, ref string, contents []string) ([]planning.TodoItem, error) {
-	existing, err := ListTodos(ctx, st, sessionID, ref)
+func AddTasks(ctx context.Context, st *store.Store, sessionID id.ID, ref string, contents []string) ([]planning.Task, error) {
+	existing, err := ListTasks(ctx, st, sessionID, ref)
 	if err != nil {
 		return nil, err
 	}
-	all, err := ListTodos(ctx, st, sessionID, "")
+	all, err := ListTasks(ctx, st, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	items := make([]planning.TodoItem, 0, len(contents))
-	nextKey := nextTodoKey(all, ref)
+	items := make([]planning.Task, 0, len(contents))
+	nextKey := nextTaskKey(all, ref)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTodoKey(nextKey, ref)
+		items = append(items, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementTaskKey(nextKey, ref)
 	}
 	for _, item := range items {
-		if err := TodoCollection(st).Put(ctx, item); err != nil {
+		if err := TaskCollection(st).Put(ctx, item); err != nil {
 			return nil, err
 		}
 	}
 	return items, nil
 }
 
-func PutTodo(ctx context.Context, st *store.Store, item planning.TodoItem) error {
-	return TodoCollection(st).Put(ctx, item)
+func PutTask(ctx context.Context, st *store.Store, item planning.Task) error {
+	return TaskCollection(st).Put(ctx, item)
 }
 
-func GetTodo(ctx context.Context, st *store.Store, todoID id.ID) (planning.TodoItem, error) {
-	if strings.Contains(strings.TrimSpace(string(todoID)), "T") {
-		items, err := TodoCollection(st).List(ctx, store.All[planning.TodoItem]())
+func GetTask(ctx context.Context, st *store.Store, taskID id.ID) (planning.Task, error) {
+	if strings.Contains(strings.TrimSpace(string(taskID)), "T") {
+		items, err := TaskCollection(st).List(ctx, store.All[planning.Task]())
 		if err != nil {
-			return planning.TodoItem{}, err
+			return planning.Task{}, err
 		}
 		for _, item := range items {
-			if planning.TodoKey(item) == string(todoID) {
+			if planning.TaskKey(item) == string(taskID) {
 				return item, nil
 			}
 		}
 	}
-	return TodoCollection(st).Get(ctx, todoID)
+	return TaskCollection(st).Get(ctx, taskID)
 }
 
-func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
-	item, err := GetTodo(ctx, st, todoID)
+func UpdateTask(ctx context.Context, st *store.Store, taskID id.ID, status planning.TaskStatus, content, note string) (planning.Task, error) {
+	item, err := GetTask(ctx, st, taskID)
 	if err != nil {
-		return planning.TodoItem{}, err
+		return planning.Task{}, err
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -266,26 +266,26 @@ func UpdateTodo(ctx context.Context, st *store.Store, todoID id.ID, status plann
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = time.Now().UTC()
-	if err := PutTodo(ctx, st, item); err != nil {
-		return planning.TodoItem{}, err
+	if err := PutTask(ctx, st, item); err != nil {
+		return planning.Task{}, err
 	}
 	return item, nil
 }
 
-func ListTodos(ctx context.Context, st *store.Store, sessionID id.ID, ref string) ([]planning.TodoItem, error) {
-	query := store.ByIndex[planning.TodoItem]("session", string(sessionID))
+func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID, ref string) ([]planning.Task, error) {
+	query := store.ByIndex[planning.Task]("session", string(sessionID))
 	if strings.TrimSpace(ref) != "" {
-		query = store.ByIndex[planning.TodoItem]("milestone", string(sessionID)+"/"+strings.TrimSpace(ref))
+		query = store.ByIndex[planning.Task]("milestone", string(sessionID)+"/"+strings.TrimSpace(ref))
 	}
-	items, err := TodoCollection(st).List(ctx, query)
+	items, err := TaskCollection(st).List(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	planning.SortTodos(items)
+	planning.SortTasks(items)
 	return items, nil
 }
 
-func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
+func nextTaskKey(items []planning.Task, milestoneKey string) string {
 	next := 1
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
@@ -298,16 +298,16 @@ func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
 			next = n + 1
 		}
 	}
-	return planning.ScopedTodoKey(milestoneKey, next)
+	return planning.ScopedTaskKey(milestoneKey, next)
 }
 
-func incrementTodoKey(key, milestoneKey string) string {
+func incrementTaskKey(key, milestoneKey string) string {
 	prefix := strings.TrimSpace(milestoneKey) + "T"
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTodoKey(milestoneKey, 1)
+		return planning.ScopedTaskKey(milestoneKey, 1)
 	}
-	return planning.ScopedTodoKey(milestoneKey, n+1)
+	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
 func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
@@ -372,16 +372,16 @@ func SetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID, ite
 	return ChatCollection(st).Put(ctx, chat)
 }
 
-func PutTask(ctx context.Context, st *store.Store, task planning.Task) error {
-	return TaskCollection(st).Put(ctx, task)
+func PutLegacyTask(ctx context.Context, st *store.Store, task planning.LegacyTask) error {
+	return LegacyTaskCollection(st).Put(ctx, task)
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.Task, error) {
-	items, err := TaskCollection(st).List(ctx, store.ByIndex[planning.Task]("session", string(sessionID)))
+func ListLegacyTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]planning.LegacyTask, error) {
+	items, err := LegacyTaskCollection(st).List(ctx, store.ByIndex[planning.LegacyTask]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(items, func(a, b planning.Task) int {
+	slices.SortFunc(items, func(a, b planning.LegacyTask) int {
 		if !a.CreatedAt.Equal(b.CreatedAt) {
 			if a.CreatedAt.Before(b.CreatedAt) {
 				return -1

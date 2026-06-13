@@ -42,36 +42,36 @@ func (s *Source) SavePlan(ctx context.Context, plan Plan) error {
 	return savePlan(ctx, st, plan)
 }
 
-func (s *Source) SaveTodo(ctx context.Context, item TodoItem) error {
+func (s *Source) SaveTask(ctx context.Context, item Task) error {
 	st, err := s.requireStore()
 	if err != nil {
 		return err
 	}
-	return saveTodo(ctx, st, item)
+	return saveTask(ctx, st, item)
 }
 
-func (s *Source) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]TodoItem, error) {
+func (s *Source) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]Task, error) {
 	st, err := s.requireStore()
 	if err != nil {
 		return nil, err
 	}
-	return listTodos(ctx, st, sessionID, milestoneRef)
+	return listTasks(ctx, st, sessionID, milestoneRef)
 }
 
-func (s *Source) SaveTask(ctx context.Context, task Task) error {
+func (s *Source) SaveLegacyTask(ctx context.Context, task LegacyTask) error {
 	st, err := s.requireStore()
 	if err != nil {
 		return err
 	}
-	return saveTask(ctx, st, task)
+	return saveLegacyTask(ctx, st, task)
 }
 
-func (s *Source) ListTasks(ctx context.Context, sessionID id.ID) ([]Task, error) {
+func (s *Source) ListLegacyTasks(ctx context.Context, sessionID id.ID) ([]LegacyTask, error) {
 	st, err := s.requireStore()
 	if err != nil {
 		return nil, err
 	}
-	return listTasks(ctx, st, sessionID)
+	return listLegacyTasks(ctx, st, sessionID)
 }
 
 func (s *Source) DeleteSessionData(ctx context.Context, sessionID id.ID) error {
@@ -90,18 +90,6 @@ func planCollection(st *store.Store) store.Collection[Plan] {
 	})
 }
 
-func todoCollection(st *store.Store) store.Collection[TodoItem] {
-	return store.NewCollection(st, store.CollectionSpec[TodoItem]{
-		Namespace: "todos",
-		GetID:     func(v TodoItem) string { return v.ID },
-		SetID:     func(v *TodoItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[TodoItem]{
-			{Name: "session", Value: func(v TodoItem) string { return v.SessionID }},
-			{Name: "milestone", Value: func(v TodoItem) string { return v.SessionID + "/" + v.MilestoneRef }},
-		},
-	})
-}
-
 func taskCollection(st *store.Store) store.Collection[Task] {
 	return store.NewCollection(st, store.CollectionSpec[Task]{
 		Namespace: "tasks",
@@ -109,6 +97,18 @@ func taskCollection(st *store.Store) store.Collection[Task] {
 		SetID:     func(v *Task, id string) { v.ID = id },
 		Indexes: []store.IndexSpec[Task]{
 			{Name: "session", Value: func(v Task) string { return v.SessionID }},
+			{Name: "milestone", Value: func(v Task) string { return v.SessionID + "/" + v.MilestoneRef }},
+		},
+	})
+}
+
+func legacyTaskCollection(st *store.Store) store.Collection[LegacyTask] {
+	return store.NewCollection(st, store.CollectionSpec[LegacyTask]{
+		Namespace: "legacy-tasks",
+		GetID:     func(v LegacyTask) string { return v.ID },
+		SetID:     func(v *LegacyTask, id string) { v.ID = id },
+		Indexes: []store.IndexSpec[LegacyTask]{
+			{Name: "session", Value: func(v LegacyTask) string { return v.SessionID }},
 		},
 	})
 }
@@ -131,7 +131,7 @@ func savePlan(ctx context.Context, st *store.Store, plan Plan) error {
 	return planCollection(st).Put(ctx, plan)
 }
 
-func saveTodo(ctx context.Context, st *store.Store, item TodoItem) error {
+func saveTask(ctx context.Context, st *store.Store, item Task) error {
 	if item.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
@@ -141,39 +141,39 @@ func saveTodo(ctx context.Context, st *store.Store, item TodoItem) error {
 	if item.UpdatedAt.IsZero() {
 		item.UpdatedAt = time.Now().UTC()
 	}
-	return todoCollection(st).Put(ctx, item)
+	return taskCollection(st).Put(ctx, item)
 }
 
-func listTodos(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]TodoItem, error) {
-	query := store.ByIndex[TodoItem]("session", string(sessionID))
+func listTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]Task, error) {
+	query := store.ByIndex[Task]("session", string(sessionID))
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	if milestoneRef != "" {
-		query = store.ByIndex[TodoItem]("milestone", string(sessionID)+"/"+milestoneRef)
+		query = store.ByIndex[Task]("milestone", string(sessionID)+"/"+milestoneRef)
 	}
-	items, err := todoCollection(st).List(ctx, query)
+	items, err := taskCollection(st).List(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	SortTodos(items)
+	SortTasks(items)
 	return items, nil
 }
 
-func saveTask(ctx context.Context, st *store.Store, task Task) error {
+func saveLegacyTask(ctx context.Context, st *store.Store, task LegacyTask) error {
 	if task.ID == "" {
 		return fmt.Errorf("put task: id is required")
 	}
 	if task.SessionID == "" {
 		return fmt.Errorf("put task: session id is required")
 	}
-	return taskCollection(st).Put(ctx, task)
+	return legacyTaskCollection(st).Put(ctx, task)
 }
 
-func listTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]Task, error) {
-	items, err := taskCollection(st).List(ctx, store.ByIndex[Task]("session", string(sessionID)))
+func listLegacyTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]LegacyTask, error) {
+	items, err := legacyTaskCollection(st).List(ctx, store.ByIndex[LegacyTask]("session", string(sessionID)))
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(items, func(a, b Task) int {
+	slices.SortFunc(items, func(a, b LegacyTask) int {
 		switch {
 		case a.CreatedAt.Before(b.CreatedAt):
 			return -1
@@ -191,21 +191,21 @@ func listTasks(ctx context.Context, st *store.Store, sessionID id.ID) ([]Task, e
 }
 
 func deleteSessionData(ctx context.Context, st *store.Store, sessionID id.ID) error {
-	tasks, err := listTasks(ctx, st, sessionID)
+	legacyTasks, err := listLegacyTasks(ctx, st, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, task := range legacyTasks {
+		if err := legacyTaskCollection(st).Delete(ctx, task.ID); err != nil {
+			return err
+		}
+	}
+	tasks, err := listTasks(ctx, st, sessionID, "")
 	if err != nil {
 		return err
 	}
 	for _, task := range tasks {
 		if err := taskCollection(st).Delete(ctx, task.ID); err != nil {
-			return err
-		}
-	}
-	todos, err := listTodos(ctx, st, sessionID, "")
-	if err != nil {
-		return err
-	}
-	for _, todo := range todos {
-		if err := todoCollection(st).Delete(ctx, todo.ID); err != nil {
 			return err
 		}
 	}

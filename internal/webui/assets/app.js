@@ -1351,8 +1351,8 @@
           delete delta.snapshot; delete delta.Snapshot;
           if (!sameSession) {
             delete delta.milestones; delete delta.Milestones;
-            delete delta.todos; delete delta.Todos;
-            delete delta.todos_by_milestone; delete delta.TodosByRef;
+            delete delta.tasks; delete delta.Tasks;
+            delete delta.tasks_by_milestone; delete delta.TasksByRef;
           }
           delete delta.context_window; delete delta.ContextWindow;
           delete delta.model_info; delete delta.ModelInfo;
@@ -1395,8 +1395,8 @@
         applyPlanningDelta(delta) {
           if (!delta) return;
           if (delta.milestones !== undefined) { this.state.milestones = delta.milestones; this.state.Milestones = delta.milestones; }
-          if (delta.todos !== undefined) { this.state.todos = delta.todos; this.state.Todos = delta.todos; }
-          if (delta.todos_by_milestone !== undefined) { this.state.todos_by_milestone = delta.todos_by_milestone; this.state.TodosByRef = delta.todos_by_milestone; }
+          if (delta.tasks !== undefined) { this.state.tasks = delta.tasks; this.state.Tasks = delta.tasks; }
+          if (delta.tasks_by_milestone !== undefined) { this.state.tasks_by_milestone = delta.tasks_by_milestone; this.state.TasksByRef = delta.tasks_by_milestone; }
           this.reportClientStateSoon();
         },
         applyTasksDelta(delta) {
@@ -2394,19 +2394,19 @@
           if (status === 'ready') return 'planning-badge-ready';
           return 'planning-badge-pending';
         },
-        todoItems() { return this.state.todos || this.state.Todos || []; },
-        todosByMilestone() { return this.state.todos_by_milestone || this.state.TodosByRef || {}; },
-        todoItemsForMilestone(milestone) {
+        taskItems() { return this.state.tasks || this.state.Tasks || []; },
+        tasksByMilestone() { return this.state.tasks_by_milestone || this.state.TasksByRef || {}; },
+        taskItemsForMilestone(milestone) {
           const ref = this.milestoneRef(milestone);
-          const grouped = this.todosByMilestone();
+          const grouped = this.tasksByMilestone();
           if (grouped && Object.prototype.hasOwnProperty.call(grouped, ref)) return grouped[ref] || [];
           return [];
         },
-        milestoneTodoCounts(milestone) {
+        milestoneTaskCounts(milestone) {
           const counts = {total: 0, completed: 0, active: 0, failed: 0, cancelled: 0, pending: 0};
-          for (const todo of this.todoItemsForMilestone(milestone)) {
+          for (const task of this.taskItemsForMilestone(milestone)) {
             counts.total++;
-            const status = this.todoStatus(todo);
+            const status = this.taskStatus(task);
             if (status === 'completed') counts.completed++;
             else if (status === 'in_progress') counts.active++;
             else if (status === 'failed' || status === 'blocked') counts.failed++;
@@ -2415,8 +2415,8 @@
           }
           return counts;
         },
-        milestoneTodoSummary(milestone) {
-          const counts = this.milestoneTodoCounts(milestone);
+        milestoneTaskSummary(milestone) {
+          const counts = this.milestoneTaskCounts(milestone);
           if (!counts.total) return '0 tasks';
           const details = [];
           if (counts.active) details.push(counts.active + ' active');
@@ -2427,7 +2427,7 @@
           return counts.completed + '/' + counts.total + ' done' + suffix;
         },
         milestoneProgressPercent(milestone, key) {
-          const counts = this.milestoneTodoCounts(milestone);
+          const counts = this.milestoneTaskCounts(milestone);
           if (!counts.total) return key === 'pending' ? 100 : 0;
           return Math.max(0, Math.min(100, ((counts[key] || 0) / counts.total) * 100));
         },
@@ -2435,7 +2435,7 @@
           return 'flex-basis: ' + this.milestoneProgressPercent(milestone, key).toFixed(2) + '%;';
         },
         milestoneProgressTitle(milestone) {
-          const counts = this.milestoneTodoCounts(milestone);
+          const counts = this.milestoneTaskCounts(milestone);
           if (!counts.total) return '0 tasks';
           const parts = [
             counts.completed + ' done',
@@ -2446,21 +2446,21 @@
           ];
           return parts.join(' · ');
         },
-        todoStatus(todo) { return todo.Status || todo.status || 'pending'; },
-        todoNote(todo) { return String(todo?.Note || todo?.note || '').trim(); },
-        todoTitle(todo) {
-          const content = String(todo?.Content || todo?.content || '').trim();
-          const note = this.todoNote(todo);
+        taskStatus(task) { return task.Status || task.status || 'pending'; },
+        taskNote(task) { return String(task?.Note || task?.note || '').trim(); },
+        taskTitle(task) {
+          const content = String(task?.Content || task?.content || '').trim();
+          const note = this.taskNote(task);
           return note ? content + '\n' + note : content;
         },
-        todoIcon(status) {
+        taskIcon(status) {
           if (status === 'completed') return 'bi-check-circle-fill text-success';
           if (status === 'in_progress') return 'bi-arrow-repeat text-primary';
           if (status === 'failed' || status === 'blocked') return 'bi-exclamation-octagon-fill text-danger';
           if (status === 'cancelled') return 'bi-x-circle-fill text-secondary';
           return 'bi-circle text-secondary';
         },
-        todoBadge(status) {
+        taskBadge(status) {
           if (status === 'completed') return 'planning-badge-completed';
           if (status === 'in_progress') return 'planning-badge-executing';
           if (status === 'failed' || status === 'blocked') return 'planning-badge-blocked';

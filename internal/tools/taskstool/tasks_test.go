@@ -1,4 +1,4 @@
-package todotool_test
+package taskstool_test
 
 import (
 	"context"
@@ -15,20 +15,20 @@ import (
 	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
-func TestTodoUpdateItemParsesTaskKey(t *testing.T) {
-	id, err := planning.ParseTodoKey("M001T001")
+func TestTaskUpdateItemParsesTaskKey(t *testing.T) {
+	id, err := planning.ParseTaskKey("M001T001")
 	if err != nil {
 		t.Fatalf("expected task key to parse, got %v", err)
 	}
 	if id != "M001T001" {
 		t.Fatalf("expected parsed task key, got %s", id)
 	}
-	if _, err := planning.ParseTodoKey("M001"); err == nil {
+	if _, err := planning.ParseTaskKey("M001"); err == nil {
 		t.Fatal("expected milestone key to be rejected as task key")
 	}
 }
 
-func TestTodoUpdateItemDefinitionUsesTaskKey(t *testing.T) {
+func TestTaskUpdateItemDefinitionUsesTaskKey(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {
 		if def.Function.Name != domain.ToolKindTasksUpdate.String() {
@@ -38,7 +38,7 @@ func TestTodoUpdateItemDefinitionUsesTaskKey(t *testing.T) {
 		if !strings.Contains(params, `"task_key":{"type":"string"`) || strings.Contains(params, `"id"`) {
 			t.Fatalf("expected tasks_update task_key string, got %s", params)
 		}
-		if !strings.Contains(params, `"enum":["pending","in_progress","completed"]`) || strings.Contains(params, "InProgress") {
+		if !strings.Contains(params, `"enum":["pending","in_progress","completed","cancelled"]`) || strings.Contains(params, "InProgress") {
 			t.Fatalf("expected tasks_update status enum to match task status strings, got %s", params)
 		}
 		if !strings.Contains(params, `"required":["task_key","status","note"]`) {
@@ -52,20 +52,20 @@ func TestTodoUpdateItemDefinitionUsesTaskKey(t *testing.T) {
 	t.Fatal("tasks_update definition not found")
 }
 
-func TestTodoStatusUsesSnakeCase(t *testing.T) {
-	if _, err := planning.ParseTodoStatus("InProgress"); err == nil {
+func TestTaskStatusUsesSnakeCase(t *testing.T) {
+	if _, err := planning.ParseTaskStatus("InProgress"); err == nil {
 		t.Fatal("expected InProgress to be rejected")
 	}
-	status, err := planning.ParseTodoStatus("in_progress")
+	status, err := planning.ParseTaskStatus("in_progress")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != planning.TodoStatusInProgress {
+	if status != planning.TaskStatusInProgress {
 		t.Fatalf("expected in_progress, got %s", status)
 	}
 }
 
-func TestMilestoneAndTodoWorkflow(t *testing.T) {
+func TestMilestoneAndTaskWorkflow(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -123,28 +123,28 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatalf("expected first pending task, got %q", next.Output)
 	}
 
-	todos, err := modeltest.ListTodos(ctx, st, session.ID, "M002")
+	tasks, err := modeltest.ListTasks(ctx, st, session.ID, "M002")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(todos) != 2 {
-		t.Fatalf("unexpected tasks: %#v", todos)
+	if len(tasks) != 2 {
+		t.Fatalf("unexpected tasks: %#v", tasks)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": tools.FormatTodoID(planning.TodoKey(todos[0])), "status": "in_progress", "note": "Started writing tests."},
+		Args: map[string]string{"task_key": tools.FormatTaskID(planning.TaskKey(tasks[0])), "status": "in_progress", "note": "Started writing tests."},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": tools.FormatTodoID(planning.TodoKey(todos[0])), "status": "completed", "note": "Completed the tests."},
+		Args: map[string]string{"task_key": tools.FormatTaskID(planning.TaskKey(tasks[0])), "status": "completed", "note": "Completed the tests."},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": tools.FormatTodoID(planning.TodoKey(todos[1])), "status": "completed", "note": "Fixed the bug."},
+		Args: map[string]string{"task_key": tools.FormatTaskID(planning.TaskKey(tasks[1])), "status": "completed", "note": "Fixed the bug."},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 }
 
-func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
+func TestTaskAddPersistReturnsRealTaskIDs(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -199,7 +199,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	}
 }
 
-func TestTodoAddRejectsDuplicateContent(t *testing.T) {
+func TestTaskAddRejectsDuplicateContent(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -209,7 +209,7 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.AddTodoItems(ctx, st, session.ID, "M001", []string{"Write tests"}); err != nil {
+	if _, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
@@ -226,7 +226,7 @@ func TestTodoAddRejectsDuplicateContent(t *testing.T) {
 	}
 }
 
-func TestTodoAddRejectsClosedMilestones(t *testing.T) {
+func TestTaskAddRejectsClosedMilestones(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -262,7 +262,7 @@ func TestTodoAddRejectsClosedMilestones(t *testing.T) {
 	}
 }
 
-func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
+func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -272,7 +272,7 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := modeltest.AddTodoItems(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,14 +280,14 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 
 	if _, err := tools.Normalize(tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": planning.TodoKey(todos[0]), "status": "completed"},
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed"},
 	}); err == nil || !strings.Contains(err.Error(), "note is required") {
 		t.Fatalf("expected missing note error, got %v", err)
 	}
 
 	result, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": planning.TodoKey(todos[0]), "status": "completed", "note": "Endpoint was wired and tested."},
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Endpoint was wired and tested."},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +295,7 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	if !strings.Contains(result.Output, "note: Endpoint was wired and tested.") {
 		t.Fatalf("expected output to include note, got %q", result.Output)
 	}
-	updated, err := modeltest.GetTodo(ctx, st, todos[0].ID)
+	updated, err := modeltest.GetTask(ctx, st, tasks[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestTodoUpdateRequiresAndPersistsNote(t *testing.T) {
 	}
 }
 
-func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
+func TestTaskScopedChatSeesAndUpdatesOnlyAssignedTask(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -316,7 +316,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := modeltest.AddTodoItems(ctx, st, session.ID, "M001", []string{"First", "Second"})
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"First", "Second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,16 +324,16 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		ID:                    "chat-1",
 		WorkflowRole:          chatrole.Execution,
 		ActiveMilestoneRef:    "M001",
-		AssignedTodoBucketRef: "M001",
-		AssignedTodoRef:       planning.TodoKey(todos[0]),
+		AssignedTaskBucketRef: "M001",
+		AssignedTaskRef:       planning.TaskKey(tasks[0]),
 	}
 	runtime := tools.Runtime{
 		SessionID:             session.ID,
 		ChatID:                chat.ID,
 		ChatRole:              chat.WorkflowRole,
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
-		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
-		AssignedTodoRef:       chat.AssignedTodoRef,
+		AssignedTaskBucketRef: chat.AssignedTaskBucketRef,
+		AssignedTaskRef:       chat.AssignedTaskRef,
 		SessionControl:        tooltest.NewSessionControl(st),
 	}
 
@@ -350,7 +350,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 
 	if _, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": planning.TodoKey(todos[1]), "status": planning.TodoStatusCompleted.String(), "note": "Tried to complete scoped task."},
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[1]), "status": planning.TaskStatusCompleted.String(), "note": "Tried to complete scoped task."},
 	}}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
 		t.Fatalf("expected scoped task error, got %v", err)
 	}

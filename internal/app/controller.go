@@ -46,26 +46,26 @@ type Event struct {
 
 // State is the browser app UI snapshot consumed by browser clients.
 type State struct {
-	Session       domain.Session                 `json:"session"`
-	Sessions      []domain.Session               `json:"sessions"`
-	Chats         []domain.Chat                  `json:"chats"`
-	ChatStatuses  []ChatSidebarStatus            `json:"chat_statuses"`
-	ActiveChatID  id.ID                          `json:"active_chat_id"`
-	Access        AccessState                    `json:"access"`
-	Snapshot      chat.Snapshot                  `json:"snapshot"`
-	Snapshots     map[id.ID]chat.Snapshot        `json:"snapshots"`
-	Milestones    planning.Plan                  `json:"milestones"`
-	Todos         []planning.TodoItem            `json:"todos"`
-	TodosByRef    map[string][]planning.TodoItem `json:"todos_by_milestone"`
-	Workspace     workspacepkg.Status            `json:"workspace_status"`
-	ContextWindow int                            `json:"context_window"`
-	ModelInfo     ModelInfo                      `json:"model_info"`
-	Theme         string                         `json:"theme"`
-	ProjectRoot   string                         `json:"project_root"`
-	Build         version.Info                   `json:"build"`
-	RestartNeeded bool                           `json:"restart_needed"`
-	RestartBuild  RestartBuildInfo               `json:"restart_build,omitempty"`
-	Error         string                         `json:"error,omitempty"`
+	Session       domain.Session             `json:"session"`
+	Sessions      []domain.Session           `json:"sessions"`
+	Chats         []domain.Chat              `json:"chats"`
+	ChatStatuses  []ChatSidebarStatus        `json:"chat_statuses"`
+	ActiveChatID  id.ID                      `json:"active_chat_id"`
+	Access        AccessState                `json:"access"`
+	Snapshot      chat.Snapshot              `json:"snapshot"`
+	Snapshots     map[id.ID]chat.Snapshot    `json:"snapshots"`
+	Milestones    planning.Plan              `json:"milestones"`
+	Tasks         []planning.Task            `json:"tasks"`
+	TasksByRef    map[string][]planning.Task `json:"tasks_by_milestone"`
+	Workspace     workspacepkg.Status        `json:"workspace_status"`
+	ContextWindow int                        `json:"context_window"`
+	ModelInfo     ModelInfo                  `json:"model_info"`
+	Theme         string                     `json:"theme"`
+	ProjectRoot   string                     `json:"project_root"`
+	Build         version.Info               `json:"build"`
+	RestartNeeded bool                       `json:"restart_needed"`
+	RestartBuild  RestartBuildInfo           `json:"restart_build,omitempty"`
+	Error         string                     `json:"error,omitempty"`
 }
 
 // Selection identifies the browser client's selected session/chat.
@@ -475,8 +475,8 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 		Snapshot:      snapshot,
 		Snapshots:     snapshots,
 		Milestones:    ownerSnapshot.Plan,
-		Todos:         slices.Clone(ownerSnapshot.Todos),
-		TodosByRef:    cloneTodosByRef(ownerSnapshot.TodosByRef),
+		Tasks:         slices.Clone(ownerSnapshot.Tasks),
+		TasksByRef:    cloneTasksByRef(ownerSnapshot.TasksByRef),
 		Workspace:     c.workspaceStatusForSession(session),
 		ContextWindow: c.contextWindowForChat(chatRecord),
 		ModelInfo:     c.modelInfoForChat(chatRecord),
@@ -778,11 +778,11 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event, selectedCha
 	case sessionpkg.EventPlanningChanged:
 		return Event{Type: "planning_delta", Payload: map[string]any{
 			"milestones":         event.Plan,
-			"todos":              slices.Clone(event.Todos),
-			"todos_by_milestone": cloneTodosByRef(event.TodosByRef),
+			"tasks":              slices.Clone(event.Tasks),
+			"tasks_by_milestone": cloneTasksByRef(event.TasksByRef),
 		}}, true
 	case sessionpkg.EventTasksChanged:
-		return Event{Type: "tasks_delta", Payload: map[string]any{"tasks": slices.Clone(event.Tasks)}}, true
+		return Event{Type: "legacy_tasks_delta", Payload: map[string]any{"legacy_tasks": slices.Clone(event.LegacyTasks)}}, true
 	case sessionpkg.EventSessionChanged:
 		return Event{Type: "session_delta", Payload: map[string]any{"session": event.Session}}, true
 	default:
@@ -1120,10 +1120,10 @@ func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID id.ID, summ
 	return planning.Plan{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func (c *Controller) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			created, err := owner.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+			created, err := owner.AddTasks(ctx, sessionID, milestoneRef, contents)
 			if err != nil {
 				return nil, err
 			}
@@ -1133,42 +1133,42 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID id.ID, mileston
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) UpdateTodoItem(ctx context.Context, todoID id.ID, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
+func (c *Controller) UpdateTask(ctx context.Context, taskID id.ID, status planning.TaskStatus, content, note string) (planning.Task, error) {
 	c.mu.RLock()
 	sessionID := c.session.ID
 	c.mu.RUnlock()
 	if c.agent != nil && sessionID != "" {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			updated, err := owner.UpdateTodoItem(ctx, todoID, status, content, note)
+			updated, err := owner.UpdateTask(ctx, taskID, status, content, note)
 			if err != nil {
-				return planning.TodoItem{}, err
+				return planning.Task{}, err
 			}
 			return updated, nil
 		}
 	}
-	return planning.TodoItem{}, fmt.Errorf("no live session owner")
+	return planning.Task{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func (c *Controller) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			return owner.ListTodos(ctx, sessionID, milestoneRef)
+			return owner.ListTasks(ctx, sessionID, milestoneRef)
 		}
 	}
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
+func (c *Controller) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.LegacyTaskStatus) (planning.LegacyTask, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			task, err := owner.AddTask(ctx, sessionID, body, status)
 			if err != nil {
-				return planning.Task{}, err
+				return planning.LegacyTask{}, err
 			}
 			return task, nil
 		}
 	}
-	return planning.Task{}, fmt.Errorf("no live session owner")
+	return planning.LegacyTask{}, fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) snapshotWithExecProcessesForSession(session domain.Session, snapshot chat.Snapshot) chat.Snapshot {
@@ -1901,13 +1901,13 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 	return session.ID != ""
 }
 
-func cloneTodosByRef(in map[string][]planning.TodoItem) map[string][]planning.TodoItem {
+func cloneTasksByRef(in map[string][]planning.Task) map[string][]planning.Task {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string][]planning.TodoItem, len(in))
-	for ref, todos := range in {
-		out[ref] = slices.Clone(todos)
+	out := make(map[string][]planning.Task, len(in))
+	for ref, tasks := range in {
+		out[ref] = slices.Clone(tasks)
 	}
 	return out
 }

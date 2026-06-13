@@ -33,39 +33,39 @@ func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	return plan, nil
 }
 
-func (c SessionControl) AddTodoItems(ctx context.Context, sessionID id.ID, ref string, items []string) ([]planning.TodoItem, error) {
+func (c SessionControl) AddTasks(ctx context.Context, sessionID id.ID, ref string, items []string) ([]planning.Task, error) {
 	now := time.Now().UTC()
 	milestoneRef := strings.TrimSpace(ref)
-	existing, err := modeltest.ListTodos(ctx, c.Store, sessionID, milestoneRef)
+	existing, err := modeltest.ListTasks(ctx, c.Store, sessionID, milestoneRef)
 	if err != nil {
 		return nil, err
 	}
-	all, err := modeltest.ListTodos(ctx, c.Store, sessionID, "")
+	all, err := modeltest.ListTasks(ctx, c.Store, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
-	out := make([]planning.TodoItem, 0, len(items))
-	nextKey := nextTodoKey(all, milestoneRef)
+	out := make([]planning.Task, 0, len(items))
+	nextKey := nextTaskKey(all, milestoneRef)
 	for _, content := range items {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, planning.TodoItem{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: milestoneRef, Content: content, Status: planning.TodoStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTodoKey(nextKey, milestoneRef)
+		out = append(out, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: milestoneRef, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementTaskKey(nextKey, milestoneRef)
 	}
 	for _, item := range out {
-		if err := modeltest.PutTodo(ctx, c.Store, item); err != nil {
+		if err := modeltest.PutTask(ctx, c.Store, item); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
 }
 
-func (c SessionControl) UpdateTodoItem(ctx context.Context, key string, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
-	item, err := modeltest.GetTodo(ctx, c.Store, id.ID(key))
+func (c SessionControl) UpdateTask(ctx context.Context, key string, status planning.TaskStatus, content, note string) (planning.Task, error) {
+	item, err := modeltest.GetTask(ctx, c.Store, id.ID(key))
 	if err != nil {
-		return planning.TodoItem{}, err
+		return planning.Task{}, err
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -75,17 +75,17 @@ func (c SessionControl) UpdateTodoItem(ctx context.Context, key string, status p
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = time.Now().UTC()
-	if err := modeltest.PutTodo(ctx, c.Store, item); err != nil {
-		return planning.TodoItem{}, err
+	if err := modeltest.PutTask(ctx, c.Store, item); err != nil {
+		return planning.Task{}, err
 	}
 	return item, nil
 }
 
-func (c SessionControl) ListTodos(ctx context.Context, sessionID id.ID, ref string) ([]planning.TodoItem, error) {
-	return modeltest.ListTodos(ctx, c.Store, sessionID, ref)
+func (c SessionControl) ListTasks(ctx context.Context, sessionID id.ID, ref string) ([]planning.Task, error) {
+	return modeltest.ListTasks(ctx, c.Store, sessionID, ref)
 }
 
-func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
+func nextTaskKey(items []planning.Task, milestoneKey string) string {
 	next := 1
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
@@ -98,23 +98,23 @@ func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
 			next = n + 1
 		}
 	}
-	return planning.ScopedTodoKey(milestoneKey, next)
+	return planning.ScopedTaskKey(milestoneKey, next)
 }
 
-func incrementTodoKey(key, milestoneKey string) string {
+func incrementTaskKey(key, milestoneKey string) string {
 	prefix := strings.TrimSpace(milestoneKey) + "T"
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTodoKey(milestoneKey, 1)
+		return planning.ScopedTaskKey(milestoneKey, 1)
 	}
-	return planning.ScopedTodoKey(milestoneKey, n+1)
+	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
-func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
+func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.LegacyTaskStatus) (planning.LegacyTask, error) {
 	now := time.Now().UTC()
-	task := planning.Task{ID: id.NewAt(now), SessionID: sessionID, Body: strings.TrimSpace(body), Status: status, CreatedAt: now}
-	if err := modeltest.PutTask(ctx, c.Store, task); err != nil {
-		return planning.Task{}, err
+	task := planning.LegacyTask{ID: id.NewAt(now), SessionID: sessionID, Body: strings.TrimSpace(body), Status: status, CreatedAt: now}
+	if err := modeltest.PutLegacyTask(ctx, c.Store, task); err != nil {
+		return planning.LegacyTask{}, err
 	}
 	return task, nil
 }

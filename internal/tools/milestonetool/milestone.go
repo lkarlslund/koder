@@ -152,11 +152,11 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	}
 	scoped := tools.ScopedMilestonePlan(runtime, plan)
 	listed := filterListedMilestones(scoped, req.Args["completed"] == "true")
-	todoSummaries, err := milestoneTodoSummaries(ctx, control, runtime.SessionID, listed.Milestones)
+	taskSummaries, err := milestoneTaskSummaries(ctx, control, runtime.SessionID, listed.Milestones)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	result := tools.MilestonePlanResultWithTodoSummaries(listed, todoSummaries)
+	result := tools.MilestonePlanResultWithTaskSummaries(listed, taskSummaries)
 	if summary := milestoneSummary(scoped.Milestones); summary != "" {
 		result.Output = summary + "\n" + result.Output
 	}
@@ -196,29 +196,29 @@ func milestoneSummary(milestones []planning.Milestone) string {
 	return "Milestones summary: " + strings.Join(parts, ", ")
 }
 
-func milestoneTodoSummaries(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) (map[string]string, error) {
+func milestoneTaskSummaries(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) (map[string]string, error) {
 	summaries := make(map[string]string, len(milestones))
 	for _, milestone := range milestones {
 		key := planning.MilestoneKey(milestone)
-		todos, err := control.ListTodos(ctx, sessionID, key)
+		tasks, err := control.ListTasks(ctx, sessionID, key)
 		if err != nil {
 			return nil, err
 		}
-		summaries[key] = todoSummary(todos)
+		summaries[key] = taskSummary(tasks)
 	}
 	return summaries, nil
 }
 
-func todoSummary(todos []planning.TodoItem) string {
-	if len(todos) == 0 {
+func taskSummary(tasks []planning.Task) string {
+	if len(tasks) == 0 {
 		return "no tasks added to milestone"
 	}
-	counts := make(map[planning.TodoStatus]int)
-	for _, todo := range todos {
-		counts[todo.Status]++
+	counts := make(map[planning.TaskStatus]int)
+	for _, task := range tasks {
+		counts[task.Status]++
 	}
 	parts := make([]string, 0, len(counts))
-	for _, status := range planning.TodoStatusValues() {
+	for _, status := range planning.TaskStatusValues() {
 		count := counts[status]
 		if count == 0 {
 			continue
@@ -278,7 +278,7 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
+	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
 	}
 	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated)), nil
@@ -294,7 +294,7 @@ func (writeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, milestones); err != nil {
+	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, milestones); err != nil {
 		return tools.Result{}, err
 	}
 	return tools.MilestonePlanResult(planning.Plan{
@@ -374,7 +374,7 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
+	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
 	}
 	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, updated.Summary, updated.Milestones)
@@ -395,7 +395,7 @@ func (writeTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req 
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, milestones); err != nil {
+	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, milestones); err != nil {
 		return tools.Result{}, err
 	}
 	plan, err := control.SetMilestonePlan(ctx, runtime.SessionID, req.Args["summary"], milestones)
@@ -513,24 +513,24 @@ func applyMilestoneOwner(milestone *planning.Milestone, status planning.Mileston
 	}
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) error {
+func validateCompletedMilestoneTasks(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != planning.MilestoneStatusCompleted {
 			continue
 		}
-		todos, err := control.ListTodos(ctx, sessionID, planning.MilestoneKey(milestone))
+		tasks, err := control.ListTasks(ctx, sessionID, planning.MilestoneKey(milestone))
 		if err != nil {
 			return err
 		}
-		for _, todo := range todos {
-			if todo.Status == planning.TodoStatusCompleted {
+		for _, task := range tasks {
+			if task.Status == planning.TaskStatusCompleted {
 				continue
 			}
 			name := strings.TrimSpace(milestone.Title)
 			if name == "" {
 				name = planning.MilestoneKey(milestone)
 			}
-			return fmt.Errorf("cannot complete milestone %q while task %s is %s", name, todo.ID, todo.Status.String())
+			return fmt.Errorf("cannot complete milestone %q while task %s is %s", name, task.ID, task.Status.String())
 		}
 	}
 	return nil

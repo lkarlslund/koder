@@ -267,7 +267,7 @@ Fields:
   where `ParentChatID` is empty, or the first chat if there is no root chat.
 - `approvals`: pending approvals found in all session chats.
 - `milestone_plan`: stored plan for the session.
-- `todos`: stored todo items for milestones in the plan.
+- `tasks`: stored task items for milestones in the plan.
 - `events`: recorded events for this session.
 
 This endpoint is broad and can return a large payload for long chats. Prefer the
@@ -347,28 +347,28 @@ Response fields:
 - `session_id`.
 - `plan`.
 
-### `GET /debug/sessions/{session_id}/todos`
-
-Returns stored todo items for milestones in the stored plan.
-
-```sh
-curl -sS "$BASE/debug/sessions/<session-id>/todos" | jq .
-```
-
-Response fields:
-
-- `session_id`.
-- `todos`.
-
 ### `GET /debug/sessions/{session_id}/tasks`
 
-Returns stored task records for the session.
+Returns stored task items for milestones in the stored plan.
 
 ```sh
 curl -sS "$BASE/debug/sessions/<session-id>/tasks" | jq .
 ```
 
-This endpoint exists because older data and tooling may still refer to tasks.
+Response fields:
+
+- `session_id`.
+- `tasks`.
+
+### `GET /debug/sessions/{session_id}/legacy-tasks`
+
+Returns legacy background task records for the session.
+
+```sh
+curl -sS "$BASE/debug/sessions/<session-id>/legacy-tasks" | jq .
+```
+
+This endpoint exists because older data and tooling may still refer to legacy background task records.
 
 ## Session Chat Endpoints
 
@@ -686,8 +686,8 @@ curl -sS "$BASE/debug/sessions/$SESSION/approvals" | jq .
 
 ```sh
 curl -sS "$BASE/debug/sessions/$SESSION/milestones" | jq .
-curl -sS "$BASE/debug/sessions/$SESSION/todos" | jq .
 curl -sS "$BASE/debug/sessions/$SESSION/tasks" | jq .
+curl -sS "$BASE/debug/sessions/$SESSION/legacy-tasks" | jq .
 ```
 
 ## Implementation Notes

@@ -66,11 +66,11 @@ func TestFinalizeResultCreatesPendingTask(t *testing.T) {
 	if _, ok := toolResult.Data.(tools.TaskStoredResult); !ok {
 		t.Fatalf("expected typed task result, got %#v", toolResult.Data)
 	}
-	tasks, err := modeltest.ListTasks(context.Background(), st, session.ID)
+	tasks, err := modeltest.ListLegacyTasks(context.Background(), st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].Status != planning.TaskStatusPending || tasks[0].Body != "Ship it" {
+	if len(tasks) != 1 || tasks[0].Status != planning.LegacyTaskStatusPending || tasks[0].Body != "Ship it" {
 		t.Fatalf("unexpected tasks: %#v", tasks)
 	}
 }

@@ -464,7 +464,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}
-	todos, err := ctrl.AddTodoItems(ctx, state.Session.ID, "M001", []string{"Implement alpha"})
+	tasks, err := ctrl.AddTasks(ctx, state.Session.ID, "M001", []string{"Implement alpha"})
 	if err != nil {
 		t.Fatalf("add task: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	status, err := ctrl.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
 		Profile:   chatrole.Execution,
 		Objective: "Implement only the assigned task",
-		TodoRef:   id.ID(planning.TodoKey(todos[0])),
+		TaskRef:   id.ID(planning.TaskKey(tasks[0])),
 	})
 	if err != nil {
 		t.Fatalf("start chat: %v", err)
@@ -484,7 +484,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTodoRef == planning.TodoKey(todos[0]) {
+		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTaskRef == planning.TaskKey(tasks[0]) {
 			found = true
 			break
 		}

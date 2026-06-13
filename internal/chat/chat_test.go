@@ -569,7 +569,7 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 	if err := modeltest.PutPlan(ctx, st, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.AddTodoItems(ctx, st, session.ID, "alpha", []string{"Inspect state", "Write tests"}); err != nil {
+	if _, err := modeltest.AddTasks(ctx, st, session.ID, "alpha", []string{"Inspect state", "Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 	return session, chat, plan

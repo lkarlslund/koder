@@ -325,10 +325,10 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	}
 }
 
-func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
+func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTasks(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	if _, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M001", []string{"Write tests"}); err != nil {
+	if _, err := modeltest.AddTasks(context.Background(), st, session.ID, "M001", []string{"Write tests"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -348,14 +348,14 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 	}
 }
 
-func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
+func TestUpdateItemAllowsCompletedMilestoneWhenTasksAreComplete(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
-	items, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M001", []string{"Write tests"})
+	items, err := modeltest.AddTasks(context.Background(), st, session.ID, "M001", []string{"Write tests"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.UpdateTodo(context.Background(), st, items[0].ID, planning.TodoStatusCompleted, items[0].Content, "completed in setup"); err != nil {
+	if _, err := modeltest.UpdateTask(context.Background(), st, items[0].ID, planning.TaskStatusCompleted, items[0].Content, "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,11 +380,11 @@ func TestListAndAddExecute(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := modeltest.AddTodoItems(context.Background(), st, session.ID, "M002", []string{"First", "Second"})
+	betaTasks, err := modeltest.AddTasks(context.Background(), st, session.ID, "M002", []string{"First", "Second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modeltest.UpdateTodo(context.Background(), st, betaTodos[0].ID, planning.TodoStatusCompleted, "", "done in setup"); err != nil {
+	if _, err := modeltest.UpdateTask(context.Background(), st, betaTasks[0].ID, planning.TaskStatusCompleted, "", "done in setup"); err != nil {
 		t.Fatal(err)
 	}
 

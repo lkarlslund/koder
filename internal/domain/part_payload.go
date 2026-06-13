@@ -226,8 +226,8 @@ func (QuestionPayload) PartKind() PartKind { return PartKindQuestion }
 
 // TaskUpdatePayload stores a task status update.
 type TaskUpdatePayload struct {
-	Body   string     `json:"body"`
-	Status TaskStatus `json:"status,omitempty"`
+	Body   string           `json:"body"`
+	Status LegacyTaskStatus `json:"status,omitempty"`
 }
 
 // PartKind returns the payload part kind.

@@ -84,7 +84,7 @@ type Status struct {
 	Role               chatrole.Role
 	Archived           bool
 	ActiveMilestoneRef string
-	AssignedTodoRef    string
+	AssignedTaskRef    string
 	State              RunState
 	Status             string
 	Busy               bool
@@ -99,7 +99,7 @@ type StartRequest struct {
 	Objective    string
 	Title        string
 	MilestoneRef string
-	TodoRef      string
+	TaskRef      string
 }
 
 type UpdateRequest struct {
@@ -139,7 +139,7 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 			Archived:           status.Archived,
 			QueuedInputs:       status.QueuedInputs,
 			ActiveMilestoneRef: status.ActiveMilestoneRef,
-			AssignedTodoRef:    status.AssignedTodoRef,
+			AssignedTaskRef:    status.AssignedTaskRef,
 			StatusText:         status.StatusText,
 		})
 	}
@@ -195,8 +195,8 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
 		out["milestone_key"] = ref
 	}
-	if todoRef := strings.TrimSpace(args["task_key"]); todoRef != "" {
-		key, err := planning.ParseTodoKey(todoRef)
+	if taskRef := strings.TrimSpace(args["task_key"]); taskRef != "" {
+		key, err := planning.ParseTaskKey(taskRef)
 		if err != nil {
 			return nil, err
 		}
@@ -349,7 +349,7 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_key"],
-		TodoRef:      req.Args["task_key"],
+		TaskRef:      req.Args["task_key"],
 	})
 	if err != nil {
 		return tools.Result{}, err

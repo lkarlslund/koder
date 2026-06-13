@@ -24,8 +24,8 @@ type fakeSource struct {
 	defaults        map[id.ID][]domain.TimelineItem
 	approvals       map[id.ID][]DebugApproval
 	plans           map[id.ID]planning.Plan
-	todos           map[id.ID][]planning.TodoItem
 	tasks           map[id.ID][]planning.Task
+	legacyTasks     map[id.ID][]planning.LegacyTask
 	rewindSessionID id.ID
 	rewindChatID    id.ID
 	rewindAnchorID  id.ID
@@ -77,12 +77,12 @@ func (f *fakeSource) Milestones(_ context.Context, sessionID id.ID) (planning.Pl
 	return f.plans[sessionID], nil
 }
 
-func (f *fakeSource) Todos(_ context.Context, sessionID id.ID) ([]planning.TodoItem, error) {
-	return f.todos[sessionID], nil
-}
-
 func (f *fakeSource) Tasks(_ context.Context, sessionID id.ID) ([]planning.Task, error) {
 	return f.tasks[sessionID], nil
+}
+
+func (f *fakeSource) LegacyTasks(_ context.Context, sessionID id.ID) ([]planning.LegacyTask, error) {
+	return f.legacyTasks[sessionID], nil
 }
 
 func (f *fakeSource) ResolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error) {

@@ -170,11 +170,11 @@ func (r *Chat) toolRuntime(runtime tools.Runtime) tools.Runtime {
 	if runtime.ActiveMilestoneRef == "" {
 		runtime.ActiveMilestoneRef = r.chat.ActiveMilestoneRef
 	}
-	if runtime.AssignedTodoBucketRef == "" {
-		runtime.AssignedTodoBucketRef = r.chat.AssignedTodoBucketRef
+	if runtime.AssignedTaskBucketRef == "" {
+		runtime.AssignedTaskBucketRef = r.chat.AssignedTaskBucketRef
 	}
-	if runtime.AssignedTodoRef == "" {
-		runtime.AssignedTodoRef = r.chat.AssignedTodoRef
+	if runtime.AssignedTaskRef == "" {
+		runtime.AssignedTaskRef = r.chat.AssignedTaskRef
 	}
 	return runtime
 }

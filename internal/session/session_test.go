@@ -37,55 +37,55 @@ func testLoadSession(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Sou
 	return Load(ctx, st, chatsSrc, planSrc, sessionID)
 }
 
-func testAddTodoItems(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
-	existing, err := planSrc.ListTodos(ctx, sessionID, milestoneRef)
+func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
+	existing, err := planSrc.ListTasks(ctx, sessionID, milestoneRef)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	items := make([]planning.TodoItem, 0, len(contents))
+	items := make([]planning.Task, 0, len(contents))
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{
+		items = append(items, planning.Task{
 			ID:           id.NewAt(now),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
-			Status:       planning.TodoStatusPending,
+			Status:       planning.TaskStatusPending,
 			Position:     len(existing) + len(items),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
 	}
 	for _, item := range items {
-		if err := planSrc.SaveTodo(ctx, item); err != nil {
+		if err := planSrc.SaveTask(ctx, item); err != nil {
 			return nil, err
 		}
 	}
 	return items, nil
 }
 
-func testUpdateTodo(ctx context.Context, planSrc *planning.Source, sessionID, todoID id.ID, status planning.TodoStatus, note string) (planning.TodoItem, error) {
-	todos, err := planSrc.ListTodos(ctx, sessionID, "")
+func testUpdateTask(ctx context.Context, planSrc *planning.Source, sessionID, taskID id.ID, status planning.TaskStatus, note string) (planning.Task, error) {
+	tasks, err := planSrc.ListTasks(ctx, sessionID, "")
 	if err != nil {
-		return planning.TodoItem{}, err
+		return planning.Task{}, err
 	}
-	for _, item := range todos {
-		if item.ID != todoID {
+	for _, item := range tasks {
+		if item.ID != taskID {
 			continue
 		}
 		item.Status = status
 		item.Note = note
 		item.UpdatedAt = time.Now().UTC()
-		return item, planSrc.SaveTodo(ctx, item)
+		return item, planSrc.SaveTask(ctx, item)
 	}
-	return planning.TodoItem{}, fmt.Errorf("task %s not found", todoID)
+	return planning.Task{}, fmt.Errorf("task %s not found", taskID)
 }
 
-func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
+func TestScopedPlanningLimitsMilestonesAndTasks(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -102,11 +102,11 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTodos, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "alpha", []string{"alpha task"})
+	alphaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"alpha task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTodos, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "beta", []string{"beta task"})
+	betaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "beta", []string{"beta task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,22 +122,22 @@ func TestScopedPlanningLimitsMilestonesAndTodos(t *testing.T) {
 	if len(plan.Milestones) != 1 || planning.MilestoneKey(plan.Milestones[0]) != "M001" {
 		t.Fatalf("expected alpha-only plan, got %#v", plan.Milestones)
 	}
-	todos, err := control.ListTodos(ctx, sessionRecord.ID, "")
+	tasks, err := control.ListTasks(ctx, sessionRecord.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(todos) != 1 || todos[0].ID != alphaTodos[0].ID {
-		t.Fatalf("expected alpha-only tasks, got %#v", todos)
+	if len(tasks) != 1 || tasks[0].ID != alphaTasks[0].ID {
+		t.Fatalf("expected alpha-only tasks, got %#v", tasks)
 	}
-	if _, err := control.ListTodos(ctx, sessionRecord.ID, "M002"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
+	if _, err := control.ListTasks(ctx, sessionRecord.ID, "M002"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
 		t.Fatalf("expected beta scope error, got %v", err)
 	}
-	if _, err := control.UpdateTodoItem(ctx, betaTodos[0].ID, planning.TodoStatusInProgress, "", "starting work"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
+	if _, err := control.UpdateTask(ctx, betaTasks[0].ID, planning.TaskStatusInProgress, "", "starting work"); err == nil || !strings.Contains(err.Error(), `scoped to milestone "M001"`) {
 		t.Fatalf("expected beta update scope error, got %v", err)
 	}
 }
 
-func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
+func TestScopedPlanningLimitsAssignedTask(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -151,7 +151,7 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	todos, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
+	tasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,20 +159,20 @@ func TestScopedPlanningLimitsAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTodoRef: planning.TodoKey(todos[0])})
-	listed, err := control.ListTodos(ctx, sessionRecord.ID, "M001")
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTaskRef: planning.TaskKey(tasks[0])})
+	listed, err := control.ListTasks(ctx, sessionRecord.ID, "M001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].ID != todos[0].ID {
+	if len(listed) != 1 || listed[0].ID != tasks[0].ID {
 		t.Fatalf("expected assigned task only, got %#v", listed)
 	}
-	if _, err := control.AddTodoItems(ctx, sessionRecord.ID, "M001", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
+	if _, err := control.AddTasks(ctx, sessionRecord.ID, "M001", []string{"third"}); err == nil || !strings.Contains(err.Error(), "scoped to task") {
 		t.Fatalf("expected add task scope error, got %v", err)
 	}
 }
 
-func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
+func TestSessionHydratesTasksWithoutPlanMilestone(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
+	created, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestSessionHydratesTodosWithoutPlanMilestone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := owner.ListTodos(ctx, sessionRecord.ID, "alpha")
+	listed, err := owner.ListTasks(ctx, sessionRecord.ID, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +216,11 @@ func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
+	tasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testUpdateTodo(ctx, planSrc, sessionRecord.ID, todos[0].ID, planning.TodoStatusCompleted, "completed in setup"); err != nil {
+	if _, err := testUpdateTask(ctx, planSrc, sessionRecord.ID, tasks[0].ID, planning.TaskStatusCompleted, "completed in setup"); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
@@ -246,12 +246,12 @@ func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	todos, err := testAddTodoItems(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
+	tasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, todo := range todos {
-		if _, err := testUpdateTodo(ctx, planSrc, sessionRecord.ID, todo.ID, planning.TodoStatusCompleted, "completed in setup"); err != nil {
+	for _, task := range tasks {
+		if _, err := testUpdateTask(ctx, planSrc, sessionRecord.ID, task.ID, planning.TaskStatusCompleted, "completed in setup"); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -360,7 +360,7 @@
                 <i class="bi planning-status" :class="milestoneIcon(milestoneStatus(node.milestone))"></i>
                 <span class="planning-title text-truncate" x-text="milestoneTitle(node.milestone)"></span>
                 <span class="planning-ref" x-text="milestoneRef(node.milestone)"></span>
-                <span class="planning-counts" x-text="node.orphan ? 'depends on ' + milestoneDependsOnRef(node.milestone) : milestoneTodoSummary(node.milestone)"></span>
+                <span class="planning-counts" x-text="node.orphan ? 'depends on ' + milestoneDependsOnRef(node.milestone) : milestoneTaskSummary(node.milestone)"></span>
                 <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(node.milestone))" x-text="milestoneStatus(node.milestone)"></span>
               </button>
               <div class="milestone-progress" :title="milestoneProgressTitle(node.milestone)">
@@ -371,14 +371,14 @@
                 <span class="milestone-progress-segment milestone-progress-pending" :style="milestoneProgressStyle(node.milestone, 'pending')"></span>
               </div>
               <div class="planning-children" x-show="milestoneExpanded(milestoneRef(node.milestone))" x-transition>
-                <template x-if="todoItemsForMilestone(node.milestone).length === 0">
+                <template x-if="taskItemsForMilestone(node.milestone).length === 0">
                   <div class="planning-empty">No tasks</div>
                 </template>
-                <template x-for="todo in todoItemsForMilestone(node.milestone)" :key="todo.ID || todo.id">
-                  <div class="planning-todo" :title="todoTitle(todo)">
-                    <i class="bi" :class="todoIcon(todoStatus(todo))"></i>
-                    <span class="text-truncate" x-text="todo.Content || todo.content"></span>
-                    <span class="badge planning-badge planning-todo-status" :class="todoBadge(todoStatus(todo))" x-text="todoStatus(todo)"></span>
+                <template x-for="task in taskItemsForMilestone(node.milestone)" :key="task.ID || task.id">
+                  <div class="planning-task" :title="taskTitle(task)">
+                    <i class="bi" :class="taskIcon(taskStatus(task))"></i>
+                    <span class="text-truncate" x-text="task.Content || task.content"></span>
+                    <span class="badge planning-badge planning-task-status" :class="taskBadge(taskStatus(task))" x-text="taskStatus(task)"></span>
                   </div>
                 </template>
               </div>

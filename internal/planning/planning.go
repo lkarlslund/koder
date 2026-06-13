@@ -32,29 +32,29 @@ type Milestone struct {
 	OwnerChatID  *id.ID
 }
 
-type TodoItem struct {
+type Task struct {
 	ID           id.ID
 	Key          string
 	SessionID    id.ID
 	MilestoneRef string
 	Content      string
 	Note         string
-	Status       TodoStatus
+	Status       TaskStatus
 	Position     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
 
-type Task struct {
+type LegacyTask struct {
 	ID        id.ID
 	SessionID id.ID
 	Body      string
-	Status    TaskStatus
+	Status    LegacyTaskStatus
 	CreatedAt time.Time
 }
 
-func SortTodos(items []TodoItem) {
-	slices.SortFunc(items, func(a, b TodoItem) int {
+func SortTasks(items []Task) {
+	slices.SortFunc(items, func(a, b Task) int {
 		switch {
 		case a.Position < b.Position:
 			return -1
@@ -86,7 +86,7 @@ func MilestoneDependsOnKey(item Milestone) string {
 	return strings.TrimSpace(item.DependsOnRef)
 }
 
-func TodoKey(item TodoItem) string {
+func TaskKey(item Task) string {
 	key := strings.TrimSpace(item.Key)
 	if key != "" {
 		return key
@@ -94,7 +94,7 @@ func TodoKey(item TodoItem) string {
 	return strings.TrimSpace(string(item.ID))
 }
 
-func ScopedTodoKey(milestoneKey string, n int) string {
+func ScopedTaskKey(milestoneKey string, n int) string {
 	milestoneKey = strings.TrimSpace(milestoneKey)
 	if milestoneKey == "" || n <= 0 {
 		return ""
@@ -143,7 +143,7 @@ func NormalizePlanKeys(plan Plan) (Plan, bool) {
 	return next, changed
 }
 
-func NormalizeTodosKeys(items []TodoItem, milestoneKeys map[string]string) ([]TodoItem, bool) {
+func NormalizeTaskKeys(items []Task, milestoneKeys map[string]string) ([]Task, bool) {
 	next := slices.Clone(items)
 	changed := false
 	for idx := range next {
@@ -155,12 +155,12 @@ func NormalizeTodosKeys(items []TodoItem, milestoneKeys map[string]string) ([]To
 			changed = true
 		}
 		oldKey := strings.TrimSpace(item.Key)
-		item.Key = normalizeTodoKeyForMilestone(item.Key, milestoneRef)
+		item.Key = normalizeTaskKeyForMilestone(item.Key, milestoneRef)
 		if item.Key != oldKey {
 			changed = true
 		}
 		if item.Key == "" {
-			item.Key = nextTodoKey(next, milestoneRef)
+			item.Key = nextTaskKey(next, milestoneRef)
 			changed = true
 		}
 	}
@@ -197,35 +197,35 @@ func nextPlanningKeyNumber(items []Milestone, prefix string) int {
 	return next
 }
 
-func nextTodoKey(items []TodoItem, milestoneKey string) string {
-	return ScopedTodoKey(milestoneKey, nextTodoKeyNumber(items, milestoneKey))
+func nextTaskKey(items []Task, milestoneKey string) string {
+	return ScopedTaskKey(milestoneKey, nextTaskKeyNumber(items, milestoneKey))
 }
 
-func nextTodoKeyNumber(items []TodoItem, milestoneKey string) int {
+func nextTaskKeyNumber(items []Task, milestoneKey string) int {
 	next := 1
 	for _, item := range items {
-		if n, ok := parseTodoKeyNumber(item.Key, milestoneKey); ok && n >= next {
+		if n, ok := parseTaskKeyNumber(item.Key, milestoneKey); ok && n >= next {
 			next = n + 1
 		}
 	}
 	return next
 }
 
-func normalizeTodoKeyForMilestone(raw, milestoneKey string) string {
+func normalizeTaskKeyForMilestone(raw, milestoneKey string) string {
 	key := strings.TrimSpace(raw)
 	if key == "" {
 		return ""
 	}
-	if _, ok := parseTodoKeyNumber(key, milestoneKey); ok {
+	if _, ok := parseTaskKeyNumber(key, milestoneKey); ok {
 		return key
 	}
 	if n, ok := parsePlanningKey(key, "T"); ok {
-		return ScopedTodoKey(milestoneKey, n)
+		return ScopedTaskKey(milestoneKey, n)
 	}
 	return key
 }
 
-func parseTodoKeyNumber(raw, milestoneKey string) (int, bool) {
+func parseTaskKeyNumber(raw, milestoneKey string) (int, bool) {
 	milestoneKey = strings.TrimSpace(milestoneKey)
 	if milestoneKey == "" {
 		return 0, false
@@ -268,7 +268,7 @@ type MilestoneAddInput struct {
 	DependsOnRef string `json:"depends_on_ref,omitempty"`
 }
 
-type TodoAddInput struct {
+type TaskAddInput struct {
 	Content string `json:"content"`
 }
 
@@ -389,8 +389,8 @@ func ValidMilestoneStatus(status MilestoneStatus) bool {
 	}
 }
 
-func ParseTodoAddItems(raw string) ([]string, error) {
-	var items []TodoAddInput
+func ParseTaskAddItems(raw string) ([]string, error) {
+	var items []TaskAddInput
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
 		return nil, errors.New("items must be a JSON array of task objects")
 	}
@@ -408,7 +408,7 @@ func ParseTodoAddItems(raw string) ([]string, error) {
 	return out, nil
 }
 
-func ParseTodoKey(raw string) (string, error) {
+func ParseTaskKey(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return "", errors.New("task_key is required")
@@ -426,28 +426,28 @@ func ParseTodoKey(raw string) (string, error) {
 	return value, nil
 }
 
-func ParseTodoStatus(raw string) (TodoStatus, error) {
-	status, err := TodoStatusString(strings.TrimSpace(raw))
+func ParseTaskStatus(raw string) (TaskStatus, error) {
+	status, err := TaskStatusString(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("invalid task status %q", raw)
 	}
 	return status, nil
 }
 
-func NormalizeTodoContent(content string) string {
+func NormalizeTaskContent(content string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(content))), " ")
 }
 
-func ValidateNoDuplicateTodoContent(existing []TodoItem, added []string) error {
+func ValidateNoDuplicateTaskContent(existing []Task, added []string) error {
 	seen := make(map[string]struct{}, len(existing)+len(added))
 	for _, item := range existing {
-		content := NormalizeTodoContent(item.Content)
+		content := NormalizeTaskContent(item.Content)
 		if content != "" {
 			seen[content] = struct{}{}
 		}
 	}
 	for _, item := range added {
-		content := NormalizeTodoContent(item)
+		content := NormalizeTaskContent(item)
 		if content == "" {
 			continue
 		}
@@ -482,10 +482,10 @@ func MilestoneTitle(plan Plan, ref string) string {
 	return ""
 }
 
-func ValidateTodoProgress(items []TodoItem) error {
+func ValidateTaskProgress(items []Task) error {
 	inProgress := 0
 	for _, item := range items {
-		if item.Status == TodoStatusInProgress {
+		if item.Status == TaskStatusInProgress {
 			inProgress++
 		}
 	}

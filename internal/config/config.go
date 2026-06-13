@@ -675,8 +675,6 @@ var toolDefaultKindAliases = map[string]domain.ToolKind{
 	"milestoneadditems":         domain.ToolKindMilestoneAdd,
 	"milestoneplananddecompose": domain.ToolKindMilestonePlan,
 	"milestoneupdateitem":       domain.ToolKindMilestoneUpdate,
-	"todoadditems":              domain.ToolKindTasksAdd,
-	"todoupdateitem":            domain.ToolKindTasksUpdate,
 }
 
 func parseToolDefaultKind(name string) (domain.ToolKind, error) {

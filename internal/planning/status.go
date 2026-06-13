@@ -1,14 +1,14 @@
 package planning
 
-//go:generate go tool enumer -type=TaskStatus,MilestoneStatus,TodoStatus -trimprefix=TaskStatus,MilestoneStatus,TodoStatus -transform=snake -json -text -values -output=status_enumer.go
+//go:generate go tool enumer -type=LegacyTaskStatus,MilestoneStatus,TaskStatus -trimprefix=LegacyTaskStatus,MilestoneStatus,TaskStatus -transform=snake -json -text -values -output=status_enumer.go
 
-type TaskStatus uint8
+type LegacyTaskStatus uint8
 
 const (
-	TaskStatusPending TaskStatus = iota
-	TaskStatusInProgress
-	TaskStatusCompleted
-	TaskStatusCancelled
+	LegacyTaskStatusPending LegacyTaskStatus = iota
+	LegacyTaskStatusInProgress
+	LegacyTaskStatusCompleted
+	LegacyTaskStatusCancelled
 )
 
 type MilestoneStatus uint8
@@ -23,10 +23,11 @@ const (
 	MilestoneStatusCancelled
 )
 
-type TodoStatus uint8
+type TaskStatus uint8
 
 const (
-	TodoStatusPending TodoStatus = iota
-	TodoStatusInProgress
-	TodoStatusCompleted
+	TaskStatusPending TaskStatus = iota
+	TaskStatusInProgress
+	TaskStatusCompleted
+	TaskStatusCancelled
 )

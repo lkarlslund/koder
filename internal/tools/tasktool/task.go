@@ -40,7 +40,7 @@ func (tool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], planning.TaskStatusPending)
+	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], planning.LegacyTaskStatusPending)
 	if err != nil {
 		return tools.Result{}, err
 	}

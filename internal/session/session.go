@@ -34,18 +34,18 @@ const (
 
 // Event reports a mutation made by the session owner.
 type Event struct {
-	Kind       EventKind
-	SessionID  id.ID
-	Chat       domain.Chat
-	Snapshot   chatpkg.Snapshot
-	Update     chatpkg.Update
-	NextChatID id.ID
-	Session    domain.Session
-	Plan       planning.Plan
-	Todos      []planning.TodoItem
-	TodosByRef map[string][]planning.TodoItem
-	Tasks      []planning.Task
-	Err        error
+	Kind        EventKind
+	SessionID   id.ID
+	Chat        domain.Chat
+	Snapshot    chatpkg.Snapshot
+	Update      chatpkg.Update
+	NextChatID  id.ID
+	Session     domain.Session
+	Plan        planning.Plan
+	Tasks       []planning.Task
+	TasksByRef  map[string][]planning.Task
+	LegacyTasks []planning.LegacyTask
+	Err         error
 }
 
 // Session owns the live state for one persisted session.
@@ -54,14 +54,14 @@ type Session struct {
 	chatsSrc *chatpkg.Source
 	planSrc  *planning.Source
 
-	mu         sync.RWMutex
-	session    domain.Session
-	chats      []domain.Chat
-	runtimes   map[id.ID]*chatpkg.Chat
-	unsubs     map[id.ID]func()
-	plan       planning.Plan
-	todosByRef map[string][]planning.TodoItem
-	tasks      []planning.Task
+	mu          sync.RWMutex
+	session     domain.Session
+	chats       []domain.Chat
+	runtimes    map[id.ID]*chatpkg.Chat
+	unsubs      map[id.ID]func()
+	plan        planning.Plan
+	tasksByRef  map[string][]planning.Task
+	legacyTasks []planning.LegacyTask
 
 	subsMu  sync.Mutex
 	nextSub int
@@ -100,32 +100,32 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 			return nil, err
 		}
 	}
-	todosByRef, err := loadTodosByRef(ctx, planSrc, sessionID, plan)
+	tasksByRef, err := loadTasksByRef(ctx, planSrc, sessionID, plan)
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := planSrc.ListTasks(ctx, sessionID)
+	legacyTasks, err := planSrc.ListLegacyTasks(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	owner := &Session{
-		store:      st,
-		chatsSrc:   chatsSrc,
-		planSrc:    planSrc,
-		session:    session,
-		chats:      slices.Clone(chats),
-		runtimes:   map[id.ID]*chatpkg.Chat{},
-		unsubs:     map[id.ID]func(){},
-		plan:       plan,
-		todosByRef: todosByRef,
-		tasks:      slices.Clone(tasks),
-		subs:       map[int]chan Event{},
+		store:       st,
+		chatsSrc:    chatsSrc,
+		planSrc:     planSrc,
+		session:     session,
+		chats:       slices.Clone(chats),
+		runtimes:    map[id.ID]*chatpkg.Chat{},
+		unsubs:      map[id.ID]func(){},
+		plan:        plan,
+		tasksByRef:  tasksByRef,
+		legacyTasks: slices.Clone(legacyTasks),
+		subs:        map[int]chan Event{},
 	}
 	return owner, nil
 }
 
-func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
-	out := map[string][]planning.TodoItem{}
+func loadTasksByRef(ctx context.Context, planSrc *planning.Source, sessionID id.ID, plan planning.Plan) (map[string][]planning.Task, error) {
+	out := map[string][]planning.Task{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
 		ref := strings.TrimSpace(planning.MilestoneKey(milestone))
@@ -138,14 +138,14 @@ func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 		seen[ref] = struct{}{}
 		out[ref] = nil
 	}
-	items, err := planSrc.ListTodos(ctx, sessionID, "")
+	items, err := planSrc.ListTasks(ctx, sessionID, "")
 	if err != nil {
 		return nil, err
 	}
-	items, changed := planning.NormalizeTodosKeys(items, planning.MilestoneKeyAliases(plan))
+	items, changed := planning.NormalizeTaskKeys(items, planning.MilestoneKeyAliases(plan))
 	if changed {
 		for _, item := range items {
-			if err := planSrc.SaveTodo(ctx, item); err != nil {
+			if err := planSrc.SaveTask(ctx, item); err != nil {
 				return nil, err
 			}
 		}
@@ -155,7 +155,7 @@ func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 		out[ref] = append(out[ref], item)
 	}
 	for ref, items := range out {
-		planning.SortTodos(items)
+		planning.SortTasks(items)
 		out[ref] = items
 	}
 	return out, nil
@@ -163,13 +163,13 @@ func loadTodosByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 
 // SessionSnapshot is a detached view of a live session.
 type SessionSnapshot struct {
-	Session    domain.Session
-	Chats      []domain.Chat
-	Snapshots  map[id.ID]chatpkg.Snapshot
-	Plan       planning.Plan
-	Todos      []planning.TodoItem
-	TodosByRef map[string][]planning.TodoItem
-	Tasks      []planning.Task
+	Session     domain.Session
+	Chats       []domain.Chat
+	Snapshots   map[id.ID]chatpkg.Snapshot
+	Plan        planning.Plan
+	Tasks       []planning.Task
+	TasksByRef  map[string][]planning.Task
+	LegacyTasks []planning.LegacyTask
 }
 
 // Snapshot returns a detached snapshot of the live session.
@@ -186,13 +186,13 @@ func (s *Session) Snapshot() SessionSnapshot {
 		}
 	}
 	return SessionSnapshot{
-		Session:    s.session,
-		Chats:      slices.Clone(s.chats),
-		Snapshots:  snapshots,
-		Plan:       cloneMilestonePlan(s.plan),
-		Todos:      flattenTodos(s.todosByRef),
-		TodosByRef: cloneTodosByRef(s.todosByRef),
-		Tasks:      slices.Clone(s.tasks),
+		Session:     s.session,
+		Chats:       slices.Clone(s.chats),
+		Snapshots:   snapshots,
+		Plan:        cloneMilestonePlan(s.plan),
+		Tasks:       flattenTasks(s.tasksByRef),
+		TasksByRef:  cloneTasksByRef(s.tasksByRef),
+		LegacyTasks: slices.Clone(s.legacyTasks),
 	}
 }
 
@@ -596,7 +596,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 	status.Role = target.WorkflowRole
 	status.Archived = target.Archived
 	status.ActiveMilestoneRef = target.ActiveMilestoneRef
-	status.AssignedTodoRef = target.AssignedTodoRef
+	status.AssignedTaskRef = target.AssignedTaskRef
 	status.StatusText = statusText
 	kind := EventChatChanged
 	if archivingVisibleChat {
@@ -948,79 +948,79 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 	}
 	s.mu.Lock()
 	s.plan = plan
-	todos := flattenTodos(s.todosByRef)
-	todosByRef := cloneTodosByRef(s.todosByRef)
+	tasks := flattenTasks(s.tasksByRef)
+	tasksByRef := cloneTasksByRef(s.tasksByRef)
 	s.mu.Unlock()
 	slog.Info("milestone plan stored", "session_id", sessionID, "milestones", len(plan.Milestones), "summary_bytes", len(plan.Summary))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Todos: todos, TodosByRef: todosByRef})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Tasks: tasks, TasksByRef: tasksByRef})
 	return cloneMilestonePlan(plan), nil
 }
 
-func (s *Session) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
 	milestoneRef = strings.TrimSpace(milestoneRef)
 	now := time.Now().UTC()
 	s.mu.RLock()
-	existing := slices.Clone(s.todosByRef[milestoneRef])
+	existing := slices.Clone(s.tasksByRef[milestoneRef])
 	position := len(existing)
-	allTodos := flattenTodos(s.todosByRef)
+	allTasks := flattenTasks(s.tasksByRef)
 	s.mu.RUnlock()
-	if err := planning.ValidateNoDuplicateTodoContent(existing, contents); err != nil {
+	if err := planning.ValidateNoDuplicateTaskContent(existing, contents); err != nil {
 		return nil, err
 	}
-	items := make([]planning.TodoItem, 0, len(contents))
-	nextKey := nextTodoKey(allTodos, milestoneRef)
+	items := make([]planning.Task, 0, len(contents))
+	nextKey := nextTaskKey(allTasks, milestoneRef)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.TodoItem{
+		items = append(items, planning.Task{
 			ID:           id.New(),
 			Key:          nextKey,
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
-			Status:       planning.TodoStatusPending,
+			Status:       planning.TaskStatusPending,
 			Position:     position + len(items),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
-		nextKey = incrementTodoKey(nextKey, milestoneRef)
+		nextKey = incrementTaskKey(nextKey, milestoneRef)
 	}
 	for _, item := range items {
-		if err := s.planSrc.SaveTodo(ctx, item); err != nil {
+		if err := s.planSrc.SaveTask(ctx, item); err != nil {
 			return nil, err
 		}
 	}
 	s.mu.Lock()
-	if s.todosByRef == nil {
-		s.todosByRef = map[string][]planning.TodoItem{}
+	if s.tasksByRef == nil {
+		s.tasksByRef = map[string][]planning.Task{}
 	}
-	s.todosByRef[milestoneRef] = append(s.todosByRef[milestoneRef], items...)
+	s.tasksByRef[milestoneRef] = append(s.tasksByRef[milestoneRef], items...)
 	plan := cloneMilestonePlan(s.plan)
-	todos := flattenTodos(s.todosByRef)
-	todosByRef := cloneTodosByRef(s.todosByRef)
+	tasks := flattenTasks(s.tasksByRef)
+	tasksByRef := cloneTasksByRef(s.tasksByRef)
 	s.mu.Unlock()
 	slog.Info("tasks added", "session_id", sessionID, "milestone_key", milestoneRef, "count", len(items))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: todos, TodosByRef: todosByRef})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: tasks, TasksByRef: tasksByRef})
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID string, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
+func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning.TaskStatus, content, note string) (planning.Task, error) {
 	if s == nil {
-		return planning.TodoItem{}, fmt.Errorf("session is required")
+		return planning.Task{}, fmt.Errorf("session is required")
 	}
 	now := time.Now().UTC()
 	s.mu.RLock()
-	var item planning.TodoItem
+	var item planning.Task
 	var ref string
 	found := false
-	for milestoneRef, todos := range s.todosByRef {
-		for _, candidate := range todos {
-			if planning.TodoKey(candidate) == todoID {
+	for milestoneRef, tasks := range s.tasksByRef {
+		for _, candidate := range tasks {
+			if planning.TaskKey(candidate) == taskID {
 				item = candidate
 				ref = milestoneRef
 				found = true
@@ -1033,7 +1033,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID string, status plan
 	}
 	s.mu.RUnlock()
 	if !found {
-		return planning.TodoItem{}, fmt.Errorf("task %s not found", todoID)
+		return planning.Task{}, fmt.Errorf("task %s not found", taskID)
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -1043,29 +1043,29 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID string, status plan
 		item.Note = strings.TrimSpace(note)
 	}
 	item.UpdatedAt = now
-	if err := s.planSrc.SaveTodo(ctx, item); err != nil {
-		return planning.TodoItem{}, err
+	if err := s.planSrc.SaveTask(ctx, item); err != nil {
+		return planning.Task{}, err
 	}
 	s.mu.Lock()
-	todos := slices.Clone(s.todosByRef[ref])
-	for idx := range todos {
-		if planning.TodoKey(todos[idx]) == todoID {
-			todos[idx] = item
+	tasks := slices.Clone(s.tasksByRef[ref])
+	for idx := range tasks {
+		if planning.TaskKey(tasks[idx]) == taskID {
+			tasks[idx] = item
 			break
 		}
 	}
-	s.todosByRef[ref] = todos
+	s.tasksByRef[ref] = tasks
 	sessionID := s.session.ID
 	plan := cloneMilestonePlan(s.plan)
-	allTodos := flattenTodos(s.todosByRef)
-	todosByRef := cloneTodosByRef(s.todosByRef)
+	allTasks := flattenTasks(s.tasksByRef)
+	tasksByRef := cloneTasksByRef(s.tasksByRef)
 	s.mu.Unlock()
 	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "task_key", item.Key, "milestone_key", ref, "status", item.Status, "note_bytes", len(item.Note))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Todos: allTodos, TodosByRef: todosByRef})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByRef: tasksByRef})
 	return item, nil
 }
 
-func (s *Session) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func (s *Session) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
@@ -1073,30 +1073,30 @@ func (s *Session) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef s
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if milestoneRef == "" {
-		return flattenTodos(s.todosByRef), nil
+		return flattenTasks(s.tasksByRef), nil
 	}
-	return slices.Clone(s.todosByRef[milestoneRef]), nil
+	return slices.Clone(s.tasksByRef[milestoneRef]), nil
 }
 
-func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.TaskStatus) (planning.Task, error) {
+func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.LegacyTaskStatus) (planning.LegacyTask, error) {
 	if err := s.requireSession(sessionID); err != nil {
-		return planning.Task{}, err
+		return planning.LegacyTask{}, err
 	}
-	task := planning.Task{
+	task := planning.LegacyTask{
 		ID:        id.New(),
 		SessionID: sessionID,
 		Body:      strings.TrimSpace(body),
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := s.planSrc.SaveTask(ctx, task); err != nil {
-		return planning.Task{}, err
+	if err := s.planSrc.SaveLegacyTask(ctx, task); err != nil {
+		return planning.LegacyTask{}, err
 	}
 	s.mu.Lock()
-	s.tasks = append(s.tasks, task)
-	tasks := slices.Clone(s.tasks)
+	s.legacyTasks = append(s.legacyTasks, task)
+	tasks := slices.Clone(s.legacyTasks)
 	s.mu.Unlock()
-	s.emit(Event{Kind: EventTasksChanged, SessionID: sessionID, Tasks: tasks})
+	s.emit(Event{Kind: EventTasksChanged, SessionID: sessionID, LegacyTasks: tasks})
 	return task, nil
 }
 
@@ -1146,62 +1146,62 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	return p.session.SetMilestonePlan(ctx, sessionID, current.Summary, current.Milestones)
 }
 
-func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
-	if assignedTodoRef(p.chat) != "" {
-		return nil, fmt.Errorf("chat is scoped to task %q", assignedTodoRef(p.chat))
+func (p scopedPlanning) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
+	if assignedTaskRef(p.chat) != "" {
+		return nil, fmt.Errorf("chat is scoped to task %q", assignedTaskRef(p.chat))
 	}
 	ref, err := p.allowedMilestoneRef(milestoneRef)
 	if err != nil {
 		return nil, err
 	}
-	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
+	return p.session.AddTasks(ctx, sessionID, ref, contents)
 }
 
-func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID string, status planning.TodoStatus, content, note string) (planning.TodoItem, error) {
-	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
-		return planning.TodoItem{}, fmt.Errorf("chat is scoped to task %q", assigned)
+func (p scopedPlanning) UpdateTask(ctx context.Context, taskID string, status planning.TaskStatus, content, note string) (planning.Task, error) {
+	if assigned := assignedTaskRef(p.chat); assigned != "" && taskID != assigned {
+		return planning.Task{}, fmt.Errorf("chat is scoped to task %q", assigned)
 	}
 	if ref := assignedMilestoneRef(p.chat); ref != "" {
-		todos, err := p.session.ListTodos(ctx, p.chat.SessionID, ref)
+		tasks, err := p.session.ListTasks(ctx, p.chat.SessionID, ref)
 		if err != nil {
-			return planning.TodoItem{}, err
+			return planning.Task{}, err
 		}
 		found := false
-		for _, item := range todos {
-			if planning.TodoKey(item) == todoID {
+		for _, item := range tasks {
+			if planning.TaskKey(item) == taskID {
 				found = true
 				break
 			}
 		}
 		if !found {
-			return planning.TodoItem{}, fmt.Errorf("chat is scoped to milestone %q", ref)
+			return planning.Task{}, fmt.Errorf("chat is scoped to milestone %q", ref)
 		}
 	}
-	updated, err := p.session.UpdateTodoItem(ctx, todoID, status, content, note)
+	updated, err := p.session.UpdateTask(ctx, taskID, status, content, note)
 	if err != nil {
-		return planning.TodoItem{}, err
+		return planning.Task{}, err
 	}
 	return updated, nil
 }
 
-func (p scopedPlanning) ListTodos(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.TodoItem, error) {
+func (p scopedPlanning) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
 	ref, err := p.allowedMilestoneRef(milestoneRef)
 	if err != nil {
 		return nil, err
 	}
-	todos, err := p.session.ListTodos(ctx, sessionID, ref)
+	tasks, err := p.session.ListTasks(ctx, sessionID, ref)
 	if err != nil {
 		return nil, err
 	}
-	if assigned := assignedTodoRef(p.chat); assigned != "" {
-		for _, item := range todos {
+	if assigned := assignedTaskRef(p.chat); assigned != "" {
+		for _, item := range tasks {
 			if item.ID == assigned {
-				return []planning.TodoItem{item}, nil
+				return []planning.Task{item}, nil
 			}
 		}
 		return nil, nil
 	}
-	return todos, nil
+	return tasks, nil
 }
 
 func (p scopedPlanning) allowedMilestoneRef(requested string) (string, error) {
@@ -1219,13 +1219,13 @@ func (p scopedPlanning) allowedMilestoneRef(requested string) (string, error) {
 func assignedMilestoneRef(chat domain.Chat) string {
 	assigned := strings.TrimSpace(chat.ActiveMilestoneRef)
 	if assigned == "" {
-		assigned = strings.TrimSpace(chat.AssignedTodoBucketRef)
+		assigned = strings.TrimSpace(chat.AssignedTaskBucketRef)
 	}
 	return assigned
 }
 
-func assignedTodoRef(chat domain.Chat) string {
-	return strings.TrimSpace(chat.AssignedTodoRef)
+func assignedTaskRef(chat domain.Chat) string {
+	return strings.TrimSpace(chat.AssignedTaskRef)
 }
 
 func (s *Session) requireSession(sessionID id.ID) error {
@@ -1281,7 +1281,7 @@ func (s *Session) chatStatusLocked(chatID id.ID) chattool.Status {
 		Role:               chatRecord.WorkflowRole,
 		Archived:           chatRecord.Archived,
 		ActiveMilestoneRef: chatRecord.ActiveMilestoneRef,
-		AssignedTodoRef:    chatRecord.AssignedTodoRef,
+		AssignedTaskRef:    chatRecord.AssignedTaskRef,
 		State:              status,
 		Status:             string(status),
 		Busy:               busy,
@@ -1377,23 +1377,23 @@ func cloneMilestones(src []planning.Milestone) []planning.Milestone {
 	return out
 }
 
-func cloneTodosByRef(src map[string][]planning.TodoItem) map[string][]planning.TodoItem {
+func cloneTasksByRef(src map[string][]planning.Task) map[string][]planning.Task {
 	if len(src) == 0 {
-		return map[string][]planning.TodoItem{}
+		return map[string][]planning.Task{}
 	}
-	out := make(map[string][]planning.TodoItem, len(src))
+	out := make(map[string][]planning.Task, len(src))
 	for ref, items := range src {
 		out[ref] = slices.Clone(items)
 	}
 	return out
 }
 
-func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
-	var out []planning.TodoItem
+func flattenTasks(src map[string][]planning.Task) []planning.Task {
+	var out []planning.Task
 	for _, items := range src {
 		out = append(out, items...)
 	}
-	slices.SortFunc(out, func(a, b planning.TodoItem) int {
+	slices.SortFunc(out, func(a, b planning.Task) int {
 		if a.MilestoneRef != b.MilestoneRef {
 			return strings.Compare(a.MilestoneRef, b.MilestoneRef)
 		}
@@ -1405,7 +1405,7 @@ func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
 	return out
 }
 
-func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
+func nextTaskKey(items []planning.Task, milestoneKey string) string {
 	next := 1
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
@@ -1418,16 +1418,16 @@ func nextTodoKey(items []planning.TodoItem, milestoneKey string) string {
 			next = n + 1
 		}
 	}
-	return planning.ScopedTodoKey(milestoneKey, next)
+	return planning.ScopedTaskKey(milestoneKey, next)
 }
 
-func incrementTodoKey(key, milestoneKey string) string {
+func incrementTaskKey(key, milestoneKey string) string {
 	prefix := strings.TrimSpace(milestoneKey) + "T"
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTodoKey(milestoneKey, 1)
+		return planning.ScopedTaskKey(milestoneKey, 1)
 	}
-	return planning.ScopedTodoKey(milestoneKey, n+1)
+	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
 var _ tools.SessionControl = (*Session)(nil)

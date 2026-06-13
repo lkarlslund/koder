@@ -195,14 +195,14 @@ type SessionChatDebug struct {
 }
 
 type SessionDetail struct {
-	Debug     SessionDebug
-	Session   domain.Session
-	Chats     []domain.Chat
-	Timeline  []domain.TimelineItem
-	Approvals []DebugApproval
-	Plan      planning.Plan
-	Todos     []planning.TodoItem
-	Tasks     []planning.Task
+	Debug       SessionDebug
+	Session     domain.Session
+	Chats       []domain.Chat
+	Timeline    []domain.TimelineItem
+	Approvals   []DebugApproval
+	Plan        planning.Plan
+	Tasks       []planning.Task
+	LegacyTasks []planning.LegacyTask
 }
 
 type ChatDetail struct {
@@ -227,8 +227,8 @@ type Source interface {
 	DefaultTranscript(ctx context.Context, sessionID id.ID, opts TranscriptOptions) ([]domain.TimelineItem, error)
 	SessionApprovals(ctx context.Context, sessionID id.ID) ([]DebugApproval, error)
 	Milestones(ctx context.Context, sessionID id.ID) (planning.Plan, error)
-	Todos(ctx context.Context, sessionID id.ID) ([]planning.TodoItem, error)
 	Tasks(ctx context.Context, sessionID id.ID) ([]planning.Task, error)
+	LegacyTasks(ctx context.Context, sessionID id.ID) ([]planning.LegacyTask, error)
 	ResolveRewindAnchor(ctx context.Context, sessionID, chatID id.ID, selector string) (id.ID, error)
 	RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error)
 }
@@ -1156,8 +1156,8 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleMilestones(w, r, sessionID)
 	case "tasks":
 		s.handleTasks(w, r, sessionID)
-	case "todos":
-		s.handleTodos(w, r, sessionID)
+	case "legacy-tasks":
+		s.handleLegacyTasks(w, r, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -1414,7 +1414,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		"timeline":       detail.Timeline,
 		"approvals":      detail.Approvals,
 		"milestone_plan": detail.Plan,
-		"todos":          detail.Todos,
+		"tasks":          detail.Tasks,
+		"legacy_tasks":   detail.LegacyTasks,
 		"events":         s.recorder.Events(sessionID),
 	})
 }
@@ -1481,20 +1482,20 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+func (s *Server) handleLegacyTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	source, sourceErr := s.sourceRequired()
 	if sourceErr != nil {
 		writeError(w, http.StatusServiceUnavailable, sourceErr)
 		return
 	}
-	tasks, err := source.Tasks(r.Context(), sessionID)
+	tasks, err := source.LegacyTasks(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"tasks":      tasks,
+		"session_id":   sessionID,
+		"legacy_tasks": tasks,
 	})
 }
 
@@ -1515,20 +1516,20 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessio
 	})
 }
 
-func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
 	source, sourceErr := s.sourceRequired()
 	if sourceErr != nil {
 		writeError(w, http.StatusServiceUnavailable, sourceErr)
 		return
 	}
-	todos, err := source.Todos(r.Context(), sessionID)
+	tasks, err := source.Tasks(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
-		"todos":      todos,
+		"tasks":      tasks,
 	})
 }
 

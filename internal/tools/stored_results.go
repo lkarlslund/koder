@@ -182,8 +182,8 @@ type QuestionStoredResult struct {
 }
 
 type TaskStoredResult struct {
-	Body   string              `json:"body"`
-	Status planning.TaskStatus `json:"status"`
+	Body   string                    `json:"body"`
+	Status planning.LegacyTaskStatus `json:"status"`
 }
 
 type PlanStoredStep struct {
@@ -206,7 +206,7 @@ type MilestoneStoredItem struct {
 	DependsOnKey string `json:"depends_on_key,omitempty"`
 	DependsOnRef string `json:"depends_on_ref,omitempty"`
 	OwnerChatID  string `json:"owner_chat_id,omitempty"`
-	TodoSummary  string `json:"todo_summary,omitempty"`
+	TaskSummary  string `json:"task_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {
@@ -222,7 +222,7 @@ type ChatStoredItem struct {
 	Archived           bool   `json:"archived,omitempty"`
 	QueuedInputs       int    `json:"queued_inputs,omitempty"`
 	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
-	AssignedTodoRef    string `json:"assigned_todo_ref,omitempty"`
+	AssignedTaskRef    string `json:"assigned_task_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`
 }
 
@@ -230,7 +230,7 @@ type ChatListStoredResult struct {
 	Items []ChatStoredItem `json:"items,omitempty"`
 }
 
-type TodoStoredItem struct {
+type TaskStoredItem struct {
 	ID      id.ID  `json:"id"`
 	Key     string `json:"key,omitempty"`
 	Content string `json:"content"`
@@ -238,12 +238,12 @@ type TodoStoredItem struct {
 	Status  string `json:"status"`
 }
 
-type TodoListStoredResult struct {
+type TaskListStoredResult struct {
 	MilestoneKey   string           `json:"milestone_key,omitempty"`
 	MilestoneRef   string           `json:"milestone_ref,omitempty"`
 	MilestoneTitle string           `json:"milestone_title,omitempty"`
 	Message        string           `json:"message,omitempty"`
-	Items          []TodoStoredItem `json:"items,omitempty"`
+	Items          []TaskStoredItem `json:"items,omitempty"`
 }
 
 type SkillStoredResult struct {
@@ -329,7 +329,7 @@ func (TaskStoredResult) storedResultPayload()          {}
 func (UpdatePlanStoredResult) storedResultPayload()    {}
 func (MilestonePlanStoredResult) storedResultPayload() {}
 func (ChatListStoredResult) storedResultPayload()      {}
-func (TodoListStoredResult) storedResultPayload()      {}
+func (TaskListStoredResult) storedResultPayload()      {}
 func (SkillStoredResult) storedResultPayload()         {}
 func (WebFetchStoredResult) storedResultPayload()      {}
 func (WebSearchStoredResult) storedResultPayload()     {}
@@ -722,7 +722,7 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 			Payload:  raw,
 		}, true
 	case domain.TaskUpdatePayload:
-		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: planning.TaskStatus(payload.Status)})
+		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: planning.LegacyTaskStatus(payload.Status)})
 		if err != nil {
 			return storedResultEnvelope{}, false
 		}
@@ -831,7 +831,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext, TasksAdd, TasksUpdate:
-		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
+		return decodeAndFormat[TaskListStoredResult](env.Payload, formatTaskListStoredResult)
 	default:
 		return "", false
 	}
@@ -1098,7 +1098,7 @@ func formatMilestoneTreeItem(item MilestoneStoredItem, children map[string][]Mil
 		}
 		line += ")"
 	}
-	if summary := strings.TrimSpace(item.TodoSummary); summary != "" {
+	if summary := strings.TrimSpace(item.TaskSummary); summary != "" {
 		line += " - " + summary
 	}
 	lines := []string{line}
@@ -1125,7 +1125,7 @@ func milestoneStoredDependsOnKey(item MilestoneStoredItem) string {
 	return strings.TrimSpace(item.DependsOnRef)
 }
 
-func formatTodoListStoredResult(result TodoListStoredResult) string {
+func formatTaskListStoredResult(result TaskListStoredResult) string {
 	lines := make([]string, 0, len(result.Items)+2)
 	if title := strings.TrimSpace(result.MilestoneTitle); title != "" {
 		lines = append(lines, "Milestone: "+title)

@@ -940,8 +940,8 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 			Summary:    "Live plan",
 			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}},
 		},
-		Todos:      []planning.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: planning.TodoStatusInProgress}},
-		TodosByRef: map[string][]planning.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: planning.TodoStatusInProgress}}},
+		Tasks:      []planning.Task{{ID: "task-1", MilestoneRef: "alpha", Content: "First", Status: planning.TaskStatusInProgress}},
+		TasksByRef: map[string][]planning.Task{"alpha": {{ID: "task-1", MilestoneRef: "alpha", Content: "First", Status: planning.TaskStatusInProgress}}},
 		Snapshots: map[id.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
@@ -967,7 +967,7 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	if !strings.Contains(payload, `"chats"`) || !strings.Contains(payload, `"Chat"`) {
 		t.Fatalf("expected state delta to include sidebar chat state, got %s", payload)
 	}
-	if !strings.Contains(payload, `"milestones"`) || !strings.Contains(payload, `"todos_by_milestone"`) || !strings.Contains(payload, `"Alpha"`) {
+	if !strings.Contains(payload, `"milestones"`) || !strings.Contains(payload, `"tasks_by_milestone"`) || !strings.Contains(payload, `"Alpha"`) {
 		t.Fatalf("expected state delta to include planning state, got %s", payload)
 	}
 	if !strings.Contains(payload, `"restart_needed":true`) {
@@ -1490,10 +1490,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
 		t.Fatalf("expected sidebar to filter milestones by status")
 	}
-	if !strings.Contains(fullPage, `todoItemsForMilestone(node.milestone)`) {
+	if !strings.Contains(fullPage, `taskItemsForMilestone(node.milestone)`) {
 		t.Fatalf("expected sidebar to render tasks as milestone children")
 	}
-	if !strings.Contains(fullPage, `milestoneTodoSummary(node.milestone)`) {
+	if !strings.Contains(fullPage, `milestoneTaskSummary(node.milestone)`) {
 		t.Fatalf("expected collapsed milestones to show task counts")
 	}
 	if !strings.Contains(fullPage, `milestone-progress`) ||
@@ -1519,7 +1519,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
 		t.Fatalf("expected colorful milestone status badge classes")
 	}
-	if !strings.Contains(fullPage, `todoBadge(todoStatus(todo))`) || !strings.Contains(fullPage, `todoBadge(status)`) {
+	if !strings.Contains(fullPage, `taskBadge(taskStatus(task))`) || !strings.Contains(fullPage, `taskBadge(status)`) {
 		t.Fatalf("expected colorful task status badge classes")
 	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
