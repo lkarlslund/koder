@@ -955,6 +955,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			"content_type": speech.ContentType,
 			"audio_base64": base64.StdEncoding.EncodeToString(speech.Audio),
 		}, nil
+	case "set_tts_enabled":
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SetTTSEnabled(in.Enabled)
 	case "model_config":
 		var in struct {
 			ProviderID string `json:"provider_id"`
@@ -1123,6 +1131,7 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 	return app.State{
 		Sessions:      sessionState.Sessions,
 		Theme:         state.Theme,
+		TTS:           state.TTS,
 		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
 		Build:         state.Build,
 		RestartNeeded: state.RestartNeeded,
@@ -1468,6 +1477,8 @@ func websocketUsesGlobalControllerEvent(typ string) bool {
 	switch typ {
 	case "chat_delta", "chats_delta", "planning_delta", "tasks_delta", "session_delta", "selection_delta", "workspace_delta", "snapshot":
 		return false
+	case "tts":
+		return true
 	default:
 		return true
 	}

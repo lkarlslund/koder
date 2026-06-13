@@ -61,6 +61,7 @@ type State struct {
 	ContextWindow int                        `json:"context_window"`
 	ModelInfo     ModelInfo                  `json:"model_info"`
 	Theme         string                     `json:"theme"`
+	TTS           TTSPreferences             `json:"tts"`
 	ProjectRoot   string                     `json:"project_root"`
 	Build         version.Info               `json:"build"`
 	RestartNeeded bool                       `json:"restart_needed"`
@@ -252,8 +253,19 @@ type GeneralPreferences struct {
 
 // BrowserPreferences contains browser behavior settings persisted in config.
 type BrowserPreferences struct {
-	Theme        string `json:"theme"`
-	AutoContinue bool   `json:"auto_continue"`
+	Theme        string         `json:"theme"`
+	AutoContinue bool           `json:"auto_continue"`
+	TTS          TTSPreferences `json:"tts"`
+}
+
+type TTSPreferences struct {
+	Enabled        bool    `json:"enabled"`
+	ProviderID     string  `json:"provider_id"`
+	ModelID        string  `json:"model_id"`
+	Voice          string  `json:"voice"`
+	ResponseFormat string  `json:"response_format"`
+	Speed          float64 `json:"speed"`
+	PCMSampleRate  int     `json:"pcm_sample_rate"`
 }
 
 // CompactionPreferences contains global compaction controls.
@@ -404,6 +416,7 @@ func (c *Controller) State() State {
 		RestartNeeded: c.restartNeeded,
 		RestartBuild:  c.restartBuild,
 		Error:         c.lastErr,
+		TTS:           ttsPreferencesFromConfig(c.cfg.UI.TTS),
 		ProjectRoot:   c.session.ProjectRoot,
 	}
 	c.mu.RUnlock()
@@ -432,6 +445,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 		RestartNeeded: c.restartNeeded,
 		RestartBuild:  c.restartBuild,
 		Error:         c.lastErr,
+		TTS:           ttsPreferencesFromConfig(c.cfg.UI.TTS),
 	}
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
@@ -490,6 +504,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 		ContextWindow: c.contextWindowForChat(chatRecord),
 		ModelInfo:     c.modelInfoForChat(chatRecord),
 		Theme:         base.Theme,
+		TTS:           base.TTS,
 		ProjectRoot:   session.ProjectRoot,
 		Build:         base.Build,
 		RestartNeeded: base.RestartNeeded,

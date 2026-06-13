@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -278,6 +280,22 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 	return state, nil
 }
 
+func (c *Controller) SetTTSEnabled(enabled bool) (TTSPreferences, error) {
+	c.mu.Lock()
+	c.cfg.UI.TTS.Enabled = enabled
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return TTSPreferences{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	prefs := ttsPreferencesFromConfig(c.cfg.UI.TTS)
+	c.mu.Unlock()
+	c.broadcast("tts", prefs)
+	return prefs, nil
+}
+
 // ResetPrompt restores one managed prompt file from embedded defaults.
 func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
 	target = strings.TrimSpace(target)
@@ -320,42 +338,99 @@ func (c *Controller) SynthesizeSpeech(ctx context.Context, text string) (TTSSpee
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
-	options, err := modelOptionsForConfig(ctx, cfg, "", "")
+	sourceProviderID := strings.TrimSpace(cfg.UI.TTS.ProviderID)
+	sourceModelID := strings.TrimSpace(cfg.UI.TTS.ModelID)
+	if sourceProviderID == "" || sourceModelID == "" {
+		var err error
+		sourceProviderID, sourceModelID, err = firstDetectedTTSModel(ctx, cfg)
+		if err != nil {
+			return TTSSpeech{}, err
+		}
+	}
+	providerCfg, ok := cfg.Provider(sourceProviderID)
+	if !ok || providerCfg.Disabled {
+		return TTSSpeech{}, fmt.Errorf("tts provider %q is not configured", sourceProviderID)
+	}
+	client, err := provider.New(sourceProviderID, providerCfg, nil)
 	if err != nil {
 		return TTSSpeech{}, err
+	}
+	speech, err := client.CreateSpeech(ctx, provider.SpeechRequest{
+		Model:          sourceModelID,
+		Input:          text,
+		Voice:          cfg.UI.TTS.Voice,
+		ResponseFormat: cfg.UI.TTS.ResponseFormat,
+		Speed:          cfg.UI.TTS.Speed,
+	})
+	if err != nil {
+		return TTSSpeech{}, err
+	}
+	contentType, audio := playableSpeechAudio(speech.ContentType, speech.Audio, cfg.UI.TTS.PCMSampleRate)
+	return TTSSpeech{
+		ProviderID:  sourceProviderID,
+		ModelID:     sourceModelID,
+		ContentType: contentType,
+		Audio:       audio,
+	}, nil
+}
+
+func firstDetectedTTSModel(ctx context.Context, cfg config.Config) (string, string, error) {
+	options, err := modelOptionsForConfig(ctx, cfg, "", "")
+	if err != nil {
+		return "", "", err
 	}
 	for _, option := range options {
 		if !option.SupportsTTS {
 			continue
 		}
-		sourceProviderID := strings.TrimSpace(option.SourceProviderID)
-		sourceModelID := strings.TrimSpace(option.SourceModelID)
-		if sourceProviderID == "" {
-			sourceProviderID = strings.TrimSpace(option.ProviderID)
+		providerID := strings.TrimSpace(option.SourceProviderID)
+		modelID := strings.TrimSpace(option.SourceModelID)
+		if providerID == "" {
+			providerID = strings.TrimSpace(option.ProviderID)
 		}
-		if sourceModelID == "" {
-			sourceModelID = strings.TrimSpace(option.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(option.ModelID)
 		}
-		providerCfg, ok := cfg.Provider(sourceProviderID)
-		if !ok || providerCfg.Disabled {
-			continue
+		if providerID != "" && modelID != "" {
+			return providerID, modelID, nil
 		}
-		client, err := provider.New(sourceProviderID, providerCfg, nil)
-		if err != nil {
-			return TTSSpeech{}, err
-		}
-		speech, err := client.CreateSpeech(ctx, sourceModelID, text, "alloy")
-		if err != nil {
-			return TTSSpeech{}, err
-		}
-		return TTSSpeech{
-			ProviderID:  sourceProviderID,
-			ModelID:     sourceModelID,
-			ContentType: speech.ContentType,
-			Audio:       speech.Audio,
-		}, nil
 	}
-	return TTSSpeech{}, fmt.Errorf("no configured tts model detected")
+	return "", "", fmt.Errorf("no configured tts model detected")
+}
+
+func playableSpeechAudio(contentType string, audio []byte, sampleRate int) (string, []byte) {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if normalized != "audio/pcm" && normalized != "application/octet-stream" {
+		return contentType, audio
+	}
+	if sampleRate <= 0 {
+		sampleRate = 24000
+	}
+	return "audio/wav", wavFromPCM16(audio, sampleRate, 1)
+}
+
+func wavFromPCM16(pcm []byte, sampleRate int, channels int) []byte {
+	if channels <= 0 {
+		channels = 1
+	}
+	var out bytes.Buffer
+	dataSize := uint32(len(pcm))
+	byteRate := uint32(sampleRate * channels * 2)
+	blockAlign := uint16(channels * 2)
+	out.WriteString("RIFF")
+	_ = binary.Write(&out, binary.LittleEndian, uint32(36)+dataSize)
+	out.WriteString("WAVEfmt ")
+	_ = binary.Write(&out, binary.LittleEndian, uint32(16))
+	_ = binary.Write(&out, binary.LittleEndian, uint16(1))
+	_ = binary.Write(&out, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(&out, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(&out, binary.LittleEndian, byteRate)
+	_ = binary.Write(&out, binary.LittleEndian, blockAlign)
+	_ = binary.Write(&out, binary.LittleEndian, uint16(16))
+	out.WriteString("data")
+	_ = binary.Write(&out, binary.LittleEndian, dataSize)
+	out.Write(pcm)
+	return out.Bytes()
 }
 
 func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
@@ -1017,6 +1092,35 @@ func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {
 	return BrowserPreferences{
 		Theme:        normalizeTheme(ui.Theme),
 		AutoContinue: ui.AutoContinue,
+		TTS:          ttsPreferencesFromConfig(ui.TTS),
+	}
+}
+
+func ttsPreferencesFromConfig(tts config.TTS) TTSPreferences {
+	voice := strings.TrimSpace(tts.Voice)
+	if voice == "" {
+		voice = "alloy"
+	}
+	format := strings.ToLower(strings.TrimSpace(tts.ResponseFormat))
+	if format == "" {
+		format = "wav"
+	}
+	speed := tts.Speed
+	if speed <= 0 {
+		speed = 1
+	}
+	sampleRate := tts.PCMSampleRate
+	if sampleRate <= 0 {
+		sampleRate = 24000
+	}
+	return TTSPreferences{
+		Enabled:        tts.Enabled,
+		ProviderID:     strings.TrimSpace(tts.ProviderID),
+		ModelID:        strings.TrimSpace(tts.ModelID),
+		Voice:          voice,
+		ResponseFormat: format,
+		Speed:          speed,
+		PCMSampleRate:  sampleRate,
 	}
 }
 
@@ -1247,11 +1351,60 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 }
 
 func applyBrowserPreferences(cfg *config.Config, prefs BrowserPreferences) error {
+	tts, err := configTTSFromPreference(prefs.TTS)
+	if err != nil {
+		return err
+	}
 	cfg.UI = config.UI{
 		Theme:        normalizeTheme(prefs.Theme),
 		AutoContinue: prefs.AutoContinue,
+		TTS:          tts,
 	}
 	return nil
+}
+
+func configTTSFromPreference(pref TTSPreferences) (config.TTS, error) {
+	providerID := strings.TrimSpace(pref.ProviderID)
+	modelID := strings.TrimSpace(pref.ModelID)
+	if (providerID == "") != (modelID == "") {
+		return config.TTS{}, fmt.Errorf("tts provider and model must be set together")
+	}
+	format := strings.ToLower(strings.TrimSpace(pref.ResponseFormat))
+	if format == "" {
+		format = "wav"
+	}
+	switch format {
+	case "mp3", "opus", "aac", "flac", "wav", "pcm":
+	default:
+		return config.TTS{}, fmt.Errorf("unsupported tts response format %q", format)
+	}
+	speed := pref.Speed
+	if speed <= 0 {
+		speed = 1
+	}
+	if speed < 0.25 || speed > 4 {
+		return config.TTS{}, fmt.Errorf("tts speed must be between 0.25 and 4")
+	}
+	sampleRate := pref.PCMSampleRate
+	if sampleRate <= 0 {
+		sampleRate = 24000
+	}
+	if sampleRate < 8000 || sampleRate > 192000 {
+		return config.TTS{}, fmt.Errorf("tts pcm sample rate must be between 8000 and 192000")
+	}
+	voice := strings.TrimSpace(pref.Voice)
+	if voice == "" {
+		voice = "alloy"
+	}
+	return config.TTS{
+		Enabled:        pref.Enabled,
+		ProviderID:     providerID,
+		ModelID:        modelID,
+		Voice:          voice,
+		ResponseFormat: format,
+		Speed:          speed,
+		PCMSampleRate:  sampleRate,
+	}, nil
 }
 
 func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences) error {

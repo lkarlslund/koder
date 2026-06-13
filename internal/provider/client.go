@@ -45,6 +45,14 @@ type SpeechResponse struct {
 	Audio       []byte
 }
 
+type SpeechRequest struct {
+	Model          string
+	Input          string
+	Voice          string
+	ResponseFormat string
+	Speed          float64
+}
+
 func parseRetryAfter(value string, now time.Time) time.Duration {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -724,23 +732,30 @@ func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, err
 	}
 }
 
-func (c *Client) CreateSpeech(ctx context.Context, modelID, input, voice string) (SpeechResponse, error) {
-	modelID = strings.TrimSpace(modelID)
-	input = strings.TrimSpace(input)
-	voice = strings.TrimSpace(voice)
-	if modelID == "" {
+func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechResponse, error) {
+	input.Model = strings.TrimSpace(input.Model)
+	input.Input = strings.TrimSpace(input.Input)
+	input.Voice = strings.TrimSpace(input.Voice)
+	input.ResponseFormat = strings.TrimSpace(input.ResponseFormat)
+	if input.Model == "" {
 		return SpeechResponse{}, fmt.Errorf("tts model id is required")
 	}
-	if input == "" {
+	if input.Input == "" {
 		return SpeechResponse{}, fmt.Errorf("tts input is required")
 	}
-	if voice == "" {
-		voice = "alloy"
+	if input.Voice == "" {
+		input.Voice = "alloy"
 	}
 	payload := map[string]any{
-		"model": modelID,
-		"input": input,
-		"voice": voice,
+		"model": input.Model,
+		"input": input.Input,
+		"voice": input.Voice,
+	}
+	if input.ResponseFormat != "" {
+		payload["response_format"] = input.ResponseFormat
+	}
+	if input.Speed > 0 {
+		payload["speed"] = input.Speed
 	}
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(payload); err != nil {

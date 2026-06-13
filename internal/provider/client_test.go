@@ -1413,7 +1413,7 @@ func TestCreateSpeech(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw := string(body)
-		if !strings.Contains(raw, `"model":"omnivoice-base-Q8_0.gguf"`) || !strings.Contains(raw, `"input":"Hello"`) {
+		if !strings.Contains(raw, `"model":"omnivoice-base-Q8_0.gguf"`) || !strings.Contains(raw, `"input":"Hello"`) || !strings.Contains(raw, `"response_format":"wav"`) || !strings.Contains(raw, `"speed":1.25`) {
 			t.Fatalf("unexpected tts request: %s", raw)
 		}
 		w.Header().Set("Content-Type", "audio/pcm")
@@ -1430,7 +1430,7 @@ func TestCreateSpeech(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	speech, err := client.CreateSpeech(context.Background(), "omnivoice-base-Q8_0.gguf", "Hello", "alloy")
+	speech, err := client.CreateSpeech(context.Background(), SpeechRequest{Model: "omnivoice-base-Q8_0.gguf", Input: "Hello", Voice: "alloy", ResponseFormat: "wav", Speed: 1.25})
 	if err != nil {
 		t.Fatal(err)
 	}

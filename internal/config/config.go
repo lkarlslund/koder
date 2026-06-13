@@ -19,6 +19,17 @@ import (
 type UI struct {
 	Theme        string `toml:"theme"`
 	AutoContinue bool   `toml:"auto_continue"`
+	TTS          TTS    `toml:"tts"`
+}
+
+type TTS struct {
+	Enabled        bool    `toml:"enabled"`
+	ProviderID     string  `toml:"provider_id"`
+	ModelID        string  `toml:"model_id"`
+	Voice          string  `toml:"voice"`
+	ResponseFormat string  `toml:"response_format"`
+	Speed          float64 `toml:"speed,omitempty"`
+	PCMSampleRate  int     `toml:"pcm_sample_rate,omitempty"`
 }
 
 type Store struct {
@@ -260,6 +271,12 @@ func Default() Config {
 		UI: UI{
 			Theme:        "dark",
 			AutoContinue: true,
+			TTS: TTS{
+				Voice:          "alloy",
+				ResponseFormat: "wav",
+				Speed:          1,
+				PCMSampleRate:  24000,
+			},
 		},
 		Thinking: Thinking{
 			CavemanPrompt:      DefaultCavemanThinkingPrompt,
@@ -315,7 +332,24 @@ func (c *Config) applyDefaults() {
 		c.Permissions.Profile = def.Permissions.Profile
 	}
 	if c.UI.Theme == "" {
-		c.UI = def.UI
+		c.UI.Theme = def.UI.Theme
+		c.UI.AutoContinue = def.UI.AutoContinue
+	}
+	c.UI.TTS.ProviderID = strings.TrimSpace(c.UI.TTS.ProviderID)
+	c.UI.TTS.ModelID = strings.TrimSpace(c.UI.TTS.ModelID)
+	c.UI.TTS.Voice = strings.TrimSpace(c.UI.TTS.Voice)
+	if c.UI.TTS.Voice == "" {
+		c.UI.TTS.Voice = def.UI.TTS.Voice
+	}
+	c.UI.TTS.ResponseFormat = strings.ToLower(strings.TrimSpace(c.UI.TTS.ResponseFormat))
+	if c.UI.TTS.ResponseFormat == "" {
+		c.UI.TTS.ResponseFormat = def.UI.TTS.ResponseFormat
+	}
+	if c.UI.TTS.Speed <= 0 {
+		c.UI.TTS.Speed = def.UI.TTS.Speed
+	}
+	if c.UI.TTS.PCMSampleRate <= 0 {
+		c.UI.TTS.PCMSampleRate = def.UI.TTS.PCMSampleRate
 	}
 	c.Thinking.CavemanProviderID = strings.TrimSpace(c.Thinking.CavemanProviderID)
 	c.Thinking.CavemanModelID = strings.TrimSpace(c.Thinking.CavemanModelID)

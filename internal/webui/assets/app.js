@@ -894,7 +894,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: readPreference('ttsEnabled', 'false') === 'true', ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1337,6 +1337,7 @@
           if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
+          if (msg.type === 'tts') this.applyTTSSettings(msg.payload);
         },
         applyStateDelta(delta) {
           if (!delta) return;
@@ -1762,6 +1763,7 @@
           }
           this.syncSessionURL();
           if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
+          this.applyTTSSettings(this.state.tts || this.state.TTS || null);
           this.restoreMilestoneExpansion();
           this.applyTheme(); this.error = this.state.error || '';
           this.syncInterruptArmed();
@@ -3091,9 +3093,17 @@
         },
         ttsButtonTitle() { return this.ttsEnabled ? 'Disable TTS output' : 'Enable TTS output'; },
         toggleTTSOutput() {
-          this.ttsEnabled = !this.ttsEnabled;
-          writePreference('ttsEnabled', this.ttsEnabled ? 'true' : 'false');
-          this.showToast(this.ttsEnabled ? 'TTS output enabled' : 'TTS output disabled');
+          const enabled = !this.ttsEnabled;
+          this.rpc('set_tts_enabled', {enabled}).then(settings => {
+            this.applyTTSSettings(settings);
+            this.showToast(this.ttsEnabled ? 'TTS output enabled' : 'TTS output disabled');
+          });
+        },
+        applyTTSSettings(settings) {
+          if (!settings) return;
+          this.ttsSettings = Object.assign({}, this.ttsSettings || {}, settings);
+          this.ttsEnabled = !!(settings.enabled || settings.Enabled);
+          if (this.settings?.ui) this.settings.ui.tts = Object.assign({}, this.settings.ui.tts || {}, this.ttsSettings);
         },
         maybeSpeakTimelineItem(item, snapshot) {
           if (!this.ttsEnabled || !item || this.snapshotIsStreaming(snapshot)) return;
@@ -3118,7 +3128,7 @@
             const audio = new Audio('data:' + contentType + ';base64,' + audioBase64);
             this.ttsAudio = audio;
             audio.play().catch(err => this.showToast(err.message || 'TTS playback failed'));
-          }).catch(() => {});
+          }).catch(err => this.showToast(err.message || 'TTS failed'));
         },
         activeAccessSettings() { return this.state.access?.settings || this.state.Access?.Settings || {}; },
         accessPresets() { return this.state.access?.presets || this.state.Access?.Presets || []; },
@@ -3505,16 +3515,46 @@
         },
         setSettingsState(state) {
           this.settings = state || {};
+          if (!this.settings.ui) this.settings.ui = {};
+          if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
+          this.applyTTSSettings(this.settings.ui.tts);
           this.providerState = this.settings.providers || this.providerState;
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
         },
-        settingsTabs() { return ['general', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
+        settingsTabs() { return ['general', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+        },
+        ttsModelOptions() {
+          const models = this.settings?.models || [];
+          const current = this.ttsModelValue();
+          return models.filter(model => model.supports_tts || this.modelOptionValue(model) === current);
+        },
+        ttsModelValue() {
+          const tts = this.settings?.ui?.tts || {};
+          if (!tts.provider_id && !tts.model_id) return '';
+          return JSON.stringify([tts.provider_id || '', tts.model_id || '']);
+        },
+        setTTSModelValue(value) {
+          if (!this.settings?.ui) return;
+          if (!this.settings.ui.tts) this.settings.ui.tts = {};
+          if (!value) {
+            this.settings.ui.tts.provider_id = '';
+            this.settings.ui.tts.model_id = '';
+            return;
+          }
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
+          this.settings.ui.tts.provider_id = parts[0] || '';
+          this.settings.ui.tts.model_id = parts[1] || '';
         },
         compactionModelValue() {
           const c = this.settings?.compaction || {};

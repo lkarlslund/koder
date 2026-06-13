@@ -847,6 +847,48 @@
                 </div>
               </div>
 
+              <div class="row g-3" x-show="settingsTab === 'tts'">
+                <div class="col-12 settings-toggles">
+                  <label class="toggle-switch">
+                    <input class="toggle-switch-input" type="checkbox" x-model="settings.ui.tts.enabled">
+                    <span class="toggle-switch-track" aria-hidden="true"></span>
+                    <span class="toggle-switch-label">TTS output</span>
+                  </label>
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label small text-secondary">TTS model</label>
+                  <select class="form-select" :value="ttsModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = ttsModelValue(); })" @change="setTTSModelValue($event.target.value)">
+                    <option value="">First detected TTS model</option>
+                    <template x-for="model in ttsModelOptions()" :key="model.provider_id + '/' + model.model_id">
+                      <option :value="modelOptionValue(model)" x-text="modelOptionLabel(model)"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Voice</label>
+                  <input class="form-control" x-model="settings.ui.tts.voice" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Response format</label>
+                  <select class="form-select" x-model="settings.ui.tts.response_format">
+                    <option value="wav">wav</option>
+                    <option value="pcm">pcm</option>
+                    <option value="mp3">mp3</option>
+                    <option value="opus">opus</option>
+                    <option value="aac">aac</option>
+                    <option value="flac">flac</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Speed</label>
+                  <input class="form-control" type="number" min="0.25" max="4" step="0.05" x-model.number="settings.ui.tts.speed">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">PCM sample rate</label>
+                  <input class="form-control" type="number" min="8000" max="192000" step="1000" x-model.number="settings.ui.tts.pcm_sample_rate">
+                </div>
+              </div>
+
               <div class="row g-3" x-show="settingsTab === 'compaction'">
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Auto compact at percent</label>

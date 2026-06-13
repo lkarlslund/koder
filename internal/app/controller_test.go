@@ -583,10 +583,10 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("synthesize speech: %v", err)
 	}
-	if speech.ProviderID != "local-tts" || speech.ModelID != "omnivoice-base-Q8_0.gguf" || speech.ContentType != "audio/pcm" {
+	if speech.ProviderID != "local-tts" || speech.ModelID != "omnivoice-base-Q8_0.gguf" || speech.ContentType != "audio/wav" {
 		t.Fatalf("unexpected speech metadata: %#v", speech)
 	}
-	if string(speech.Audio) != string([]byte{0, 1, 2, 3}) {
+	if len(speech.Audio) <= 44 || string(speech.Audio[:4]) != "RIFF" || string(speech.Audio[8:12]) != "WAVE" {
 		t.Fatalf("unexpected speech audio: %#v", speech.Audio)
 	}
 }
