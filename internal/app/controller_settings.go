@@ -910,6 +910,7 @@ func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPrefer
 		Editable:           custom,
 		ContextWindow:      model.ContextWindow,
 		ModelPreset:        strings.TrimSpace(model.ModelPreset),
+		ExtraBody:          cloneExtraBodyMap(model.ExtraBody),
 		Temperature:        model.Temperature,
 		TopP:               model.TopP,
 		MinP:               model.MinP,
@@ -1352,6 +1353,7 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		SourceModelID:    sourceModelID,
 		ContextWindow:    pref.ContextWindow,
 		ModelPreset:      strings.TrimSpace(pref.ModelPreset),
+		ExtraBody:        cloneExtraBodyMap(pref.ExtraBody),
 		Temperature:      pref.Temperature,
 		TopP:             pref.TopP,
 		MinP:             pref.MinP,
@@ -1360,6 +1362,23 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		ThinkingMode:     strings.TrimSpace(pref.ThinkingMode),
 		ThinkingBudget:   pref.ThinkingBudget,
 	}, nil
+}
+
+func cloneExtraBodyMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(src))
+	for key, value := range src {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func applyBrowserPreferences(cfg *config.Config, prefs BrowserPreferences) error {

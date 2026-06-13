@@ -115,6 +115,33 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 	}
 }
 
+func TestRequestExtraBodyIncludesCustomModelJSON(t *testing.T) {
+	temperature := 0.7
+	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+		ModelID:     "custom-model",
+		ModelPreset: ModelPresetDefault,
+		Temperature: &temperature,
+		ExtraBody: map[string]any{
+			"temperature":      0.2,
+			"reasoning_effort": "high",
+			"model":            "ignored",
+			"messages":         []any{"ignored"},
+			"stream":           false,
+			"stream_options":   map[string]any{"include_usage": false},
+			"tools":            []any{"ignored"},
+			"tool_choice":      "ignored",
+		},
+	})
+	want := map[string]any{
+		"temperature":      0.2,
+		"reasoning_effort": "high",
+		"return_progress":  true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected custom extra body: %#v", got)
+	}
+}
+
 func TestWithLlamaCacheAffinityPinsLocalChatSlot(t *testing.T) {
 	chatID := id.ID("019e8888-0000-7000-8000-000000000001")
 	got := WithLlamaCacheAffinity(nil, config.Provider{

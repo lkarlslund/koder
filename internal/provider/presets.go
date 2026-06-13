@@ -93,10 +93,30 @@ func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]
 		}
 	}
 	applyModelRequestOptions(body, cfg, model)
+	applyCustomExtraBody(body, model.ExtraBody)
 	if len(body) == 0 {
 		return nil
 	}
 	return body
+}
+
+func applyCustomExtraBody(body map[string]any, extra map[string]any) {
+	for key, value := range extra {
+		key = strings.TrimSpace(key)
+		if key == "" || protectedExtraBodyKey(key) {
+			continue
+		}
+		body[key] = value
+	}
+}
+
+func protectedExtraBodyKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "model", "messages", "stream", "stream_options", "tools", "tool_choice":
+		return true
+	default:
+		return false
+	}
 }
 
 func WithLlamaCacheAffinity(body map[string]any, cfg config.Provider, sessionID, chatID id.ID) map[string]any {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 func TestLoadWritesDefaultConfig(t *testing.T) {
@@ -443,6 +444,41 @@ func TestModelConfigResolvesCustomModelSource(t *testing.T) {
 	request := cfg.ModelRequestOptions("local", "qwen coding")
 	if request.ModelID != "Qwen/Qwen3.6-35B-A3B" || request.Temperature == nil || *request.Temperature != 0.2 {
 		t.Fatalf("unexpected request options: %#v", request)
+	}
+}
+
+func TestModelConfigExtraBodyTOMLRoundTrip(t *testing.T) {
+	cfg := Default()
+	cfg.Models = []ModelConfig{
+		{
+			ProviderID:    "local",
+			ModelID:       "custom",
+			ContextWindow: 32768,
+			ExtraBody: map[string]any{
+				"reasoning_effort": "high",
+				"temperature":      0.2,
+				"chat_template_kwargs": map[string]any{
+					"enable_thinking": false,
+				},
+			},
+		},
+	}
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := toml.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	got.applyDefaults()
+	request := got.ModelRequestOptions("local", "custom")
+	if request.ExtraBody["reasoning_effort"] != "high" || request.ExtraBody["temperature"] != 0.2 {
+		t.Fatalf("unexpected extra body after round trip: %#v", request.ExtraBody)
+	}
+	nested, ok := request.ExtraBody["chat_template_kwargs"].(map[string]any)
+	if !ok || nested["enable_thinking"] != false {
+		t.Fatalf("unexpected nested extra body after round trip: %#v", request.ExtraBody)
 	}
 }
 

@@ -889,7 +889,7 @@
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
-        showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
+        showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
@@ -3253,6 +3253,8 @@
             repeat_penalty: raw.repeat_penalty ?? null,
             thinking_mode: raw.thinking_mode || 'auto',
             thinking_budget: raw.thinking_budget || 0,
+            extra_body: raw.extra_body || {},
+            extra_body_text: this.formatModelExtraBodyText(raw.extra_body),
           }, raw || {});
         },
         modelSettingsEditable() {
@@ -3762,8 +3764,11 @@
             top_k: 0,
             repeat_penalty: null,
             thinking_mode: 'auto',
-            thinking_budget: 0
+            thinking_budget: 0,
+            extra_body: {},
+            extra_body_text: '{}'
           }, existing || {}, values, {provider_id: providerID, model_id: modelID});
+          next.extra_body_text = this.formatModelExtraBodyText(next.extra_body);
           if (existing) Object.assign(existing, next); else this.settings.model_configs.push(next);
           this.settings.model_configs.sort((a, b) => (String(a.provider_id || '') + '\0' + String(a.model_id || '')).localeCompare(String(b.provider_id || '') + '\0' + String(b.model_id || '')));
         },
@@ -3771,7 +3776,9 @@
           const source = (this.settings?.models || []).find(model => model.detected) || {};
           const providerID = source.provider_id || this.settings?.general?.default_provider || this.providerIDOptions()[0] || '';
           const sourceModelID = source.model_id || '';
-          this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: this.uniqueCustomModelID(providerID, sourceModelID), source_provider_id: providerID, source_model_id: sourceModelID, custom: true, editable: true});
+          this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: this.uniqueCustomModelID(providerID, sourceModelID), source_provider_id: providerID, source_model_id: sourceModelID, custom: true, editable: true, extra_body: {}});
+          this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
+          this.modelConfigExtraBodyOpen = false;
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
         },
         editModelConfig(key) {
@@ -3782,11 +3789,14 @@
             original_model_id: item.model_id || '',
             context_window: 32768,
             model_preset: 'auto',
-            thinking_mode: 'auto'
+            thinking_mode: 'auto',
+            extra_body: {}
           }, item)));
+          this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
+          this.modelConfigExtraBodyOpen = this.modelExtraBodyHasContent(this.modelConfigDraft.extra_body);
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
         },
-        closeModelConfigEditor() { this.showModelConfigEditor = false; this.modelConfigDraft = null; this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; },
+        closeModelConfigEditor() { this.showModelConfigEditor = false; this.modelConfigDraft = null; this.modelConfigExtraBodyOpen = false; this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; },
         saveModelConfig() {
           if (!this.settings || !this.modelConfigDraft) return;
           const providerID = String(this.modelConfigDraft.provider_id || '').trim();
@@ -3800,6 +3810,14 @@
           const contextWindow = Number(this.modelConfigDraft.context_window || 0);
           if (contextWindow <= 0) {
             this.modelConfigStatus = 'Context window must be greater than zero'; this.modelConfigStatusKind = 'danger';
+            return;
+          }
+          let extraBody = {};
+          try {
+            extraBody = this.parseModelExtraBodyText(this.modelConfigDraft.extra_body_text);
+          } catch (err) {
+            this.modelConfigStatus = err.message || 'Custom request JSON is invalid'; this.modelConfigStatusKind = 'danger';
+            this.modelConfigExtraBodyOpen = true;
             return;
           }
           const originalKey = JSON.stringify([this.modelConfigDraft.original_provider_id || providerID, this.modelConfigDraft.original_model_id || modelID]);
@@ -3821,12 +3839,28 @@
             top_k: Number(this.modelConfigDraft.top_k || 0),
             repeat_penalty: this.blankableNumber(this.modelConfigDraft.repeat_penalty),
             thinking_mode: String(this.modelConfigDraft.thinking_mode || 'auto').trim() || 'auto',
-            thinking_budget: Number(this.modelConfigDraft.thinking_budget || 0)
+            thinking_budget: Number(this.modelConfigDraft.thinking_budget || 0),
+            extra_body: extraBody,
+            extra_body_text: this.formatModelExtraBodyText(extraBody)
           }));
           rows.sort((a, b) => (String(a.provider_id || '') + '\0' + String(a.model_id || '')).localeCompare(String(b.provider_id || '') + '\0' + String(b.model_id || '')));
           this.settings.model_configs = rows;
           this.modelConfigStatus = 'Saved model'; this.modelConfigStatusKind = 'success';
           this.showModelConfigEditor = false;
+        },
+        modelExtraBodyHasContent(value) {
+          return !!(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length);
+        },
+        formatModelExtraBodyText(value) {
+          if (!this.modelExtraBodyHasContent(value)) return '{}';
+          return JSON.stringify(value, null, 2);
+        },
+        parseModelExtraBodyText(text) {
+          const raw = String(text || '').trim();
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Custom request JSON must be an object');
+          return parsed;
         },
         deleteModelConfig(key) {
           if (!this.settings || !key || !confirm('Delete this model setting?')) return;

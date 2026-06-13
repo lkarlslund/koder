@@ -82,19 +82,20 @@ type Provider struct {
 
 // ModelConfig stores settings for one provider/model pair.
 type ModelConfig struct {
-	ProviderID       string   `toml:"provider_id"`
-	ModelID          string   `toml:"model_id"`
-	SourceProviderID string   `toml:"source_provider_id,omitempty"`
-	SourceModelID    string   `toml:"source_model_id,omitempty"`
-	ContextWindow    int      `toml:"context_window"`
-	ModelPreset      string   `toml:"model_preset"`
-	Temperature      *float64 `toml:"temperature,omitempty"`
-	TopP             *float64 `toml:"top_p,omitempty"`
-	MinP             *float64 `toml:"min_p,omitempty"`
-	TopK             int      `toml:"top_k,omitempty"`
-	RepeatPenalty    *float64 `toml:"repeat_penalty,omitempty"`
-	ThinkingMode     string   `toml:"thinking_mode,omitempty"`
-	ThinkingBudget   int      `toml:"thinking_budget,omitempty"`
+	ProviderID       string         `toml:"provider_id"`
+	ModelID          string         `toml:"model_id"`
+	SourceProviderID string         `toml:"source_provider_id,omitempty"`
+	SourceModelID    string         `toml:"source_model_id,omitempty"`
+	ContextWindow    int            `toml:"context_window"`
+	ModelPreset      string         `toml:"model_preset"`
+	ExtraBody        map[string]any `toml:"extra_body,omitempty"`
+	Temperature      *float64       `toml:"temperature,omitempty"`
+	TopP             *float64       `toml:"top_p,omitempty"`
+	MinP             *float64       `toml:"min_p,omitempty"`
+	TopK             int            `toml:"top_k,omitempty"`
+	RepeatPenalty    *float64       `toml:"repeat_penalty,omitempty"`
+	ThinkingMode     string         `toml:"thinking_mode,omitempty"`
+	ThinkingBudget   int            `toml:"thinking_budget,omitempty"`
 }
 
 type MCPServer struct {
@@ -602,6 +603,9 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 	model.ModelPreset = strings.TrimSpace(model.ModelPreset)
 	if model.ModelPreset == "" {
 		model.ModelPreset = "auto"
+	}
+	if len(model.ExtraBody) == 0 {
+		model.ExtraBody = nil
 	}
 	model.ThinkingMode = normalizeThinkingMode(model.ThinkingMode)
 	if model.ThinkingBudget < 0 {
