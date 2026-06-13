@@ -458,6 +458,8 @@ type Model struct {
 	ID                string
 	OwnedBy           string
 	ContextWindow     int
+	SupportsChat      bool
+	SupportsTTS       bool
 	SupportsImages    bool
 	SupportsPDFs      bool
 	CapabilitySource  string

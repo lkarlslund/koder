@@ -40,6 +40,11 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s status %d: %s", e.Operation, e.StatusCode, body)
 }
 
+type SpeechResponse struct {
+	ContentType string
+	Audio       []byte
+}
+
 func parseRetryAfter(value string, now time.Time) time.Duration {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -654,6 +659,124 @@ func (c *Client) ProbeImageSupport(ctx context.Context, modelID string) (bool, e
 		return false, nil
 	}
 	return false, err
+}
+
+func (c *Client) ProbeChatSupport(ctx context.Context, modelID string) (bool, error) {
+	_, err := c.CompleteChat(ctx, ChatRequest{
+		Model: modelID,
+		Messages: []Message{{
+			Role:    RoleUser,
+			Content: "Reply with OK.",
+		}},
+		Stream: false,
+		ExtraBody: map[string]any{
+			"max_tokens": 1,
+		},
+	})
+	if err == nil {
+		return true, nil
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusNotFound, http.StatusMethodNotAllowed:
+			return false, nil
+		}
+	}
+	return true, err
+}
+
+func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, error) {
+	payload := map[string]any{
+		"model": modelID,
+		"input": "OK",
+		"voice": "alloy",
+	}
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		return false, fmt.Errorf("encode tts probe: %w", err)
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/audio/speech"), &body)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Accept", "audio/*, application/octet-stream")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("tts probe: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		return strings.Contains(contentType, "audio/") || strings.Contains(contentType, "application/octet-stream"), nil
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	switch resp.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+		return false, nil
+	}
+	return false, &APIError{
+		Operation:  "tts probe",
+		StatusCode: resp.StatusCode,
+		Body:       strings.TrimSpace(string(bodyBytes)),
+		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+	}
+}
+
+func (c *Client) CreateSpeech(ctx context.Context, modelID, input, voice string) (SpeechResponse, error) {
+	modelID = strings.TrimSpace(modelID)
+	input = strings.TrimSpace(input)
+	voice = strings.TrimSpace(voice)
+	if modelID == "" {
+		return SpeechResponse{}, fmt.Errorf("tts model id is required")
+	}
+	if input == "" {
+		return SpeechResponse{}, fmt.Errorf("tts input is required")
+	}
+	if voice == "" {
+		voice = "alloy"
+	}
+	payload := map[string]any{
+		"model": modelID,
+		"input": input,
+		"voice": voice,
+	}
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		return SpeechResponse{}, fmt.Errorf("encode tts request: %w", err)
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/audio/speech"), &body)
+	if err != nil {
+		return SpeechResponse{}, err
+	}
+	req.Header.Set("Accept", "audio/*, application/octet-stream")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return SpeechResponse{}, fmt.Errorf("tts request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return SpeechResponse{}, &APIError{
+			Operation:  "tts",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(bodyBytes)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
+	}
+	audio, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return SpeechResponse{}, fmt.Errorf("read tts response: %w", err)
+	}
+	if len(audio) == 0 {
+		return SpeechResponse{}, fmt.Errorf("tts response was empty")
+	}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return SpeechResponse{ContentType: contentType, Audio: audio}, nil
 }
 
 func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan domain.Event, error) {

@@ -34,6 +34,7 @@
         <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
+        <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
     </nav>
@@ -548,6 +549,8 @@
                 <span class="d-flex flex-wrap gap-1 mt-1">
                   <span class="badge text-bg-info" x-show="model.detected">detected</span>
                   <span class="badge text-bg-primary" x-show="model.custom">custom</span>
+                  <span class="badge text-bg-success" x-show="model.supports_tts">TTS</span>
+                  <span class="badge text-bg-secondary" x-show="model.supports_chat === false">not chat</span>
                   <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
                 </span>
               </span>

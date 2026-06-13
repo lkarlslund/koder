@@ -26,6 +26,8 @@ type capabilityEntry struct {
 	ProviderID        string    `json:"provider_id"`
 	BaseURL           string    `json:"base_url"`
 	ModelID           string    `json:"model_id"`
+	SupportsChat      bool      `json:"supports_chat"`
+	SupportsTTS       bool      `json:"supports_tts"`
 	SupportsImages    bool      `json:"supports_images"`
 	SupportsPDFs      bool      `json:"supports_pdfs"`
 	CapabilitySource  string    `json:"capability_source"`
@@ -65,12 +67,42 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 		return domain.Model{}, err
 	}
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
+	current := inferCapabilities(providerID, cfg, model)
 	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
 		if strings.TrimSpace(entry.CapabilitySource) == "probe" {
-			return applyEntry(model, entry), nil
+			return applyEntry(current, entry), nil
 		}
 	}
-	return inferCapabilities(providerID, cfg, model), nil
+	if shouldProbeTTS(providerID, cfg, model.ID) {
+		client, err := New(providerID, cfg, nil)
+		if err == nil && client != nil {
+			supportsTTS, probeErr := client.ProbeTTSSupport(context.Background(), model.ID)
+			if probeErr == nil && supportsTTS {
+				supportsChat := true
+				if chatSupported, chatErr := client.ProbeChatSupport(context.Background(), model.ID); chatErr == nil {
+					supportsChat = chatSupported
+				}
+				entry := capabilityEntry{
+					ProviderID:        providerID,
+					BaseURL:           strings.TrimSpace(cfg.BaseURL),
+					ModelID:           model.ID,
+					SupportsChat:      supportsChat,
+					SupportsTTS:       true,
+					SupportsImages:    current.SupportsImages,
+					SupportsPDFs:      current.SupportsPDFs,
+					CapabilitySource:  "probe",
+					CapabilitiesKnown: true,
+					DetectedAt:        time.Now().UTC(),
+				}
+				cache.Entries[key] = entry
+				if err := s.save(cache); err != nil {
+					return domain.Model{}, err
+				}
+				return applyEntry(current, entry), nil
+			}
+		}
+	}
+	return current, nil
 }
 
 func (s *CapabilityStore) SupportsAttachment(providerID string, cfg config.Provider, modelID string, kind attachment.Kind) (bool, error) {
@@ -118,6 +150,8 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 				ProviderID:        providerID,
 				BaseURL:           strings.TrimSpace(cfg.BaseURL),
 				ModelID:           modelID,
+				SupportsChat:      current.SupportsChat,
+				SupportsTTS:       current.SupportsTTS,
 				SupportsImages:    supported,
 				SupportsPDFs:      current.SupportsPDFs,
 				CapabilitySource:  "probe",
@@ -150,6 +184,8 @@ func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, mod
 
 func inferCapabilities(providerID string, cfg config.Provider, model domain.Model) domain.Model {
 	supportsPDFs := false
+	model.SupportsChat = true
+	model.SupportsTTS = false
 	model.SupportsImages = false
 	model.SupportsPDFs = supportsPDFs
 	model.CapabilitySource = ""
@@ -157,11 +193,31 @@ func inferCapabilities(providerID string, cfg config.Provider, model domain.Mode
 	return model
 }
 
+func shouldProbeTTS(providerID string, cfg config.Provider, modelID string) bool {
+	haystack := strings.ToLower(strings.Join([]string{
+		providerID,
+		cfg.Name,
+		cfg.BaseURL,
+		modelID,
+	}, " "))
+	for _, needle := range []string{"tts", "speech", "voice", "audio", "omnivoice"} {
+		if strings.Contains(haystack, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func capabilityKey(providerID, baseURL, modelID string) string {
 	return strings.TrimSpace(providerID) + "|" + strings.TrimSpace(baseURL) + "|" + strings.TrimSpace(modelID)
 }
 
 func applyEntry(model domain.Model, entry capabilityEntry) domain.Model {
+	model.SupportsChat = entry.SupportsChat
+	if !entry.SupportsChat && !entry.SupportsTTS {
+		model.SupportsChat = true
+	}
+	model.SupportsTTS = entry.SupportsTTS
 	model.SupportsImages = entry.SupportsImages
 	model.SupportsPDFs = entry.SupportsPDFs
 	model.CapabilitySource = entry.CapabilitySource

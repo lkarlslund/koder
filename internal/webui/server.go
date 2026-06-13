@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -937,6 +938,23 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"models": options}, nil
+	case "tts_speech":
+		var in struct {
+			Text string `json:"text"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		speech, err := s.controller.SynthesizeSpeech(ctx, in.Text)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"provider_id":  speech.ProviderID,
+			"model_id":     speech.ModelID,
+			"content_type": speech.ContentType,
+			"audio_base64": base64.StdEncoding.EncodeToString(speech.Audio),
+		}, nil
 	case "model_config":
 		var in struct {
 			ProviderID string `json:"provider_id"`

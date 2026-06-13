@@ -1343,6 +1343,150 @@ func TestProbeImageSupportUnsupported(t *testing.T) {
 	}
 }
 
+func TestProbeTTSSupportSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio/speech" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := string(body)
+		if !strings.Contains(raw, `"model":"omnivoice-base-Q8_0.gguf"`) || !strings.Contains(raw, `"input":"OK"`) {
+			t.Fatalf("unexpected tts probe request: %s", raw)
+		}
+		w.Header().Set("Content-Type", "audio/pcm")
+		_, _ = w.Write([]byte{0, 1, 2, 3})
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := client.ProbeTTSSupport(context.Background(), "omnivoice-base-Q8_0.gguf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected probe success to report tts support")
+	}
+}
+
+func TestProbeTTSSupportUnsupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := client.ProbeTTSSupport(context.Background(), "demo-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected missing speech endpoint to report false")
+	}
+}
+
+func TestCreateSpeech(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio/speech" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := string(body)
+		if !strings.Contains(raw, `"model":"omnivoice-base-Q8_0.gguf"`) || !strings.Contains(raw, `"input":"Hello"`) {
+			t.Fatalf("unexpected tts request: %s", raw)
+		}
+		w.Header().Set("Content-Type", "audio/pcm")
+		_, _ = w.Write([]byte{4, 5, 6})
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	speech, err := client.CreateSpeech(context.Background(), "omnivoice-base-Q8_0.gguf", "Hello", "alloy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if speech.ContentType != "audio/pcm" || string(speech.Audio) != string([]byte{4, 5, 6}) {
+		t.Fatalf("unexpected speech response: %#v", speech)
+	}
+}
+
+func TestCapabilityStoreDetectsTTSOnlyModel(t *testing.T) {
+	var speechCalls int
+	var chatCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/audio/speech":
+			speechCalls++
+			w.Header().Set("Content-Type", "audio/pcm")
+			_, _ = w.Write([]byte{0, 1, 2, 3})
+		case "/v1/chat/completions":
+			chatCalls++
+			http.NotFound(w, r)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}
+
+	model, err := store.EnrichModel("local-tts", cfg, domain.Model{ID: "omnivoice-base-Q8_0.gguf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.SupportsTTS || model.SupportsChat || !model.CapabilitiesKnown || model.CapabilitySource != "probe" {
+		t.Fatalf("expected tts-only probe result, got %#v", model)
+	}
+	if speechCalls != 1 || chatCalls != 1 {
+		t.Fatalf("expected one speech and chat probe, got speech=%d chat=%d", speechCalls, chatCalls)
+	}
+
+	model, err = store.EnrichModel("local-tts", cfg, domain.Model{ID: "omnivoice-base-Q8_0.gguf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.SupportsTTS || model.SupportsChat {
+		t.Fatalf("expected cached tts-only result, got %#v", model)
+	}
+	if speechCalls != 1 || chatCalls != 1 {
+		t.Fatalf("expected cached result without reprobe, got speech=%d chat=%d", speechCalls, chatCalls)
+	}
+}
+
 func TestCapabilityStoreSupportsAttachmentCachesProbeResult(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

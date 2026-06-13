@@ -546,6 +546,51 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 }
 
+func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			fmt.Fprint(w, `{"data":[{"id":"omnivoice-base-Q8_0.gguf","owned_by":"local"}]}`)
+		case "/v1/audio/speech":
+			w.Header().Set("Content-Type", "audio/pcm")
+			_, _ = w.Write([]byte{0, 1, 2, 3})
+		case "/v1/chat/completions":
+			http.NotFound(w, r)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"local-tts": {Name: "Local TTS", BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+	})
+
+	options, err := ctrl.ModelOptions(context.Background())
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("expected one model option, got %#v", options)
+	}
+	if !options[0].SupportsTTS || options[0].SupportsChat {
+		t.Fatalf("expected tts-only model option, got %#v", options[0])
+	}
+
+	speech, err := ctrl.SynthesizeSpeech(context.Background(), "Hello")
+	if err != nil {
+		t.Fatalf("synthesize speech: %v", err)
+	}
+	if speech.ProviderID != "local-tts" || speech.ModelID != "omnivoice-base-Q8_0.gguf" || speech.ContentType != "audio/pcm" {
+		t.Fatalf("unexpected speech metadata: %#v", speech)
+	}
+	if string(speech.Audio) != string([]byte{0, 1, 2, 3}) {
+		t.Fatalf("unexpected speech audio: %#v", speech.Audio)
+	}
+}
+
 func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

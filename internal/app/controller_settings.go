@@ -311,6 +311,53 @@ func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
 }
 
+// SynthesizeSpeech renders text with the first configured TTS-capable model.
+func (c *Controller) SynthesizeSpeech(ctx context.Context, text string) (TTSSpeech, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return TTSSpeech{}, fmt.Errorf("tts text is required")
+	}
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	options, err := modelOptionsForConfig(ctx, cfg, "", "")
+	if err != nil {
+		return TTSSpeech{}, err
+	}
+	for _, option := range options {
+		if !option.SupportsTTS {
+			continue
+		}
+		sourceProviderID := strings.TrimSpace(option.SourceProviderID)
+		sourceModelID := strings.TrimSpace(option.SourceModelID)
+		if sourceProviderID == "" {
+			sourceProviderID = strings.TrimSpace(option.ProviderID)
+		}
+		if sourceModelID == "" {
+			sourceModelID = strings.TrimSpace(option.ModelID)
+		}
+		providerCfg, ok := cfg.Provider(sourceProviderID)
+		if !ok || providerCfg.Disabled {
+			continue
+		}
+		client, err := provider.New(sourceProviderID, providerCfg, nil)
+		if err != nil {
+			return TTSSpeech{}, err
+		}
+		speech, err := client.CreateSpeech(ctx, sourceModelID, text, "alloy")
+		if err != nil {
+			return TTSSpeech{}, err
+		}
+		return TTSSpeech{
+			ProviderID:  sourceProviderID,
+			ModelID:     sourceModelID,
+			ContentType: speech.ContentType,
+			Audio:       speech.Audio,
+		}, nil
+	}
+	return TTSSpeech{}, fmt.Errorf("no configured tts model detected")
+}
+
 func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
 	return modelOptionsForConfig(ctx, c.cfg, strings.TrimSpace(c.chat.ProviderID), strings.TrimSpace(c.chat.ModelID))
 }
@@ -319,6 +366,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 	seen := map[string]struct{}{}
 	detected := map[string]domain.Model{}
 	options := make([]ModelOption, 0, len(cfg.Providers))
+	capabilities := provider.NewCapabilityStore(cfg.StateDir())
 	add := func(providerID string, providerCfg config.Provider, model domain.Model) {
 		providerID = strings.TrimSpace(providerID)
 		modelID := strings.TrimSpace(model.ID)
@@ -339,6 +387,8 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			SourceModelID:    modelID,
 			OwnedBy:          strings.TrimSpace(model.OwnedBy),
 			ContextWindow:    model.ContextWindow,
+			SupportsChat:     model.SupportsChat,
+			SupportsTTS:      model.SupportsTTS,
 			Detected:         true,
 			BackingDetected:  true,
 			Editable:         false,
@@ -372,6 +422,9 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			continue
 		}
 		for _, model := range models {
+			if enriched, err := capabilities.EnrichModel(providerID, providerCfg, model); err == nil {
+				model = enriched
+			}
 			add(providerID, providerCfg, model)
 		}
 	}
@@ -405,6 +458,8 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			SourceModelID:    model.SourceModelID,
 			OwnedBy:          strings.TrimSpace(source.OwnedBy),
 			ContextWindow:    model.ContextWindow,
+			SupportsChat:     source.SupportsChat || !source.CapabilitiesKnown,
+			SupportsTTS:      source.SupportsTTS,
 			Custom:           true,
 			BackingDetected:  sourceDetected,
 			Editable:         true,
@@ -701,6 +756,7 @@ func ensureModelOption(options []ModelOption, cfg config.Config, providerID, mod
 		ModelID:          modelID,
 		SourceProviderID: sourceProviderID,
 		SourceModelID:    sourceModelID,
+		SupportsChat:     true,
 		Custom:           custom,
 		Editable:         custom,
 	})

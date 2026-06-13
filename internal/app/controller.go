@@ -103,6 +103,8 @@ type ModelOption struct {
 	SourceModelID    string `json:"source_model_id,omitempty"`
 	OwnedBy          string `json:"owned_by,omitempty"`
 	ContextWindow    int    `json:"context_window,omitempty"`
+	SupportsChat     bool   `json:"supports_chat"`
+	SupportsTTS      bool   `json:"supports_tts"`
 	Detected         bool   `json:"detected"`
 	Custom           bool   `json:"custom"`
 	BackingDetected  bool   `json:"backing_detected"`
@@ -118,11 +120,21 @@ type ModelInfo struct {
 	SourceModelID     string `json:"source_model_id,omitempty"`
 	BackingDetected   bool   `json:"backing_detected"`
 	ContextWindow     int    `json:"context_window"`
+	SupportsChat      bool   `json:"supports_chat"`
+	SupportsTTS       bool   `json:"supports_tts"`
 	SupportsTools     bool   `json:"supports_tools"`
 	SupportsImages    bool   `json:"supports_images"`
 	SupportsPDFs      bool   `json:"supports_pdfs"`
 	CapabilitiesKnown bool   `json:"capabilities_known"`
 	CapabilitySource  string `json:"capability_source,omitempty"`
+}
+
+// TTSSpeech is synthesized audio returned for browser playback.
+type TTSSpeech struct {
+	ProviderID  string `json:"provider_id"`
+	ModelID     string `json:"model_id"`
+	ContentType string `json:"content_type"`
+	Audio       []byte `json:"audio"`
 }
 
 // AccessState describes the active session sandbox access settings.
@@ -2101,6 +2113,7 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 		SourceProviderID: sourceProviderID,
 		SourceModelID:    sourceModelID,
 		ContextWindow:    c.contextWindowForChat(chatRecord),
+		SupportsChat:     true,
 		SupportsTools:    true,
 	}
 	if sourceModelID == "" {
@@ -2110,6 +2123,9 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	if err != nil {
 		return info
 	}
+	info.SupportsChat = enriched.SupportsChat
+	info.SupportsTTS = enriched.SupportsTTS
+	info.SupportsTools = enriched.SupportsChat
 	info.SupportsImages = enriched.SupportsImages
 	info.SupportsPDFs = enriched.SupportsPDFs
 	info.CapabilitiesKnown = enriched.CapabilitiesKnown

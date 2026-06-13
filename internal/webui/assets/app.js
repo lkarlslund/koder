@@ -894,7 +894,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: readPreference('ttsEnabled', 'false') === 'true', ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1479,6 +1479,7 @@
           }
           if (delta.error) this.error = delta.error;
           this.syncInterruptArmed();
+          if (active && delta.item) this.maybeSpeakTimelineItem(delta.item, next);
           if (active) {
             this.afterTranscriptDOMUpdate(() => {
               if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
@@ -2197,6 +2198,8 @@
           const source = info.capability_source || info.CapabilitySource || '';
           const lines = [
             'Context: ' + this.formatTokens(contextWindow) + ' tokens',
+            'Chat: ' + (info.supports_chat === false || info.SupportsChat === false ? 'no' : 'yes'),
+            'TTS: ' + this.capabilityLabel(info.supports_tts || info.SupportsTTS, known),
             'Tools: ' + (info.supports_tools === false || info.SupportsTools === false ? 'no' : 'yes'),
             'Images: ' + this.capabilityLabel(info.supports_images || info.SupportsImages, known),
             'PDFs: ' + this.capabilityLabel(info.supports_pdfs || info.SupportsPDFs, known),
@@ -3084,6 +3087,37 @@
           if (this.toastTimer) clearTimeout(this.toastTimer);
           this.toastTimer = setTimeout(() => { this.toast = ''; this.toastTimer = null; }, 4500);
         },
+        ttsButtonTitle() { return this.ttsEnabled ? 'Disable TTS output' : 'Enable TTS output'; },
+        toggleTTSOutput() {
+          this.ttsEnabled = !this.ttsEnabled;
+          writePreference('ttsEnabled', this.ttsEnabled ? 'true' : 'false');
+          this.showToast(this.ttsEnabled ? 'TTS output enabled' : 'TTS output disabled');
+        },
+        maybeSpeakTimelineItem(item, snapshot) {
+          if (!this.ttsEnabled || !item || this.snapshotIsStreaming(snapshot)) return;
+          const kind = String(item.kind || item.Kind || '').trim();
+          if (kind !== 'assistant') return;
+          const id = this.timelineItemID(item);
+          const content = item.content || item.Content || {};
+          const text = String(content.text || content.Text || '').trim();
+          if (!id || !text || this.ttsSpokenItems[id] === text) return;
+          this.ttsSpokenItems = {...this.ttsSpokenItems, [id]: text};
+          this.speakText(text);
+        },
+        speakText(text) {
+          this.rpc('tts_speech', {text}).then(result => {
+            const audioBase64 = result.audio_base64 || result.AudioBase64 || '';
+            if (!audioBase64) return;
+            if (this.ttsAudio) {
+              this.ttsAudio.pause();
+              this.ttsAudio = null;
+            }
+            const contentType = result.content_type || result.ContentType || 'application/octet-stream';
+            const audio = new Audio('data:' + contentType + ';base64,' + audioBase64);
+            this.ttsAudio = audio;
+            audio.play().catch(err => this.showToast(err.message || 'TTS playback failed'));
+          }).catch(() => {});
+        },
         activeAccessSettings() { return this.state.access?.settings || this.state.Access?.Settings || {}; },
         accessPresets() { return this.state.access?.presets || this.state.Access?.Presets || []; },
         accessSummary(settings) {
@@ -3143,6 +3177,10 @@
           return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.source_provider_id, m.source_model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
         },
         selectModel(model) {
+          if (model && model.supports_chat === false) {
+            this.showToast('This model supports TTS output, not chat completions.');
+            return;
+          }
           this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(() => {
             this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {current: item.provider_id === model.provider_id && item.model_id === model.model_id}));
             this.loadModelSettings(model.provider_id, model.model_id);
