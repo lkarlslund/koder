@@ -733,6 +733,9 @@
       const range = readRangeLabel(args, data);
       return range ? base + ', ' + range : base;
     }
+    function chatSendMessage(args) {
+      return String(firstValue(args || {}, ['message', 'Message']) || '').trim();
+    }
     function toolTitleText(tool) {
       const kind = String((tool && tool.tool) || '');
       const data = toolData(tool);
@@ -759,6 +762,7 @@
         case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
         case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
         case 'show_image': return path ? 'Show image ' + path : 'Show image';
+        case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
         default: return kind || 'Tool';
       }
     }
@@ -766,6 +770,7 @@
       const args = toolArgs(tool);
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
+      if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
       const values = [];
       if (args.command) values.push(args.command);
       if (args.cmd) values.push(args.cmd);
@@ -862,6 +867,7 @@
         const items = data.items || data.Items || [];
         return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
       }
+      if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }

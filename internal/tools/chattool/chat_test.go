@@ -204,6 +204,16 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 	}
 }
 
+func TestSendPreviewIncludesMessage(t *testing.T) {
+	got := (sendTool{}).Preview(tools.Request{Args: map[string]string{
+		"chat_id": "child-chat",
+		"message": "Use jadx output",
+	}})
+	if !strings.Contains(got, "child-chat") || !strings.Contains(got, "Use jadx output") {
+		t.Fatalf("expected chat id and message in preview, got %q", got)
+	}
+}
+
 func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 	control := &fakeChatControl{statuses: []Status{{
 		ID:         "child-chat",

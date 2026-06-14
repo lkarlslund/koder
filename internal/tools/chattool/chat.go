@@ -287,7 +287,13 @@ func normalizeOptionalBool(args map[string]string, key string) (map[string]strin
 
 func (listTool) Preview(tools.Request) string      { return "List chats" }
 func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
-func (sendTool) Preview(req tools.Request) string  { return "Message chat " + req.Args["chat_id"] }
+func (sendTool) Preview(req tools.Request) string {
+	message := strings.TrimSpace(req.Args["message"])
+	if message == "" {
+		return "Message chat " + req.Args["chat_id"]
+	}
+	return "Message chat " + req.Args["chat_id"] + ": " + message
+}
 func (cancelTool) Preview(req tools.Request) string {
 	return targetPreview("Cancel", req.Args["chat_id"])
 }

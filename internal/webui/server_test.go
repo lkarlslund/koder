@@ -1162,6 +1162,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
+	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
+		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
+		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args)`) ||
+		!strings.Contains(fullPage, `if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool))`) {
+		t.Fatalf("expected chat_send to render the sent message instead of the chat status result")
+	}
 	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
 		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
 	}
