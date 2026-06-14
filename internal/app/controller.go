@@ -250,6 +250,7 @@ type GeneralPreferences struct {
 	DefaultProvider  string `json:"default_provider"`
 	DefaultModel     string `json:"default_model"`
 	MaxToolLoopSteps int    `json:"max_tool_loop_steps"`
+	MaxChildChats    int    `json:"max_child_chats"`
 }
 
 // BrowserPreferences contains browser behavior settings persisted in config.

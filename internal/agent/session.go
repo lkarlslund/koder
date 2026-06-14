@@ -16,6 +16,7 @@ func sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.Regi
 		DefaultProvider: defaults.ProviderID,
 		DefaultModel:    defaults.ModelID,
 		AccessSettings:  defaults.Access,
+		MaxChildChats:   defaults.MaxChildChats,
 	}
 }
 

@@ -19,6 +19,7 @@ type RegistryConfig struct {
 	DefaultProvider string
 	DefaultModel    string
 	AccessSettings  accesssettings.Settings
+	MaxChildChats   int
 }
 
 type Registry struct {
@@ -47,7 +48,16 @@ func (r *Registry) UpdateConfig(cfg RegistryConfig) {
 	}
 	r.mu.Lock()
 	r.config = cloneRegistryConfig(cfg)
+	sessions := make([]*Session, 0, len(r.sessions))
+	for _, owner := range r.sessions {
+		if owner != nil {
+			sessions = append(sessions, owner)
+		}
+	}
 	r.mu.Unlock()
+	for _, owner := range sessions {
+		owner.UpdateConfig(cfg)
+	}
 }
 
 func (r *Registry) Load(ctx context.Context, sessionID id.ID) (*Session, error) {
@@ -74,6 +84,7 @@ func (r *Registry) Load(ctx context.Context, sessionID id.ID) (*Session, error) 
 	if err != nil {
 		return nil, err
 	}
+	loaded.UpdateConfig(r.currentConfig())
 	r.mu.Lock()
 	if existing := r.sessions[sessionID]; existing != nil {
 		r.mu.Unlock()

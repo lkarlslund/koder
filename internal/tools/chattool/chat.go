@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -24,8 +23,8 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Use milestone_key or task_key to scope what the child chat can see. A task_key scopes the child to that single task. After starting it, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_key":{"type":"string","description":"Optional milestone key to scope the child chat"},"task_key":{"type":"string","description":"Optional task key to scope the child chat to one task"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Usage:       "Start a background child chat using a registered chat profile. Execution chats must be scoped with milestone_key and should execute the milestone's full task list. If an existing child owns or is working on that milestone, use chat_send to steer it instead of starting another chat. After starting a child, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_key":{"type":"string","description":"Optional milestone key to scope what the child chat can see; required for execution chats"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(sendTool{}, tools.ToolSpec{
@@ -108,7 +107,6 @@ type StartRequest struct {
 	Objective    string
 	Title        string
 	MilestoneRef string
-	TaskRef      string
 }
 
 type UpdateRequest struct {
@@ -205,13 +203,6 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	}
 	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
 		out["milestone_key"] = ref
-	}
-	if taskRef := strings.TrimSpace(args["task_key"]); taskRef != "" {
-		key, err := planning.ParseTaskKey(taskRef)
-		if err != nil {
-			return nil, err
-		}
-		out["task_key"] = key
 	}
 	return out, nil
 }
@@ -375,7 +366,6 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
 		MilestoneRef: req.Args["milestone_key"],
-		TaskRef:      req.Args["task_key"],
 	})
 	if err != nil {
 		return tools.Result{}, err

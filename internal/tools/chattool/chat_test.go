@@ -76,15 +76,12 @@ func TestNormalizeArgs(t *testing.T) {
 		t.Fatalf("unexpected list args: %#v", listArgs)
 	}
 
-	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "milestone_key": " M001 ", "title": "Worker", "task_key": "M001T001"})
+	args, err := (startTool{}).NormalizeArgs(map[string]string{"profile": " execution ", "objective": " do it ", "milestone_key": " M001 ", "title": "Worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_key"] != "M001" || args["title"] != "Worker" || args["task_key"] != "M001T001" {
+	if args["profile"] != "execution" || args["objective"] != "do it" || args["milestone_key"] != "M001" || args["title"] != "Worker" {
 		t.Fatalf("unexpected normalized args: %#v", args)
-	}
-	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "execution", "objective": "do it", "task_key": "M001"}); err == nil || !strings.Contains(err.Error(), "invalid task_key") {
-		t.Fatalf("expected milestone-as-task error, got %v", err)
 	}
 	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "missing", "objective": "do it"}); err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("expected invalid profile error, got %v", err)

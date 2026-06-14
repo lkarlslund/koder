@@ -64,6 +64,7 @@ type Session struct {
 	tasksByRef  map[string][]planning.Task
 	legacyTasks []planning.LegacyTask
 	workspace   workspacepkg.Status
+	config      RegistryConfig
 
 	workspaceRefreshTimer   *time.Timer
 	workspaceRefreshPending bool
@@ -73,6 +74,15 @@ type Session struct {
 	subsMu  sync.Mutex
 	nextSub int
 	subs    map[int]chan Event
+}
+
+func (s *Session) UpdateConfig(cfg RegistryConfig) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.config = cloneRegistryConfig(cfg)
+	s.mu.Unlock()
 }
 
 // Load hydrates a live session owner from persisted state.

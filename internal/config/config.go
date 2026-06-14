@@ -120,6 +120,7 @@ type Config struct {
 	Defaults         Defaults                `toml:"defaults"`
 	Compaction       Compaction              `toml:"compaction"`
 	MaxToolLoopSteps int                     `toml:"max_tool_loop_steps"`
+	MaxChildChats    int                     `toml:"max_child_chats"`
 	Tools            Tools                   `toml:"tools"`
 	Providers        map[string]Provider     `toml:"providers"`
 	Models           []ModelConfig           `toml:"models"`
@@ -154,6 +155,7 @@ func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
 
 const providerConfigurationHint = "configure at least one provider in config.toml and set defaults.provider_id"
 const defaultMaxToolLoopSteps = 500
+const defaultMaxChildChats = 1
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
 const defaultCavemanParallelism = 1
@@ -234,6 +236,7 @@ func Default() Config {
 	toolDefaults[domain.ToolKindBash] = false
 	return Config{
 		MaxToolLoopSteps: defaultMaxToolLoopSteps,
+		MaxChildChats:    defaultMaxChildChats,
 		Compaction: Compaction{
 			AutoAtPercent: defaultAutoCompactAt,
 			KeepToolCalls: defaultCompactionKeepToolCalls,
@@ -291,6 +294,9 @@ func (c *Config) applyDefaults() {
 	def := Default()
 	if c.MaxToolLoopSteps <= 0 {
 		c.MaxToolLoopSteps = def.MaxToolLoopSteps
+	}
+	if c.MaxChildChats <= 0 {
+		c.MaxChildChats = def.MaxChildChats
 	}
 	if c.Compaction.AutoAtPercent <= 0 {
 		c.Compaction.AutoAtPercent = def.Compaction.AutoAtPercent

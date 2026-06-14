@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 func testAppendTimeline(ctx context.Context, st *store.Store, sessionRecord domain.Session, chatRecord domain.Chat, content domain.TimelineContent) (domain.TimelineItem, error) {
@@ -202,6 +203,87 @@ func TestSessionHydratesTasksWithoutPlanMilestone(t *testing.T) {
 		if listed[idx].ID != created[idx].ID {
 			t.Fatalf("task %d: expected %s, got %s", idx, created[idx].ID, listed[idx].ID)
 		}
+	}
+}
+
+func TestStartChatRejectsDuplicateMilestoneChild(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Milestones: []planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.UpdateConfig(RegistryConfig{MaxChildChats: 2})
+	parentID := owner.Snapshot().Chats[0].ID
+	control := owner.ChatToolControl(parentID)
+	if _, err := control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    "Implement alpha",
+		MilestoneRef: "M001",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    "Implement alpha again",
+		MilestoneRef: "M001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "use chat_send") {
+		t.Fatalf("expected duplicate milestone steer error, got %v", err)
+	}
+}
+
+func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Milestones: []planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady, Position: 1},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.UpdateConfig(RegistryConfig{MaxChildChats: 1})
+	parentID := owner.Snapshot().Chats[0].ID
+	control := owner.ChatToolControl(parentID)
+	if _, err := control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    "Implement alpha",
+		MilestoneRef: "M001",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    "Implement beta",
+		MilestoneRef: "M002",
+	})
+	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chat_send") {
+		t.Fatalf("expected max child chat error, got %v", err)
 	}
 }
 

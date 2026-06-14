@@ -789,6 +789,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 			DefaultProvider:  strings.TrimSpace(c.cfg.Defaults.ProviderID),
 			DefaultModel:     strings.TrimSpace(c.cfg.Defaults.ModelID),
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
+			MaxChildChats:    c.cfg.MaxChildChats,
 		},
 		UI:           browserPreferencesFromConfig(c.cfg.UI),
 		Compaction:   compactionPreferencesFromConfig(c.cfg),
@@ -1268,6 +1269,10 @@ func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error
 		return fmt.Errorf("max tool loop steps must be greater than zero")
 	}
 	cfg.MaxToolLoopSteps = prefs.MaxToolLoopSteps
+	if prefs.MaxChildChats <= 0 {
+		return fmt.Errorf("max child chats must be greater than zero")
+	}
+	cfg.MaxChildChats = prefs.MaxChildChats
 	return nil
 }
 

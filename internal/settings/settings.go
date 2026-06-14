@@ -16,9 +16,10 @@ type Store struct {
 }
 
 type NewSessionDefaults struct {
-	ProviderID string
-	ModelID    string
-	Access     accesssettings.Settings
+	ProviderID    string
+	ModelID       string
+	Access        accesssettings.Settings
+	MaxChildChats int
 }
 
 type ToolSettings struct {
@@ -84,9 +85,10 @@ func (s *Store) Snapshot() config.Config {
 func (s *Store) NewSessionDefaults() NewSessionDefaults {
 	cfg := s.Snapshot()
 	return NewSessionDefaults{
-		ProviderID: strings.TrimSpace(cfg.Defaults.ProviderID),
-		ModelID:    strings.TrimSpace(cfg.Defaults.ModelID),
-		Access:     accesssettings.Normalize(cfg.Access),
+		ProviderID:    strings.TrimSpace(cfg.Defaults.ProviderID),
+		ModelID:       strings.TrimSpace(cfg.Defaults.ModelID),
+		Access:        accesssettings.Normalize(cfg.Access),
+		MaxChildChats: cfg.MaxChildChats,
 	}
 }
 

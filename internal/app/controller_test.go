@@ -464,15 +464,14 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}
-	tasks, err := ctrl.AddTasks(ctx, state.Session.ID, "M001", []string{"Implement alpha"})
-	if err != nil {
+	if _, err := ctrl.AddTasks(ctx, state.Session.ID, "M001", []string{"Implement alpha"}); err != nil {
 		t.Fatalf("add task: %v", err)
 	}
 
 	status, err := ctrl.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
-		Profile:   chatrole.Execution,
-		Objective: "Implement only the assigned task",
-		TaskRef:   id.ID(planning.TaskKey(tasks[0])),
+		Profile:      chatrole.Execution,
+		Objective:    "Implement the milestone",
+		MilestoneRef: "M001",
 	})
 	if err != nil {
 		t.Fatalf("start chat: %v", err)
@@ -484,7 +483,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTaskRef == planning.TaskKey(tasks[0]) {
+		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTaskRef == "" {
 			found = true
 			break
 		}
@@ -685,6 +684,7 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 		t.Fatalf("expected web_search tool default in %#v", prefs.ToolDefaults)
 	}
 	prefs.General.MaxToolLoopSteps = 77
+	prefs.General.MaxChildChats = 3
 	prefs.UI.Theme = "dark"
 	prefs.Compaction.UseChatModel = false
 	prefs.Compaction.ProviderID = "test"
@@ -736,8 +736,8 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.Compaction.ModelID != "compact-model" {
-		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
+	if loaded.MaxToolLoopSteps != 77 || loaded.MaxChildChats != 3 || loaded.UI.Theme != "dark" || loaded.Compaction.ModelID != "compact-model" {
+		t.Fatalf("expected saved config, got max=%d child=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.MaxChildChats, loaded.UI.Theme, loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
 	}
 	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProviderID != "test" || loaded.Thinking.CavemanModelID != "model" || loaded.Thinking.CavemanPrompt != "rewrite thinking:\n{{thinking}}" || loaded.Thinking.CavemanMinTokens != 96 {
 		t.Fatalf("expected saved thinking settings, got %#v", loaded.Thinking)

@@ -1726,6 +1726,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `settings.thinking.caveman_prompt`) {
 		t.Fatalf("expected thinking preferences tab with caveman controls")
 	}
+	if !strings.Contains(fullPage, `settings.general.max_child_chats`) ||
+		!strings.Contains(document, `Max active sub chats`) {
+		t.Fatalf("expected general preferences to include child chat concurrency control")
+	}
 	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
 		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) {

@@ -27,6 +27,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps 500, got %d", cfg.MaxToolLoopSteps)
 	}
+	if cfg.MaxChildChats != 1 {
+		t.Fatalf("expected default max child chats 1, got %d", cfg.MaxChildChats)
+	}
 	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
 		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
 	}
@@ -353,11 +356,15 @@ func TestLoadBackfillsMissingAutoContinueSetting(t *testing.T) {
 func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 	cfg := Default()
 	cfg.MaxToolLoopSteps = 0
+	cfg.MaxChildChats = 0
 
 	cfg.applyDefaults()
 
 	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps applied, got %d", cfg.MaxToolLoopSteps)
+	}
+	if cfg.MaxChildChats != 1 {
+		t.Fatalf("expected default max child chats applied, got %d", cfg.MaxChildChats)
 	}
 }
 
