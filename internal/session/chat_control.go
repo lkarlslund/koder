@@ -211,6 +211,7 @@ func (s *Session) startPreparedChat(ctx context.Context, chatID id.ID, milestone
 	chatSnapshot := activeChat.Snapshot()
 	return chattool.Status{
 		ID:                 chatSnapshot.Chat.ID,
+		ParentChatID:       chatParentID(chatSnapshot.Chat),
 		Title:              chatSnapshot.Chat.Title,
 		Role:               chatSnapshot.Chat.WorkflowRole,
 		Archived:           chatSnapshot.Chat.Archived,
@@ -295,15 +296,18 @@ func (s *Session) childIdleNotification(ctx context.Context, chatRecord domain.C
 		tasks, err := s.ListTasks(ctx, chatRecord.SessionID, ref)
 		if err == nil && len(tasks) > 0 {
 			completed := 0
+			remaining := make([]string, 0)
 			for _, task := range tasks {
 				if task.Status == planning.TaskStatusCompleted {
 					completed++
+					continue
 				}
+				remaining = append(remaining, fmt.Sprintf("%s is %s", planning.TaskKey(task), task.Status))
 			}
 			if completed == len(tasks) {
 				return fmt.Sprintf("%s All %d tasks for milestone %s are done.", text, len(tasks), ref)
 			}
-			return fmt.Sprintf("%s Chat completed %d out of %d tasks for milestone %s, but is now stopped.", text, completed, len(tasks), ref)
+			return fmt.Sprintf("%s Chat completed %d out of %d tasks for milestone %s, but is now stopped. Remaining tasks: %s.", text, completed, len(tasks), ref, strings.Join(remaining, ", "))
 		}
 	}
 	statusText = strings.TrimSpace(statusText)
@@ -363,6 +367,13 @@ func ensureChatOperationOwner(ownerChatID id.ID, target domain.Chat) error {
 		return nil
 	}
 	return fmt.Errorf("chat %s is not owned by chat %s", target.ID, ownerChatID)
+}
+
+func chatParentID(chatRecord domain.Chat) id.ID {
+	if chatRecord.ParentChatID == nil {
+		return ""
+	}
+	return *chatRecord.ParentChatID
 }
 
 func sessionTaskByID(ctx context.Context, owner interface {

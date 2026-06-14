@@ -45,8 +45,15 @@ func init() {
 	tools.Register(archiveTool{}, tools.ToolSpec{
 		Title:       "Archive chat",
 		Description: "Archive or restore a chat.",
-		Usage:       "Set archived=true for completed or no-longer-needed chats, archived=false to restore an archived chat. Omit chat_id to target the current chat. Only idle chats can be archived. If you need to find archived chats first, call chat_list with archived=true.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to archive or restore; defaults to the current chat when omitted"},"archived":{"type":"boolean","description":"true hides the chat; false restores it"}},"required":["archived"],"additionalProperties":false}`,
+		Usage:       "Set archived=true for a completed or no-longer-needed direct child chat, archived=false to restore an archived direct child chat. chat_id is required; this tool cannot target the current chat. Only idle chats can be archived. If you need to find archived chats first, call chat_list with archived=true.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Direct child chat UUID to archive or restore"},"archived":{"type":"boolean","description":"true hides the chat; false restores it"}},"required":["chat_id","archived"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(cleanupTool{}, tools.ToolSpec{
+		Title:       "Cleanup chats",
+		Description: "Archive idle execution child chats.",
+		Usage:       "Archive idle direct child chats owned by the current chat. This only archives execution chats that are idle, have no queued inputs, and have no pending approvals. It skips the current chat, non-child chats, non-execution chats, running chats, waiting-approval chats, queued chats, and already archived chats.",
+		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(renameTool{}, tools.ToolSpec{
@@ -63,6 +70,7 @@ type startTool struct{}
 type sendTool struct{}
 type cancelTool struct{}
 type archiveTool struct{}
+type cleanupTool struct{}
 type renameTool struct{}
 
 const serviceKey = "chat"
@@ -80,6 +88,7 @@ const (
 
 type Status struct {
 	ID                 id.ID
+	ParentChatID       id.ID
 	Title              string
 	Role               chatrole.Role
 	Archived           bool
@@ -151,6 +160,7 @@ func (startTool) ID() tools.ID   { return tools.ChatStart }
 func (sendTool) ID() tools.ID    { return tools.ChatSend }
 func (cancelTool) ID() tools.ID  { return tools.ChatCancel }
 func (archiveTool) ID() tools.ID { return tools.ChatArchive }
+func (cleanupTool) ID() tools.ID { return tools.ChatCleanup }
 func (renameTool) ID() tools.ID  { return tools.ChatRename }
 
 func (listTool) BypassesPermission() bool    { return true }
@@ -158,6 +168,7 @@ func (startTool) BypassesPermission() bool   { return true }
 func (sendTool) BypassesPermission() bool    { return true }
 func (cancelTool) BypassesPermission() bool  { return true }
 func (archiveTool) BypassesPermission() bool { return true }
+func (cleanupTool) BypassesPermission() bool { return true }
 func (renameTool) BypassesPermission() bool  { return true }
 
 func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
@@ -238,7 +249,11 @@ func (cancelTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 }
 
 func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	out := optionalChatIDArg(args)
+	chatID := requiredChatID(args)
+	if chatID == "" {
+		return nil, errors.New("chat_id is required")
+	}
+	out := map[string]string{"chat_id": chatID}
 	archived := strings.TrimSpace(args["archived"])
 	if archived == "" {
 		return nil, errors.New("archived is required")
@@ -249,6 +264,10 @@ func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	}
 	out["archived"] = strconv.FormatBool(value)
 	return out, nil
+}
+
+func (cleanupTool) NormalizeArgs(map[string]string) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 func (renameTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -303,6 +322,7 @@ func (archiveTool) Preview(req tools.Request) string {
 	}
 	return targetPreview("Archive", req.Args["chat_id"])
 }
+func (cleanupTool) Preview(tools.Request) string { return "Archive idle execution child chats" }
 func (renameTool) Preview(req tools.Request) string {
 	return targetPreview("Rename", req.Args["chat_id"])
 }
@@ -397,12 +417,85 @@ func (cancelTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 
 func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
+	chatID := id.ID(strings.TrimSpace(req.Args["chat_id"]))
+	if chatID == "" {
+		return tools.Result{}, errors.New("chat_id is required")
+	}
+	if chatID == runtime.ChatID {
+		return tools.Result{}, fmt.Errorf("chat_archive cannot target the current chat %s; target a direct child chat instead", runtime.ChatID)
+	}
 	archived := req.Args["archived"] == "true"
 	status, err := updateChat(ctx, runtime, req, UpdateRequest{Archived: &archived})
 	if err != nil {
 		return tools.Result{}, err
 	}
 	return chatResult(req.Tool, status)
+}
+
+func (cleanupTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime := opts.Runtime
+	control, err := requireControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	statuses, err := control.ListChats(ctx, runtime.SessionID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	archived := true
+	archivedStatuses := make([]Status, 0)
+	skipped := make([]string, 0)
+	for _, status := range statuses {
+		if skip := cleanupSkipReason(runtime.ChatID, status); skip != "" {
+			skipped = append(skipped, fmt.Sprintf("#%s %s: %s", status.ID, strings.TrimSpace(status.Title), skip))
+			continue
+		}
+		updated, err := control.UpdateChat(ctx, runtime.SessionID, runtime.ChatID, status.ID, UpdateRequest{Archived: &archived})
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("#%s %s: %s", status.ID, strings.TrimSpace(status.Title), err.Error()))
+			continue
+		}
+		archivedStatuses = append(archivedStatuses, updated)
+	}
+	return tools.Result{
+		Output: cleanupOutput(archivedStatuses, skipped),
+		Stored: storedResult(archivedStatuses),
+	}, nil
+}
+
+func cleanupSkipReason(currentChatID id.ID, status Status) string {
+	switch {
+	case status.ID == "":
+		return "missing chat id"
+	case status.ID == currentChatID:
+		return "current chat"
+	case status.Archived:
+		return "already archived"
+	case status.ParentChatID != currentChatID:
+		return "not a direct child"
+	case status.Role != chatrole.Execution:
+		return "not an execution chat"
+	case status.State != RunStateIdle || status.Busy:
+		return "not idle"
+	case status.QueuedInputs > 0:
+		return fmt.Sprintf("%d queued input(s)", status.QueuedInputs)
+	case status.PendingApprovals > 0:
+		return fmt.Sprintf("%d pending approval(s)", status.PendingApprovals)
+	default:
+		return ""
+	}
+}
+
+func cleanupOutput(archived []Status, skipped []string) string {
+	lines := []string{fmt.Sprintf("Archived %d idle execution child chat(s).", len(archived))}
+	for _, status := range archived {
+		lines = append(lines, fmt.Sprintf("archived: #%s %s", status.ID, strings.TrimSpace(status.Title)))
+	}
+	if len(skipped) > 0 {
+		lines = append(lines, fmt.Sprintf("Skipped %d chat(s):", len(skipped)))
+		lines = append(lines, skipped...)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (renameTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -452,6 +545,10 @@ func (cancelTool) SummarizeResult(_ tools.Request, result tools.Result) (string,
 
 func (archiveTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
 	return "Archived chat", result.Output
+}
+
+func (cleanupTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Cleaned up chats", result.Output
 }
 
 func (renameTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {

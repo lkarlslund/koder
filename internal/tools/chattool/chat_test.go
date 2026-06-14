@@ -42,7 +42,13 @@ func (f *fakeChatControl) UpdateChat(_ context.Context, sessionID, ownerChatID, 
 	f.lastOwnerChatID = ownerChatID
 	f.lastChatID = chatID
 	f.lastUpdate = update
-	status := f.statuses[0]
+	status := Status{ID: chatID}
+	for _, item := range f.statuses {
+		if item.ID == chatID {
+			status = item
+			break
+		}
+	}
 	if update.Archived != nil {
 		status.Archived = *update.Archived
 	}
@@ -112,6 +118,9 @@ func TestNormalizeArgs(t *testing.T) {
 	}
 	if archiveArgs["chat_id"] != "child" || archiveArgs["archived"] != "false" {
 		t.Fatalf("unexpected archive args: %#v", archiveArgs)
+	}
+	if _, err := (archiveTool{}).NormalizeArgs(map[string]string{"archived": "true"}); err == nil || !strings.Contains(err.Error(), "chat_id") {
+		t.Fatalf("expected archive chat_id error, got %v", err)
 	}
 	if _, err := (archiveTool{}).NormalizeArgs(map[string]string{"archived": "maybe"}); err == nil {
 		t.Fatal("expected archived bool error")
@@ -247,12 +256,12 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 
 	_, err = (archiveTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatArchive,
-		Args: map[string]string{"archived": "false"},
+		Args: map[string]string{"chat_id": "child-chat", "archived": "false"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastChatID != "chat-20" || control.lastUpdate.Archived == nil || *control.lastUpdate.Archived {
+	if control.lastChatID != "child-chat" || control.lastUpdate.Archived == nil || *control.lastUpdate.Archived {
 		t.Fatalf("unexpected archive request: %#v", control)
 	}
 
@@ -272,9 +281,76 @@ func TestArchiveExecuteSurfacesArchiveRuleErrors(t *testing.T) {
 	control := &fakeChatControl{updateErr: errors.New("cannot archive chat chat-20 while it is not idle")}
 	_, err := (archiveTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatArchive,
-		Args: map[string]string{"archived": "true"},
+		Args: map[string]string{"chat_id": "child-chat", "archived": "true"},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "not idle") {
 		t.Fatalf("expected archive rule error, got %v", err)
+	}
+}
+
+func TestArchiveRejectsCurrentChat(t *testing.T) {
+	control := &fakeChatControl{}
+	_, err := (archiveTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
+		Tool: domain.ToolKindChatArchive,
+		Args: map[string]string{"chat_id": "chat-20", "archived": "true"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "current chat") {
+		t.Fatalf("expected current chat archive error, got %v", err)
+	}
+	if control.lastChatID != "" {
+		t.Fatalf("archive should not call control for current chat, got %s", control.lastChatID)
+	}
+}
+
+func TestCleanupArchivesIdleExecutionChildren(t *testing.T) {
+	control := &fakeChatControl{statuses: []Status{{
+		ID:           "chat-20",
+		Title:        "Root",
+		Role:         chatrole.Orchestrator,
+		State:        RunStateRunning,
+		ParentChatID: "",
+	}, {
+		ID:           "child-idle",
+		ParentChatID: "chat-20",
+		Title:        "Done worker",
+		Role:         chatrole.Execution,
+		State:        RunStateIdle,
+	}, {
+		ID:           "child-running",
+		ParentChatID: "chat-20",
+		Title:        "Busy worker",
+		Role:         chatrole.Execution,
+		State:        RunStateRunning,
+		Busy:         true,
+	}, {
+		ID:           "side-chat",
+		ParentChatID: "other-parent",
+		Title:        "Side",
+		Role:         chatrole.Execution,
+		State:        RunStateIdle,
+	}, {
+		ID:           "child-plan",
+		ParentChatID: "chat-20",
+		Title:        "Planner",
+		Role:         chatrole.Planning,
+		State:        RunStateIdle,
+	}}}
+	result, err := (cleanupTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
+		Tool: domain.ToolKindChatCleanup,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.lastChatID != "child-idle" || control.lastUpdate.Archived == nil || !*control.lastUpdate.Archived {
+		t.Fatalf("expected cleanup to archive only idle execution child, got %#v", control)
+	}
+	if !strings.Contains(result.Output, "Archived 1 idle execution child chat") ||
+		!strings.Contains(result.Output, "child-running") ||
+		!strings.Contains(result.Output, "not idle") ||
+		!strings.Contains(result.Output, "side-chat") ||
+		!strings.Contains(result.Output, "not a direct child") ||
+		!strings.Contains(result.Output, "child-plan") ||
+		!strings.Contains(result.Output, "not an execution chat") {
+		t.Fatalf("unexpected cleanup output: %q", result.Output)
 	}
 }

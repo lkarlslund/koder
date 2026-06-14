@@ -17,7 +17,7 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 	for _, def := range defs {
 		names[def.Function.Name] = true
 	}
-	for _, name := range []string{domain.ToolKindChatSend.String(), domain.ToolKindChatStart.String(), domain.ToolKindMilestoneAdd.String(), domain.ToolKindMilestonePlan.String()} {
+	for _, name := range executionForbiddenToolNames() {
 		if names[name] {
 			t.Fatalf("execution definitions exposed forbidden tool %q", name)
 		}
@@ -43,6 +43,27 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	}
 	if !tools.IsDenied(err) {
 		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
+}
+
+func TestExecuteWithChatRejectsAllChatToolsForExecutionRole(t *testing.T) {
+	for _, kind := range executionForbiddenChatTools() {
+		t.Run(kind.String(), func(t *testing.T) {
+			_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+				SessionID: "session-1",
+				ChatID:    "chat-1",
+				ChatRole:  chatrole.Execution,
+			}, Request: tools.Request{
+				Tool: kind,
+				Args: map[string]string{"chat_id": "child-1", "profile": string(chatrole.Execution), "objective": "no", "message": "no", "archived": "true", "title": "no"},
+			}})
+			if err == nil || !strings.Contains(err.Error(), "not available to execution chats") {
+				t.Fatalf("expected role denial, got %v", err)
+			}
+			if !tools.IsDenied(err) {
+				t.Fatalf("expected denied error, got %T %[1]v", err)
+			}
+		})
 	}
 }
 
@@ -89,5 +110,28 @@ func TestBypassPermissionToolStillObeysDisabledState(t *testing.T) {
 	}
 	if !tools.IsDenied(err) {
 		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
+}
+
+func executionForbiddenToolNames() []string {
+	names := []string{
+		domain.ToolKindMilestoneAdd.String(),
+		domain.ToolKindMilestonePlan.String(),
+	}
+	for _, kind := range executionForbiddenChatTools() {
+		names = append(names, kind.String())
+	}
+	return names
+}
+
+func executionForbiddenChatTools() []tools.ID {
+	return []tools.ID{
+		domain.ToolKindChatList,
+		domain.ToolKindChatStart,
+		domain.ToolKindChatSend,
+		domain.ToolKindChatCancel,
+		domain.ToolKindChatArchive,
+		domain.ToolKindChatRename,
+		domain.ToolKindChatCleanup,
 	}
 }

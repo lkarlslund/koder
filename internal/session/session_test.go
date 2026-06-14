@@ -229,7 +229,7 @@ func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
 	}
 	chatID := id.New()
 	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", ParentChatID: &chatID}, chatID, "Idle")
-	want := "Chat " + chatID + " is now idle. Chat completed 1 out of 2 tasks for milestone alpha, but is now stopped."
+	want := "Chat " + chatID + " is now idle. Chat completed 1 out of 2 tasks for milestone alpha, but is now stopped. Remaining tasks: alphaT002 is pending."
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

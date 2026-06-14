@@ -46,6 +46,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"execution allows edit", Execution, testTool("file_edit"), true},
 		{"execution rejects chat start", Execution, testTool("chat_start"), false},
 		{"execution rejects chat send", Execution, testTool("chat_send"), false},
+		{"execution rejects chat cleanup", Execution, testTool("chat_cleanup"), false},
 		{"execution rejects milestone add", Execution, testTool("milestone_add"), false},
 		{"execution allows milestone update", Execution, testTool("milestone_update"), true},
 		{"orchestrator allows chat send", Orchestrator, testTool("chat_send"), true},

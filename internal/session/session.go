@@ -1447,6 +1447,7 @@ func (s *Session) chatStatusLocked(chatID id.ID) chattool.Status {
 	}
 	return chattool.Status{
 		ID:                 chatRecord.ID,
+		ParentChatID:       chatParentID(chatRecord),
 		Title:              chatRecord.Title,
 		Role:               chatRecord.WorkflowRole,
 		Archived:           chatRecord.Archived,

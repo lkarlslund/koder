@@ -78,6 +78,7 @@ const (
 	ToolKindChatCancel      ToolKind = "chat_cancel"
 	ToolKindChatArchive     ToolKind = "chat_archive"
 	ToolKindChatRename      ToolKind = "chat_rename"
+	ToolKindChatCleanup     ToolKind = "chat_cleanup"
 	ToolKindSkill           ToolKind = "skill"
 	ToolKindWebFetch        ToolKind = "web_fetch"
 	ToolKindWebSearch       ToolKind = "web_search"
@@ -126,6 +127,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindChatCancel,
 	ToolKindChatArchive,
 	ToolKindChatRename,
+	ToolKindChatCleanup,
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,

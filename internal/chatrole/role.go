@@ -76,11 +76,13 @@ Focus only on the assigned milestone and task list.
 - Keep task status updated as you progress.
 			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
+				"chat_list",
 				"chat_start",
 				"chat_send",
 				"chat_cancel",
 				"chat_archive",
 				"chat_rename",
+				"chat_cleanup",
 				"milestone_add",
 				"milestone_plan",
 				"milestone_write",
