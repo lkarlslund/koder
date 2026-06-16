@@ -34,6 +34,7 @@ type ContinuationPause struct {
 	Tool     domain.ToolKind
 	Count    int
 	Limit    int
+	Args     string
 	Body     string
 	Subtitle string
 }
@@ -71,15 +72,18 @@ func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, Con
 		return ToolLoopAllow, ContinuationPause{}
 	}
 	toolName := calls[0].Tool.DisplayName()
+	args := calls[0].ArgumentsJSON()
 	pause := ContinuationPause{
 		Reason:   ContinuationPauseReasonRepeatedTool,
 		Tool:     calls[0].Tool,
 		Count:    t.repeatCount,
+		Args:     args,
 		Subtitle: fmt.Sprintf("Repeated identical %s calls", toolName),
 		Body: fmt.Sprintf(
-			"Stopped continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to prior results.",
+			"Stopped continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to prior results.\n\nRepeated input: %s",
 			t.repeatCount,
 			toolName,
+			args,
 		),
 	}
 	if t.repeatCount == RepeatedToolLoopThreshold {
@@ -97,11 +101,15 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 	if count <= 0 {
 		count = RepeatedToolLoopThreshold
 	}
-	return fmt.Sprintf(
-		"Denied repeated %s call: this is identical call %d with the same input. Use the prior tool result already in this chat, or choose a different tool or different arguments.",
+	msg := fmt.Sprintf(
+		"Denied repeated %s call: this is identical call %d with the same input.",
 		toolName,
 		count,
 	)
+	if args := strings.TrimSpace(pause.Args); args != "" {
+		msg += " Repeated input: " + args + "."
+	}
+	return msg + " Read the previous tool result, then choose a different tool or pass different arguments that include the field you intended to change."
 }
 
 func toolLoopSignature(req tools.Request) string {

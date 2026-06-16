@@ -304,6 +304,34 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	}
 }
 
+func TestOrchestratorCannotMutateInProgressTask(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := modeltest.UpdateTask(ctx, st, tasks[0].ID, planning.TaskStatusInProgress, tasks[0].Content, "worker started"); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
+
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindTasksUpdate,
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator tried to complete running task."},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "chat_send") {
+		t.Fatalf("expected running task steering error, got %v", err)
+	}
+}
+
 func TestTaskScopedChatSeesAndUpdatesOnlyAssignedTask(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)

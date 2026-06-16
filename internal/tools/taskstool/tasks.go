@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -215,6 +216,9 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
+			if err := ensureTaskUpdateAllowed(runtime, tasks[idx]); err != nil {
+				return tools.Result{}, err
+			}
 			taskStatus, err := planning.ParseTaskStatus(req.Args["status"])
 			if err != nil {
 				return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
@@ -352,6 +356,9 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
+			if err := ensureTaskUpdateAllowed(runtime, tasks[idx]); err != nil {
+				return tools.Result{}, err
+			}
 			tasks[idx].Status = taskStatus
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				tasks[idx].Content = content
@@ -411,6 +418,17 @@ func ensureMilestoneAcceptsTasks(plan planning.Plan, ref string) error {
 		return nil
 	}
 	return nil
+}
+
+func ensureTaskUpdateAllowed(runtime tools.Runtime, task planning.Task) error {
+	if runtime.ChatRole != chatrole.Orchestrator || task.Status != planning.TaskStatusInProgress {
+		return nil
+	}
+	key := planning.TaskKey(task)
+	if key == "" {
+		key = string(task.ID)
+	}
+	return fmt.Errorf("task %s is in_progress and may be executing in a child chat; use chat_send to steer the worker instead of mutating the running task", key)
 }
 
 func persistedTaskBucket(ctx context.Context, control tools.SessionControl, sessionID id.ID, ref string) (planning.Plan, []planning.Task, string, error) {

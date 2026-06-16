@@ -6750,8 +6750,8 @@ func TestRunPromptDeniesRepeatedIdenticalToolCallsThenStops(t *testing.T) {
 				}
 				if tool.Status == domain.ToolStatusDenied {
 					deniedOutputs++
-					if tool.Result == nil || !strings.Contains(tool.Result.Text, "Use the prior tool result") {
-						t.Fatalf("expected denied loop tool to tell model to use prior results, got %#v", tool.Result)
+					if tool.Result == nil || !strings.Contains(tool.Result.Text, "Read the previous tool result") || !strings.Contains(tool.Result.Text, "Repeated input:") {
+						t.Fatalf("expected denied loop tool to show repeated input and tell model to read prior results, got %#v", tool.Result)
 					}
 				}
 			}

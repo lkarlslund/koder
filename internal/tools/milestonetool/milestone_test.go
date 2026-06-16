@@ -199,6 +199,35 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 }
 
+func TestUpdateItemRejectsNoOpAndSummarizesDependencyChange(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusPending, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"milestone_key": "M001", "status": "pending"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "no changes applied") || !strings.Contains(err.Error(), "depends_on_key is unset") {
+		t.Fatalf("expected no-op guidance error, got %v", err)
+	}
+
+	result, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"milestone_key": "M001", "depends_on_key": "M002"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Updated milestone M001: depends_on_key=M002") || !strings.Contains(result.Output, "depends_on_key=M002") {
+		t.Fatalf("expected dependency change summary, got %q", result.Output)
+	}
+}
+
 func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
 	plan := planning.Plan{
 		Summary: "Ship it",
@@ -329,7 +358,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 
 	finalized, err := (updateItemTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"milestone_key": "M002", "status": "executing"},
+		Args: map[string]string{"milestone_key": "M002", "status": "completed"},
 	}, tools.Result{Output: result.Output, Stored: result.Stored})
 	if err != nil {
 		t.Fatal(err)

@@ -282,14 +282,29 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 	if err != nil {
 		return tools.Result{}, err
 	}
+	before, ok := milestoneForKey(plan.Milestones, req.Args["milestone_key"])
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", req.Args["milestone_key"])
+	}
 	updated, err := updatedMilestonePlan(plan, req, actorFromRuntime(runtime))
 	if err != nil {
 		return tools.Result{}, err
 	}
+	after, ok := milestoneForKey(updated.Milestones, req.Args["milestone_key"])
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", req.Args["milestone_key"])
+	}
+	if milestonesEquivalent(before, after) {
+		return tools.Result{}, noMilestoneChangeError(before, req)
+	}
 	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated)), nil
+	result := tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated))
+	if summary := milestoneUpdateSummary(before, after); summary != "" {
+		result.Output = summary + "\n" + result.Output
+	}
+	return result, nil
 }
 
 func (writeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -378,9 +393,20 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	if err != nil {
 		return tools.Result{}, err
 	}
+	before, ok := milestoneForKey(plan.Milestones, req.Args["milestone_key"])
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", req.Args["milestone_key"])
+	}
 	updated, err := updatedMilestonePlan(plan, req, actorFromRuntime(runtime))
 	if err != nil {
 		return tools.Result{}, err
+	}
+	after, ok := milestoneForKey(updated.Milestones, req.Args["milestone_key"])
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", req.Args["milestone_key"])
+	}
+	if milestonesEquivalent(before, after) {
+		return tools.Result{}, noMilestoneChangeError(before, req)
 	}
 	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
@@ -392,6 +418,9 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	stored := tools.MilestoneStoredResult(tools.MilestonePlanForRef(plan, req.Args["milestone_key"]))
 	result.Stored = stored
 	result.Output = tools.FormatMilestoneOutput(stored)
+	if summary := milestoneUpdateSummary(before, after); summary != "" {
+		result.Output = summary + "\n" + result.Output
+	}
 	return result, nil
 }
 func (writeTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
@@ -550,4 +579,63 @@ func validateCompletedMilestoneTasks(ctx context.Context, control tools.SessionC
 		}
 	}
 	return nil
+}
+
+func milestoneForKey(items []planning.Milestone, key string) (planning.Milestone, bool) {
+	key = strings.TrimSpace(key)
+	for _, item := range items {
+		if planning.MilestoneKey(item) == key {
+			return item, true
+		}
+	}
+	return planning.Milestone{}, false
+}
+
+func milestonesEquivalent(a, b planning.Milestone) bool {
+	return a.Status == b.Status &&
+		strings.TrimSpace(a.Title) == strings.TrimSpace(b.Title) &&
+		strings.TrimSpace(a.Notes) == strings.TrimSpace(b.Notes) &&
+		strings.TrimSpace(a.DependsOnRef) == strings.TrimSpace(b.DependsOnRef)
+}
+
+func noMilestoneChangeError(current planning.Milestone, req tools.Request) error {
+	key := planning.MilestoneKey(current)
+	parts := []string{fmt.Sprintf("no changes applied to milestone %s", key)}
+	if status, ok := req.Args["status"]; ok {
+		parts = append(parts, fmt.Sprintf("status is already %s", strings.TrimSpace(status)))
+	}
+	if _, ok := req.Args["depends_on_key"]; !ok {
+		currentParent := strings.TrimSpace(current.DependsOnRef)
+		if currentParent == "" {
+			currentParent = "unset"
+		}
+		parts = append(parts, fmt.Sprintf("depends_on_key is %s", currentParent))
+		parts = append(parts, "to change dependency, pass depends_on_key explicitly and omit status unless changing status")
+	}
+	return errors.New(strings.Join(parts, "; "))
+}
+
+func milestoneUpdateSummary(before, after planning.Milestone) string {
+	key := planning.MilestoneKey(after)
+	changes := make([]string, 0, 4)
+	if before.Status != after.Status {
+		changes = append(changes, fmt.Sprintf("status=%s", after.Status.String()))
+	}
+	if strings.TrimSpace(before.Title) != strings.TrimSpace(after.Title) {
+		changes = append(changes, fmt.Sprintf("title=%q", strings.TrimSpace(after.Title)))
+	}
+	if strings.TrimSpace(before.Notes) != strings.TrimSpace(after.Notes) {
+		changes = append(changes, "notes updated")
+	}
+	if strings.TrimSpace(before.DependsOnRef) != strings.TrimSpace(after.DependsOnRef) {
+		parent := strings.TrimSpace(after.DependsOnRef)
+		if parent == "" {
+			parent = "root"
+		}
+		changes = append(changes, "depends_on_key="+parent)
+	}
+	if len(changes) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Updated milestone %s: %s", key, strings.Join(changes, ", "))
 }
