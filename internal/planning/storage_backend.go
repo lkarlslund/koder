@@ -50,12 +50,12 @@ func (s *Source) SaveTask(ctx context.Context, item Task) error {
 	return saveTask(ctx, st, item)
 }
 
-func (s *Source) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]Task, error) {
+func (s *Source) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]Task, error) {
 	st, err := s.requireStore()
 	if err != nil {
 		return nil, err
 	}
-	return listTasks(ctx, st, sessionID, milestoneRef)
+	return listTasks(ctx, st, sessionID, milestoneKey)
 }
 
 func (s *Source) SaveLegacyTask(ctx context.Context, task LegacyTask) error {
@@ -97,7 +97,7 @@ func taskCollection(st *store.Store) store.Collection[Task] {
 		SetID:     func(v *Task, id string) { v.ID = id },
 		Indexes: []store.IndexSpec[Task]{
 			{Name: "session", Value: func(v Task) string { return v.SessionID }},
-			{Name: "milestone", Value: func(v Task) string { return v.SessionID + "/" + v.MilestoneRef }},
+			{Name: "milestone", Value: func(v Task) string { return v.SessionID + "/" + v.MilestoneKey }},
 		},
 	})
 }
@@ -144,11 +144,11 @@ func saveTask(ctx context.Context, st *store.Store, item Task) error {
 	return taskCollection(st).Put(ctx, item)
 }
 
-func listTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneRef string) ([]Task, error) {
+func listTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneKey string) ([]Task, error) {
 	query := store.ByIndex[Task]("session", string(sessionID))
-	milestoneRef = strings.TrimSpace(milestoneRef)
-	if milestoneRef != "" {
-		query = store.ByIndex[Task]("milestone", string(sessionID)+"/"+milestoneRef)
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	if milestoneKey != "" {
+		query = store.ByIndex[Task]("milestone", string(sessionID)+"/"+milestoneKey)
 	}
 	items, err := taskCollection(st).List(ctx, query)
 	if err != nil {

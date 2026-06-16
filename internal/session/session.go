@@ -44,7 +44,7 @@ type Event struct {
 	Session     domain.Session
 	Plan        planning.Plan
 	Tasks       []planning.Task
-	TasksByRef  map[string][]planning.Task
+	TasksByKey  map[string][]planning.Task
 	LegacyTasks []planning.LegacyTask
 	Err         error
 }
@@ -61,7 +61,7 @@ type Session struct {
 	runtimes    map[id.ID]*chatpkg.Chat
 	unsubs      map[id.ID]func()
 	plan        planning.Plan
-	tasksByRef  map[string][]planning.Task
+	tasksByKey  map[string][]planning.Task
 	legacyTasks []planning.LegacyTask
 	workspace   workspacepkg.Status
 	config      RegistryConfig
@@ -117,7 +117,7 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 			return nil, err
 		}
 	}
-	tasksByRef, err := loadTasksByRef(ctx, planSrc, sessionID, plan)
+	tasksByKey, err := loadTasksByKey(ctx, planSrc, sessionID, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 		runtimes:    map[id.ID]*chatpkg.Chat{},
 		unsubs:      map[id.ID]func(){},
 		plan:        plan,
-		tasksByRef:  tasksByRef,
+		tasksByKey:  tasksByKey,
 		legacyTasks: slices.Clone(legacyTasks),
 		workspace:   workspacepkg.Status{ProjectRoot: session.ProjectRoot},
 		subs:        map[int]chan Event{},
@@ -142,7 +142,7 @@ func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSr
 	return owner, nil
 }
 
-func loadTasksByRef(ctx context.Context, planSrc *planning.Source, sessionID id.ID, plan planning.Plan) (map[string][]planning.Task, error) {
+func loadTasksByKey(ctx context.Context, planSrc *planning.Source, sessionID id.ID, plan planning.Plan) (map[string][]planning.Task, error) {
 	out := map[string][]planning.Task{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
@@ -169,7 +169,7 @@ func loadTasksByRef(ctx context.Context, planSrc *planning.Source, sessionID id.
 		}
 	}
 	for _, item := range items {
-		ref := strings.TrimSpace(item.MilestoneRef)
+		ref := strings.TrimSpace(item.MilestoneKey)
 		out[ref] = append(out[ref], item)
 	}
 	for ref, items := range out {
@@ -186,7 +186,7 @@ type SessionSnapshot struct {
 	Snapshots   map[id.ID]chatpkg.Snapshot
 	Plan        planning.Plan
 	Tasks       []planning.Task
-	TasksByRef  map[string][]planning.Task
+	TasksByKey  map[string][]planning.Task
 	LegacyTasks []planning.LegacyTask
 }
 
@@ -208,8 +208,8 @@ func (s *Session) Snapshot() SessionSnapshot {
 		Chats:       slices.Clone(s.chats),
 		Snapshots:   snapshots,
 		Plan:        cloneMilestonePlan(s.plan),
-		Tasks:       flattenTasks(s.tasksByRef),
-		TasksByRef:  cloneTasksByRef(s.tasksByRef),
+		Tasks:       flattenTasks(s.tasksByKey),
+		TasksByKey:  cloneTasksByKey(s.tasksByKey),
 		LegacyTasks: slices.Clone(s.legacyTasks),
 	}
 }
@@ -764,7 +764,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 	status.Title = target.Title
 	status.Role = target.WorkflowRole
 	status.Archived = target.Archived
-	status.ActiveMilestoneRef = target.ActiveMilestoneRef
+	status.ActiveMilestoneKey = target.ActiveMilestoneKey
 	status.AssignedTaskRef = target.AssignedTaskRef
 	status.StatusText = statusText
 	kind := EventChatChanged
@@ -1128,30 +1128,30 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 	}
 	s.mu.Lock()
 	s.plan = plan
-	tasks := flattenTasks(s.tasksByRef)
-	tasksByRef := cloneTasksByRef(s.tasksByRef)
+	tasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
 	s.mu.Unlock()
 	slog.Info("milestone plan stored", "session_id", sessionID, "milestones", len(plan.Milestones), "summary_bytes", len(plan.Summary))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Tasks: tasks, TasksByRef: tasksByRef})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Tasks: tasks, TasksByKey: tasksByKey})
 	return cloneMilestonePlan(plan), nil
 }
 
-func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
+func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
-	milestoneRef = strings.TrimSpace(milestoneRef)
+	milestoneKey = strings.TrimSpace(milestoneKey)
 	now := time.Now().UTC()
 	s.mu.RLock()
-	existing := slices.Clone(s.tasksByRef[milestoneRef])
+	existing := slices.Clone(s.tasksByKey[milestoneKey])
 	position := len(existing)
-	allTasks := flattenTasks(s.tasksByRef)
+	allTasks := flattenTasks(s.tasksByKey)
 	s.mu.RUnlock()
 	if err := planning.ValidateNoDuplicateTaskContent(existing, contents); err != nil {
 		return nil, err
 	}
 	items := make([]planning.Task, 0, len(contents))
-	nextKey := nextTaskKey(allTasks, milestoneRef)
+	nextKey := nextTaskKey(allTasks, milestoneKey)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
@@ -1161,14 +1161,14 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef st
 			ID:           id.New(),
 			Key:          nextKey,
 			SessionID:    sessionID,
-			MilestoneRef: milestoneRef,
+			MilestoneKey: milestoneKey,
 			Content:      content,
 			Status:       planning.TaskStatusPending,
 			Position:     position + len(items),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
-		nextKey = incrementTaskKey(nextKey, milestoneRef)
+		nextKey = incrementTaskKey(nextKey, milestoneKey)
 	}
 	for _, item := range items {
 		if err := s.planSrc.SaveTask(ctx, item); err != nil {
@@ -1176,16 +1176,16 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef st
 		}
 	}
 	s.mu.Lock()
-	if s.tasksByRef == nil {
-		s.tasksByRef = map[string][]planning.Task{}
+	if s.tasksByKey == nil {
+		s.tasksByKey = map[string][]planning.Task{}
 	}
-	s.tasksByRef[milestoneRef] = append(s.tasksByRef[milestoneRef], items...)
+	s.tasksByKey[milestoneKey] = append(s.tasksByKey[milestoneKey], items...)
 	plan := cloneMilestonePlan(s.plan)
-	tasks := flattenTasks(s.tasksByRef)
-	tasksByRef := cloneTasksByRef(s.tasksByRef)
+	tasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
 	s.mu.Unlock()
-	slog.Info("tasks added", "session_id", sessionID, "milestone_key", milestoneRef, "count", len(items))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: tasks, TasksByRef: tasksByRef})
+	slog.Info("tasks added", "session_id", sessionID, "milestone_key", milestoneKey, "count", len(items))
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: tasks, TasksByKey: tasksByKey})
 	return slices.Clone(items), nil
 }
 
@@ -1198,11 +1198,11 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	var item planning.Task
 	var ref string
 	found := false
-	for milestoneRef, tasks := range s.tasksByRef {
+	for milestoneKey, tasks := range s.tasksByKey {
 		for _, candidate := range tasks {
 			if planning.TaskKey(candidate) == taskID {
 				item = candidate
-				ref = milestoneRef
+				ref = milestoneKey
 				found = true
 				break
 			}
@@ -1227,35 +1227,35 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 		return planning.Task{}, err
 	}
 	s.mu.Lock()
-	tasks := slices.Clone(s.tasksByRef[ref])
+	tasks := slices.Clone(s.tasksByKey[ref])
 	for idx := range tasks {
 		if planning.TaskKey(tasks[idx]) == taskID {
 			tasks[idx] = item
 			break
 		}
 	}
-	s.tasksByRef[ref] = tasks
+	s.tasksByKey[ref] = tasks
 	sessionID := s.session.ID
 	plan := cloneMilestonePlan(s.plan)
-	allTasks := flattenTasks(s.tasksByRef)
-	tasksByRef := cloneTasksByRef(s.tasksByRef)
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
 	s.mu.Unlock()
 	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "task_key", item.Key, "milestone_key", ref, "status", item.Status, "note_bytes", len(item.Note))
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByRef: tasksByRef})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
 	return item, nil
 }
 
-func (s *Session) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
+func (s *Session) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
-	milestoneRef = strings.TrimSpace(milestoneRef)
+	milestoneKey = strings.TrimSpace(milestoneKey)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if milestoneRef == "" {
-		return flattenTasks(s.tasksByRef), nil
+	if milestoneKey == "" {
+		return flattenTasks(s.tasksByKey), nil
 	}
-	return slices.Clone(s.tasksByRef[milestoneRef]), nil
+	return slices.Clone(s.tasksByKey[milestoneKey]), nil
 }
 
 func (s *Session) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.LegacyTaskStatus) (planning.LegacyTask, error) {
@@ -1294,14 +1294,14 @@ func (p scopedPlanning) GetMilestonePlan(ctx context.Context, sessionID id.ID) (
 	if err != nil {
 		return planning.Plan{}, err
 	}
-	if ref := assignedMilestoneRef(p.chat); ref != "" {
-		return planning.PlanForRef(plan, ref), nil
+	if ref := assignedMilestoneKey(p.chat); ref != "" {
+		return planning.PlanForKey(plan, ref), nil
 	}
 	return plan, nil
 }
 
 func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
-	ref := assignedMilestoneRef(p.chat)
+	ref := assignedMilestoneKey(p.chat)
 	if ref == "" {
 		return p.session.SetMilestonePlan(ctx, sessionID, summary, milestones)
 	}
@@ -1326,11 +1326,11 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	return p.session.SetMilestonePlan(ctx, sessionID, current.Summary, current.Milestones)
 }
 
-func (p scopedPlanning) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
+func (p scopedPlanning) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if assignedTaskRef(p.chat) != "" {
 		return nil, fmt.Errorf("chat is scoped to task %q", assignedTaskRef(p.chat))
 	}
-	ref, err := p.allowedMilestoneRef(milestoneRef)
+	ref, err := p.allowedMilestoneKey(milestoneKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1341,7 +1341,7 @@ func (p scopedPlanning) UpdateTask(ctx context.Context, taskID string, status pl
 	if assigned := assignedTaskRef(p.chat); assigned != "" && taskID != assigned {
 		return planning.Task{}, fmt.Errorf("chat is scoped to task %q", assigned)
 	}
-	if ref := assignedMilestoneRef(p.chat); ref != "" {
+	if ref := assignedMilestoneKey(p.chat); ref != "" {
 		tasks, err := p.session.ListTasks(ctx, p.chat.SessionID, ref)
 		if err != nil {
 			return planning.Task{}, err
@@ -1364,8 +1364,8 @@ func (p scopedPlanning) UpdateTask(ctx context.Context, taskID string, status pl
 	return updated, nil
 }
 
-func (p scopedPlanning) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
-	ref, err := p.allowedMilestoneRef(milestoneRef)
+func (p scopedPlanning) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
+	ref, err := p.allowedMilestoneKey(milestoneKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1384,9 +1384,9 @@ func (p scopedPlanning) ListTasks(ctx context.Context, sessionID id.ID, mileston
 	return tasks, nil
 }
 
-func (p scopedPlanning) allowedMilestoneRef(requested string) (string, error) {
+func (p scopedPlanning) allowedMilestoneKey(requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
-	assigned := assignedMilestoneRef(p.chat)
+	assigned := assignedMilestoneKey(p.chat)
 	if assigned == "" {
 		return requested, nil
 	}
@@ -1396,10 +1396,10 @@ func (p scopedPlanning) allowedMilestoneRef(requested string) (string, error) {
 	return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
 }
 
-func assignedMilestoneRef(chat domain.Chat) string {
-	assigned := strings.TrimSpace(chat.ActiveMilestoneRef)
+func assignedMilestoneKey(chat domain.Chat) string {
+	assigned := strings.TrimSpace(chat.ActiveMilestoneKey)
 	if assigned == "" {
-		assigned = strings.TrimSpace(chat.AssignedTaskBucketRef)
+		assigned = strings.TrimSpace(chat.AssignedTaskBucketKey)
 	}
 	return assigned
 }
@@ -1461,7 +1461,7 @@ func (s *Session) chatStatusLocked(chatID id.ID) chattool.Status {
 		Title:              chatRecord.Title,
 		Role:               chatRecord.WorkflowRole,
 		Archived:           chatRecord.Archived,
-		ActiveMilestoneRef: chatRecord.ActiveMilestoneRef,
+		ActiveMilestoneKey: chatRecord.ActiveMilestoneKey,
 		AssignedTaskRef:    chatRecord.AssignedTaskRef,
 		State:              status,
 		Status:             string(status),
@@ -1558,7 +1558,7 @@ func cloneMilestones(src []planning.Milestone) []planning.Milestone {
 	return out
 }
 
-func cloneTasksByRef(src map[string][]planning.Task) map[string][]planning.Task {
+func cloneTasksByKey(src map[string][]planning.Task) map[string][]planning.Task {
 	if len(src) == 0 {
 		return map[string][]planning.Task{}
 	}
@@ -1575,8 +1575,8 @@ func flattenTasks(src map[string][]planning.Task) []planning.Task {
 		out = append(out, items...)
 	}
 	slices.SortFunc(out, func(a, b planning.Task) int {
-		if a.MilestoneRef != b.MilestoneRef {
-			return strings.Compare(a.MilestoneRef, b.MilestoneRef)
+		if a.MilestoneKey != b.MilestoneKey {
+			return strings.Compare(a.MilestoneKey, b.MilestoneKey)
 		}
 		if a.Position != b.Position {
 			return a.Position - b.Position

@@ -91,7 +91,7 @@ type Status struct {
 	Title              string
 	Role               chatrole.Role
 	Archived           bool
-	ActiveMilestoneRef string
+	ActiveMilestoneKey string
 	AssignedTaskRef    string
 	State              RunState
 	Status             string
@@ -106,7 +106,7 @@ type StartRequest struct {
 	Profile      chatrole.Role
 	Objective    string
 	Title        string
-	MilestoneRef string
+	MilestoneKey string
 }
 
 type UpdateRequest struct {
@@ -145,7 +145,7 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 			State:              string(status.State),
 			Archived:           status.Archived,
 			QueuedInputs:       status.QueuedInputs,
-			ActiveMilestoneRef: status.ActiveMilestoneRef,
+			ActiveMilestoneKey: status.ActiveMilestoneKey,
 			AssignedTaskRef:    status.AssignedTaskRef,
 			StatusText:         status.StatusText,
 		})
@@ -365,7 +365,7 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Profile:      chatrole.Role(req.Args["profile"]),
 		Objective:    req.Args["objective"],
 		Title:        req.Args["title"],
-		MilestoneRef: req.Args["milestone_key"],
+		MilestoneKey: req.Args["milestone_key"],
 	})
 	if err != nil {
 		return tools.Result{}, err

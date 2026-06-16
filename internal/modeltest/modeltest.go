@@ -60,7 +60,7 @@ func TaskCollection(st *store.Store) store.Collection[planning.Task] {
 		SetID:     func(v *planning.Task, id string) { v.ID = id },
 		Indexes: []store.IndexSpec[planning.Task]{
 			{Name: "session", Value: func(v planning.Task) string { return v.SessionID }},
-			{Name: "milestone", Value: func(v planning.Task) string { return v.SessionID + "/" + v.MilestoneRef }},
+			{Name: "milestone", Value: func(v planning.Task) string { return v.SessionID + "/" + v.MilestoneKey }},
 		},
 	})
 }
@@ -206,8 +206,8 @@ func GetPlan(ctx context.Context, st *store.Store, sessionID id.ID) (planning.Pl
 	return plan, nil
 }
 
-func AddTasks(ctx context.Context, st *store.Store, sessionID id.ID, ref string, contents []string) ([]planning.Task, error) {
-	existing, err := ListTasks(ctx, st, sessionID, ref)
+func AddTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
+	existing, err := ListTasks(ctx, st, sessionID, milestoneKey)
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +217,14 @@ func AddTasks(ctx context.Context, st *store.Store, sessionID id.ID, ref string,
 	}
 	now := time.Now().UTC()
 	items := make([]planning.Task, 0, len(contents))
-	nextKey := nextTaskKey(all, ref)
+	nextKey := nextTaskKey(all, milestoneKey)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: ref, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTaskKey(nextKey, ref)
+		items = append(items, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementTaskKey(nextKey, milestoneKey)
 	}
 	for _, item := range items {
 		if err := TaskCollection(st).Put(ctx, item); err != nil {
@@ -272,10 +272,10 @@ func UpdateTask(ctx context.Context, st *store.Store, taskID id.ID, status plann
 	return item, nil
 }
 
-func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID, ref string) ([]planning.Task, error) {
+func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
 	query := store.ByIndex[planning.Task]("session", string(sessionID))
-	if strings.TrimSpace(ref) != "" {
-		query = store.ByIndex[planning.Task]("milestone", string(sessionID)+"/"+strings.TrimSpace(ref))
+	if strings.TrimSpace(milestoneKey) != "" {
+		query = store.ByIndex[planning.Task]("milestone", string(sessionID)+"/"+strings.TrimSpace(milestoneKey))
 	}
 	items, err := TaskCollection(st).List(ctx, query)
 	if err != nil {

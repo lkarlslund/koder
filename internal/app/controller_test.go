@@ -460,7 +460,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 		t.Fatal("expected active session and chat")
 	}
 	if _, err := ctrl.SetMilestonePlan(ctx, state.Session.ID, "Ship it", []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
+		{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	status, err := ctrl.StartChat(ctx, state.Session.ID, state.ActiveChatID, chattool.StartRequest{
 		Profile:      chatrole.Execution,
 		Objective:    "Implement the milestone",
-		MilestoneRef: "M001",
+		MilestoneKey: "M001",
 	})
 	if err != nil {
 		t.Fatalf("start chat: %v", err)
@@ -483,7 +483,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	}
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == status.ID && item.ActiveMilestoneRef == "M001" && item.AssignedTaskRef == "" {
+		if item.ID == status.ID && item.ActiveMilestoneKey == "M001" && item.AssignedTaskRef == "" {
 			found = true
 			break
 		}

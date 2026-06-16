@@ -167,11 +167,11 @@ func (r *Chat) toolRuntime(runtime tools.Runtime) tools.Runtime {
 	if runtime.ChatRole == "" {
 		runtime.ChatRole = r.chat.WorkflowRole
 	}
-	if runtime.ActiveMilestoneRef == "" {
-		runtime.ActiveMilestoneRef = r.chat.ActiveMilestoneRef
+	if runtime.ActiveMilestoneKey == "" {
+		runtime.ActiveMilestoneKey = r.chat.ActiveMilestoneKey
 	}
-	if runtime.AssignedTaskBucketRef == "" {
-		runtime.AssignedTaskBucketRef = r.chat.AssignedTaskBucketRef
+	if runtime.AssignedTaskBucketKey == "" {
+		runtime.AssignedTaskBucketKey = r.chat.AssignedTaskBucketKey
 	}
 	if runtime.AssignedTaskRef == "" {
 		runtime.AssignedTaskRef = r.chat.AssignedTaskRef

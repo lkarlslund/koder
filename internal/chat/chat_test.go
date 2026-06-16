@@ -563,8 +563,8 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 		t.Fatal(err)
 	}
 	plan := planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, Position: 0},
-		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
+		{Key: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting, Position: 0},
+		{Key: "beta", Title: "Beta", Status: planning.MilestoneStatusPending, Position: 1},
 	}}
 	if err := modeltest.PutPlan(ctx, st, plan); err != nil {
 		t.Fatal(err)

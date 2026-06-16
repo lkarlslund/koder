@@ -1359,7 +1359,7 @@
           if (!sameSession) {
             delete delta.milestones; delete delta.Milestones;
             delete delta.tasks; delete delta.Tasks;
-            delete delta.tasks_by_milestone; delete delta.TasksByRef;
+            delete delta.tasks_by_milestone; delete delta.TasksByKey;
           }
           delete delta.context_window; delete delta.ContextWindow;
           delete delta.model_info; delete delta.ModelInfo;
@@ -1403,7 +1403,7 @@
           if (!delta) return;
           if (delta.milestones !== undefined) { this.state.milestones = delta.milestones; this.state.Milestones = delta.milestones; }
           if (delta.tasks !== undefined) { this.state.tasks = delta.tasks; this.state.Tasks = delta.tasks; }
-          if (delta.tasks_by_milestone !== undefined) { this.state.tasks_by_milestone = delta.tasks_by_milestone; this.state.TasksByRef = delta.tasks_by_milestone; }
+          if (delta.tasks_by_milestone !== undefined) { this.state.tasks_by_milestone = delta.tasks_by_milestone; this.state.TasksByKey = delta.tasks_by_milestone; }
           this.reportClientStateSoon();
         },
         applyTasksDelta(delta) {
@@ -2307,21 +2307,21 @@
         },
         visibleMilestoneTree() {
           const items = this.visibleMilestones();
-          const byRef = new Map();
+          const byKey = new Map();
           const nodes = items.map(milestone => ({milestone, children: [], depth: 0, orphan: false}));
           for (const node of nodes) {
-            const ref = this.milestoneRef(node.milestone);
-            if (ref) byRef.set(ref, node);
+            const milestoneKey = this.milestoneKey(node.milestone);
+            if (milestoneKey) byKey.set(milestoneKey, node);
           }
           const roots = [];
           for (const node of nodes) {
-            const parentRef = this.milestoneDependsOnRef(node.milestone);
-            const parent = parentRef ? byRef.get(parentRef) : null;
+            const parentKey = this.milestoneDependsOnKey(node.milestone);
+            const parent = parentKey ? byKey.get(parentKey) : null;
             if (parent && parent !== node) {
               parent.children.push(node);
               continue;
             }
-            node.orphan = !!parentRef && !parent;
+            node.orphan = !!parentKey && !parent;
             roots.push(node);
           }
           return roots;
@@ -2329,10 +2329,10 @@
         flattenedMilestones() {
           const out = [];
           const visit = (node, depth, seen) => {
-            const ref = this.milestoneRef(node.milestone);
-            if (ref && seen.has(ref)) return;
+            const milestoneKey = this.milestoneKey(node.milestone);
+            if (milestoneKey && seen.has(milestoneKey)) return;
             const nextSeen = new Set(seen);
-            if (ref) nextSeen.add(ref);
+            if (milestoneKey) nextSeen.add(milestoneKey);
             out.push({...node, depth});
             for (const child of node.children) visit(child, depth + 1, nextSeen);
           };
@@ -2375,21 +2375,21 @@
           return (this.milestoneStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' milestones';
         },
         milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },
-        milestoneRef(m) { return m.Key || m.key || m.Ref || m.ref || ''; },
-        milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
+        milestoneKey(m) { return m.Key || m.key || ''; },
+        milestoneTitle(m) { return m.Title || m.title || this.milestoneKey(m); },
         milestoneStatus(m) { return m.Status || m.status || 'pending'; },
         milestoneNotes(m) { return m.Notes || m.notes || ''; },
-        milestoneDependsOnRef(m) { return m.DependsOnKey || m.depends_on_key || m.DependsOnRef || m.depends_on_ref || ''; },
+        milestoneDependsOnKey(m) { return m.DependsOnKey || m.depends_on_key || ''; },
         milestoneTreeTitle(node) {
           const notes = this.milestoneNotes(node.milestone);
           if (!node.orphan) return notes;
-          const parentRef = this.milestoneDependsOnRef(node.milestone);
-          return (notes ? notes + '\n' : '') + 'Depends on hidden or missing milestone ' + parentRef;
+          const parentKey = this.milestoneDependsOnKey(node.milestone);
+          return (notes ? notes + '\n' : '') + 'Depends on hidden or missing milestone ' + parentKey;
         },
-        milestoneExpanded(ref) { return !!this.expandedMilestones[ref]; },
-        toggleMilestone(ref) {
-          if (!ref) return;
-          this.expandedMilestones = {...this.expandedMilestones, [ref]: !this.expandedMilestones[ref]};
+        milestoneExpanded(milestoneKey) { return !!this.expandedMilestones[milestoneKey]; },
+        toggleMilestone(milestoneKey) {
+          if (!milestoneKey) return;
+          this.expandedMilestones = {...this.expandedMilestones, [milestoneKey]: !this.expandedMilestones[milestoneKey]};
           this.writeMilestoneExpansion();
         },
         milestoneIcon(status) {
@@ -2410,11 +2410,11 @@
           return 'planning-badge-pending';
         },
         taskItems() { return this.state.tasks || this.state.Tasks || []; },
-        tasksByMilestone() { return this.state.tasks_by_milestone || this.state.TasksByRef || {}; },
+        tasksByMilestone() { return this.state.tasks_by_milestone || this.state.TasksByKey || {}; },
         taskItemsForMilestone(milestone) {
-          const ref = this.milestoneRef(milestone);
+          const milestoneKey = this.milestoneKey(milestone);
           const grouped = this.tasksByMilestone();
-          if (grouped && Object.prototype.hasOwnProperty.call(grouped, ref)) return grouped[ref] || [];
+          if (grouped && Object.prototype.hasOwnProperty.call(grouped, milestoneKey)) return grouped[milestoneKey] || [];
           return [];
         },
         milestoneTaskCounts(milestone) {

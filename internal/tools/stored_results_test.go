@@ -1,10 +1,12 @@
 package tools_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -193,6 +195,72 @@ func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
 	}
 	if !strings.Contains(text, "{idle} {queued_inputs:1}") {
 		t.Fatalf("expected queued input count, got %q", text)
+	}
+}
+
+func TestPlanningStoredResultsEmitMilestoneKeysOnly(t *testing.T) {
+	plan := planning.Plan{Milestones: []planning.Milestone{{
+		Key:          "M001",
+		LegacyRef:    "legacy-alpha",
+		Title:        "Alpha",
+		Status:       planning.MilestoneStatusReady,
+		DependsOnKey: "M000",
+	}}}
+
+	milestones := tools.MilestoneStoredResult(plan)
+	rawMilestones, err := json.Marshal(milestones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawMilestones), `"ref"`) || strings.Contains(string(rawMilestones), `"depends_on_ref"`) {
+		t.Fatalf("expected milestone stored JSON to expose only key fields, got %s", rawMilestones)
+	}
+	if !strings.Contains(string(rawMilestones), `"key":"M001"`) || !strings.Contains(string(rawMilestones), `"depends_on_key":"M000"`) {
+		t.Fatalf("expected milestone stored JSON to include canonical key fields, got %s", rawMilestones)
+	}
+
+	tasks := tools.BuildTaskListStoredResult(plan, "M001", nil, "")
+	rawTasks, err := json.Marshal(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawTasks), `"milestone_ref"`) {
+		t.Fatalf("expected task stored JSON to omit milestone_ref, got %s", rawTasks)
+	}
+	if !strings.Contains(string(rawTasks), `"milestone_key":"M001"`) {
+		t.Fatalf("expected task stored JSON to include milestone_key, got %s", rawTasks)
+	}
+}
+
+func TestDisplayTextForPartStillReadsLegacyMilestoneKeys(t *testing.T) {
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindMilestoneList, tools.StoredResultStatusOK, "", tools.MilestonePlanStoredResult{
+		Milestones: []tools.MilestoneStoredItem{{
+			LegacyRef:          "legacy-alpha",
+			Title:              "Alpha",
+			Status:             "ready",
+			LegacyDependsOnKey: "legacy-parent",
+		}},
+	}))
+	if !ok {
+		t.Fatal("expected display text")
+	}
+	if !strings.Contains(text, "- [ready] Alpha (legacy-alpha; depends_on_key=legacy-parent)") {
+		t.Fatalf("expected legacy refs to render as keys, got %q", text)
+	}
+
+	text, ok = tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTaskList, tools.StoredResultStatusOK, "", tools.TaskListStoredResult{
+		LegacyMilestoneKey: "legacy-alpha",
+		Items: []tools.TaskStoredItem{{
+			ID:      "task-1",
+			Content: "First",
+			Status:  "pending",
+		}},
+	}))
+	if !ok {
+		t.Fatal("expected display text")
+	}
+	if !strings.Contains(text, "Milestone key: legacy-alpha") {
+		t.Fatalf("expected legacy milestone_ref to render as milestone key, got %q", text)
 	}
 }
 

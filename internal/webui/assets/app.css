@@ -202,7 +202,7 @@
     .milestone-progress-cancelled { background: var(--bs-secondary-color); }
     .milestone-progress-pending { background: transparent; }
     .planning-expander, .planning-status { font-size: .85rem; line-height: 1; }
-    .planning-ref, .planning-counts { color: var(--bs-secondary-color); font-size: .78rem; white-space: nowrap; }
+    .planning-key, .planning-counts { color: var(--bs-secondary-color); font-size: .78rem; white-space: nowrap; }
     .planning-task-status { font-size: .68rem; white-space: nowrap; }
     .planning-badge { font-size: .68rem; max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; border: 1px solid transparent; }
     .planning-badge-pending { color: var(--bs-secondary-text-emphasis); background: var(--bs-secondary-bg-subtle); border-color: var(--bs-secondary-border-subtle); }

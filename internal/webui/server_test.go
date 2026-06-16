@@ -938,10 +938,10 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		RestartNeeded: true,
 		Milestones: planning.Plan{
 			Summary:    "Live plan",
-			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}},
+			Milestones: []planning.Milestone{{Key: "alpha", Title: "Alpha", Status: planning.MilestoneStatusExecuting}},
 		},
-		Tasks:      []planning.Task{{ID: "task-1", MilestoneRef: "alpha", Content: "First", Status: planning.TaskStatusInProgress}},
-		TasksByRef: map[string][]planning.Task{"alpha": {{ID: "task-1", MilestoneRef: "alpha", Content: "First", Status: planning.TaskStatusInProgress}}},
+		Tasks:      []planning.Task{{ID: "task-1", MilestoneKey: "alpha", Content: "First", Status: planning.TaskStatusInProgress}},
+		TasksByKey: map[string][]planning.Task{"alpha": {{ID: "task-1", MilestoneKey: "alpha", Content: "First", Status: planning.TaskStatusInProgress}}},
 		Snapshots: map[id.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
@@ -1488,7 +1488,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `visibleMilestones()`) ||
 		!strings.Contains(fullPage, `flattenedMilestones()`) ||
-		!strings.Contains(fullPage, `milestoneDependsOnRef`) ||
+		!strings.Contains(fullPage, `milestoneDependsOnKey`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterOptions()`) ||
 		!strings.Contains(fullPage, `milestoneFilterStatuses()`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterClass(filter.status)`) ||

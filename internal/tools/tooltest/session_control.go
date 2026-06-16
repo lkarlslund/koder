@@ -35,8 +35,8 @@ func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 
 func (c SessionControl) AddTasks(ctx context.Context, sessionID id.ID, ref string, items []string) ([]planning.Task, error) {
 	now := time.Now().UTC()
-	milestoneRef := strings.TrimSpace(ref)
-	existing, err := modeltest.ListTasks(ctx, c.Store, sessionID, milestoneRef)
+	milestoneKey := strings.TrimSpace(ref)
+	existing, err := modeltest.ListTasks(ctx, c.Store, sessionID, milestoneKey)
 	if err != nil {
 		return nil, err
 	}
@@ -45,14 +45,14 @@ func (c SessionControl) AddTasks(ctx context.Context, sessionID id.ID, ref strin
 		return nil, err
 	}
 	out := make([]planning.Task, 0, len(items))
-	nextKey := nextTaskKey(all, milestoneRef)
+	nextKey := nextTaskKey(all, milestoneKey)
 	for _, content := range items {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneRef: milestoneRef, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTaskKey(nextKey, milestoneRef)
+		out = append(out, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		nextKey = incrementTaskKey(nextKey, milestoneKey)
 	}
 	for _, item := range out {
 		if err := modeltest.PutTask(ctx, c.Store, item); err != nil {

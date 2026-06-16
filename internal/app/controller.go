@@ -56,7 +56,7 @@ type State struct {
 	Snapshots     map[id.ID]chat.Snapshot    `json:"snapshots"`
 	Milestones    planning.Plan              `json:"milestones"`
 	Tasks         []planning.Task            `json:"tasks"`
-	TasksByRef    map[string][]planning.Task `json:"tasks_by_milestone"`
+	TasksByKey    map[string][]planning.Task `json:"tasks_by_milestone"`
 	Workspace     workspacepkg.Status        `json:"workspace_status"`
 	ContextWindow int                        `json:"context_window"`
 	ModelInfo     ModelInfo                  `json:"model_info"`
@@ -501,7 +501,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 		Snapshots:     snapshots,
 		Milestones:    ownerSnapshot.Plan,
 		Tasks:         slices.Clone(ownerSnapshot.Tasks),
-		TasksByRef:    cloneTasksByRef(ownerSnapshot.TasksByRef),
+		TasksByKey:    cloneTasksByKey(ownerSnapshot.TasksByKey),
 		Workspace:     owner.WorkspaceStatus(),
 		ContextWindow: c.contextWindowForChat(chatRecord),
 		ModelInfo:     c.modelInfoForChat(chatRecord),
@@ -795,7 +795,7 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event, selectedCha
 		return Event{Type: "planning_delta", Payload: map[string]any{
 			"milestones":         event.Plan,
 			"tasks":              slices.Clone(event.Tasks),
-			"tasks_by_milestone": cloneTasksByRef(event.TasksByRef),
+			"tasks_by_milestone": cloneTasksByKey(event.TasksByKey),
 		}}, true
 	case sessionpkg.EventTasksChanged:
 		return Event{Type: "legacy_tasks_delta", Payload: map[string]any{"legacy_tasks": slices.Clone(event.LegacyTasks)}}, true
@@ -1132,10 +1132,10 @@ func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID id.ID, summ
 	return planning.Plan{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTasks(ctx context.Context, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
+func (c *Controller) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			created, err := owner.AddTasks(ctx, sessionID, milestoneRef, contents)
+			created, err := owner.AddTasks(ctx, sessionID, milestoneKey, contents)
 			if err != nil {
 				return nil, err
 			}
@@ -1161,10 +1161,10 @@ func (c *Controller) UpdateTask(ctx context.Context, taskID id.ID, status planni
 	return planning.Task{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) ListTasks(ctx context.Context, sessionID id.ID, milestoneRef string) ([]planning.Task, error) {
+func (c *Controller) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
-			return owner.ListTasks(ctx, sessionID, milestoneRef)
+			return owner.ListTasks(ctx, sessionID, milestoneKey)
 		}
 	}
 	return nil, fmt.Errorf("no live session owner")
@@ -1855,7 +1855,7 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 	return session.ID != ""
 }
 
-func cloneTasksByRef(in map[string][]planning.Task) map[string][]planning.Task {
+func cloneTasksByKey(in map[string][]planning.Task) map[string][]planning.Task {
 	if len(in) == 0 {
 		return nil
 	}

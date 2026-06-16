@@ -67,7 +67,7 @@ func (dependTool) BypassesPermission() bool     { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if tools.AssignedMilestoneRef(runtime) != "" {
+	if tools.AssignedMilestoneKey(runtime) != "" {
 		return tools.ToolSpec{}, false
 	}
 	if runtime.ChatRole == chatrole.Execution {
@@ -77,7 +77,7 @@ func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tool
 }
 
 func (dependTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if tools.AssignedMilestoneRef(runtime) != "" {
+	if tools.AssignedMilestoneKey(runtime) != "" {
 		return tools.ToolSpec{}, false
 	}
 	if runtime.ChatRole == chatrole.Execution {
@@ -276,8 +276,8 @@ func taskSummary(tasks []planning.Task) string {
 
 func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	if tools.AssignedMilestoneRef(runtime) != "" {
-		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneRef(runtime))
+	if tools.AssignedMilestoneKey(runtime) != "" {
+		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneKey(runtime))
 	}
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
@@ -291,7 +291,7 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 		Title:        strings.TrimSpace(req.Args["title"]),
 		Status:       planning.MilestoneStatusPending,
 		Notes:        strings.TrimSpace(req.Args["notes"]),
-		DependsOnRef: strings.TrimSpace(req.Args["depends_on_key"]),
+		DependsOnKey: strings.TrimSpace(req.Args["depends_on_key"]),
 	}
 	nextMilestones := appendMilestones(plan.Milestones, []planning.Milestone{item})
 	nextPlan, _ := planning.NormalizePlanKeys(planning.Plan{Summary: plan.Summary, Milestones: nextMilestones})
@@ -320,7 +320,7 @@ func callMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.R
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
+	ref, err := tools.AllowedMilestoneKey(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -420,7 +420,7 @@ func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, r
 		Title:        strings.TrimSpace(req.Args["title"]),
 		Status:       planning.MilestoneStatusPending,
 		Notes:        strings.TrimSpace(req.Args["notes"]),
-		DependsOnRef: strings.TrimSpace(req.Args["depends_on_key"]),
+		DependsOnKey: strings.TrimSpace(req.Args["depends_on_key"]),
 	}
 	nextMilestones := appendMilestones(plan.Milestones, []planning.Milestone{item})
 	nextPlan, _ := planning.NormalizePlanKeys(planning.Plan{Summary: plan.Summary, Milestones: nextMilestones})
@@ -472,7 +472,7 @@ func finalizeMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req too
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := tools.MilestoneStoredResult(tools.MilestonePlanForRef(plan, req.Args["milestone_key"]))
+	stored := tools.MilestoneStoredResult(tools.MilestonePlanForKey(plan, req.Args["milestone_key"]))
 	result.Stored = stored
 	result.Output = tools.FormatMilestoneOutput(stored)
 	if summary := milestoneUpdateSummary(before, after); summary != "" {
@@ -571,7 +571,7 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor milestone
 			milestones[idx].Notes = strings.TrimSpace(notes)
 		}
 		if dependsOnKey, ok := req.Args["depends_on_key"]; ok {
-			milestones[idx].DependsOnRef = strings.TrimSpace(dependsOnKey)
+			milestones[idx].DependsOnKey = strings.TrimSpace(dependsOnKey)
 		}
 		break
 	}
@@ -652,7 +652,7 @@ func milestonesEquivalent(a, b planning.Milestone) bool {
 	return a.Status == b.Status &&
 		strings.TrimSpace(a.Title) == strings.TrimSpace(b.Title) &&
 		strings.TrimSpace(a.Notes) == strings.TrimSpace(b.Notes) &&
-		strings.TrimSpace(a.DependsOnRef) == strings.TrimSpace(b.DependsOnRef)
+		strings.TrimSpace(a.DependsOnKey) == strings.TrimSpace(b.DependsOnKey)
 }
 
 func noMilestoneChangeError(current planning.Milestone, req tools.Request) error {
@@ -662,7 +662,7 @@ func noMilestoneChangeError(current planning.Milestone, req tools.Request) error
 		parts = append(parts, fmt.Sprintf("status is already %s", strings.TrimSpace(status)))
 	}
 	if _, ok := req.Args["depends_on_key"]; !ok {
-		currentParent := strings.TrimSpace(current.DependsOnRef)
+		currentParent := strings.TrimSpace(current.DependsOnKey)
 		if currentParent == "" {
 			currentParent = "unset"
 		}
@@ -684,8 +684,8 @@ func milestoneUpdateSummary(before, after planning.Milestone) string {
 	if strings.TrimSpace(before.Notes) != strings.TrimSpace(after.Notes) {
 		changes = append(changes, "notes updated")
 	}
-	if strings.TrimSpace(before.DependsOnRef) != strings.TrimSpace(after.DependsOnRef) {
-		parent := strings.TrimSpace(after.DependsOnRef)
+	if strings.TrimSpace(before.DependsOnKey) != strings.TrimSpace(after.DependsOnKey) {
+		parent := strings.TrimSpace(after.DependsOnKey)
 		if parent == "" {
 			parent = "root"
 		}

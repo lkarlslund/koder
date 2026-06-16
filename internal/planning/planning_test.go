@@ -19,8 +19,8 @@ func TestParseTaskKeyRequiresScopedKey(t *testing.T) {
 
 func TestNormalizeTaskKeysScopesLegacyTaskKeys(t *testing.T) {
 	items, changed := NormalizeTaskKeys([]Task{
-		{Key: "T001", MilestoneRef: "old"},
-		{MilestoneRef: "M002"},
+		{Key: "T001", MilestoneKey: "old"},
+		{MilestoneKey: "M002"},
 	}, map[string]string{"old": "M001", "M002": "M002"})
 	if !changed {
 		t.Fatal("expected normalization to report changed keys")

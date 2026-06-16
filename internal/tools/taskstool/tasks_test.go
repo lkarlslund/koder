@@ -206,7 +206,7 @@ func TestTaskAddRejectsDuplicateContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusReady}}}); err != nil {
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Write tests"}); err != nil {
@@ -234,8 +234,8 @@ func TestTaskAddRejectsClosedMilestones(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{
-		{Ref: "done", Title: "Done", Status: planning.MilestoneStatusCompleted},
-		{Ref: "cancelled", Title: "Cancelled", Status: planning.MilestoneStatusCancelled},
+		{Key: "M001", Title: "Done", Status: planning.MilestoneStatusCompleted},
+		{Key: "M002", Title: "Cancelled", Status: planning.MilestoneStatusCancelled},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
@@ -311,7 +311,7 @@ func TestOrchestratorCannotMutateInProgressTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
@@ -340,7 +340,7 @@ func TestTaskScopedChatSeesAndUpdatesOnlyAssignedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Summary: "Ship it", Milestones: []planning.Milestone{
-		{Ref: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting},
+		{Key: "implement", Title: "Implement", Status: planning.MilestoneStatusExecuting},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -351,16 +351,16 @@ func TestTaskScopedChatSeesAndUpdatesOnlyAssignedTask(t *testing.T) {
 	chat := domain.Chat{
 		ID:                    "chat-1",
 		WorkflowRole:          chatrole.Execution,
-		ActiveMilestoneRef:    "M001",
-		AssignedTaskBucketRef: "M001",
+		ActiveMilestoneKey:    "M001",
+		AssignedTaskBucketKey: "M001",
 		AssignedTaskRef:       planning.TaskKey(tasks[0]),
 	}
 	runtime := tools.Runtime{
 		SessionID:             session.ID,
 		ChatID:                chat.ID,
 		ChatRole:              chat.WorkflowRole,
-		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
-		AssignedTaskBucketRef: chat.AssignedTaskBucketRef,
+		ActiveMilestoneKey:    chat.ActiveMilestoneKey,
+		AssignedTaskBucketKey: chat.AssignedTaskBucketKey,
 		AssignedTaskRef:       chat.AssignedTaskRef,
 		SessionControl:        tooltest.NewSessionControl(st),
 	}

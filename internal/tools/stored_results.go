@@ -197,16 +197,16 @@ type UpdatePlanStoredResult struct {
 }
 
 type MilestoneStoredItem struct {
-	ID           id.ID  `json:"id,omitempty"`
-	Key          string `json:"key,omitempty"`
-	Ref          string `json:"ref"`
-	Title        string `json:"title"`
-	Status       string `json:"status"`
-	Notes        string `json:"notes,omitempty"`
-	DependsOnKey string `json:"depends_on_key,omitempty"`
-	DependsOnRef string `json:"depends_on_ref,omitempty"`
-	OwnerChatID  string `json:"owner_chat_id,omitempty"`
-	TaskSummary  string `json:"task_summary,omitempty"`
+	ID                 id.ID  `json:"id,omitempty"`
+	Key                string `json:"key,omitempty"`
+	LegacyRef          string `json:"ref,omitempty"`
+	Title              string `json:"title"`
+	Status             string `json:"status"`
+	Notes              string `json:"notes,omitempty"`
+	DependsOnKey       string `json:"depends_on_key,omitempty"`
+	LegacyDependsOnKey string `json:"depends_on_ref,omitempty"`
+	OwnerChatID        string `json:"owner_chat_id,omitempty"`
+	TaskSummary        string `json:"task_summary,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {
@@ -221,7 +221,7 @@ type ChatStoredItem struct {
 	State              string `json:"state,omitempty"`
 	Archived           bool   `json:"archived,omitempty"`
 	QueuedInputs       int    `json:"queued_inputs,omitempty"`
-	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
+	ActiveMilestoneKey string `json:"active_milestone_key,omitempty"`
 	AssignedTaskRef    string `json:"assigned_task_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`
 }
@@ -239,11 +239,11 @@ type TaskStoredItem struct {
 }
 
 type TaskListStoredResult struct {
-	MilestoneKey   string           `json:"milestone_key,omitempty"`
-	MilestoneRef   string           `json:"milestone_ref,omitempty"`
-	MilestoneTitle string           `json:"milestone_title,omitempty"`
-	Message        string           `json:"message,omitempty"`
-	Items          []TaskStoredItem `json:"items,omitempty"`
+	MilestoneKey       string           `json:"milestone_key,omitempty"`
+	LegacyMilestoneKey string           `json:"milestone_ref,omitempty"`
+	MilestoneTitle     string           `json:"milestone_title,omitempty"`
+	Message            string           `json:"message,omitempty"`
+	Items              []TaskStoredItem `json:"items,omitempty"`
 }
 
 type SkillStoredResult struct {
@@ -1115,14 +1115,14 @@ func milestoneStoredKey(item MilestoneStoredItem) string {
 	if key := strings.TrimSpace(item.Key); key != "" {
 		return key
 	}
-	return strings.TrimSpace(item.Ref)
+	return strings.TrimSpace(item.LegacyRef)
 }
 
 func milestoneStoredDependsOnKey(item MilestoneStoredItem) string {
 	if key := strings.TrimSpace(item.DependsOnKey); key != "" {
 		return key
 	}
-	return strings.TrimSpace(item.DependsOnRef)
+	return strings.TrimSpace(item.LegacyDependsOnKey)
 }
 
 func formatTaskListStoredResult(result TaskListStoredResult) string {
@@ -1132,7 +1132,7 @@ func formatTaskListStoredResult(result TaskListStoredResult) string {
 	}
 	if key := strings.TrimSpace(result.MilestoneKey); key != "" {
 		lines = append(lines, "Milestone key: "+key)
-	} else if ref := strings.TrimSpace(result.MilestoneRef); ref != "" {
+	} else if ref := strings.TrimSpace(result.LegacyMilestoneKey); ref != "" {
 		lines = append(lines, "Milestone key: "+ref)
 	}
 	for _, item := range result.Items {
@@ -1174,7 +1174,7 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 			line += " {archived}"
 		}
 		lines = append(lines, line)
-		if ref := strings.TrimSpace(item.ActiveMilestoneRef); ref != "" {
+		if ref := strings.TrimSpace(item.ActiveMilestoneKey); ref != "" {
 			lines = append(lines, "milestone: "+ref)
 		}
 		if status := strings.TrimSpace(item.StatusText); status != "" {

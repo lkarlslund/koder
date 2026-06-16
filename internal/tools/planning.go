@@ -37,9 +37,9 @@ func RequireTaskControl(runtime Runtime) (TaskControl, error) {
 	return runtime.TaskControl, nil
 }
 
-func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
+func AllowedMilestoneKey(runtime Runtime, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
-	assigned := AssignedMilestoneRef(runtime)
+	assigned := AssignedMilestoneKey(runtime)
 	if assigned == "" {
 		return requested, nil
 	}
@@ -49,10 +49,10 @@ func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 	return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
 }
 
-func AssignedMilestoneRef(runtime Runtime) string {
-	assigned := strings.TrimSpace(runtime.ActiveMilestoneRef)
+func AssignedMilestoneKey(runtime Runtime) string {
+	assigned := strings.TrimSpace(runtime.ActiveMilestoneKey)
 	if assigned == "" {
-		assigned = strings.TrimSpace(runtime.AssignedTaskBucketRef)
+		assigned = strings.TrimSpace(runtime.AssignedTaskBucketKey)
 	}
 	return assigned
 }
@@ -85,7 +85,7 @@ func ScopedTasks(runtime Runtime, tasks []planning.Task) []planning.Task {
 }
 
 func ScopedMilestonePlan(runtime Runtime, plan planning.Plan) planning.Plan {
-	assigned := AssignedMilestoneRef(runtime)
+	assigned := AssignedMilestoneKey(runtime)
 	if assigned == "" {
 		return plan
 	}
@@ -100,8 +100,8 @@ func ScopedMilestonePlan(runtime Runtime, plan planning.Plan) planning.Plan {
 	return scoped
 }
 
-func MilestonePlanForRef(plan planning.Plan, ref string) planning.Plan {
-	return planning.PlanForRef(plan, ref)
+func MilestonePlanForKey(plan planning.Plan, ref string) planning.Plan {
+	return planning.PlanForKey(plan, ref)
 }
 
 func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
@@ -118,12 +118,10 @@ func MilestoneStoredResultWithTaskSummaries(plan planning.Plan, summaries map[st
 		items = append(items, MilestoneStoredItem{
 			ID:           item.ID,
 			Key:          planning.MilestoneKey(item),
-			Ref:          item.Ref,
 			Title:        item.Title,
 			Status:       item.Status.String(),
 			Notes:        item.Notes,
 			DependsOnKey: planning.MilestoneDependsOnKey(item),
-			DependsOnRef: item.DependsOnRef,
 			OwnerChatID:  ownerChatID,
 			TaskSummary:  summaries[planning.MilestoneKey(item)],
 		})
@@ -147,7 +145,6 @@ func BuildTaskListStoredResult(plan planning.Plan, ref string, tasks []planning.
 	}
 	return TaskListStoredResult{
 		MilestoneKey:   ref,
-		MilestoneRef:   ref,
 		MilestoneTitle: planning.MilestoneTitle(plan, ref),
 		Message:        message,
 		Items:          items,
@@ -176,7 +173,7 @@ func TaskBucketResult(plan planning.Plan, ref string, tasks []planning.Task, mes
 }
 
 func TaskBucketResultWithTitle(ref, title string, tasks []planning.Task, message string) Result {
-	stored := BuildTaskListStoredResult(planning.Plan{Milestones: []planning.Milestone{{Ref: ref, Title: title}}}, ref, tasks, message)
+	stored := BuildTaskListStoredResult(planning.Plan{Milestones: []planning.Milestone{{Key: ref, Title: title}}}, ref, tasks, message)
 	output := FormatTaskOutput(stored)
 	if strings.TrimSpace(output) == "" {
 		output = "No tasks found."

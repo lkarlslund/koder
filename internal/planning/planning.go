@@ -22,12 +22,11 @@ type Plan struct {
 type Milestone struct {
 	ID           id.ID
 	Key          string
-	Ref          string
-	LegacyRef    string
+	LegacyRef    string `json:",omitempty"`
 	Title        string
 	Status       MilestoneStatus
 	Notes        string
-	DependsOnRef string
+	DependsOnKey string
 	Position     int
 	OwnerChatID  *id.ID
 }
@@ -36,13 +35,96 @@ type Task struct {
 	ID           id.ID
 	Key          string
 	SessionID    id.ID
-	MilestoneRef string
+	MilestoneKey string
 	Content      string
 	Note         string
 	Status       TaskStatus
 	Position     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+func (m *Milestone) UnmarshalJSON(data []byte) error {
+	type milestoneJSON struct {
+		ID           id.ID
+		Key          string
+		Ref          string
+		LegacyRef    string
+		Title        string
+		Status       MilestoneStatus
+		Notes        string
+		DependsOnKey string
+		DependsOnRef string
+		Position     int
+		OwnerChatID  *id.ID
+	}
+	var raw milestoneJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	key := strings.TrimSpace(raw.Key)
+	legacyRef := strings.TrimSpace(raw.LegacyRef)
+	if legacy := strings.TrimSpace(raw.Ref); legacy != "" {
+		if key == "" {
+			key = legacy
+		}
+		if legacyRef == "" && legacy != key {
+			legacyRef = legacy
+		}
+	}
+	dependsOnKey := strings.TrimSpace(raw.DependsOnKey)
+	if dependsOnKey == "" {
+		dependsOnKey = strings.TrimSpace(raw.DependsOnRef)
+	}
+	*m = Milestone{
+		ID:           raw.ID,
+		Key:          key,
+		LegacyRef:    legacyRef,
+		Title:        raw.Title,
+		Status:       raw.Status,
+		Notes:        raw.Notes,
+		DependsOnKey: dependsOnKey,
+		Position:     raw.Position,
+		OwnerChatID:  raw.OwnerChatID,
+	}
+	return nil
+}
+
+func (t *Task) UnmarshalJSON(data []byte) error {
+	type taskJSON struct {
+		ID           id.ID
+		Key          string
+		SessionID    id.ID
+		MilestoneKey string
+		MilestoneRef string
+		Content      string
+		Note         string
+		Status       TaskStatus
+		Position     int
+		CreatedAt    time.Time
+		UpdatedAt    time.Time
+	}
+	var raw taskJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	milestoneKey := strings.TrimSpace(raw.MilestoneKey)
+	if milestoneKey == "" {
+		milestoneKey = strings.TrimSpace(raw.MilestoneRef)
+	}
+	*t = Task{
+		ID:           raw.ID,
+		Key:          raw.Key,
+		SessionID:    raw.SessionID,
+		MilestoneKey: milestoneKey,
+		Content:      raw.Content,
+		Note:         raw.Note,
+		Status:       raw.Status,
+		Position:     raw.Position,
+		CreatedAt:    raw.CreatedAt,
+		UpdatedAt:    raw.UpdatedAt,
+	}
+	return nil
 }
 
 type LegacyTask struct {
@@ -79,11 +161,11 @@ func MilestoneKey(item Milestone) string {
 	if key != "" {
 		return key
 	}
-	return strings.TrimSpace(item.Ref)
+	return strings.TrimSpace(item.LegacyRef)
 }
 
 func MilestoneDependsOnKey(item Milestone) string {
-	return strings.TrimSpace(item.DependsOnRef)
+	return strings.TrimSpace(item.DependsOnKey)
 }
 
 func TaskKey(item Task) string {
@@ -110,7 +192,7 @@ func NormalizePlanKeys(plan Plan) (Plan, bool) {
 	legacyToKey := make(map[string]string, len(next.Milestones))
 	for idx := range next.Milestones {
 		item := &next.Milestones[idx]
-		legacyRef := strings.TrimSpace(item.Ref)
+		legacyRef := strings.TrimSpace(item.LegacyRef)
 		if item.ID == "" {
 			item.ID = id.New()
 			changed = true
@@ -122,21 +204,13 @@ func NormalizePlanKeys(plan Plan) (Plan, bool) {
 		}
 		item.Key = strings.TrimSpace(item.Key)
 		if legacyRef != "" {
-			if strings.TrimSpace(item.LegacyRef) == "" && legacyRef != item.Key {
-				item.LegacyRef = legacyRef
-				changed = true
-			}
 			legacyToKey[legacyRef] = item.Key
-		}
-		if item.Ref != item.Key {
-			item.Ref = item.Key
-			changed = true
 		}
 	}
 	for idx := range next.Milestones {
-		depends := strings.TrimSpace(next.Milestones[idx].DependsOnRef)
+		depends := strings.TrimSpace(next.Milestones[idx].DependsOnKey)
 		if replacement := legacyToKey[depends]; replacement != "" && replacement != depends {
-			next.Milestones[idx].DependsOnRef = replacement
+			next.Milestones[idx].DependsOnKey = replacement
 			changed = true
 		}
 	}
@@ -148,19 +222,19 @@ func NormalizeTaskKeys(items []Task, milestoneKeys map[string]string) ([]Task, b
 	changed := false
 	for idx := range next {
 		item := &next[idx]
-		milestoneRef := strings.TrimSpace(item.MilestoneRef)
-		if replacement := milestoneKeys[milestoneRef]; replacement != "" && replacement != milestoneRef {
-			item.MilestoneRef = replacement
-			milestoneRef = replacement
+		milestoneKey := strings.TrimSpace(item.MilestoneKey)
+		if replacement := milestoneKeys[milestoneKey]; replacement != "" && replacement != milestoneKey {
+			item.MilestoneKey = replacement
+			milestoneKey = replacement
 			changed = true
 		}
 		oldKey := strings.TrimSpace(item.Key)
-		item.Key = normalizeTaskKeyForMilestone(item.Key, milestoneRef)
+		item.Key = normalizeTaskKeyForMilestone(item.Key, milestoneKey)
 		if item.Key != oldKey {
 			changed = true
 		}
 		if item.Key == "" {
-			item.Key = nextTaskKey(next, milestoneRef)
+			item.Key = nextTaskKey(next, milestoneKey)
 			changed = true
 		}
 	}
@@ -175,9 +249,6 @@ func MilestoneKeyAliases(plan Plan) map[string]string {
 			continue
 		}
 		out[key] = key
-		if ref := strings.TrimSpace(milestone.Ref); ref != "" {
-			out[ref] = key
-		}
 		if ref := strings.TrimSpace(milestone.LegacyRef); ref != "" {
 			out[ref] = key
 		}
@@ -188,7 +259,7 @@ func MilestoneKeyAliases(plan Plan) map[string]string {
 func nextPlanningKeyNumber(items []Milestone, prefix string) int {
 	next := 1
 	for _, item := range items {
-		for _, key := range []string{item.Key, item.Ref} {
+		for _, key := range []string{item.Key, item.LegacyRef} {
 			if n, ok := parsePlanningKey(key, prefix); ok && n >= next {
 				next = n + 1
 			}
@@ -250,22 +321,22 @@ func parsePlanningKey(raw, prefix string) (int, bool) {
 }
 
 type MilestoneInput struct {
-	Key          string `json:"key,omitempty"`
-	Ref          string `json:"ref"`
-	Title        string `json:"title"`
-	Status       string `json:"status"`
-	Notes        string `json:"notes,omitempty"`
-	DependsOnKey string `json:"depends_on_key,omitempty"`
-	DependsOnRef string `json:"depends_on_ref,omitempty"`
+	Key                string `json:"key,omitempty"`
+	LegacyRef          string `json:"ref,omitempty"`
+	Title              string `json:"title"`
+	Status             string `json:"status"`
+	Notes              string `json:"notes,omitempty"`
+	DependsOnKey       string `json:"depends_on_key,omitempty"`
+	LegacyDependsOnKey string `json:"depends_on_ref,omitempty"`
 }
 
 type MilestoneAddInput struct {
-	Key          string `json:"key,omitempty"`
-	Ref          string `json:"ref"`
-	Title        string `json:"title"`
-	Notes        string `json:"notes,omitempty"`
-	DependsOnKey string `json:"depends_on_key,omitempty"`
-	DependsOnRef string `json:"depends_on_ref,omitempty"`
+	Key                string `json:"key,omitempty"`
+	LegacyRef          string `json:"ref,omitempty"`
+	Title              string `json:"title"`
+	Notes              string `json:"notes,omitempty"`
+	DependsOnKey       string `json:"depends_on_key,omitempty"`
+	LegacyDependsOnKey string `json:"depends_on_ref,omitempty"`
 }
 
 type TaskAddInput struct {
@@ -281,16 +352,16 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 	seenRefs := map[string]struct{}{}
 	for idx, item := range items {
 		key := strings.TrimSpace(item.Key)
-		legacyRef := strings.TrimSpace(item.Ref)
+		legacyRef := strings.TrimSpace(item.LegacyRef)
 		title := strings.TrimSpace(item.Title)
 		status, err := MilestoneStatusString(strings.TrimSpace(item.Status))
 		if err != nil {
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
 		notes := strings.TrimSpace(item.Notes)
-		dependsOnRef := strings.TrimSpace(item.DependsOnKey)
-		if dependsOnRef == "" {
-			dependsOnRef = strings.TrimSpace(item.DependsOnRef)
+		dependsOnKey := strings.TrimSpace(item.DependsOnKey)
+		if dependsOnKey == "" {
+			dependsOnKey = strings.TrimSpace(item.LegacyDependsOnKey)
 		}
 		if title == "" {
 			return nil, errors.New("each milestone requires title")
@@ -303,11 +374,11 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 		}
 		out = append(out, Milestone{
 			Key:          key,
-			Ref:          legacyRef,
+			LegacyRef:    legacyRef,
 			Title:        title,
 			Status:       status,
 			Notes:        notes,
-			DependsOnRef: dependsOnRef,
+			DependsOnKey: dependsOnKey,
 			Position:     idx,
 		})
 	}
@@ -331,12 +402,12 @@ func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
 	seenRefs := map[string]struct{}{}
 	for _, item := range items {
 		key := strings.TrimSpace(item.Key)
-		legacyRef := strings.TrimSpace(item.Ref)
+		legacyRef := strings.TrimSpace(item.LegacyRef)
 		title := strings.TrimSpace(item.Title)
 		notes := strings.TrimSpace(item.Notes)
-		dependsOnRef := strings.TrimSpace(item.DependsOnKey)
-		if dependsOnRef == "" {
-			dependsOnRef = strings.TrimSpace(item.DependsOnRef)
+		dependsOnKey := strings.TrimSpace(item.DependsOnKey)
+		if dependsOnKey == "" {
+			dependsOnKey = strings.TrimSpace(item.LegacyDependsOnKey)
 		}
 		if title == "" {
 			return nil, errors.New("each milestone requires title")
@@ -349,11 +420,11 @@ func ParseMilestoneAddItems(raw string) ([]Milestone, error) {
 		}
 		out = append(out, Milestone{
 			Key:          key,
-			Ref:          legacyRef,
+			LegacyRef:    legacyRef,
 			Title:        title,
 			Status:       MilestoneStatusPending,
 			Notes:        notes,
-			DependsOnRef: dependsOnRef,
+			DependsOnKey: dependsOnKey,
 		})
 	}
 	if len(out) == 0 {
@@ -515,15 +586,15 @@ func ValidateMilestoneProgress(items []Milestone) error {
 	}
 	for _, item := range items {
 		key := MilestoneKey(item)
-		dependsOnRef := MilestoneDependsOnKey(item)
-		if dependsOnRef == "" {
+		dependsOnKey := MilestoneDependsOnKey(item)
+		if dependsOnKey == "" {
 			continue
 		}
-		if dependsOnRef == key {
+		if dependsOnKey == key {
 			return fmt.Errorf("milestone %q cannot depend on itself", key)
 		}
-		if _, exists := seenRefs[dependsOnRef]; !exists {
-			return fmt.Errorf("milestone %q depends on unknown milestone %q", key, dependsOnRef)
+		if _, exists := seenRefs[dependsOnKey]; !exists {
+			return fmt.Errorf("milestone %q depends on unknown milestone %q", key, dependsOnKey)
 		}
 	}
 	if err := validateMilestoneDependencyCycles(items); err != nil {
@@ -549,7 +620,7 @@ func validateMilestoneDependencyCycles(items []Milestone) error {
 	return nil
 }
 
-func PlanForRef(plan Plan, ref string) Plan {
+func PlanForKey(plan Plan, ref string) Plan {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return plan

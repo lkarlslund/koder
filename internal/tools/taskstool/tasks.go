@@ -132,7 +132,7 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
+	ref, err := tools.AllowedMilestoneKey(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -152,7 +152,7 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
+	ref, err := tools.AllowedMilestoneKey(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -199,7 +199,7 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 	if err != nil {
 		return tools.Result{}, err
 	}
-	allowedRef, err := tools.AllowedMilestoneRef(runtime, "")
+	allowedRef, err := tools.AllowedMilestoneKey(runtime, "")
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -249,7 +249,7 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 	if err != nil {
 		return tools.Result{}, err
 	}
-	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_key"])
+	ref, err := tools.AllowedMilestoneKey(runtime, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
 	}

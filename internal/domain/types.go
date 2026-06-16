@@ -292,8 +292,8 @@ type Chat struct {
 	ModelID                string
 	PermissionProfile      string
 	ToolStates             ToolStates
-	ActiveMilestoneRef     string
-	AssignedTaskBucketRef  string
+	ActiveMilestoneKey     string
+	AssignedTaskBucketKey  string
 	AssignedTaskRef        string
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
@@ -305,6 +305,72 @@ type Chat struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	LastMessage            string
+}
+
+func (c *Chat) UnmarshalJSON(data []byte) error {
+	type chatJSON struct {
+		ID                     ID
+		SessionID              ID
+		ParentChatID           *ID
+		Title                  string
+		WorkflowRole           WorkflowRole
+		ProviderID             string
+		ModelID                string
+		PermissionProfile      string
+		ToolStates             ToolStates
+		ActiveMilestoneKey     string
+		ActiveMilestoneRef     string
+		AssignedTaskBucketKey  string
+		AssignedTaskBucketRef  string
+		AssignedTaskRef        string
+		LastKnownContextTokens int
+		ContextTokensKnown     bool
+		TokenUsage             Usage
+		Position               int
+		Archived               bool
+		AutoRestart            bool
+		QueuedInputs           []QueuedInput
+		CreatedAt              time.Time
+		UpdatedAt              time.Time
+		LastMessage            string
+	}
+	var raw chatJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	activeMilestoneKey := raw.ActiveMilestoneKey
+	if activeMilestoneKey == "" {
+		activeMilestoneKey = raw.ActiveMilestoneRef
+	}
+	assignedTaskBucketKey := raw.AssignedTaskBucketKey
+	if assignedTaskBucketKey == "" {
+		assignedTaskBucketKey = raw.AssignedTaskBucketRef
+	}
+	*c = Chat{
+		ID:                     raw.ID,
+		SessionID:              raw.SessionID,
+		ParentChatID:           raw.ParentChatID,
+		Title:                  raw.Title,
+		WorkflowRole:           raw.WorkflowRole,
+		ProviderID:             raw.ProviderID,
+		ModelID:                raw.ModelID,
+		PermissionProfile:      raw.PermissionProfile,
+		ToolStates:             raw.ToolStates,
+		ActiveMilestoneKey:     activeMilestoneKey,
+		AssignedTaskBucketKey:  assignedTaskBucketKey,
+		AssignedTaskRef:        raw.AssignedTaskRef,
+		LastKnownContextTokens: raw.LastKnownContextTokens,
+		ContextTokensKnown:     raw.ContextTokensKnown,
+		TokenUsage:             raw.TokenUsage,
+		Position:               raw.Position,
+		Archived:               raw.Archived,
+		AutoRestart:            raw.AutoRestart,
+		QueuedInputs:           raw.QueuedInputs,
+		CreatedAt:              raw.CreatedAt,
+		UpdatedAt:              raw.UpdatedAt,
+		LastMessage:            raw.LastMessage,
+	}
+	return nil
 }
 
 type ContextUsage struct {

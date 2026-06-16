@@ -137,8 +137,8 @@ type Runtime struct {
 	SessionID             id.ID
 	ChatID                id.ID
 	ChatRole              chatrole.Role
-	ActiveMilestoneRef    string
-	AssignedTaskBucketRef string
+	ActiveMilestoneKey    string
+	AssignedTaskBucketKey string
 	AssignedTaskRef       string
 	SessionControl        SessionControl
 	TaskControl           TaskControl

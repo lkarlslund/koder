@@ -38,8 +38,8 @@ func testLoadSession(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Sou
 	return Load(ctx, st, chatsSrc, planSrc, sessionID)
 }
 
-func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneRef string, contents []string) ([]planning.Task, error) {
-	existing, err := planSrc.ListTasks(ctx, sessionID, milestoneRef)
+func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
+	existing, err := planSrc.ListTasks(ctx, sessionID, milestoneKey)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID
 		items = append(items, planning.Task{
 			ID:           id.NewAt(now),
 			SessionID:    sessionID,
-			MilestoneRef: milestoneRef,
+			MilestoneKey: milestoneKey,
 			Content:      content,
 			Status:       planning.TaskStatusPending,
 			Position:     len(existing) + len(items),
@@ -98,16 +98,16 @@ func TestScopedPlanningLimitsMilestonesAndTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
-		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady},
+		{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady},
+		{Key: "M002", Title: "Beta", Status: planning.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	alphaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"alpha task"})
+	alphaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "M001", []string{"alpha task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	betaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "beta", []string{"beta task"})
+	betaTasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "M002", []string{"beta task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestScopedPlanningLimitsMilestonesAndTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001"})
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneKey: "M001"})
 	plan, err := control.GetMilestonePlan(ctx, sessionRecord.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -149,10 +149,10 @@ func TestScopedPlanningLimitsAssignedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
+	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Summary: "Plan", Milestones: []planning.Milestone{{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady}}}); err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "alpha", []string{"first", "second"})
+	tasks, err := testAddTasks(ctx, planSrc, sessionRecord.ID, "M001", []string{"first", "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestScopedPlanningLimitsAssignedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneRef: "M001", AssignedTaskRef: planning.TaskKey(tasks[0])})
+	control := owner.PlanningForChat(domain.Chat{SessionID: sessionRecord.ID, ActiveMilestoneKey: "M001", AssignedTaskRef: planning.TaskKey(tasks[0])})
 	listed, err := control.ListTasks(ctx, sessionRecord.ID, "M001")
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestStartChatRejectsDuplicateMilestoneChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady},
+		{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,14 +232,14 @@ func TestStartChatRejectsDuplicateMilestoneChild(t *testing.T) {
 	if _, err := control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
 		Profile:      chatrole.Execution,
 		Objective:    "Implement alpha",
-		MilestoneRef: "M001",
+		MilestoneKey: "M001",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
 		Profile:      chatrole.Execution,
 		Objective:    "Implement alpha again",
-		MilestoneRef: "M001",
+		MilestoneKey: "M001",
 	})
 	if err == nil || !strings.Contains(err.Error(), "use chat_send") {
 		t.Fatalf("expected duplicate milestone steer error, got %v", err)
@@ -258,8 +258,8 @@ func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := planSrc.SavePlan(ctx, planning.Plan{SessionID: sessionRecord.ID, Milestones: []planning.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
-		{Ref: "beta", Title: "Beta", Status: planning.MilestoneStatusReady, Position: 1},
+		{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
+		{Key: "M002", Title: "Beta", Status: planning.MilestoneStatusReady, Position: 1},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -273,14 +273,14 @@ func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
 	if _, err := control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
 		Profile:      chatrole.Execution,
 		Objective:    "Implement alpha",
-		MilestoneRef: "M001",
+		MilestoneKey: "M001",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = control.StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
 		Profile:      chatrole.Execution,
 		Objective:    "Implement beta",
-		MilestoneRef: "M002",
+		MilestoneKey: "M002",
 	})
 	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chat_send") {
 		t.Fatalf("expected max child chat error, got %v", err)
@@ -310,7 +310,7 @@ func TestSessionChildIdleNotificationSummarizesMilestoneProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatID := id.New()
-	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", ParentChatID: &chatID}, chatID, "Idle")
+	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneKey: "alpha", ParentChatID: &chatID}, chatID, "Idle")
 	want := "Chat " + chatID + " is now idle. Chat completed 1 out of 2 tasks for milestone alpha, but is now stopped. Remaining tasks: alphaT002 is pending."
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
@@ -342,7 +342,7 @@ func TestSessionChildIdleNotificationSummarizesCompletedMilestone(t *testing.T) 
 		t.Fatal(err)
 	}
 	chatID := id.New()
-	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneRef: "alpha", ParentChatID: &chatID}, chatID, "Idle")
+	got := owner.childIdleNotification(ctx, domain.Chat{ID: chatID, SessionID: sessionRecord.ID, ActiveMilestoneKey: "alpha", ParentChatID: &chatID}, chatID, "Idle")
 	want := "Chat " + chatID + " is now idle. All 2 tasks for milestone alpha are done."
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)

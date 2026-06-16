@@ -1291,7 +1291,7 @@ type stateDelta struct {
 	Access        any    `json:"access,omitempty"`
 	Milestones    any    `json:"milestones,omitempty"`
 	Tasks         any    `json:"tasks,omitempty"`
-	TasksByRef    any    `json:"tasks_by_milestone,omitempty"`
+	TasksByKey    any    `json:"tasks_by_milestone,omitempty"`
 	Workspace     any    `json:"workspace_status,omitempty"`
 	ContextWindow int    `json:"context_window,omitempty"`
 	ModelInfo     any    `json:"model_info,omitempty"`
@@ -1421,7 +1421,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		Access:        state.Access,
 		Milestones:    state.Milestones,
 		Tasks:         state.Tasks,
-		TasksByRef:    state.TasksByRef,
+		TasksByKey:    state.TasksByKey,
 		Workspace:     state.Workspace,
 		ContextWindow: state.ContextWindow,
 		ModelInfo:     state.ModelInfo,
