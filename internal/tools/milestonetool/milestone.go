@@ -31,8 +31,15 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, title, notes, or dependency parent. Use the exact milestone_key returned by milestone_list or milestone_add. Use depends_on_key to move it under another milestone; pass an empty depends_on_key to make it a root milestone. For dependency-only changes, pass milestone_key and depends_on_key without status. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
+		Usage:       "Update one milestone's status, title, or notes. Use milestone_depend, not milestone_update, when you only need to change depends_on_key. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list or milestone_add"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"},"depends_on_key":{"type":"string","description":"Optional parent milestone key. Pass an empty string to make this a root milestone."}},"required":["milestone_key"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(dependTool{}, tools.ToolSpec{
+		Title:       "Set milestone dependency",
+		Description: "Move one milestone under another milestone or back to the root.",
+		Usage:       "Set exactly one milestone dependency parent. Use this instead of milestone_update for dependency-only changes. Pass milestone_key for the milestone to move and depends_on_key for its parent. Pass depends_on_key as an empty string to make the milestone a root milestone. Fails if either milestone key is unknown or if the dependency would create a cycle.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key to move, returned by milestone_list or milestone_add"},"depends_on_key":{"type":"string","description":"Parent milestone key. Use an empty string to make this milestone a root milestone."}},"required":["milestone_key","depends_on_key"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
@@ -44,19 +51,32 @@ func init() {
 type listTool struct{}
 type addItemsTool struct{}
 type updateItemTool struct{}
+type dependTool struct{}
 type writeTool struct{}
 
 func (listTool) ID() tools.ID       { return tools.MilestoneList }
 func (addItemsTool) ID() tools.ID   { return tools.MilestoneAdd }
 func (updateItemTool) ID() tools.ID { return tools.MilestoneUpdate }
+func (dependTool) ID() tools.ID     { return tools.MilestoneDepend }
 func (writeTool) ID() tools.ID      { return tools.MilestoneWrite }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
+func (dependTool) BypassesPermission() bool     { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if tools.AssignedMilestoneRef(runtime) != "" {
+		return tools.ToolSpec{}, false
+	}
+	if runtime.ChatRole == chatrole.Execution {
+		return tools.ToolSpec{}, false
+	}
+	return spec, true
+}
+
+func (dependTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	if tools.AssignedMilestoneRef(runtime) != "" {
 		return tools.ToolSpec{}, false
 	}
@@ -126,6 +146,17 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	return out, nil
 }
 
+func (dependTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	key, err := planning.ParseMilestoneKey(args["milestone_key"])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"milestone_key":  key,
+		"depends_on_key": strings.TrimSpace(args["depends_on_key"]),
+	}, nil
+}
+
 func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	raw := strings.TrimSpace(args["milestones"])
 	if raw == "" {
@@ -145,6 +176,13 @@ func (listTool) Preview(req tools.Request) string     { return "Read milestones"
 func (addItemsTool) Preview(req tools.Request) string { return "Add milestone " + req.Args["title"] }
 func (updateItemTool) Preview(req tools.Request) string {
 	return "Update milestone " + req.Args["milestone_key"]
+}
+func (dependTool) Preview(req tools.Request) string {
+	parent := strings.TrimSpace(req.Args["depends_on_key"])
+	if parent == "" {
+		parent = "root"
+	}
+	return "Set milestone " + req.Args["milestone_key"] + " dependency to " + parent
 }
 func (writeTool) Preview(req tools.Request) string { return "Replace milestones" }
 
@@ -269,6 +307,15 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 
 func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
+	return callMilestoneUpdate(ctx, runtime, req)
+}
+
+func (dependTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
+	return callMilestoneUpdate(ctx, runtime, req)
+}
+
+func callMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -338,6 +385,10 @@ func (updateItemTool) SummarizeResult(req tools.Request, result tools.Result) (s
 	return "Updated milestone", result.Output
 }
 
+func (dependTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Updated milestone dependency", result.Output
+}
+
 func (writeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Updated milestones", result.Output
 }
@@ -385,6 +436,12 @@ func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, r
 	return result, nil
 }
 func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	return finalizeMilestoneUpdate(ctx, runtime, req, result)
+}
+func (dependTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	return finalizeMilestoneUpdate(ctx, runtime, req, result)
+}
+func finalizeMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -610,7 +667,7 @@ func noMilestoneChangeError(current planning.Milestone, req tools.Request) error
 			currentParent = "unset"
 		}
 		parts = append(parts, fmt.Sprintf("depends_on_key is %s", currentParent))
-		parts = append(parts, "to change dependency, pass depends_on_key explicitly and omit status unless changing status")
+		parts = append(parts, fmt.Sprintf("to change dependency, call milestone_depend with milestone_key=%s and depends_on_key=<parent milestone key>; do not retry milestone_update with only status", key))
 	}
 	return errors.New(strings.Join(parts, "; "))
 }

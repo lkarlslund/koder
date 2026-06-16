@@ -74,6 +74,9 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected plan definition to be disabled in execution chats")
 	}
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneDepend, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
+		t.Fatal("expected depend definition to be disabled in execution chats")
+	}
 	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha", "status": "cancelled", "depends_on_key": ""})
 	if err != nil {
 		t.Fatal(err)
@@ -88,12 +91,26 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, ok := updated["status"]; ok || updated["depends_on_key"] != "beta" {
 		t.Fatalf("expected dependency-only update, got %#v", updated)
 	}
+	dependency, err := (dependTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha", "depends_on_key": "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependency["milestone_key"] != "alpha" || dependency["depends_on_key"] != "beta" {
+		t.Fatalf("unexpected dependency args: %#v", dependency)
+	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
 	if !enabled {
 		t.Fatal("expected update milestone definition to be enabled")
 	}
-	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","status"]`) || !strings.Contains(def.Function.Description, "dependency-only") {
+	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","status"]`) || !strings.Contains(def.Function.Description, "milestone_depend") {
 		t.Fatalf("expected cancelled status and guidance in LLM definition: %#v", def)
+	}
+	def, enabled = tools.DefinitionFor(domain.ToolKindMilestoneDepend, tools.Runtime{ChatRole: chatrole.Orchestrator})
+	if !enabled {
+		t.Fatal("expected depend milestone definition to be enabled")
+	}
+	if !strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","depends_on_key"]`) {
+		t.Fatalf("expected dependency tool to require both keys: %#v", def)
 	}
 }
 
@@ -215,9 +232,12 @@ func TestUpdateItemRejectsNoOpAndSummarizesDependencyChange(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no changes applied") || !strings.Contains(err.Error(), "depends_on_key is unset") {
 		t.Fatalf("expected no-op guidance error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "milestone_depend") {
+		t.Fatalf("expected dependency tool guidance, got %v", err)
+	}
 
-	result, err := (updateItemTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
-		Tool: domain.ToolKindMilestoneUpdate,
+	result, err := (dependTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindMilestoneDepend,
 		Args: map[string]string{"milestone_key": "M001", "depends_on_key": "M002"},
 	}})
 	if err != nil {

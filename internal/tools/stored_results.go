@@ -826,7 +826,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
 	case ShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
-	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneWrite, MilestonePlan:
+	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend, MilestoneWrite, MilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename, ChatCleanup:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)

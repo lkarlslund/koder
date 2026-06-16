@@ -28,6 +28,7 @@ const (
 	MilestoneList   ID = domain.ToolKindMilestoneList
 	MilestoneAdd    ID = domain.ToolKindMilestoneAdd
 	MilestoneUpdate ID = domain.ToolKindMilestoneUpdate
+	MilestoneDepend ID = domain.ToolKindMilestoneDepend
 	MilestonePlan   ID = domain.ToolKindMilestonePlan
 	MilestoneWrite  ID = domain.ToolKindMilestoneWrite
 	TaskList        ID = domain.ToolKindTaskList

@@ -64,6 +64,7 @@ const (
 	ToolKindMilestoneList   ToolKind = "milestone_list"
 	ToolKindMilestoneAdd    ToolKind = "milestone_add"
 	ToolKindMilestoneUpdate ToolKind = "milestone_update"
+	ToolKindMilestoneDepend ToolKind = "milestone_depend"
 	ToolKindMilestonePlan   ToolKind = "milestone_plan"
 	ToolKindMilestoneWrite  ToolKind = "milestone_write"
 	ToolKindTaskList        ToolKind = "task_list"
@@ -113,6 +114,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindMilestoneList,
 	ToolKindMilestoneAdd,
 	ToolKindMilestoneUpdate,
+	ToolKindMilestoneDepend,
 	ToolKindMilestonePlan,
 	ToolKindMilestoneWrite,
 	ToolKindTaskList,
