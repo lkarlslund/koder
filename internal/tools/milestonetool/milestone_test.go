@@ -65,8 +65,8 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
 		t.Fatal("expected missing title error")
 	}
-	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha"}); err == nil {
-		t.Fatal("expected missing status error")
+	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha"}); err == nil || !strings.Contains(err.Error(), "requires status") {
+		t.Fatalf("expected missing change error, got %v", err)
 	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
@@ -81,11 +81,18 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if updated["status"] != planning.MilestoneStatusCancelled.String() || updated["depends_on_key"] != "" {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
+	updated, err = (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha", "depends_on_key": "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := updated["status"]; ok || updated["depends_on_key"] != "beta" {
+		t.Fatalf("expected dependency-only update, got %#v", updated)
+	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
 	if !enabled {
 		t.Fatal("expected update milestone definition to be enabled")
 	}
-	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || !strings.Contains(def.Function.Description, "created by accident") {
+	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","status"]`) || !strings.Contains(def.Function.Description, "dependency-only") {
 		t.Fatalf("expected cancelled status and guidance in LLM definition: %#v", def)
 	}
 }
@@ -176,6 +183,13 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 	if plan.Milestones[0].DependsOnRef != "" {
 		t.Fatalf("expected dependency to be cleared, got %#v", plan.Milestones[0])
+	}
+	plan, err = updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "depends_on_key": "beta"}}, milestoneActor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Milestones[0].Status != planning.MilestoneStatusCompleted || plan.Milestones[0].DependsOnRef != "beta" {
+		t.Fatalf("expected dependency-only update to preserve status, got %#v", plan.Milestones[0])
 	}
 	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"milestone_key": "alpha", "status": "completed", "depends_on_key": "alpha"}}, milestoneActor{}); err == nil {
 		t.Fatal("expected self dependency error")

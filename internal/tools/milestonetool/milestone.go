@@ -31,8 +31,8 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, title, notes, or dependency parent. Use the exact milestone_key returned by milestone_list or milestone_add. Use depends_on_key to move it under another milestone; pass an empty depends_on_key to make it a root milestone. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
-		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list or milestone_add"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"},"depends_on_key":{"type":"string","description":"Optional parent milestone key. Pass an empty string to make this a root milestone."}},"required":["milestone_key","status"],"additionalProperties":false}`,
+		Usage:       "Update one milestone's status, title, notes, or dependency parent. Use the exact milestone_key returned by milestone_list or milestone_add. Use depends_on_key to move it under another milestone; pass an empty depends_on_key to make it a root milestone. For dependency-only changes, pass milestone_key and depends_on_key without status. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list or milestone_add"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"},"depends_on_key":{"type":"string","description":"Optional parent milestone key. Pass an empty string to make this a root milestone."}},"required":["milestone_key"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
@@ -98,22 +98,30 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	if err != nil {
 		return nil, err
 	}
-	status, err := planning.ParseMilestoneStatus(args["status"])
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{
-		"milestone_key": key,
-		"status":        status.String(),
+	out := map[string]string{"milestone_key": key}
+	changed := false
+	if raw, ok := args["status"]; ok {
+		status, err := planning.ParseMilestoneStatus(raw)
+		if err != nil {
+			return nil, err
+		}
+		out["status"] = status.String()
+		changed = true
 	}
 	if title := strings.TrimSpace(args["title"]); title != "" {
 		out["title"] = title
+		changed = true
 	}
 	if notes, ok := args["notes"]; ok {
 		out["notes"] = strings.TrimSpace(notes)
+		changed = true
 	}
 	if dependsOnKey, ok := args["depends_on_key"]; ok {
 		out["depends_on_key"] = strings.TrimSpace(dependsOnKey)
+		changed = true
+	}
+	if !changed {
+		return nil, errors.New("milestone update requires status, title, notes, or depends_on_key")
 	}
 	return out, nil
 }
@@ -446,9 +454,15 @@ func actorFromRuntime(runtime tools.Runtime) milestoneActor {
 
 func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor milestoneActor) (planning.Plan, error) {
 	key := req.Args["milestone_key"]
-	status, err := planning.MilestoneStatusString(req.Args["status"])
-	if err != nil {
-		return plan, fmt.Errorf("invalid milestone status %q", req.Args["status"])
+	var status planning.MilestoneStatus
+	statusChanged := false
+	if raw, ok := req.Args["status"]; ok {
+		parsed, err := planning.MilestoneStatusString(raw)
+		if err != nil {
+			return plan, fmt.Errorf("invalid milestone status %q", raw)
+		}
+		status = parsed
+		statusChanged = true
 	}
 	milestones := append([]planning.Milestone(nil), plan.Milestones...)
 	found := false
@@ -457,11 +471,13 @@ func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor milestone
 			continue
 		}
 		found = true
-		if err := validateMilestoneOwner(milestones[idx], status, actor); err != nil {
-			return planning.Plan{}, err
+		if statusChanged {
+			if err := validateMilestoneOwner(milestones[idx], status, actor); err != nil {
+				return planning.Plan{}, err
+			}
+			milestones[idx].Status = status
+			applyMilestoneOwner(&milestones[idx], status, actor)
 		}
-		milestones[idx].Status = status
-		applyMilestoneOwner(&milestones[idx], status, actor)
 		if title := strings.TrimSpace(req.Args["title"]); title != "" {
 			milestones[idx].Title = title
 		}
