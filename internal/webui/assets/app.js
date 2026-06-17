@@ -393,8 +393,12 @@
       });
     }
     const markdownCache = new Map();
+    const timelineMarkdownCache = new Map();
     function markdownCacheKey(source, options) {
       return (options.deferDiagrams ? 'defer' : 'full') + ':' + source;
+    }
+    function markdownOptionsKey(options) {
+      return (options.deferDiagrams ? 'defer' : 'full') + ':' + (options.incremental ? 'incremental' : 'static');
     }
     function cachedMarkdown(source, options, render) {
       const key = markdownCacheKey(source, options);
@@ -405,7 +409,24 @@
       return html;
     }
     function markdownCacheSize() {
-      return markdownCache.size;
+      return markdownCache.size + timelineMarkdownCache.size;
+    }
+    function timelineMarkdownCacheKey(item, options) {
+      const id = String(item?.id || item?.ID || '').trim();
+      if (!id) return '';
+      return id + ':' + markdownOptionsKey(options || {});
+    }
+    function renderTimelineMarkdown(item, text, options = {}) {
+      const source = String(text || '');
+      if (options.incremental) return renderMarkdown(source, options);
+      const key = timelineMarkdownCacheKey(item, options);
+      if (!key) return renderMarkdown(source, options);
+      const cached = timelineMarkdownCache.get(key);
+      if (cached && cached.source === source) return cached.html;
+      const html = renderMarkdown(source, options);
+      timelineMarkdownCache.set(key, {source, html});
+      if (timelineMarkdownCache.size > 240) timelineMarkdownCache.delete(timelineMarkdownCache.keys().next().value);
+      return html;
     }
     function websocketPayloadBytes(value) {
       if (typeof value === 'string') return new Blob([value]).size;
@@ -478,6 +499,20 @@
         el._koderMarkdownStable = stableSource;
       }
       tailNode.innerHTML = renderMarkdown(tailSource, options);
+    }
+    function renderTimelineMarkdownIntoElement(el, item, text, options = {}) {
+      if (!el) return;
+      if (options.incremental) {
+        renderMarkdownIntoElement(el, text, options);
+        return;
+      }
+      const source = String(text || '');
+      const key = timelineMarkdownCacheKey(item, options) || 'inline:' + markdownOptionsKey(options);
+      if (el._koderMarkdownSource === source && el._koderMarkdownOptions === key) return;
+      el._koderMarkdownSource = source;
+      el._koderMarkdownOptions = key;
+      el.innerHTML = renderTimelineMarkdown(item, source, options);
+      el._koderMarkdownStable = '';
     }
     function firstValue(obj, names) {
       if (!obj) return '';
@@ -2291,7 +2326,9 @@
           return Math.max(1, Math.ceil(source.length / 4));
         },
         markdownHTML(text, options = {}) { return renderMarkdown(text, options); },
+        timelineMarkdownHTML(item, text, options = {}) { return renderTimelineMarkdown(item, text, options); },
         renderMarkdownElement(el, text, options = {}) { renderMarkdownIntoElement(el, text, options); },
+        renderTimelineMarkdownElement(el, item, text, options = {}) { renderTimelineMarkdownIntoElement(el, item, text, options); },
         userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
         userMessageIcon(item) { return userMessageIconClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },

@@ -118,7 +118,7 @@
                 </div>
               </template>
               <div class="markdown-body user-markdown-body">
-                <span class="user-message-text" x-html="markdownHTML(item.content?.text || '')"></span>
+                <span class="user-message-text" x-html="timelineMarkdownHTML(item, item.content?.text || '')"></span>
               </div>
             </div>
           </template>
@@ -142,7 +142,7 @@
                   <pre x-text="reasoningDisplayText(item)"></pre>
                 </details>
               </template>
-              <div class="markdown-body" x-effect="renderMarkdownElement($el, item.content?.text || '', itemMarkdownOptions(item))"></div>
+              <div class="markdown-body" x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3">
                   <div class="turn-header tool-header">

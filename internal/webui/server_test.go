@@ -1197,8 +1197,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap:`) {
 		t.Fatalf("expected settings tabs to render as block buttons with primary active background")
 	}
-	if !strings.Contains(fullPage, `x-effect="renderMarkdownElement($el, item.content?.text || '', itemMarkdownOptions(item))"`) {
-		t.Fatalf("expected assistant text to render through status-aware markdown element renderer")
+	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
+		t.Fatalf("expected assistant text to render through status-aware timeline markdown element renderer")
 	}
 	if !strings.Contains(fullPage, `x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"`) {
 		t.Fatalf("expected streaming assistant text to render markdown incrementally with deferred diagrams")
@@ -1210,7 +1210,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `:class="userMessageIcon(item)"`) ||
 		!strings.Contains(fullPage, `<span class="turn-source-label">user</span>`) ||
 		!strings.Contains(fullPage, `class="turn-source-qualifier" x-show="userMessageSourceQualifier(item)"`) ||
-		!strings.Contains(fullPage, `class="user-message-text" x-html="markdownHTML(item.content?.text || '')"`) ||
+		!strings.Contains(fullPage, `class="user-message-text" x-html="timelineMarkdownHTML(item, item.content?.text || '')"`) ||
 		!strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
 		t.Fatalf("expected user turns to render icon/source headers and message text")
 	}
@@ -1369,6 +1369,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const timelineStore = new Map()`) ||
 		!strings.Contains(fullPage, `cacheStateTimelines`) ||
 		!strings.Contains(fullPage, `stripSnapshotTimeline`) ||
+		!strings.Contains(fullPage, `const timelineMarkdownCache = new Map()`) ||
+		!strings.Contains(fullPage, `timelineMarkdownHTML(item`) ||
+		!strings.Contains(fullPage, `renderTimelineMarkdownElement($el, item`) ||
 		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
 		!strings.Contains(fullPage, `timelineItemHeights`) ||
 		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
