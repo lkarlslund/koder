@@ -1366,6 +1366,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const transcriptWindowOverscan = 30`) ||
 		!strings.Contains(fullPage, `timelineTopSpacerHeight()`) ||
 		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
+		!strings.Contains(fullPage, `const timelineStore = new Map()`) ||
+		!strings.Contains(fullPage, `cacheStateTimelines`) ||
+		!strings.Contains(fullPage, `stripSnapshotTimeline`) ||
 		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
 		!strings.Contains(fullPage, `timelineItemHeights`) ||
 		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||

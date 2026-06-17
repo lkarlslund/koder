@@ -417,6 +417,7 @@
     const transcriptTailWindowSize = 120;
     const transcriptWindowOverscan = 30;
     const estimatedTimelineItemHeight = 160;
+    const timelineStore = new Map();
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
@@ -1481,12 +1482,13 @@
           if (delta.status_text !== undefined) next.StatusText = delta.status_text;
           if (delta.active !== undefined) next.Active = delta.active;
           if (delta.replace_timeline || delta.ReplaceTimeline) {
-            next.Timeline = Array.isArray(delta.timeline || delta.Timeline) ? (delta.timeline || delta.Timeline) : [];
+            const timeline = Array.isArray(delta.timeline || delta.Timeline) ? (delta.timeline || delta.Timeline) : [];
+            this.storeTimeline(id, timeline);
             next.TimelineHasMore = false;
             next.TimelineLoadedAll = true;
-            next.TimelineBefore = next.Timeline.length ? this.timelineItemID(next.Timeline[0]) : '';
+            next.TimelineBefore = timeline.length ? this.timelineItemID(timeline[0]) : '';
           } else if (delta.item) {
-            next.Timeline = this.patchTimelineItem(next.Timeline || next.timeline || [], delta.item);
+            this.storeTimeline(id, this.patchTimelineItem(this.timelineForChat(id, next), delta.item));
           }
           snapshots[id] = next;
           snapshots[String(id)] = next;
@@ -1651,7 +1653,7 @@
           const items = page.items || page.Items || [];
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[chatID] || snapshots[String(chatID)] || {};
-          const existing = current.Timeline || current.timeline || [];
+          const existing = this.timelineForChat(chatID, current);
           let timeline = [];
           if (options.replace) {
             timeline = items.slice();
@@ -1664,11 +1666,11 @@
           }
           const next = {
             ...current,
-            Timeline: timeline,
             TimelineHasMore: !!(page.has_more || page.HasMore),
             TimelineLoadedAll: !!(page.loaded_all || page.LoadedAll),
             TimelineBefore: String(page.before || page.Before || (timeline[0] && this.timelineItemID(timeline[0])) || '').trim(),
           };
+          this.storeTimeline(chatID, timeline);
           snapshots[chatID] = next;
           snapshots[String(chatID)] = next;
           this.state.snapshots = snapshots;
@@ -1787,7 +1789,7 @@
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
-          this.state = s || {};
+          this.state = this.cacheStateTimelines(s || {});
           if (!this.restartNeeded()) {
             this.restartRequestPending = false;
             this.restartAcknowledged = false;
@@ -1944,7 +1946,53 @@
           const snapshots = this.state.snapshots || this.state.Snapshots || {};
           return snapshots[id] || snapshots[String(id)] || this.state.snapshot || this.state.Snapshot || {};
         },
-        timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
+        timeline() {
+          const id = String(this.activeChatID() || '');
+          return this.timelineForChat(id, this.activeSnapshot());
+        },
+        timelineForChat(chatID, snapshot = {}) {
+          const id = String(chatID || snapshot?.Chat?.ID || snapshot?.Chat?.id || snapshot?.chat?.id || snapshot?.chat?.ID || '').trim();
+          if (id && timelineStore.has(id)) return timelineStore.get(id);
+          const timeline = snapshot?.Timeline || snapshot?.timeline || [];
+          return Array.isArray(timeline) ? timeline : [];
+        },
+        storeTimeline(chatID, timeline) {
+          const id = String(chatID || '').trim();
+          if (!id || !Array.isArray(timeline)) return [];
+          const stored = timeline.slice();
+          timelineStore.set(id, stored);
+          return stored;
+        },
+        stripSnapshotTimeline(chatID, snapshot) {
+          if (!snapshot || typeof snapshot !== 'object') return snapshot;
+          const timeline = snapshot.Timeline || snapshot.timeline;
+          if (!Array.isArray(timeline)) return snapshot;
+          this.storeTimeline(chatID || snapshot.Chat?.ID || snapshot.Chat?.id || snapshot.chat?.ID || snapshot.chat?.id, timeline);
+          const next = {...snapshot};
+          delete next.Timeline;
+          delete next.timeline;
+          return next;
+        },
+        cacheStateTimelines(state) {
+          if (!state || typeof state !== 'object') return state || {};
+          const next = {...state};
+          const activeID = String(next.active_chat_id || next.ActiveChatID || '').trim();
+          if (next.snapshot || next.Snapshot) {
+            const snapshot = this.stripSnapshotTimeline(activeID, next.snapshot || next.Snapshot);
+            next.snapshot = snapshot;
+            next.Snapshot = snapshot;
+          }
+          const snapshots = next.snapshots || next.Snapshots;
+          if (snapshots && typeof snapshots === 'object') {
+            const cached = {};
+            Object.entries(snapshots).forEach(([chatID, snapshot]) => {
+              cached[chatID] = this.stripSnapshotTimeline(chatID, snapshot);
+            });
+            next.snapshots = cached;
+            next.Snapshots = cached;
+          }
+          return next;
+        },
         renderedTimeline() {
           const timeline = this.timeline();
           const bounds = this.timelineRenderWindowBounds(timeline);
@@ -1964,7 +2012,7 @@
           const end = Math.max(start, Math.min(Number(current.end || length), length));
           const overscan = Math.max(0, Number(current.overscan || 0));
           if (end <= start && length > 0) return fallback();
-          if (this.transcriptStickToBottom && length > transcriptTailWindowSize && end < length) return fallback();
+          if (this.transcriptStickToBottom && length > transcriptTailWindowSize && (end < length || end - start > transcriptTailWindowSize + transcriptWindowOverscan)) return fallback();
           return {chatID, start, end, overscan};
         },
         setTimelineRenderWindow(start, end, overscan = 0) {
@@ -3349,7 +3397,8 @@
           this.speakText(text);
         },
         maybeSpeakLatestAssistant(snapshot) {
-          const timeline = snapshot?.Timeline || snapshot?.timeline || [];
+          const chatID = String(snapshot?.Chat?.ID || snapshot?.Chat?.id || snapshot?.chat?.ID || snapshot?.chat?.id || this.activeChatID() || '').trim();
+          const timeline = this.timelineForChat(chatID, snapshot);
           for (let i = timeline.length - 1; i >= 0; i--) {
             const item = timeline[i];
             const kind = String(item?.kind || item?.Kind || '').trim();
