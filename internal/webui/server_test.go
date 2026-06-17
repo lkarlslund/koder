@@ -1366,6 +1366,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const transcriptWindowOverscan = 30`) ||
 		!strings.Contains(fullPage, `timelineTopSpacerHeight()`) ||
 		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
+		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
+		!strings.Contains(fullPage, `timelineItemHeights`) ||
+		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `timeline-spacer`) {
 		t.Fatalf("expected browser to track transcript render windows")
 	}

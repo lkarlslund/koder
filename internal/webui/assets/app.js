@@ -913,7 +913,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1702,6 +1702,7 @@
           this.$nextTick(() => {
             requestAnimationFrame(() => {
               const run = () => {
+                this.measureRenderedTimelineItems();
                 fn();
                 requestAnimationFrame(fn);
                 setTimeout(fn, 0);
@@ -1979,14 +1980,64 @@
           const timeline = this.timeline();
           return this.setTimelineRenderWindow(0, timeline.length, 0);
         },
+        timelineHeightKey(item) {
+          const itemID = this.timelineItemID(item);
+          if (!itemID) return '';
+          return String(this.activeChatID() || '') + ':' + itemID;
+        },
+        timelineItemHeight(item) {
+          const key = this.timelineHeightKey(item);
+          const measured = key ? Number(this.timelineItemHeights[key] || 0) : 0;
+          return measured > 0 ? measured : Math.max(1, Number(this.timelineAverageItemHeight || estimatedTimelineItemHeight));
+        },
+        timelineSpacerHeight(items) {
+          if (!Array.isArray(items) || items.length === 0) return 0;
+          let height = 0;
+          for (const item of items) height += this.timelineItemHeight(item);
+          return Math.round(height);
+        },
         timelineTopSpacerHeight() {
+          const timeline = this.timeline();
           const bounds = this.timelineRenderWindowBounds();
-          return bounds.start * estimatedTimelineItemHeight;
+          return this.timelineSpacerHeight(timeline.slice(0, bounds.start));
         },
         timelineBottomSpacerHeight() {
           const timeline = this.timeline();
           const bounds = this.timelineRenderWindowBounds(timeline);
-          return Math.max(0, timeline.length - bounds.end) * estimatedTimelineItemHeight;
+          return this.timelineSpacerHeight(timeline.slice(bounds.end));
+        },
+        measureRenderedTimelineItems(root = null) {
+          root = root || this.transcriptElement();
+          if (!root) return;
+          const chatID = String(this.activeChatID() || '');
+          if (!chatID) return;
+          const next = {...(this.timelineItemHeights || {})};
+          let changed = false;
+          let total = 0;
+          let count = 0;
+          root.querySelectorAll('.transcript-turn[data-timeline-item-id]').forEach(row => {
+            const itemID = String(row.dataset.timelineItemId || '').trim();
+            if (!itemID) return;
+            const rect = row.getBoundingClientRect();
+            const styles = window.getComputedStyle(row);
+            const marginTop = Number.parseFloat(styles.marginTop || '0') || 0;
+            const marginBottom = Number.parseFloat(styles.marginBottom || '0') || 0;
+            const height = Math.max(1, Math.ceil(rect.height + marginTop + marginBottom));
+            const key = chatID + ':' + itemID;
+            total += height;
+            count++;
+            if (next[key] !== height) {
+              next[key] = height;
+              changed = true;
+            }
+          });
+          if (count > 0) {
+            const average = Math.max(1, Math.round(total / count));
+            if (this.timelineAverageItemHeight !== average) {
+              this.timelineAverageItemHeight = average;
+            }
+          }
+          if (changed) this.timelineItemHeights = next;
         },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
         allExecProcesses() {
