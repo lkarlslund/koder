@@ -1775,8 +1775,10 @@
           const el = this.transcriptElement();
           if (!el) return;
           if (options.scrollToBottom || scroll.stickToBottom) {
-            el.scrollTop = el.scrollHeight;
             this.transcriptStickToBottom = true;
+            this.recalculateTimelineRenderWindow();
+            el.scrollTop = el.scrollHeight;
+            requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
             return;
           }
           el.scrollTop = scroll.top;
