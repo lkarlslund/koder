@@ -910,7 +910,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1938,6 +1938,39 @@
           return snapshots[id] || snapshots[String(id)] || this.state.snapshot || this.state.Snapshot || {};
         },
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
+        renderedTimeline() {
+          const timeline = this.timeline();
+          const window = this.timelineRenderWindowBounds(timeline);
+          return timeline.slice(window.start, window.end);
+        },
+        timelineRenderWindowBounds(timeline = this.timeline()) {
+          const chatID = String(this.activeChatID() || '');
+          const length = Array.isArray(timeline) ? timeline.length : 0;
+          const current = this.timelineRenderWindow || {};
+          if (current.chatID !== chatID || !length) return {chatID, start: 0, end: length, overscan: 0};
+          const start = Math.max(0, Math.min(Number(current.start || 0), length));
+          const end = Math.max(start, Math.min(Number(current.end || length), length));
+          const overscan = Math.max(0, Number(current.overscan || 0));
+          if (end <= start && length > 0) return {chatID, start: 0, end: length, overscan: 0};
+          return {chatID, start, end, overscan};
+        },
+        setTimelineRenderWindow(start, end, overscan = 0) {
+          const timeline = this.timeline();
+          const length = timeline.length;
+          const next = {
+            chatID: String(this.activeChatID() || ''),
+            start: Math.max(0, Math.min(Number(start || 0), length)),
+            end: Math.max(0, Math.min(Number(end || 0), length)),
+            overscan: Math.max(0, Number(overscan || 0)),
+          };
+          if (next.end < next.start) next.end = next.start;
+          this.timelineRenderWindow = next;
+          return this.timelineRenderWindowBounds(timeline);
+        },
+        resetTimelineRenderWindow() {
+          const timeline = this.timeline();
+          return this.setTimelineRenderWindow(0, timeline.length, 0);
+        },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
         allExecProcesses() {
           const snapshot = this.activeSnapshot();
@@ -2129,6 +2162,7 @@
         clientDebugState() {
           const transcript = this.transcriptElement();
           const timeline = this.timeline();
+          const renderWindow = this.timelineRenderWindowBounds(timeline);
           const renderedTurns = transcript ? transcript.querySelectorAll('.transcript-turn').length : 0;
           const domNodes = transcript ? transcript.querySelectorAll('*').length : 0;
           return {
@@ -2148,9 +2182,9 @@
             transcript_dom_nodes: domNodes,
             markdown_cache_entries: markdownCacheSize(),
             last_ws_message_bytes: this.lastWSMessageBytes || 0,
-            render_window_start: 0,
-            render_window_end: timeline.length,
-            render_window_overscan: 0,
+            render_window_start: renderWindow.start,
+            render_window_end: renderWindow.end,
+            render_window_overscan: renderWindow.overscan,
             open_dialog: this.openDialogName(),
             interrupt_visible: this.chatInterruptible(),
             interrupt_armed: !!this.interruptArmed(),

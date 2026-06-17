@@ -1359,6 +1359,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
+	if !strings.Contains(fullPage, `renderedTimeline()`) ||
+		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||
+		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) {
+		t.Fatalf("expected browser to track transcript render windows")
+	}
 	if !strings.Contains(fullPage, `rollback_chat`) ||
 		!strings.Contains(fullPage, `this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(s =>`) ||
 		!strings.Contains(fullPage, `fork_chat`) ||
