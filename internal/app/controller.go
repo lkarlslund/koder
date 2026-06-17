@@ -952,9 +952,12 @@ func continueRuntime(rt *chat.Chat, note string) error {
 
 // StopForSelection cancels the selected chat turn.
 func (c *Controller) StopForSelection(ctx context.Context, selection Selection) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, session, chatRecord, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
 	if err != nil {
 		return err
+	}
+	if c.agent != nil {
+		c.agent.CancelActiveProviderRequests(session.ID, chatRecord.ID)
 	}
 	return stopRuntime(rt, chat.CancelReasonUserInterruptHard)
 }

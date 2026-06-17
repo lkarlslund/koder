@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
@@ -263,6 +264,44 @@ func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for selected exec process update")
 		}
+	}
+}
+
+func TestControllerHardStopCancelsActiveProviderRequest(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	recorder := debugsrv.NewRecorder()
+	engine := agent.New(cfg, st, recorder, nil)
+	ctrl := New(cfg, engine)
+	projectRoot := t.TempDir()
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	activateTestSession(t, ctrl, projectRoot)
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+
+	selection := controllerSelection(ctrl)
+	activeCtx, _, finish := recorder.StartHTTP(context.Background(), debugsrv.HTTPTrace{
+		SessionID: selection.SessionID,
+		ChatID:    selection.ChatID,
+		Method:    "POST",
+		Path:      "/chat/completions",
+	})
+	defer finish()
+
+	if err := ctrl.StopForSelection(context.Background(), selection); err != nil {
+		t.Fatalf("stop selection: %v", err)
+	}
+	select {
+	case <-activeCtx.Done():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected hard stop to cancel active provider request")
 	}
 }
 

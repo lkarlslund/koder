@@ -130,6 +130,14 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	}
 }
 
+// CancelActiveProviderRequests cancels in-flight provider HTTP requests for one chat.
+func (e *Engine) CancelActiveProviderRequests(sessionID, chatID id.ID) int {
+	if e == nil || e.debug == nil || sessionID == "" || chatID == "" {
+		return 0
+	}
+	return e.debug.CancelActiveHTTPTraces(debugsrv.HTTPTraceFilter{SessionID: sessionID, ChatID: chatID})
+}
+
 func (e *Engine) ListMCPServers() []mcp.ServerState {
 	if e.mcp == nil {
 		return nil
