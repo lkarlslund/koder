@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -40,14 +41,17 @@ type ContinuationPause struct {
 }
 
 type ToolLoopTracker struct {
-	lastSignature string
-	lastTool      domain.ToolKind
-	repeatCount   int
+	lastCall    toolLoopComparableCall
+	repeatCount int
+}
+
+type toolLoopComparableCall struct {
+	Tool domain.ToolKind
+	Args map[string]string
 }
 
 func (t *ToolLoopTracker) Reset() {
-	t.lastSignature = ""
-	t.lastTool = ""
+	t.lastCall = toolLoopComparableCall{}
 	t.repeatCount = 0
 }
 
@@ -56,16 +60,15 @@ func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, Con
 		t.Reset()
 		return ToolLoopAllow, ContinuationPause{}
 	}
-	signature := toolLoopSignature(calls[0])
-	if signature == "" {
+	call, ok := comparableToolLoopCall(calls[0])
+	if !ok {
 		t.Reset()
 		return ToolLoopAllow, ContinuationPause{}
 	}
-	if signature == t.lastSignature {
+	if reflect.DeepEqual(call, t.lastCall) {
 		t.repeatCount++
 	} else {
-		t.lastSignature = signature
-		t.lastTool = calls[0].Tool
+		t.lastCall = call
 		t.repeatCount = 1
 	}
 	if t.repeatCount < RepeatedToolLoopThreshold {
@@ -112,11 +115,22 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 	return msg + " Read the previous tool result, then choose a different tool or pass different arguments that include the field you intended to change."
 }
 
-func toolLoopSignature(req tools.Request) string {
+func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {
 	if req.Tool == domain.ToolKindExecWriteStdin && strings.TrimSpace(req.Args["chars"]) == "" && strings.TrimSpace(req.Args["close_stdin"]) == "" {
-		return ""
+		return toolLoopComparableCall{}, false
 	}
-	return req.Tool.String() + "\x00" + req.ArgumentsJSON()
+	return toolLoopComparableCall{Tool: req.Tool, Args: cloneToolLoopArgs(req.Args)}, true
+}
+
+func cloneToolLoopArgs(args map[string]string) map[string]string {
+	if args == nil {
+		return nil
+	}
+	out := make(map[string]string, len(args))
+	for key, value := range args {
+		out[key] = value
+	}
+	return out
 }
 
 func ProviderRefusalPauseBody(reasoning string) string {
