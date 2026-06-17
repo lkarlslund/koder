@@ -90,6 +90,7 @@
         <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
         <span x-text="timelineLoadingAll[activeChatID()] ? 'Loading full chat' : 'Loading earlier messages'"></span>
       </div>
+      <div class="timeline-spacer" aria-hidden="true" x-show="timelineTopSpacerHeight() > 0" :style="{height: timelineTopSpacerHeight() + 'px'}"></div>
       <template x-for="item in renderedTimeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4" :data-timeline-item-id="timelineItemID(item)">
           <template x-if="item.kind === 'user'">
@@ -214,6 +215,7 @@
           <div class="markdown-body" x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"></div>
         </section>
       </template>
+      <div class="timeline-spacer" aria-hidden="true" x-show="timelineBottomSpacerHeight() > 0" :style="{height: timelineBottomSpacerHeight() + 'px'}"></div>
     </main>
 
     <div class="sidebar-resizer" x-show="!welcomeMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>

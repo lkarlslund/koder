@@ -414,6 +414,9 @@
       if (value instanceof Blob) return value.size;
       return 0;
     }
+    const transcriptTailWindowSize = 120;
+    const transcriptWindowOverscan = 30;
+    const estimatedTimelineItemHeight = 160;
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
@@ -1940,18 +1943,23 @@
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
         renderedTimeline() {
           const timeline = this.timeline();
-          const window = this.timelineRenderWindowBounds(timeline);
-          return timeline.slice(window.start, window.end);
+          const bounds = this.timelineRenderWindowBounds(timeline);
+          return timeline.slice(bounds.start, bounds.end);
         },
         timelineRenderWindowBounds(timeline = this.timeline()) {
           const chatID = String(this.activeChatID() || '');
           const length = Array.isArray(timeline) ? timeline.length : 0;
           const current = this.timelineRenderWindow || {};
-          if (current.chatID !== chatID || !length) return {chatID, start: 0, end: length, overscan: 0};
+          const fallback = () => {
+            if (!this.transcriptStickToBottom || length <= transcriptTailWindowSize) return {chatID, start: 0, end: length, overscan: 0};
+            const start = Math.max(0, length - transcriptTailWindowSize - transcriptWindowOverscan);
+            return {chatID, start, end: length, overscan: transcriptWindowOverscan};
+          };
+          if (current.chatID !== chatID || !length) return fallback();
           const start = Math.max(0, Math.min(Number(current.start || 0), length));
           const end = Math.max(start, Math.min(Number(current.end || length), length));
           const overscan = Math.max(0, Number(current.overscan || 0));
-          if (end <= start && length > 0) return {chatID, start: 0, end: length, overscan: 0};
+          if (end <= start && length > 0) return fallback();
           return {chatID, start, end, overscan};
         },
         setTimelineRenderWindow(start, end, overscan = 0) {
@@ -1970,6 +1978,15 @@
         resetTimelineRenderWindow() {
           const timeline = this.timeline();
           return this.setTimelineRenderWindow(0, timeline.length, 0);
+        },
+        timelineTopSpacerHeight() {
+          const bounds = this.timelineRenderWindowBounds();
+          return bounds.start * estimatedTimelineItemHeight;
+        },
+        timelineBottomSpacerHeight() {
+          const timeline = this.timeline();
+          const bounds = this.timelineRenderWindowBounds(timeline);
+          return Math.max(0, timeline.length - bounds.end) * estimatedTimelineItemHeight;
         },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
         allExecProcesses() {

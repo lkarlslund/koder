@@ -1361,7 +1361,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `renderedTimeline()`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||
-		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) {
+		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) ||
+		!strings.Contains(fullPage, `const transcriptTailWindowSize = 120`) ||
+		!strings.Contains(fullPage, `const transcriptWindowOverscan = 30`) ||
+		!strings.Contains(fullPage, `timelineTopSpacerHeight()`) ||
+		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
+		!strings.Contains(fullPage, `timeline-spacer`) {
 		t.Fatalf("expected browser to track transcript render windows")
 	}
 	if !strings.Contains(fullPage, `rollback_chat`) ||

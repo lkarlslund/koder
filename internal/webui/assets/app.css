@@ -26,6 +26,7 @@
     .welcome-session-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem .85rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: inherit; text-align: left; }
     .welcome-session-row:hover { border-color: var(--bs-primary); background: var(--bs-secondary-bg); }
     .transcript { min-height: 0; overflow: auto; }
+    .timeline-spacer { flex: 0 0 auto; width: 100%; pointer-events: none; }
     .timeline-load-indicator { position: sticky; top: .25rem; z-index: 5; display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .75rem; padding: .2rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-secondary-color); font-size: .82rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
