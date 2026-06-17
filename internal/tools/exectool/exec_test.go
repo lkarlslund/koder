@@ -17,7 +17,7 @@ import (
 func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 	spec := tools.Info(domain.ToolKindExecCommand)
 	text := strings.Join([]string{spec.Description, spec.Usage, spec.Parameters}, "\n")
-	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments"} {
+	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments", "comment"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected exec_command spec to contain %q, got:\n%s", want, text)
 		}
@@ -27,6 +27,7 @@ func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 func TestCommandNormalizeArgs(t *testing.T) {
 	args, err := (commandTool{}).NormalizeArgs(map[string]string{
 		"cmd":           "sleep 1",
+		"comment":       "  run a short sleep\nfor testing  ",
 		"workdir":       "./sub",
 		"tty":           "true",
 		"yield_time_ms": "250",
@@ -34,7 +35,7 @@ func TestCommandNormalizeArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize args: %v", err)
 	}
-	if args["cmd"] != "sleep 1" || args["workdir"] != "sub" || args["tty"] != "true" || args["yield_time_ms"] != "250" {
+	if args["cmd"] != "sleep 1" || args["comment"] != "run a short sleep for testing" || args["workdir"] != "sub" || args["tty"] != "true" || args["yield_time_ms"] != "250" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
 }
@@ -48,7 +49,7 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 		ChatID:    "chat-1",
 		Exec:      control,
 	}, Request: tools.Request{
-		Args: map[string]string{"cmd": "pwd"},
+		Args: map[string]string{"cmd": "pwd", "comment": "show current directory"},
 	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -65,6 +66,9 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 	}
 	if stored.Workdir != "." {
 		t.Fatalf("expected stored relative workdir '.', got %q", stored.Workdir)
+	}
+	if stored.Comment != "show current directory" || result.Meta["comment"] != "show current directory" {
+		t.Fatalf("expected stored comment metadata, stored=%#v meta=%#v", stored, result.Meta)
 	}
 }
 

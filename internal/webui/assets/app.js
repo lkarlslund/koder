@@ -785,12 +785,19 @@
     function chatSendMessage(args) {
       return String(firstValue(args || {}, ['message', 'Message']) || '').trim();
     }
+    function compactCommandLabel(command) {
+      const text = String(command || '').replace(/\s+/g, ' ').trim();
+      if (!text) return '';
+      const max = 96;
+      return text.length > max ? text.slice(0, max - 1) + '…' : text;
+    }
     function toolTitleText(tool) {
       const kind = String((tool && tool.tool) || '');
       const data = toolData(tool);
       const args = toolArgs(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
       const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command', 'cmd']);
+      const comment = firstValue(data, ['comment', 'Comment']) || firstValue(args, ['comment']);
       switch (kind) {
         case 'file_read': return readTitle(path, args, data);
         case 'file_write': return path ? 'Write ' + path : 'Write file';
@@ -799,7 +806,10 @@
           if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
           return 'Run command';
         }
-        case 'exec_command': return command ? 'Start exec ' + command : 'Start exec';
+        case 'exec_command': {
+          const label = comment || compactCommandLabel(command);
+          return label ? 'Start exec ' + label : 'Start exec';
+        }
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
         case 'exec_write_stdin': return 'Write exec stdin';
@@ -820,9 +830,10 @@
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
+      if (String((tool && tool.tool) || '') === 'exec_command' && args.comment) return '';
       const values = [];
-      if (args.command) values.push(args.command);
-      if (args.cmd) values.push(args.cmd);
+      if (args.command) values.push(compactCommandLabel(args.command));
+      if (args.cmd) values.push(compactCommandLabel(args.cmd));
       if (args.process_id) values.push('process_id=' + args.process_id);
       const timeout = timeoutLabel(args.timeout_ms || args.yield_time_ms);
       if (timeout) values.push((args.yield_time_ms ? 'wait=' : 'timeout=') + timeout);

@@ -21,8 +21,8 @@ func init() {
 	tools.Register(commandTool{}, tools.ToolSpec{
 		Title:       "Start exec session",
 		Description: "Start a persistent shell command session.",
-		Usage:       "Start a shell command. Short commands usually return their initial output immediately; commands still running after the startup grace period remain as persistent exec sessions. Use exec_write_stdin with empty chars to wait for new output, exec_write_stdin with chars to interact, exec_status for one-off inspection, and exec_terminate to stop a running command. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text.",
-		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","description":"Optional startup grace period in milliseconds before returning. Defaults to a short wait."}},"required":["cmd"],"additionalProperties":false}`,
+		Usage:       "Start a shell command. Short commands usually return their initial output immediately; commands still running after the startup grace period remain as persistent exec sessions. Use exec_write_stdin with empty chars to wait for new output, exec_write_stdin with chars to interact, exec_status for one-off inspection, and exec_terminate to stop a running command. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Use comment for a short user-facing description when cmd is long or dense.",
+		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"comment":{"type":"string","description":"Optional short user-facing description of what this exec does. Use this for long or dense commands instead of relying on cmd as the visible label."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","description":"Optional startup grace period in milliseconds before returning. Defaults to a short wait."}},"required":["cmd"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(statusTool{}, tools.ToolSpec{
@@ -99,6 +99,9 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 		return nil, errors.New("cmd is empty")
 	}
 	out := map[string]string{"cmd": cmd}
+	if comment := normalizeComment(args["comment"]); comment != "" {
+		out["comment"] = comment
+	}
 	if workdir := tools.NormalizePathInput(args["workdir"]); workdir != "" {
 		out["workdir"] = workdir
 	}
@@ -206,9 +209,14 @@ func (cleanupTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	return (listTool{}).NormalizeArgs(args)
 }
 
-func (commandTool) Preview(req tools.Request) string { return req.Args["cmd"] }
-func (statusTool) Preview(req tools.Request) string  { return "Inspect " + req.Args["process_id"] }
-func (listTool) Preview(req tools.Request) string    { return "List exec sessions" }
+func (commandTool) Preview(req tools.Request) string {
+	if comment := strings.TrimSpace(req.Args["comment"]); comment != "" {
+		return comment
+	}
+	return req.Args["cmd"]
+}
+func (statusTool) Preview(req tools.Request) string { return "Inspect " + req.Args["process_id"] }
+func (listTool) Preview(req tools.Request) string   { return "List exec sessions" }
 func (writeStdinTool) Preview(req tools.Request) string {
 	if req.Args["chars"] == "" && req.Args["close_stdin"] == "" {
 		return "Wait for output from " + req.Args["process_id"]
@@ -256,6 +264,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	}
 	stored := storedFromSnapshot(snap, execStartMessage(snap))
 	stored.Workdir = rel
+	stored.Comment = req.Args["comment"]
 	meta := map[string]string{
 		"process_id": snap.ProcessID,
 		"command":    snap.Command,
@@ -266,11 +275,28 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	if snap.ExitCode != nil {
 		meta["exit_code"] = strconv.Itoa(*snap.ExitCode)
 	}
+	if stored.Comment != "" {
+		meta["comment"] = stored.Comment
+	}
 	return tools.Result{
 		Output: stored.Message,
 		Meta:   meta,
 		Stored: stored,
 	}, nil
+}
+
+func normalizeComment(value string) string {
+	comment := strings.TrimSpace(value)
+	if comment == "" {
+		return ""
+	}
+	comment = strings.Join(strings.Fields(comment), " ")
+	const maxCommentRunes = 160
+	runes := []rune(comment)
+	if len(runes) <= maxCommentRunes {
+		return comment
+	}
+	return string(runes[:maxCommentRunes])
 }
 
 func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
