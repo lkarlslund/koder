@@ -392,6 +392,68 @@ func TestChatDeltaUsesChangedItemWithoutTimeline(t *testing.T) {
 	}
 }
 
+func TestWebSocketStatusDeltaDoesNotSerializeTimeline(t *testing.T) {
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat: domain.Chat{ID: "chat-1", SessionID: "session-1"},
+			Timeline: []domain.TimelineItem{
+				{ID: "item-1", ChatID: "chat-1", Seq: 1, Content: domain.UserMessage{Text: "old"}},
+				{ID: "item-2", ChatID: "chat-1", Seq: 2, Content: domain.AssistantMessage{Text: "also old"}},
+			},
+			Status: chat.StatusWaitingLLM,
+			Active: true,
+		},
+		StatusChanged: true,
+	}
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 12, Type: "chat_delta", Payload: update})
+	if !ok {
+		t.Fatal("expected compact chat delta")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	payload := string(data)
+	if strings.Contains(payload, `"timeline"`) || strings.Contains(payload, "also old") {
+		t.Fatalf("status-only chat delta serialized timeline data: %s", payload)
+	}
+	if !strings.Contains(payload, `"status"`) {
+		t.Fatalf("expected status field in compact chat delta: %s", payload)
+	}
+}
+
+func TestWebSocketReplaceTimelineDeltaIsOnlyTimelineCarrier(t *testing.T) {
+	item := domain.TimelineItem{
+		ID:      "item-1",
+		ChatID:  "chat-1",
+		Seq:     1,
+		Content: domain.AssistantMessage{Text: "kept"},
+	}
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat:     domain.Chat{ID: "chat-1", SessionID: "session-1"},
+			Timeline: []domain.TimelineItem{item},
+			Status:   chat.StatusIdle,
+		},
+		ReplaceTimeline: true,
+	}
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 13, Type: "chat_delta", Payload: update})
+	if !ok {
+		t.Fatal("expected compact chat delta")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	payload := string(data)
+	if !strings.Contains(payload, `"replace_timeline":true`) || !strings.Contains(payload, `"timeline"`) || !strings.Contains(payload, "kept") {
+		t.Fatalf("expected replace timeline delta to carry timeline: %s", payload)
+	}
+	if strings.Contains(payload, `"item"`) {
+		t.Fatalf("replace timeline delta should not also carry an item patch: %s", payload)
+	}
+}
+
 func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := selectedTestState(t, ctrl).Session.ID
