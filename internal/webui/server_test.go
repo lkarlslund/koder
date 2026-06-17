@@ -359,6 +359,47 @@ func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
 	}
 }
 
+func TestTrimStateTimelinesPreservesPagedTailMetadataAtLimit(t *testing.T) {
+	chatID := id.ID("chat-1")
+	items := make([]domain.TimelineItem, 0, defaultTimelinePageSize)
+	for i := 0; i < defaultTimelinePageSize; i++ {
+		items = append(items, domain.TimelineItem{
+			ID:      id.ID(fmt.Sprintf("item-%d", i+1)),
+			ChatID:  chatID,
+			Seq:     int64(i + 1),
+			Content: domain.UserMessage{Text: fmt.Sprintf("message %d", i+1)},
+		})
+	}
+	state := app.State{
+		ActiveChatID: chatID,
+		Snapshot: chat.Snapshot{
+			Chat:              domain.Chat{ID: chatID},
+			Timeline:          items,
+			TimelineHasMore:   true,
+			TimelineLoadedAll: false,
+			TimelineBefore:    items[0].ID,
+		},
+		Snapshots: map[id.ID]chat.Snapshot{
+			chatID: {
+				Chat:              domain.Chat{ID: chatID},
+				Timeline:          items,
+				TimelineHasMore:   true,
+				TimelineLoadedAll: false,
+				TimelineBefore:    items[0].ID,
+			},
+		},
+	}
+
+	trimmed := trimStateTimelines(state, defaultTimelinePageSize)
+	snapshot := trimmed.Snapshots[chatID]
+	if got, want := len(snapshot.Timeline), defaultTimelinePageSize; got != want {
+		t.Fatalf("timeline length = %d, want %d", got, want)
+	}
+	if !snapshot.TimelineHasMore || snapshot.TimelineLoadedAll || snapshot.TimelineBefore != items[0].ID {
+		t.Fatalf("paged tail metadata was not preserved: %#v", snapshot)
+	}
+}
+
 func TestChatDeltaUsesChangedItemWithoutTimeline(t *testing.T) {
 	changed := domain.TimelineItem{
 		ID:      "item-2",
@@ -1377,6 +1418,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
 		!strings.Contains(fullPage, `timelineItemHeights`) ||
 		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
+		!strings.Contains(fullPage, `scheduleTimelineRenderWindowRecalculation`) ||
+		!strings.Contains(fullPage, `timelineRenderWindowPending`) ||
 		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
 		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
 		!strings.Contains(fullPage, `requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; })`) ||
@@ -1465,8 +1508,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
 		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
 	}
-	if !strings.Contains(fullPage, `scrollRestoreSeq`) || !strings.Contains(fullPage, `seq === this.scrollRestoreSeq`) {
-		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored")
+	if !strings.Contains(fullPage, `scrollRestoreSeq`) ||
+		!strings.Contains(fullPage, `seq === this.scrollRestoreSeq`) ||
+		!strings.Contains(fullPage, `this.scrollRestoreSeq++`) {
+		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored after user scrolling")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
 		!strings.Contains(fullPage, `Promise.resolve(rendered).then`) ||

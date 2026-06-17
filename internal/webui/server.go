@@ -1229,8 +1229,11 @@ func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {
 	}
 	if limit <= 0 || total <= limit {
 		snapshot.Timeline = slices.Clone(snapshot.Timeline)
-		snapshot.TimelineHasMore = false
-		snapshot.TimelineLoadedAll = true
+		if snapshot.TimelineHasMore {
+			snapshot.TimelineLoadedAll = false
+		} else {
+			snapshot.TimelineLoadedAll = true
+		}
 		snapshot.TimelineBefore = snapshot.Timeline[0].ID
 		return snapshot
 	}
