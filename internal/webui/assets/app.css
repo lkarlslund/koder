@@ -16,6 +16,8 @@
     @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
     .welcome-view { grid-column: 1 / 4; min-height: 0; overflow: auto; display: grid; place-items: start center; background: var(--bs-body-bg); }
     .welcome-panel { width: min(840px, 100%); margin: min(8vh, 4rem) auto; display: grid; gap: 1.25rem; }
+    .hydrating-view { grid-column: 1 / 4; min-height: 0; overflow: hidden; display: grid; place-items: center; background: var(--bs-body-bg); }
+    .hydrating-panel { width: min(24rem, 100%); display: grid; justify-items: center; gap: .25rem; }
     .welcome-header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--bs-border-color); }
     .welcome-header h1 { margin: .15rem 0 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: 0; }
     .welcome-kicker { display: inline-flex; align-items: center; gap: .45rem; color: var(--bs-secondary-color); font-weight: 600; }

@@ -942,7 +942,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1825,6 +1825,7 @@
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = this.cacheStateTimelines(s || {});
+          this.hydratingSession = {active: false, id: '', title: '', error: ''};
           if (!this.restartNeeded()) {
             this.restartRequestPending = false;
             this.restartAcknowledged = false;
@@ -1856,7 +1857,9 @@
         sessionIDFromLocation() { return this.selectionFromLocation().sessionID; },
         chatIDFromLocation() { return this.selectionFromLocation().chatID; },
         currentSessionID() { return String(this.state.session?.id || this.state.session?.ID || '').trim(); },
-        welcomeMode() { return !this.currentSessionID(); },
+        welcomeMode() { return !this.currentSessionID() && !this.hydratingSession.active; },
+        hydratingSessionMode() { return !!this.hydratingSession.active; },
+        sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
         sessionURL(id) {
           const session = String(id || '').trim();
@@ -2356,7 +2359,7 @@
           const renderedTurns = transcript ? transcript.querySelectorAll('.transcript-turn').length : 0;
           const domNodes = transcript ? transcript.querySelectorAll('*').length : 0;
           return {
-            selected_session: this.state.session?.id || this.state.session?.ID || '',
+            selected_session: this.state.session?.id || this.state.session?.ID || this.hydratingSession.id || '',
             selected_chat: String(this.activeChatID() || ''),
             document_visible: !document.hidden,
             window_focused: document.hasFocus(),
@@ -3728,6 +3731,22 @@
           return root ? `(${root})` : '';
         },
         sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },
+        beginHydratingSession(id) {
+          id = String(id || '').trim();
+          if (!id) return;
+          const session = this.sessionRows().find(row => this.sessionID(row) === id) || {};
+          this.hydratingSession = {active: true, id, title: this.sessionTitle(session), error: ''};
+          this.showSessions = false;
+          this.closeSessionEditor();
+          this.state.session = null;
+          this.state.Session = null;
+          this.state.snapshot = {};
+          this.state.Snapshot = {};
+          this.state.active_chat_id = '';
+          this.state.ActiveChatID = '';
+          history.pushState(null, '', this.sessionURL(id));
+          this.reportClientStateSoon();
+        },
         switchSession(id, ev) {
           if (!id) return;
           if (this.shouldOpenInNewTab(ev)) {
@@ -3735,8 +3754,13 @@
             return;
           }
           if (id === this.activeSessionID()) { this.closeSessionDialog(); return; }
+          this.beginHydratingSession(id);
           this.allowSessionURLSync = true;
-          this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+          this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); }).catch(err => {
+            const message = err.message || 'session hydration failed';
+            this.hydratingSession = {...this.hydratingSession, active: false, error: message};
+            this.showToast(message);
+          });
         },
         beginCreateSessionFromWelcome() {
           this.sessionState = this.normalizeSessionState(this.state);

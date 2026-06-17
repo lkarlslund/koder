@@ -39,7 +39,7 @@
       </div>
     </nav>
 
-    <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="!welcomeMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
+    <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="sessionLoadedMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
       <i class="bi bi-layout-sidebar-inset-reverse"></i>
       <span class="visually-hidden">Open sidebar</span>
     </button>
@@ -82,7 +82,15 @@
       </section>
     </main>
 
-    <main class="transcript p-3" x-show="!welcomeMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
+    <main class="hydrating-view p-3" x-show="hydratingSessionMode()" style="display: none;">
+      <section class="hydrating-panel text-center">
+        <div class="spinner-border text-primary" aria-hidden="true"></div>
+        <div class="fw-semibold mt-3">Hydrating session</div>
+        <div class="small text-secondary text-truncate" x-text="hydratingSession.title || hydratingSession.id"></div>
+      </section>
+    </main>
+
+    <main class="transcript p-3" x-show="sessionLoadedMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
@@ -218,11 +226,11 @@
       <div class="timeline-spacer" aria-hidden="true" x-show="timelineBottomSpacerHeight() > 0" :style="{height: timelineBottomSpacerHeight() + 'px'}"></div>
     </main>
 
-    <div class="sidebar-resizer" x-show="!welcomeMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
+    <div class="sidebar-resizer" x-show="sessionLoadedMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
-    <div class="mobile-sidebar-backdrop" x-show="!welcomeMode() && mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
+    <div class="mobile-sidebar-backdrop" x-show="sessionLoadedMode() && mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
 
-    <aside class="sidebar p-3 bg-body-tertiary" x-show="!welcomeMode()" :class="{'mobile-open': mobileSidebarOpen}">
+    <aside class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()" :class="{'mobile-open': mobileSidebarOpen}">
       <div class="mobile-sidebar-header">
         <span class="fw-semibold">Sidebar</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" title="Close sidebar" @click="closeMobileSidebar()"><i class="bi bi-x-lg"></i></button>
@@ -432,7 +440,7 @@
       </div>
     </aside>
 
-    <form class="composer p-3 bg-body" x-show="!welcomeMode()" @submit.prevent="send()">
+    <form class="composer p-3 bg-body" x-show="sessionLoadedMode()" @submit.prevent="send()">
       <div class="composer-queue mb-2" x-show="activeQueue().length > 0" style="display: none;">
         <template x-for="item in activeQueue()" :key="queueItemID(item)">
           <div class="composer-queue-item" draggable="true" :class="{'dragging': dragQueueID === queueItemID(item)}" @dragstart="startQueueDrag($event, queueItemID(item))" @dragover.prevent="overQueueDrag($event, queueItemID(item))" @drop.stop.prevent="dropQueue($event, queueItemID(item))" @dragend="endQueueDrag()">

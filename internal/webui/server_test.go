@@ -1479,6 +1479,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `this.chatURL(this.activeChatID(), id)`) ||
 		!strings.Contains(fullPage, `switchChat(id, ev)`) ||
 		!strings.Contains(fullPage, `switchSession(id, ev)`) ||
+		!strings.Contains(fullPage, `sessionLoadedMode()`) ||
 		!strings.Contains(fullPage, `@auxclick.prevent="switchChat(chatID(chat), $event)"`) ||
 		!strings.Contains(fullPage, `@auxclick.stop.prevent="switchSession(sessionID(session), $event)"`) {
 		t.Fatalf("expected session/chat URL deep links and new-tab click handling")
@@ -1790,6 +1791,13 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `switch_session`) {
 		t.Fatalf("expected session dialog to switch sessions")
+	}
+	if !strings.Contains(fullPage, `Hydrating session`) ||
+		!strings.Contains(fullPage, `hydratingSessionMode()`) ||
+		!strings.Contains(fullPage, `beginHydratingSession(id)`) ||
+		!strings.Contains(fullPage, `history.pushState(null, '', this.sessionURL(id))`) ||
+		!strings.Contains(fullPage, `spinner-border text-primary`) {
+		t.Fatalf("expected session switches to show a hydrating session spinner immediately")
 	}
 	if !strings.Contains(fullPage, `new_session`) {
 		t.Fatalf("expected session dialog to create sessions")
