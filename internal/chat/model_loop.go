@@ -185,18 +185,20 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	}
 	l.tracker.Reset()
 
-	if step > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
-		if strings.TrimSpace(resp.RawReasoning) != "" {
+	if strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
+		if step > 0 && strings.TrimSpace(resp.RawReasoning) != "" {
 			return TurnStepResult{
 				Continue:         true,
 				TurnInstructions: TurnInstructionBlocks("", AfterToolResultContinuationPrompt),
 			}, nil
 		}
-		l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
-			Reason: ContinuationPauseReasonProviderRefusal,
-			Body:   ProviderRefusalPauseBody(resp.RawReasoning),
-		}, out)
-		return TurnStepResult{Done: true}, nil
+		if strings.TrimSpace(resp.RawReasoning) == "" {
+			l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
+				Reason: ContinuationPauseReasonProviderRefusal,
+				Body:   ProviderRefusalPauseBody(resp.RawReasoning),
+			}, out)
+			return TurnStepResult{Done: true}, nil
+		}
 	}
 	if step > 0 && l.model.AutoContinueBadStopEnabled() && !l.autoContinuedBadStop && len(resp.ToolCalls) == 0 && shouldAutoContinueBadStop(text) {
 		l.autoContinuedBadStop = true

@@ -63,6 +63,10 @@ type runtimeFakeRunner struct {
 	events         []<-chan domain.Event
 }
 
+type emptyResponseRunner struct {
+	runtimeFakeRunner
+}
+
 type cancelAwareRunner struct {
 	ctxSeen chan context.Context
 	events  chan domain.Event
@@ -362,6 +366,10 @@ func (f *runtimeFakeRunner) NextAssistantTimelineItemForTurn(_ context.Context, 
 func (f *runtimeFakeRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, out chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
 	forwardFakeEvents(f.nextEvents(), out)
 	return ModelResponse{Text: "done"}, nil
+}
+
+func (f *emptyResponseRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	return ModelResponse{}, nil
 }
 
 func (f *runtimeFakeRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
@@ -699,6 +707,44 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatal("timed out waiting for runtime update")
+		}
+	}
+}
+
+func TestRuntimePausesOnInitialEmptyProviderResponse(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &emptyResponseRunner{}
+	rt := newTestChat(t, st, session, chat, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "go on"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindMessageDone {
+				continue
+			}
+			timeline := rt.SnapshotTimeline()
+			if len(timeline) < 2 {
+				t.Fatalf("timeline = %#v", timeline)
+			}
+			notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
+			if !ok {
+				t.Fatalf("last item content = %T, want notice", timeline[len(timeline)-1].Content)
+			}
+			if notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonProviderRefusal) {
+				t.Fatalf("notice = %#v", notice)
+			}
+			if strings.Contains(notice.Text, "assistant item needs text or reasoning") {
+				t.Fatalf("provider refusal leaked storage validation error: %q", notice.Text)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for provider-refusal pause: %#v", rt.Snapshot())
 		}
 	}
 }
