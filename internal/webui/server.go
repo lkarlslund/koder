@@ -491,20 +491,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				s.updateDebugChats()
-				if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
+				size, err := writeJSON(ctx, conn, &writeMu, webEvent)
+				if err != nil {
 					slog.Info("websocket closed while writing event", "client", clientID, "type", webEvent.Type, "error", err)
 					return
 				}
+				s.recordWebSocketWrite(clientID, webEvent.Type, size)
 			case <-heartbeat.C:
-				if err := writeJSON(ctx, conn, &writeMu, map[string]any{
+				size, err := writeJSON(ctx, conn, &writeMu, map[string]any{
 					"type": "heartbeat",
 					"payload": map[string]string{
 						"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 					},
-				}); err != nil {
+				})
+				if err != nil {
 					slog.Info("websocket closed while writing heartbeat", "client", clientID, "error", err)
 					return
 				}
+				s.recordWebSocketWrite(clientID, "heartbeat", size)
 			case <-ctx.Done():
 				slog.Info("websocket context closed", "client", clientID, "error", ctx.Err())
 				return
@@ -519,7 +523,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		var req rpcRequest
 		if err := json.Unmarshal(data, &req); err != nil {
-			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: nil, OK: false, Error: err.Error()})
+			if size, writeErr := writeJSON(ctx, conn, &writeMu, rpcResponse{ID: nil, OK: false, Error: err.Error()}); writeErr == nil {
+				s.recordWebSocketWrite(clientID, "rpc_response", size)
+			}
 			continue
 		}
 		result, err := s.handleRPC(ctx, clientID, req.Method, req.Params)
@@ -530,10 +536,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			resp.Error = err.Error()
 		}
-		if err := writeJSON(ctx, conn, &writeMu, resp); err != nil {
-			slog.Info("websocket closed while writing rpc response", "client", clientID, "method", req.Method, "error", err)
+		size, writeErr := writeJSON(ctx, conn, &writeMu, resp)
+		if writeErr != nil {
+			slog.Info("websocket closed while writing rpc response", "client", clientID, "method", req.Method, "error", writeErr)
 			return
 		}
+		s.recordWebSocketWrite(clientID, "rpc_response", size)
 		if err == nil {
 			s.updateDebugChats()
 		}
@@ -549,6 +557,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+func (s *Server) recordWebSocketWrite(clientID string, eventType string, size int) {
+	if s.debug == nil || size <= 0 {
+		return
+	}
+	patch := debugsrv.ClientDebug{LastOutboundWSBytes: size}
+	switch eventType {
+	case "chat_delta":
+		patch.LastChatDeltaBytes = size
+	case "state_delta":
+		patch.LastStateDeltaBytes = size
+	}
+	s.debug.PatchClient(clientID, patch)
 }
 
 func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
@@ -1651,16 +1673,19 @@ func writeHTTPRPCResponse(w http.ResponseWriter, resp rpcResponse) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value any) error {
+func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value any) (int, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, websocketWriteTimeout)
 	defer cancel()
 	mu.Lock()
 	defer mu.Unlock()
-	return conn.Write(writeCtx, websocket.MessageText, data)
+	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+		return 0, err
+	}
+	return len(data), nil
 }
 
 func renderIndexHTML() string {

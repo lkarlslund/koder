@@ -404,6 +404,16 @@
       if (markdownCache.size > 120) markdownCache.delete(markdownCache.keys().next().value);
       return html;
     }
+    function markdownCacheSize() {
+      return markdownCache.size;
+    }
+    function websocketPayloadBytes(value) {
+      if (typeof value === 'string') return new Blob([value]).size;
+      if (value instanceof ArrayBuffer) return value.byteLength;
+      if (ArrayBuffer.isView(value)) return value.byteLength;
+      if (value instanceof Blob) return value.size;
+      return 0;
+    }
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
@@ -890,7 +900,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
+        ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
@@ -1113,6 +1123,7 @@
           ws.onmessage = ev => {
             if (this.ws !== ws) return;
             this.lastWSMessageAt = Date.now();
+            this.lastWSMessageBytes = websocketPayloadBytes(ev.data);
             try {
               this.onMessage(JSON.parse(ev.data));
             } catch (err) {
@@ -2117,6 +2128,9 @@
         },
         clientDebugState() {
           const transcript = this.transcriptElement();
+          const timeline = this.timeline();
+          const renderedTurns = transcript ? transcript.querySelectorAll('.transcript-turn').length : 0;
+          const domNodes = transcript ? transcript.querySelectorAll('*').length : 0;
           return {
             selected_session: this.state.session?.id || this.state.session?.ID || '',
             selected_chat: String(this.activeChatID() || ''),
@@ -2129,6 +2143,14 @@
             transcript_scroll_height: transcript ? Math.round(transcript.scrollHeight) : 0,
             transcript_client_height: transcript ? Math.round(transcript.clientHeight) : 0,
             stick_to_bottom: !!this.transcriptStickToBottom,
+            timeline_items_loaded: timeline.length,
+            timeline_items_rendered: renderedTurns,
+            transcript_dom_nodes: domNodes,
+            markdown_cache_entries: markdownCacheSize(),
+            last_ws_message_bytes: this.lastWSMessageBytes || 0,
+            render_window_start: 0,
+            render_window_end: timeline.length,
+            render_window_overscan: 0,
             open_dialog: this.openDialogName(),
             interrupt_visible: this.chatInterruptible(),
             interrupt_armed: !!this.interruptArmed(),

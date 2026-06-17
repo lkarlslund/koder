@@ -158,6 +158,10 @@ Client fields include:
 - `selected_session` and `selected_chat`.
 - browser/UI state such as focus, viewport size, scroll position,
   stick-to-bottom, open dialog, and interrupt button state.
+- browser performance counters such as loaded and rendered timeline item counts,
+  transcript DOM node count, markdown cache entries, last websocket payload
+  bytes, last outbound websocket bytes, last chat/state delta bytes, and the
+  active transcript render window.
 
 ### `GET /debug/clients/{client_id}`
 

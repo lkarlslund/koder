@@ -784,7 +784,7 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	clientID := result["client_id"].(string)
 	state := selectedTestState(t, ctrl)
 	activeChatID := state.ActiveChatID
-	update := fmt.Sprintf(`{"id":2,"method":"client_state","params":{"selected_session":"%s","selected_chat":"%s","document_visible":true,"window_focused":true,"composer_focused":true,"viewport_width":120,"viewport_height":40,"stick_to_bottom":true,"open_dialog":"models","interrupt_visible":true,"interrupt_armed":true}}`, state.Session.ID, activeChatID)
+	update := fmt.Sprintf(`{"id":2,"method":"client_state","params":{"selected_session":"%s","selected_chat":"%s","document_visible":true,"window_focused":true,"composer_focused":true,"viewport_width":120,"viewport_height":40,"stick_to_bottom":true,"timeline_items_loaded":7,"timeline_items_rendered":5,"transcript_dom_nodes":25,"markdown_cache_entries":3,"last_ws_message_bytes":512,"render_window_start":1,"render_window_end":6,"render_window_overscan":2,"open_dialog":"models","interrupt_visible":true,"interrupt_armed":true}}`, state.Session.ID, activeChatID)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(update)); err != nil {
 		t.Fatalf("write client_state: %v", err)
 	}
@@ -794,6 +794,9 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 		t.Fatalf("expected debug client %q", clientID)
 	}
 	if client.SelectedChat != activeChatID || !client.ComposerFocused || client.OpenDialog != "models" || !client.InterruptVisible || !client.InterruptArmed {
+		t.Fatalf("unexpected client debug state: %#v", client)
+	}
+	if client.TimelineItemsLoaded != 7 || client.TimelineItemsRendered != 5 || client.TranscriptDOMNodes != 25 || client.MarkdownCacheEntries != 3 || client.LastWSMessageBytes != 512 || client.RenderWindowStart != 1 || client.RenderWindowEnd != 6 || client.RenderWindowOverscan != 2 {
 		t.Fatalf("unexpected client debug state: %#v", client)
 	}
 }
@@ -1094,7 +1097,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `commit + ' (' + age + ')'`) {
 		t.Fatalf("expected restart-needed control to acknowledge restart and allow hard restart escalation")
 	}
-	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
+	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) || !strings.Contains(fullPage, `timeline_items_loaded: timeline.length`) {
 		t.Fatalf("expected browser to report per-client debug state")
 	}
 	if strings.Contains(fullPage, assetHashPlaceholder) {

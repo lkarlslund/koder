@@ -131,6 +131,17 @@ type ClientDebug struct {
 	TranscriptScrollHeight int       `json:"transcript_scroll_height,omitempty"`
 	TranscriptClientHeight int       `json:"transcript_client_height,omitempty"`
 	StickToBottom          bool      `json:"stick_to_bottom"`
+	TimelineItemsLoaded    int       `json:"timeline_items_loaded,omitempty"`
+	TimelineItemsRendered  int       `json:"timeline_items_rendered,omitempty"`
+	TranscriptDOMNodes     int       `json:"transcript_dom_nodes,omitempty"`
+	MarkdownCacheEntries   int       `json:"markdown_cache_entries,omitempty"`
+	LastWSMessageBytes     int       `json:"last_ws_message_bytes,omitempty"`
+	LastOutboundWSBytes    int       `json:"last_outbound_ws_bytes,omitempty"`
+	LastChatDeltaBytes     int       `json:"last_chat_delta_bytes,omitempty"`
+	LastStateDeltaBytes    int       `json:"last_state_delta_bytes,omitempty"`
+	RenderWindowStart      int       `json:"render_window_start,omitempty"`
+	RenderWindowEnd        int       `json:"render_window_end,omitempty"`
+	RenderWindowOverscan   int       `json:"render_window_overscan,omitempty"`
 	OpenDialog             string    `json:"open_dialog,omitempty"`
 	InterruptVisible       bool      `json:"interrupt_visible"`
 	InterruptArmed         bool      `json:"interrupt_armed"`
@@ -712,7 +723,48 @@ func (r *Recorder) UpdateClient(clientID string, update ClientDebug) {
 	update.LastSeen = time.Now().UTC()
 	update.RemoteAddr = firstNonEmpty(update.RemoteAddr, existing.RemoteAddr)
 	update.UserAgent = firstNonEmpty(update.UserAgent, existing.UserAgent)
+	if update.LastOutboundWSBytes == 0 {
+		update.LastOutboundWSBytes = existing.LastOutboundWSBytes
+	}
+	if update.LastChatDeltaBytes == 0 {
+		update.LastChatDeltaBytes = existing.LastChatDeltaBytes
+	}
+	if update.LastStateDeltaBytes == 0 {
+		update.LastStateDeltaBytes = existing.LastStateDeltaBytes
+	}
 	r.clients[clientID] = update
+}
+
+func (r *Recorder) PatchClient(clientID string, patch ClientDebug) {
+	if r == nil {
+		return
+	}
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.clients == nil {
+		r.clients = map[string]ClientDebug{}
+	}
+	existing := r.clients[clientID]
+	if existing.ID == "" {
+		existing.ID = clientID
+		existing.ConnectedAt = time.Now().UTC()
+		existing.Connected = true
+	}
+	if patch.LastOutboundWSBytes > 0 {
+		existing.LastOutboundWSBytes = patch.LastOutboundWSBytes
+	}
+	if patch.LastChatDeltaBytes > 0 {
+		existing.LastChatDeltaBytes = patch.LastChatDeltaBytes
+	}
+	if patch.LastStateDeltaBytes > 0 {
+		existing.LastStateDeltaBytes = patch.LastStateDeltaBytes
+	}
+	existing.LastSeen = time.Now().UTC()
+	r.clients[clientID] = existing
 }
 
 func (r *Recorder) UnregisterClient(clientID string) {

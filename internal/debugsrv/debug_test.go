@@ -774,7 +774,7 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	t.Parallel()
 
 	rec := NewRecorder()
-	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9"})
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", TimelineItemsLoaded: 42})
 	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
 	srv := httptest.NewServer(Handler(nil, rec))
 	defer srv.Close()
@@ -793,6 +793,9 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	if len(clients.Clients) != 1 || clients.Clients[0].ID != "client-1" {
 		t.Fatalf("unexpected clients response: %#v", clients)
 	}
+	if clients.Clients[0].TimelineItemsLoaded != 42 {
+		t.Fatalf("expected browser performance counters, got %#v", clients.Clients[0])
+	}
 
 	resp, err = http.Get(srv.URL + "/debug/chats/chat-9")
 	if err != nil {
@@ -805,6 +808,38 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	}
 	if chat.ID != "chat-9" || chat.SessionID != "session-7" {
 		t.Fatalf("unexpected chat response: %#v", chat)
+	}
+}
+
+func TestRecorderPatchClientUpdatesByteCountersOnly(t *testing.T) {
+	t.Parallel()
+
+	rec := NewRecorder()
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", ComposerFocused: true})
+	rec.PatchClient("client-1", ClientDebug{LastOutboundWSBytes: 100, LastChatDeltaBytes: 80})
+	rec.PatchClient("client-1", ClientDebug{LastOutboundWSBytes: 40, LastStateDeltaBytes: 35})
+
+	client, ok := rec.Client("client-1")
+	if !ok {
+		t.Fatal("expected patched client")
+	}
+	if client.SelectedSession != "session-7" || client.SelectedChat != "chat-9" || !client.ComposerFocused {
+		t.Fatalf("patch replaced existing client state: %#v", client)
+	}
+	if client.LastOutboundWSBytes != 40 || client.LastChatDeltaBytes != 80 || client.LastStateDeltaBytes != 35 {
+		t.Fatalf("unexpected byte counters: %#v", client)
+	}
+
+	rec.UpdateClient("client-1", ClientDebug{SelectedSession: "session-8", LastWSMessageBytes: 12})
+	client, ok = rec.Client("client-1")
+	if !ok {
+		t.Fatal("expected updated client")
+	}
+	if client.SelectedSession != "session-8" || client.LastWSMessageBytes != 12 {
+		t.Fatalf("expected browser update to apply: %#v", client)
+	}
+	if client.LastOutboundWSBytes != 40 || client.LastChatDeltaBytes != 80 || client.LastStateDeltaBytes != 35 {
+		t.Fatalf("browser update dropped server byte counters: %#v", client)
 	}
 }
 
