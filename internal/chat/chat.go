@@ -85,6 +85,7 @@ type Snapshot struct {
 type Update struct {
 	Event             *domain.Event
 	Snapshot          Snapshot
+	Item              domain.TimelineItem
 	Turn              Turn
 	Status            Status
 	StatusText        string
@@ -1264,16 +1265,19 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 }
 
 func (r *Chat) Snapshot() Snapshot {
+	return r.snapshot(true)
+}
+
+func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
 		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
 	chatRecord := r.state.Chat()
-	return Snapshot{
+	snapshot := Snapshot{
 		Session:           r.session,
 		Chat:              chatRecord,
-		Timeline:          r.state.SnapshotTimeline(),
 		TimelineHasMore:   !r.timelineLoaded,
 		TimelineLoadedAll: r.timelineLoaded,
 		Approvals:         r.state.Approvals(),
@@ -1286,6 +1290,10 @@ func (r *Chat) Snapshot() Snapshot {
 		TokenUsage:        chatRecord.TokenUsage.Normalized(),
 		Active:            r.active,
 	}
+	if includeTimeline {
+		snapshot.Timeline = r.state.SnapshotTimeline()
+	}
+	return snapshot
 }
 
 type LiveRewindResult struct {
@@ -1555,7 +1563,7 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 			return domain.TimelineItem{}, err
 		}
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
+	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, false, true, false))
 	return item, nil
 }
 
@@ -1671,7 +1679,7 @@ func (r *Chat) appendAssistantItem(ctx context.Context, item domain.TimelineItem
 			return domain.TimelineItem{}, err
 		}
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
+	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, false, true, true))
 	return item, nil
 }
 
@@ -1848,7 +1856,8 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 			return count, err
 		}
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
+	item := changed[len(changed)-1]
+	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, false, true, true))
 	return count, nil
 }
 
@@ -1915,7 +1924,7 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 			return domain.TimelineItem{}, err
 		}
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, true))
+	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, false, true, true))
 	return item, nil
 }
 
@@ -2251,7 +2260,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
 	r.removeApprovalLocked(toolCallID)
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
 	go func() {
@@ -2288,7 +2297,7 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
 	r.removeApprovalLocked(toolCallID)
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
 	go func() {
@@ -2565,6 +2574,19 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 			contextChanged = true
 		}
 	}
+	copyEvt := evt
+	if queueErr != nil {
+		copyEvt = domain.Event{Kind: domain.EventKindError, Err: queueErr}
+	}
+	var changedItem domain.TimelineItem
+	if copyEvt.Item.ID != "" && r.state != nil {
+		if item, ok := r.state.TimelineItem(copyEvt.Item.ID); ok {
+			changedItem = item
+			copyEvt.Item = item
+		} else {
+			changedItem = copyEvt.Item
+		}
+	}
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if metadataChanged && r.deps.Store != nil {
@@ -2573,11 +2595,9 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	if tokenUsageChanged && r.deps.Store != nil {
 		_, _ = updateStoredChatUsage(context.Background(), r.deps.Store, chatRecord.ID, chatRecord)
 	}
-	copyEvt := evt
-	if queueErr != nil {
-		copyEvt = domain.Event{Kind: domain.EventKindError, Err: queueErr}
-	}
-	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, queueChanged, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+	update := r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, queueChanged, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply)
+	update.Item = changedItem
+	r.broadcast(update)
 }
 
 func discardEventDuringHardCancel(evt domain.Event) bool {
@@ -3061,8 +3081,17 @@ func (r *Chat) snapshotUpdate(event *domain.Event) Update {
 	return r.snapshotUpdateFlags(event, false, false, false, false, false)
 }
 
+func (r *Chat) snapshotUpdateWithItem(item domain.TimelineItem, event *domain.Event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged bool) Update {
+	update := r.snapshotUpdateFlags(event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged)
+	update.Item = item
+	if update.Event != nil && update.Event.Item.ID == "" {
+		update.Event.Item = item
+	}
+	return update
+}
+
 func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged bool) Update {
-	snapshot := r.Snapshot()
+	snapshot := r.snapshot(false)
 	return Update{
 		Event:             event,
 		Snapshot:          snapshot,
@@ -3179,7 +3208,7 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 	r.status = StatusIdle
 	r.statusText = ""
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, false))
+	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, true, false, false))
 	return nil
 }
 

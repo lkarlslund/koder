@@ -277,6 +277,18 @@ func (s *ChatState) EnsureTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	return record, true
 }
 
+// TimelineItem returns the current in-memory value for one timeline item.
+func (s *ChatState) TimelineItem(itemID id.ID) (domain.TimelineItem, bool) {
+	if s == nil || itemID == "" || s.byItem == nil {
+		return domain.TimelineItem{}, false
+	}
+	record := s.byItem[itemID]
+	if record == nil {
+		return domain.TimelineItem{}, false
+	}
+	return record.Item, true
+}
+
 func (s *ChatState) replaceTemporaryActiveAssistant(item domain.TimelineItem) *TimelineRecord {
 	if !isDurableTimelineItem(item) {
 		return nil

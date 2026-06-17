@@ -2806,8 +2806,11 @@ func TestRuntimeCompactionCompletionClearsKnownContext(t *testing.T) {
 			if update.Snapshot.TokenUsage.HasAnyTokens() || update.Snapshot.Chat.TokenUsage.HasAnyTokens() {
 				t.Fatalf("expected token usage reset after compaction, got snapshot=%#v chat=%#v", update.Snapshot.TokenUsage, update.Snapshot.Chat.TokenUsage)
 			}
-			if len(update.Snapshot.Timeline) == 0 {
-				t.Fatal("expected compaction item in snapshot")
+			if update.Item.ID != item.ID {
+				t.Fatalf("expected compaction item in update, got %#v", update.Item)
+			}
+			if len(update.Snapshot.Timeline) != 0 {
+				t.Fatalf("expected delta snapshot without timeline, got %d items", len(update.Snapshot.Timeline))
 			}
 			return
 		case <-deadline:

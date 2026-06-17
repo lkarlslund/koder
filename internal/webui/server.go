@@ -1386,6 +1386,9 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 }
 
 func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
+	if update.Item.ID != "" {
+		return update.Item, true
+	}
 	if update.Event != nil && update.Event.Item.ID != "" {
 		if item, ok := snapshotTimelineItem(update.Snapshot.Timeline, update.Event.Item.ID); ok {
 			return item, true

@@ -1492,9 +1492,10 @@
           if (active && delta.item) this.maybeSpeakTimelineItem(delta.item, next);
           if (active && wasStreaming && !this.snapshotIsStreaming(next)) this.maybeSpeakLatestAssistant(next);
           if (active) {
+            const changedItemID = delta.item ? this.timelineItemID(delta.item) : '';
             this.afterTranscriptDOMUpdate(() => {
               if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-            });
+            }, {itemID: changedItemID});
           }
           this.reportClientStateSoon();
         },
@@ -1695,7 +1696,7 @@
                 run();
                 return;
               }
-              const rendered = this.renderDiagrams();
+              const rendered = this.renderDiagrams(this.timelineItemElement(options.itemID));
               run();
               Promise.resolve(rendered).then(() => {
                 fn();
@@ -1705,8 +1706,16 @@
             });
           });
         },
-        renderDiagrams() {
+        timelineItemElement(itemID) {
+          const id = String(itemID || '').trim();
+          if (!id) return null;
           const root = this.transcriptElement();
+          if (!root) return null;
+          const escaped = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&');
+          return root.querySelector('[data-timeline-item-id="' + escaped + '"]');
+        },
+        renderDiagrams(root = null) {
+          root = root || this.transcriptElement();
           this.enhanceDisplayedMedia(root);
           return renderMermaidIn(root).then(() => this.enhanceDisplayedMedia(root));
         },

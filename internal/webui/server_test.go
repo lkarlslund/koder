@@ -359,6 +359,39 @@ func TestTrimStateTimelinesKeepsOnlyTail(t *testing.T) {
 	}
 }
 
+func TestChatDeltaUsesChangedItemWithoutTimeline(t *testing.T) {
+	changed := domain.TimelineItem{
+		ID:      "item-2",
+		ChatID:  "chat-1",
+		Seq:     2,
+		Content: domain.AssistantMessage{Text: "changed"},
+	}
+	delta := chatDeltaFromUpdate(chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat: domain.Chat{ID: "chat-1"},
+			Timeline: []domain.TimelineItem{
+				{ID: "item-1", ChatID: "chat-1", Seq: 1, Content: domain.UserMessage{Text: "old"}},
+				changed,
+			},
+		},
+		Item:              changed,
+		TranscriptChanged: true,
+	})
+	if delta.Item == nil || delta.Item.ID != changed.ID {
+		t.Fatalf("expected changed item in delta, got %#v", delta.Item)
+	}
+	if len(delta.Timeline) != 0 {
+		t.Fatalf("expected no full timeline for item delta, got %d items", len(delta.Timeline))
+	}
+	data, err := json.Marshal(delta)
+	if err != nil {
+		t.Fatalf("marshal delta: %v", err)
+	}
+	if bytes.Contains(data, []byte(`"timeline"`)) {
+		t.Fatalf("item delta serialized timeline: %s", data)
+	}
+}
+
 func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	activeID := selectedTestState(t, ctrl).Session.ID
