@@ -1368,6 +1368,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
 		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
 		!strings.Contains(fullPage, `timelineItemHeights`) ||
+		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
+		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
+		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `timeline-spacer`) {
 		t.Fatalf("expected browser to track transcript render windows")

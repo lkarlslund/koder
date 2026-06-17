@@ -1577,6 +1577,7 @@
         },
         onTranscriptScroll() {
           this.updateTranscriptStickiness();
+          this.recalculateTimelineRenderWindow();
           const el = this.transcriptElement();
           if (!el || el.scrollTop > 96) return;
           this.loadOlderTimeline();
@@ -1961,6 +1962,7 @@
           const end = Math.max(start, Math.min(Number(current.end || length), length));
           const overscan = Math.max(0, Number(current.overscan || 0));
           if (end <= start && length > 0) return fallback();
+          if (this.transcriptStickToBottom && length > transcriptTailWindowSize && end < length) return fallback();
           return {chatID, start, end, overscan};
         },
         setTimelineRenderWindow(start, end, overscan = 0) {
@@ -1973,8 +1975,41 @@
             overscan: Math.max(0, Number(overscan || 0)),
           };
           if (next.end < next.start) next.end = next.start;
+          const current = this.timelineRenderWindow || {};
+          if (current.chatID === next.chatID && current.start === next.start && current.end === next.end && current.overscan === next.overscan) {
+            return this.timelineRenderWindowBounds(timeline);
+          }
           this.timelineRenderWindow = next;
           return this.timelineRenderWindowBounds(timeline);
+        },
+        timelineIndexAtOffset(timeline, offset) {
+          if (!Array.isArray(timeline) || timeline.length === 0) return 0;
+          const target = Math.max(0, Number(offset || 0));
+          let cursor = 0;
+          for (let idx = 0; idx < timeline.length; idx++) {
+            cursor += this.timelineItemHeight(timeline[idx]);
+            if (cursor >= target) return idx;
+          }
+          return Math.max(0, timeline.length - 1);
+        },
+        recalculateTimelineRenderWindow() {
+          const timeline = this.timeline();
+          const length = timeline.length;
+          const chatID = String(this.activeChatID() || '');
+          if (!chatID || length <= transcriptTailWindowSize) {
+            return this.setTimelineRenderWindow(0, length, 0);
+          }
+          const el = this.transcriptElement();
+          const nearBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 48;
+          if (nearBottom) {
+            const start = Math.max(0, length - transcriptTailWindowSize - transcriptWindowOverscan);
+            return this.setTimelineRenderWindow(start, length, transcriptWindowOverscan);
+          }
+          const first = this.timelineIndexAtOffset(timeline, el.scrollTop);
+          const last = this.timelineIndexAtOffset(timeline, el.scrollTop + el.clientHeight);
+          const start = Math.max(0, first - transcriptWindowOverscan);
+          const end = Math.min(length, last + transcriptWindowOverscan + 1);
+          return this.setTimelineRenderWindow(start, Math.max(end, start + 1), transcriptWindowOverscan);
         },
         resetTimelineRenderWindow() {
           const timeline = this.timeline();
