@@ -2325,10 +2325,16 @@ func TestRuntimeCancelReasonControlsHardOrSoftStop(t *testing.T) {
 	if !cancelled {
 		t.Fatal("expected hard cancel to cancel active work")
 	}
-	if rt.cancelState != CancelStateCancelling {
+	if rt.cancelState != CancelStateNone {
 		t.Fatalf("cancel state = %q", rt.cancelState)
 	}
-	if rt.statusText != "Interrupting..." {
+	if rt.active {
+		t.Fatal("expected hard cancel to abandon active turn")
+	}
+	if rt.status != StatusIdle {
+		t.Fatalf("status = %q", rt.status)
+	}
+	if rt.statusText != "Idle" {
 		t.Fatalf("status text = %q", rt.statusText)
 	}
 }
@@ -2367,6 +2373,67 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
+	}
+}
+
+func TestRuntimeHardCancelAbandonsBlockedStreamAndRunsQueuedPrompt(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	firstStream := make(chan domain.Event)
+	closedStream := make(chan domain.Event)
+	close(closedStream)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{firstStream, closedStream}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "second"})
+	rt.Cancel(CancelReasonUserInterruptHard)
+
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued prompt after hard cancel; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	assistantID := NewTimelineID(time.Now().UTC())
+	firstStream <- domain.Event{
+		Kind: domain.EventKindMessageDelta,
+		Text: "late stale text",
+		Item: domain.TimelineItem{
+			ID:        assistantID,
+			ChatID:    chatRecord.ID,
+			Content:   domain.AssistantMessage{},
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	close(firstStream)
+
+	deadline = time.After(2 * time.Second)
+	for rt.Snapshot().Active {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued prompt to finish; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if assistantTextInSnapshot(rt.Snapshot(), "late stale text") {
+		t.Fatalf("stale stream event from interrupted turn reached snapshot: %#v", rt.Snapshot().Timeline)
 	}
 }
 

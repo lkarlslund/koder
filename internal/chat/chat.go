@@ -117,6 +117,7 @@ type Chat struct {
 	activeUserSource string
 	cancelState      CancelState
 	running          map[string]struct{}
+	turnSeq          uint64
 	draining         bool
 	closed           bool
 	timelineLoaded   bool
@@ -176,9 +177,12 @@ type denyCmd struct {
 }
 type closeCmd struct{}
 type streamEventCmd struct {
+	turn  uint64
 	event domain.Event
 }
-type streamClosedCmd struct{}
+type streamClosedCmd struct {
+	turn uint64
+}
 
 type TurnStepResult struct {
 	Continue         bool
@@ -880,9 +884,6 @@ func (r *Chat) Cancel(reason CancelReason) {
 	cancel := r.cancel
 	hardUpdated := false
 	if hard && r.active && !r.closed {
-		r.draining = true
-		r.cancelState = CancelStateCancelling
-		r.statusText = "Interrupting..."
 		hardUpdated = true
 		if reason.Restart() {
 			r.chat.AutoRestart = true
@@ -896,13 +897,16 @@ func (r *Chat) Cancel(reason CancelReason) {
 			r.state.DiscardActiveAssistant()
 			r.state.ClearPendingAssistant()
 		}
+		r.abortActiveTurnLocked()
 	}
 	r.mu.Unlock()
 	if cancel != nil && hard {
 		cancel()
 	}
 	if hardUpdated {
-		r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, true, false))
+		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+		r.broadcast(r.snapshotUpdateFlags(&evt, true, false, true, true, false))
+		r.maybeDispatchNext()
 	}
 	select {
 	case r.inbox <- interruptCmd{reason: reason}:
@@ -947,6 +951,8 @@ func (r *Chat) Compact(instructions string) error {
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	r.turnSeq++
+	turn := r.turnSeq
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Compacting session..."
@@ -961,7 +967,7 @@ func (r *Chat) Compact(instructions string) error {
 			r.handleTurnError(ctx, out, err)
 		}
 	}()
-	r.forwardTurnEvents(out)
+	r.forwardTurnEvents(turn, out)
 	return nil
 }
 
@@ -1957,9 +1963,9 @@ func (r *Chat) loop() {
 		case denyCmd:
 			r.handleDeny(typed.toolCallID)
 		case streamEventCmd:
-			r.handleStreamEvent(typed.event)
+			r.handleStreamEventForTurn(typed.turn, typed.event)
 		case streamClosedCmd:
-			r.handleStreamClosed()
+			r.handleStreamClosedForTurn(typed.turn)
 		case closeCmd:
 			r.handleClose()
 			return
@@ -2149,6 +2155,8 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	r.turnSeq++
+	turn := r.turnSeq
 	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue {
 		r.activeUserSource = ""
 	} else {
@@ -2161,7 +2169,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue, true, true, true, false))
-	r.runItem(ctx, item)
+	r.runItem(ctx, turn, item)
 }
 
 func (r *Chat) handleInterrupt(reason CancelReason) {
@@ -2181,8 +2189,7 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 	}
 	cancel := r.cancel
 	if reason.Hard() {
-		r.cancelState = CancelStateCancelling
-		r.statusText = "Interrupting..."
+		r.abortActiveTurnLocked()
 		if r.state != nil {
 			r.state.DiscardActiveAssistant()
 			r.state.ClearPendingAssistant()
@@ -2195,7 +2202,13 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 		cancel()
 	}
 	_ = r.Persist(context.Background(), nil)
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	if reason.Hard() {
+		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+		r.broadcast(r.snapshotUpdateFlags(&evt, true, false, true, true, false))
+		r.maybeDispatchNext()
+	} else {
+		r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	}
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionOverride) {
@@ -2230,6 +2243,8 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
+	r.turnSeq++
+	turn := r.turnSeq
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -2250,7 +2265,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 			r.continueTurnLoop(ctx, nil, out)
 		}
 	}()
-	r.forwardTurnEvents(out)
+	r.forwardTurnEvents(turn, out)
 }
 
 func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string) {
@@ -2265,6 +2280,8 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 		return r.cancelState == CancelStateCancelling
 	})
 	r.cancel = cancel
+	r.turnSeq++
+	turn := r.turnSeq
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -2280,7 +2297,7 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 			r.handleTurnError(ctx, out, err)
 		}
 	}()
-	r.forwardTurnEvents(out)
+	r.forwardTurnEvents(turn, out)
 }
 
 func (r *Chat) resolveApprovalToolCallIDLocked(raw string) string {
@@ -2342,6 +2359,8 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	r.turnSeq++
+	turn := r.turnSeq
 	r.active = true
 	r.status = StatusRunningTools
 	r.statusText = "Resuming tool calls"
@@ -2360,12 +2379,20 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 			r.continueTurnLoop(ctx, nil, out)
 		}
 	}()
-	r.forwardTurnEvents(out)
+	r.forwardTurnEvents(turn, out)
 }
 
 func (r *Chat) handleStreamEvent(evt domain.Event) {
+	r.handleStreamEventForTurn(0, evt)
+}
+
+func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	refreshedQueue, queueChanged, queueErr := r.queueRefreshForEvent(evt)
 	r.mu.Lock()
+	if turn != 0 && turn != r.turnSeq {
+		r.mu.Unlock()
+		return
+	}
 	if r.cancelState == CancelStateCancelling && discardEventDuringHardCancel(evt) {
 		r.mu.Unlock()
 		return
@@ -2674,7 +2701,15 @@ func timelineItemSummary(item domain.TimelineItem) string {
 }
 
 func (r *Chat) handleStreamClosed() {
+	r.handleStreamClosedForTurn(0)
+}
+
+func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	r.mu.Lock()
+	if turn != 0 && turn != r.turnSeq {
+		r.mu.Unlock()
+		return
+	}
 	if r.cancel != nil {
 		r.cancel = nil
 	}
@@ -2703,6 +2738,18 @@ func (r *Chat) handleStreamClosed() {
 	if shouldDispatch && !draining {
 		r.maybeDispatchNext()
 	}
+}
+
+func (r *Chat) abortActiveTurnLocked() {
+	r.turnSeq++
+	r.cancel = nil
+	r.cancelState = CancelStateNone
+	r.running = nil
+	r.activeUserSource = ""
+	r.active = false
+	r.draining = false
+	r.status = StatusIdle
+	r.statusText = "Idle"
 }
 
 func (r *Chat) handleClose() {
@@ -2778,6 +2825,8 @@ func (r *Chat) maybeDispatchNext() {
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	r.turnSeq++
+	turn := r.turnSeq
 	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue {
 		r.activeUserSource = ""
 	} else {
@@ -2790,16 +2839,16 @@ func (r *Chat) maybeDispatchNext() {
 
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue, true, true, true, false))
-	r.runItem(ctx, item)
+	r.runItem(ctx, turn, item)
 }
 
-func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
+func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput) {
 	r.mu.Lock()
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
 	r.mu.Unlock()
 	if r.deps.Model != nil {
-		r.runTurnLoop(ctx, item, note)
+		r.runTurnLoop(ctx, turn, item, note)
 		return
 	}
 	err := fmt.Errorf("model service is not configured")
@@ -2814,7 +2863,7 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) runTurnLoop(ctx context.Context, item domain.QueuedInput, note string) {
+func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedInput, note string) {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
@@ -2839,7 +2888,7 @@ func (r *Chat) runTurnLoop(ctx context.Context, item domain.QueuedInput, note st
 		}
 		r.continueTurnLoop(ctx, turnInstructions, out)
 	}()
-	r.forwardTurnEvents(out)
+	r.forwardTurnEvents(turn, out)
 }
 
 func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) {
@@ -2911,12 +2960,12 @@ func (r *Chat) handleTurnError(ctx context.Context, out chan<- domain.Event, err
 	out <- evt
 }
 
-func (r *Chat) forwardTurnEvents(events <-chan domain.Event) {
+func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
 	go func() {
 		for evt := range events {
-			r.inbox <- streamEventCmd{event: evt}
+			r.inbox <- streamEventCmd{turn: turn, event: evt}
 		}
-		r.inbox <- streamClosedCmd{}
+		r.inbox <- streamClosedCmd{turn: turn}
 	}()
 }
 

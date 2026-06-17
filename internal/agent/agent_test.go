@@ -6236,6 +6236,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	t.Parallel()
 
 	requestStarted := make(chan struct{})
+	requestCanceled := make(chan struct{})
 	releaseRequest := make(chan struct{})
 	closeRelease := func() {
 		select {
@@ -6246,6 +6247,12 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	}
 	t.Cleanup(closeRelease)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.URL.Path != "/v1/chat/completions" || !strings.Contains(string(body), "hello") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+			return
+		}
 		select {
 		case <-requestStarted:
 		default:
@@ -6253,6 +6260,11 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 		}
 		select {
 		case <-r.Context().Done():
+			select {
+			case <-requestCanceled:
+			default:
+				close(requestCanceled)
+			}
 		case <-releaseRequest:
 		}
 	}))
@@ -6294,6 +6306,12 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 		t.Fatalf("timed out waiting for provider request; snapshot=%#v", rt.Snapshot())
 	}
 	rt.Cancel(chatpkg.CancelReasonUserInterruptHard)
+
+	select {
+	case <-requestCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for provider request context cancellation; snapshot=%#v", rt.Snapshot())
+	}
 	closeRelease()
 
 	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
