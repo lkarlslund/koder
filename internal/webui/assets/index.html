@@ -90,7 +90,7 @@
         <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
         <span x-text="timelineLoadingAll[activeChatID()] ? 'Loading full chat' : 'Loading earlier messages'"></span>
       </div>
-      <template x-for="item in timeline()" :key="item.id || item.ID">
+      <template x-for="item in renderedTimeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4" :data-timeline-item-id="timelineItemID(item)">
           <template x-if="item.kind === 'user'">
             <div class="turn user-turn">

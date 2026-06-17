@@ -1386,8 +1386,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'file_read') return ''`) {
 		t.Fatalf("expected read tool rendering to show a single title line with requested line ranges")
 	}
-	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) {
-		t.Fatalf("expected transcript rows to use item ids directly")
+	if !strings.Contains(fullPage, `x-for="item in renderedTimeline()"`) || !strings.Contains(fullPage, `:key="item.id || item.ID"`) {
+		t.Fatalf("expected transcript rows to use rendered timeline items keyed directly by item id")
 	}
 	if !strings.Contains(fullPage, `applyStateDelta(delta)`) || !strings.Contains(fullPage, `msg.type === 'state_delta'`) {
 		t.Fatalf("expected browser to patch compact state deltas")
