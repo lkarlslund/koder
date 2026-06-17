@@ -56,6 +56,8 @@ const (
 	StatusErrored           Status = "error"
 )
 
+const toolCallDeltaForwardInterval = 200 * time.Millisecond
+
 type CancelState string
 
 const (
@@ -2982,11 +2984,68 @@ func (r *Chat) handleTurnError(ctx context.Context, out chan<- domain.Event, err
 
 func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
 	go func() {
-		for evt := range events {
-			r.inbox <- streamEventCmd{turn: turn, event: evt}
+		var (
+			pendingToolDelta *domain.Event
+			toolDeltaTimer   *time.Timer
+			toolDeltaTimerC  <-chan time.Time
+		)
+		stopToolDeltaTimer := func() {
+			if toolDeltaTimer == nil {
+				return
+			}
+			if !toolDeltaTimer.Stop() {
+				select {
+				case <-toolDeltaTimer.C:
+				default:
+				}
+			}
+			toolDeltaTimer = nil
+			toolDeltaTimerC = nil
 		}
-		r.inbox <- streamClosedCmd{turn: turn}
+		startToolDeltaTimer := func() {
+			stopToolDeltaTimer()
+			toolDeltaTimer = time.NewTimer(toolCallDeltaForwardInterval)
+			toolDeltaTimerC = toolDeltaTimer.C
+		}
+		flushToolDelta := func() {
+			if pendingToolDelta != nil {
+				r.inbox <- streamEventCmd{turn: turn, event: *pendingToolDelta}
+				pendingToolDelta = nil
+			}
+			stopToolDeltaTimer()
+		}
+		defer func() {
+			flushToolDelta()
+			r.inbox <- streamClosedCmd{turn: turn}
+		}()
+
+		for {
+			select {
+			case evt, ok := <-events:
+				if !ok {
+					return
+				}
+				if debounceStreamingToolCallDelta(evt) {
+					if toolDeltaTimer == nil {
+						r.inbox <- streamEventCmd{turn: turn, event: evt}
+						startToolDeltaTimer()
+						continue
+					}
+					pending := evt
+					pendingToolDelta = &pending
+					continue
+				}
+				flushToolDelta()
+				r.inbox <- streamEventCmd{turn: turn, event: evt}
+			case <-toolDeltaTimerC:
+				flushToolDelta()
+			}
+		}
 	}()
+}
+
+func debounceStreamingToolCallDelta(evt domain.Event) bool {
+	return evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID == "" && evt.Meta["arguments"] != ""
 }
 
 func (r *Chat) persistQueue() error {

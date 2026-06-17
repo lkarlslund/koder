@@ -2112,6 +2112,69 @@ func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 	}
 }
 
+func TestRuntimeDebouncesStreamedToolCallDeltaStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	events := make(chan domain.Event, 4)
+	rt.forwardTurnEvents(0, events)
+	started := time.Now()
+	events <- domain.Event{
+		Kind: domain.EventKindToolCallDelta,
+		Tool: domain.ToolKindFileEdit,
+		Meta: map[string]string{"arguments": strings.Repeat("x", 1024)},
+	}
+	events <- domain.Event{
+		Kind: domain.EventKindToolCallDelta,
+		Tool: domain.ToolKindFileEdit,
+		Meta: map[string]string{"arguments": strings.Repeat("x", 2048)},
+	}
+	events <- domain.Event{
+		Kind: domain.EventKindToolCallDelta,
+		Tool: domain.ToolKindFileEdit,
+		Meta: map[string]string{"arguments": strings.Repeat("x", 4096)},
+	}
+
+	first := waitForToolCallDeltaUpdate(t, updates, 2*time.Second)
+	if first.StatusText != "Receiving FileEdit tool call (1.0 KB arguments)" {
+		t.Fatalf("first status text = %q", first.StatusText)
+	}
+
+	if remaining := toolCallDeltaForwardInterval/2 - time.Since(started); remaining > 0 {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindToolCallDelta {
+				t.Fatalf("received debounced tool call delta too early: %q", update.StatusText)
+			}
+		case <-time.After(remaining):
+		}
+	}
+
+	second := waitForToolCallDeltaUpdate(t, updates, 2*time.Second)
+	if second.StatusText != "Receiving FileEdit tool call (4.0 KB arguments)" {
+		t.Fatalf("second status text = %q", second.StatusText)
+	}
+	close(events)
+}
+
+func waitForToolCallDeltaUpdate(t *testing.T, updates <-chan Update, timeout time.Duration) Update {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindToolCallDelta {
+				return update
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for tool call delta update")
+		}
+	}
+}
+
 func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
