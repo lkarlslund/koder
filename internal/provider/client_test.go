@@ -1289,6 +1289,48 @@ func TestMessageMarshalJSONWithContentParts(t *testing.T) {
 	}
 }
 
+func TestMessageMarshalJSONSanitizesControlCharacters(t *testing.T) {
+	buf, err := json.Marshal(ChatRequest{
+		Model:  "test",
+		Stream: false,
+		Messages: []Message{
+			{
+				Role:    RoleTool,
+				Content: "ldap diag v65f4\x00\nnext\x1b",
+			},
+			{
+				Role: RoleUser,
+				ContentParts: []ContentPart{
+					TextPart("part\x00text"),
+				},
+			},
+			{
+				Role: RoleAssistant,
+				ToolCalls: []ToolCall{{
+					ID:   "call_1",
+					Type: "function",
+					Function: FunctionCall{
+						Name:      "exec_command",
+						Arguments: "{\"cmd\":\"printf \x00\"}",
+					},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(buf)
+	if strings.Contains(raw, `\u0000`) || strings.Contains(raw, `\u001b`) {
+		t.Fatalf("expected control characters to be visible hex escapes, got %s", raw)
+	}
+	for _, want := range []string{`v65f4\\x00`, `next\\x1b`, `part\\x00text`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("expected %s in sanitized JSON, got %s", want, raw)
+		}
+	}
+}
+
 func TestChatRequestMarshalJSONMergesExtraBody(t *testing.T) {
 	buf, err := json.Marshal(ChatRequest{
 		Model:  "Qwen/Qwen3.6-35B-A3B",

@@ -120,7 +120,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	}
 	var content any
-	trimmed := strings.TrimSpace(m.Content)
+	trimmed := strings.TrimSpace(sanitizePromptText(m.Content))
 	if trimmed != "" {
 		content = trimmed
 	}
@@ -131,7 +131,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 			case "text":
 				items = append(items, map[string]any{
 					"type": "text",
-					"text": part.Text,
+					"text": sanitizePromptText(part.Text),
 				})
 			case "image_url":
 				items = append(items, map[string]any{
@@ -150,8 +150,43 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		Role:       providerRole(m.Role),
 		Content:    content,
 		ToolCallID: m.ToolCallID,
-		ToolCalls:  m.ToolCalls,
+		ToolCalls:  sanitizeToolCalls(m.ToolCalls),
 	})
+}
+
+func sanitizeToolCalls(calls []ToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, len(calls))
+	copy(out, calls)
+	for i := range out {
+		out[i].Function.Arguments = sanitizePromptText(out[i].Function.Arguments)
+	}
+	return out
+}
+
+func sanitizePromptText(text string) string {
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	changed := false
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			changed = true
+			fmt.Fprintf(&b, "\\x%02x", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	if !changed {
+		return text
+	}
+	return b.String()
 }
 
 func providerRole(role Role) string {
