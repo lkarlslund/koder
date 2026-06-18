@@ -1575,7 +1575,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `activeQueue().length > 0`) ||
 		!strings.Contains(fullPage, `reorder_queue`) ||
 		!strings.Contains(fullPage, `delete_queue_item`) ||
-		!strings.Contains(fullPage, `send_queue_item_now`) {
+		!strings.Contains(fullPage, `toggle_queue_item_kind`) ||
+		!strings.Contains(fullPage, `send_queue_item_now`) ||
+		!strings.Contains(fullPage, `abort_and_send_queue_item_now`) ||
+		!strings.Contains(fullPage, `toggleQueueItemKind(item)`) {
 		t.Fatalf("expected composer queue controls and RPCs")
 	}
 	if !strings.Contains(fullPage, `text === '/permissions'`) {

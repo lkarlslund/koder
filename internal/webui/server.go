@@ -663,6 +663,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"deleted": true}, s.controller.DeleteQueueItemForSelection(ctx, s.appSelection(clientID), in.ID)
+	case "toggle_queue_item_kind":
+		var in struct {
+			ID id.ID `json:"id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"updated": true}, s.controller.ToggleQueueItemKindForSelection(ctx, s.appSelection(clientID), in.ID)
 	case "send_queue_item_now":
 		var in struct {
 			ID id.ID `json:"id"`
@@ -671,6 +679,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"queued": true}, s.controller.SendQueueItemNowForSelection(ctx, s.appSelection(clientID), in.ID)
+	case "abort_and_send_queue_item_now":
+		var in struct {
+			ID id.ID `json:"id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"queued": true}, s.controller.AbortAndSendQueueItemNowForSelection(ctx, s.appSelection(clientID), in.ID)
 	case "stop":
 		return map[string]bool{"stopped": true}, s.controller.StopForSelection(ctx, s.appSelection(clientID))
 	case "stop_after_turn":

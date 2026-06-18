@@ -911,6 +911,23 @@ func deleteRuntimeQueueItem(rt *chat.Chat, id id.ID) error {
 	return nil
 }
 
+// ToggleQueueItemKindForSelection switches a selected queued input between normal and steer delivery.
+func (c *Controller) ToggleQueueItemKindForSelection(ctx context.Context, selection Selection, id id.ID) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return toggleRuntimeQueueItemKind(rt, id)
+}
+
+func toggleRuntimeQueueItemKind(rt *chat.Chat, id id.ID) error {
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.ToggleQueueItemKind(id)
+	return nil
+}
+
 // SendQueueItemNowForSelection promotes a held queued input for the selected chat.
 func (c *Controller) SendQueueItemNowForSelection(ctx context.Context, selection Selection, id id.ID) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -925,6 +942,23 @@ func sendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
 		return fmt.Errorf("no active chat")
 	}
 	rt.SendQueueItemNow(id)
+	return nil
+}
+
+// AbortAndSendQueueItemNowForSelection cancels the active turn and dispatches the selected queued input.
+func (c *Controller) AbortAndSendQueueItemNowForSelection(ctx context.Context, selection Selection, id id.ID) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	return abortAndSendRuntimeQueueItemNow(rt, id)
+}
+
+func abortAndSendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.AbortAndSendQueueItemNow(id)
 	return nil
 }
 

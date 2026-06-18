@@ -1435,6 +1435,177 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	}
 }
 
+func TestRuntimeToggleQueueItemKindSwitchesUserAndSteer(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &runtimeFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	queuedID := id.NewAt(time.Now().UTC())
+	rt.ReplaceQueue([]domain.QueuedInput{{
+		ID:        queuedID,
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
+		Text:      "queued",
+		Held:      true,
+		CreatedAt: time.Now().UTC(),
+	}})
+
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) != 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued input: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.ToggleQueueItemKind(queuedID)
+	deadline = time.After(2 * time.Second)
+	for {
+		items := rt.Snapshot().QueuedInputs
+		if len(items) == 1 && domain.DeliveryForQueuedInput(items[0]) == domain.QueuedInputDeliveryTurnBoundary {
+			if items[0].Kind != domain.QueuedInputKindSteer {
+				t.Fatalf("kind after steer toggle = %q", items[0].Kind)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for steer toggle: %#v", items)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.ToggleQueueItemKind(queuedID)
+	deadline = time.After(2 * time.Second)
+	for {
+		items := rt.Snapshot().QueuedInputs
+		if len(items) == 1 && domain.DeliveryForQueuedInput(items[0]) == domain.QueuedInputDeliveryNextTurn {
+			if items[0].Kind != domain.QueuedInputKindQueued {
+				t.Fatalf("kind after queued toggle = %q", items[0].Kind)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued toggle: %#v", items)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestRuntimeAbortAndSendQueueItemNowCancelsActiveTurnAndDispatchesSelectedItem(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	firstStream := make(chan domain.Event)
+	secondStream := make(chan domain.Event)
+	close(secondStream)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{firstStream, secondStream}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	secondID := id.NewAt(time.Now().UTC())
+	thirdID := id.NewAt(time.Now().UTC())
+	rt.ReplaceQueue([]domain.QueuedInput{
+		{
+			ID:        secondID,
+			Kind:      domain.QueuedInputKindQueued,
+			Delivery:  domain.QueuedInputDeliveryNextTurn,
+			Origin:    domain.QueuedInputOriginUser,
+			Text:      "second",
+			Held:      true,
+			CreatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        thirdID,
+			Kind:      domain.QueuedInputKindSteer,
+			Delivery:  domain.QueuedInputDeliveryTurnBoundary,
+			Origin:    domain.QueuedInputOriginUser,
+			Text:      "third",
+			Held:      true,
+			CreatedAt: time.Now().UTC(),
+		},
+	})
+	deadline = time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued inputs: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.AbortAndSendQueueItemNow(thirdID)
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for abort-send dispatch; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(1); got != "third" {
+		t.Fatalf("prompt after abort-send = %q", got)
+	}
+	deadline = time.After(2 * time.Second)
+	for {
+		items := rt.Snapshot().QueuedInputs
+		if len(items) == 1 && items[0].ID == secondID {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected only non-selected item to remain queued, got %#v", items)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	assistantID := NewTimelineID(time.Now().UTC())
+	firstStream <- domain.Event{
+		Kind: domain.EventKindMessageDelta,
+		Text: "stale first response",
+		Item: domain.TimelineItem{
+			ID:        assistantID,
+			ChatID:    chatRecord.ID,
+			Content:   domain.AssistantMessage{},
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	close(firstStream)
+
+	deadline = time.After(2 * time.Second)
+	for rt.Snapshot().Active {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for abort-send turn to settle; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if assistantTextInSnapshot(rt.Snapshot(), "stale first response") {
+		t.Fatalf("stale stream event from aborted turn reached snapshot: %#v", rt.Snapshot().Timeline)
+	}
+}
+
 func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

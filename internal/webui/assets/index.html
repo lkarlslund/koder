@@ -445,11 +445,12 @@
         <template x-for="item in activeQueue()" :key="queueItemID(item)">
           <div class="composer-queue-item" draggable="true" :class="{'dragging': dragQueueID === queueItemID(item)}" @dragstart="startQueueDrag($event, queueItemID(item))" @dragover.prevent="overQueueDrag($event, queueItemID(item))" @drop.stop.prevent="dropQueue($event, queueItemID(item))" @dragend="endQueueDrag()">
             <i class="bi bi-grip-vertical queue-drag-handle" title="Drag to reorder"></i>
-            <span class="badge text-bg-secondary queue-kind" x-text="queueItemKind(item)"></span>
+            <button type="button" class="badge text-bg-secondary queue-kind" :title="queueItemKindToggleTitle(item)" @click.stop="toggleQueueItemKind(item)" x-text="queueItemKind(item)"></button>
             <span class="queue-text text-truncate" :title="queueItemTooltip(item)" x-text="queueItemPreview(item)"></span>
             <span class="queue-attachments" x-show="queueAttachmentCount(item) > 0" x-text="'+' + queueAttachmentCount(item)"></span>
             <div class="btn-group btn-group-sm queue-actions">
-              <button type="button" class="btn btn-outline-primary" title="Send now as steer" @click="sendQueueItemNow(item)"><i class="bi bi-send-fill"></i></button>
+              <button type="button" class="btn btn-outline-danger" x-show="chatInterruptible()" title="Abort current turn and send now" @click="abortAndSendQueueItemNow(item)"><i class="bi bi-send-exclamation-fill"></i></button>
+              <button type="button" class="btn btn-outline-primary" title="Send now" @click="sendQueueItemNow(item)"><i class="bi bi-send-fill"></i></button>
               <button type="button" class="btn btn-outline-secondary" title="Move to composer" @click="moveQueueItemToComposer(item)"><i class="bi bi-input-cursor-text"></i></button>
               <button type="button" class="btn btn-outline-danger" title="Remove from queue" @click="deleteQueueItem(item)"><i class="bi bi-trash"></i></button>
             </div>

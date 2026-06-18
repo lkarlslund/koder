@@ -158,7 +158,15 @@ type deleteQueueItemCmd struct {
 	id id.ID
 }
 
+type toggleQueueItemKindCmd struct {
+	id id.ID
+}
+
 type sendQueueItemNowCmd struct {
+	id id.ID
+}
+
+type abortAndSendQueueItemNowCmd struct {
 	id id.ID
 }
 
@@ -866,8 +874,16 @@ func (r *Chat) DeleteQueueItem(id id.ID) {
 	r.inbox <- deleteQueueItemCmd{id: id}
 }
 
+func (r *Chat) ToggleQueueItemKind(id id.ID) {
+	r.inbox <- toggleQueueItemKindCmd{id: id}
+}
+
 func (r *Chat) SendQueueItemNow(id id.ID) {
 	r.inbox <- sendQueueItemNowCmd{id: id}
+}
+
+func (r *Chat) AbortAndSendQueueItemNow(id id.ID) {
+	r.inbox <- abortAndSendQueueItemNowCmd{id: id}
 }
 
 func (r *Chat) ReplaceQueue(items []domain.QueuedInput) {
@@ -1961,8 +1977,12 @@ func (r *Chat) loop() {
 			r.handleReorderQueue(typed.ids)
 		case deleteQueueItemCmd:
 			r.handleDeleteQueueItem(typed.id)
+		case toggleQueueItemKindCmd:
+			r.handleToggleQueueItemKind(typed.id)
 		case sendQueueItemNowCmd:
 			r.handleSendQueueItemNow(typed.id)
+		case abortAndSendQueueItemNowCmd:
+			r.handleAbortAndSendQueueItemNow(typed.id)
 		case dispatchQueuedCmd:
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
@@ -2082,6 +2102,42 @@ func (r *Chat) handleDeleteQueueItem(id id.ID) {
 	}
 }
 
+func (r *Chat) handleToggleQueueItemKind(id id.ID) {
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	idx := slices.IndexFunc(r.queue, func(item domain.QueuedInput) bool {
+		return item.ID == id
+	})
+	if idx < 0 {
+		r.mu.Unlock()
+		return
+	}
+	item := r.queue[idx]
+	switch domain.DeliveryForQueuedInput(item) {
+	case domain.QueuedInputDeliveryTurnBoundary:
+		item.Kind = domain.QueuedInputKindQueued
+		item.Delivery = domain.QueuedInputDeliveryNextTurn
+	case domain.QueuedInputDeliveryNextTurn:
+		item.Kind = domain.QueuedInputKindSteer
+		item.Delivery = domain.QueuedInputDeliveryTurnBoundary
+	default:
+		r.mu.Unlock()
+		return
+	}
+	r.queue[idx] = item
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	r.mu.Unlock()
+	_ = r.persistQueue()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+}
+
 func (r *Chat) handleSendQueueItemNow(id id.ID) {
 	if id == "" {
 		return
@@ -2117,6 +2173,57 @@ func (r *Chat) handleSendQueueItemNow(id id.ID) {
 	r.mu.Unlock()
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	r.maybeDispatchNext()
+}
+
+func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	idx := slices.IndexFunc(r.queue, func(item domain.QueuedInput) bool {
+		return item.ID == id
+	})
+	if idx < 0 {
+		r.mu.Unlock()
+		return
+	}
+	item := r.queue[idx]
+	item.Delivery = domain.QueuedInputDeliveryNextTurn
+	item.Kind = domain.QueuedInputKindQueued
+	item.Held = false
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = time.Now().UTC()
+	}
+	remaining := append(slices.Clone(r.queue[:idx]), r.queue[idx+1:]...)
+	r.queue = append([]domain.QueuedInput{item}, remaining...)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	cancel := r.cancel
+	wasActive := r.active || r.status == StatusWaitingApproval
+	if wasActive {
+		if r.state != nil {
+			r.state.DiscardActiveAssistant()
+			r.state.ClearPendingAssistant()
+		}
+		r.abortActiveTurnLocked()
+		r.cancelState = CancelStateCancelling
+	}
+	r.mu.Unlock()
+	if cancel != nil && wasActive {
+		cancel()
+	}
+	_ = r.persistQueue()
+	if wasActive {
+		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+		r.broadcast(r.snapshotUpdateFlags(&evt, true, true, true, true, false))
+	} else {
+		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	}
 	r.maybeDispatchNext()
 }
 

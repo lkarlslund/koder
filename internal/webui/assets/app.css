@@ -97,7 +97,8 @@
     .composer-queue-item { display: grid; grid-template-columns: 1rem auto minmax(0, 1fr) auto auto; align-items: center; gap: .4rem; min-height: 2rem; padding: .22rem .32rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); }
     .composer-queue-item.dragging { opacity: .55; }
     .queue-drag-handle { color: var(--bs-secondary-color); cursor: grab; line-height: 1; }
-    .queue-kind { min-width: 4.8rem; }
+    .queue-kind { min-width: 4.8rem; border: 0; cursor: pointer; }
+    .queue-kind:hover, .queue-kind:focus-visible { filter: brightness(1.12); box-shadow: 0 0 0 .12rem rgba(var(--bs-primary-rgb), .25); }
     .queue-text { min-width: 0; font-size: .9rem; }
     .queue-attachments { color: var(--bs-secondary-color); font-size: .8rem; white-space: nowrap; }
     .queue-actions { flex: 0 0 auto; }

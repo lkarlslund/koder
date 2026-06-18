@@ -3182,6 +3182,12 @@
           if (delivery === 'continue') return 'continue';
           return origin;
         },
+        queueItemKindToggleTitle(item) {
+          const delivery = this.queueItemDelivery(item);
+          if (delivery === 'turn_boundary') return 'Convert queued steer to normal queued user message';
+          if (delivery === 'next_turn') return 'Convert queued user message to steer';
+          return 'Message type cannot be changed';
+        },
         queueItemText(item) { return String(item?.Text || item?.text || item?.Note || item?.note || ''); },
         queueItemPreview(item) {
           const text = this.queueItemText(item).replace(/\s+/g, ' ').trim();
@@ -3242,6 +3248,27 @@
             this.setActiveQueue(previous);
           });
         },
+        toggledQueueItemKind(item) {
+          const delivery = this.queueItemDelivery(item);
+          if (delivery === 'turn_boundary') {
+            return {...item, Kind: 'queued', kind: 'queued', Delivery: 'next_turn', delivery: 'next_turn'};
+          }
+          if (delivery === 'next_turn') {
+            return {...item, Kind: 'steer', kind: 'steer', Delivery: 'turn_boundary', delivery: 'turn_boundary'};
+          }
+          return item;
+        },
+        toggleQueueItemKind(item) {
+          const id = this.queueItemID(item);
+          if (!id) return;
+          const previous = this.activeQueue().slice();
+          const updated = previous.map(existing => this.queueItemID(existing) === id ? this.toggledQueueItemKind(existing) : existing);
+          this.setActiveQueue(updated);
+          this.rpc('toggle_queue_item_kind', {id}).catch(err => {
+            this.showToast(err.message);
+            this.setActiveQueue(previous);
+          });
+        },
         moveQueueItemToComposer(item) {
           const text = this.queueItemText(item);
           if (text) {
@@ -3257,9 +3284,20 @@
           const id = this.queueItemID(item);
           if (!id) return;
           const previous = this.activeQueue().slice();
-          const promoted = {...item, Delivery: 'next_turn', delivery: 'next_turn'};
+          const promoted = {...item, Kind: 'queued', kind: 'queued', Delivery: 'next_turn', delivery: 'next_turn'};
           this.setActiveQueue([promoted, ...previous.filter(existing => this.queueItemID(existing) !== id)]);
           this.rpc('send_queue_item_now', {id}).catch(err => {
+            this.showToast(err.message);
+            this.setActiveQueue(previous);
+          });
+        },
+        abortAndSendQueueItemNow(item) {
+          const id = this.queueItemID(item);
+          if (!id) return;
+          const previous = this.activeQueue().slice();
+          const promoted = {...item, Kind: 'queued', kind: 'queued', Delivery: 'next_turn', delivery: 'next_turn'};
+          this.setActiveQueue([promoted, ...previous.filter(existing => this.queueItemID(existing) !== id)]);
+          this.rpc('abort_and_send_queue_item_now', {id}).catch(err => {
             this.showToast(err.message);
             this.setActiveQueue(previous);
           });
