@@ -870,6 +870,76 @@ func TestStreamChatResponseMergesToolCallsByIndexAcrossArgumentChunks(t *testing
 	}
 }
 
+func TestStreamChatResponsePreservesWhitespaceOnlyToolArgumentChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_exec\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"exec_command\",\"arguments\":\"\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"cmd\\\":\\\"sed -i 's/else\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" \"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"389/else\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" \"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"389/g' file\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected one aggregated tool call, got %#v", resp.ToolCalls)
+	}
+	got := resp.ToolCalls[0].Function.Arguments
+	want := `{"cmd":"sed -i 's/else 389/else 389/g' file"}`
+	if got != want {
+		t.Fatalf("expected whitespace-only argument chunks to be preserved, got %q want %q", got, want)
+	}
+}
+
+func TestStreamChatResponsePreservesWhitespaceOnlyReasoningChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"else\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" \"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"389\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var reasoning strings.Builder
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
+		if evt.Kind == domain.EventKindReasoning {
+			reasoning.WriteString(evt.Text)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reasoning != "else 389" {
+		t.Fatalf("expected response reasoning to preserve whitespace-only chunks, got %q", resp.Reasoning)
+	}
+	if reasoning.String() != "else 389" {
+		t.Fatalf("expected reasoning events to preserve whitespace-only chunks, got %q", reasoning.String())
+	}
+}
+
 func TestStreamChatWithRecorderDoesNotBufferEventStream(t *testing.T) {
 	firstChunkSent := make(chan struct{}, 1)
 	releaseDone := make(chan struct{})

@@ -639,7 +639,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	}.Normalized()
 	return ChatResponse{
 		Text:      choice.Message.Content,
-		Reasoning: firstNonEmptyString(choice.Message.ReasoningContent, choice.Message.Reasoning),
+		Reasoning: firstPresentString(choice.Message.ReasoningContent, choice.Message.Reasoning),
 		Usage:     usage,
 		ToolCalls: convertToolCalls(choice.Message.ToolCalls),
 	}, nil
@@ -1099,7 +1099,7 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string,
 		if choice.Delta.Content != "" {
 			emit(domain.Event{Kind: domain.EventKindMessageDelta, Text: choice.Delta.Content, RawJSON: raw})
 		}
-		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+		if reasoning := firstPresentString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
 			emit(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw})
 		}
 		if len(choice.Delta.ToolCalls) > 0 || len(choice.Message.ToolCalls) > 0 {
@@ -1145,12 +1145,12 @@ func providerToolCallDeltaEvent(raw string, currentToolCalls []ToolCall) domain.
 		return evt
 	}
 	call := currentToolCalls[len(currentToolCalls)-1]
-	evt.ToolCallID = strings.TrimSpace(call.ID)
-	if name := strings.TrimSpace(call.Function.Name); name != "" {
+	evt.ToolCallID = call.ID
+	if name := call.Function.Name; name != "" {
 		evt.Tool = domain.ToolKind(name)
 	}
 	meta := map[string]string{}
-	if args := strings.TrimSpace(call.Function.Arguments); args != "" {
+	if args := call.Function.Arguments; args != "" {
 		meta["arguments"] = args
 	}
 	if call.Index != nil {
@@ -1171,7 +1171,7 @@ func convertToolCalls(raw []rawToolCall) []ToolCall {
 		calls = append(calls, ToolCall{
 			ID:    item.ID,
 			Index: item.Index,
-			Type:  firstNonEmptyString(item.Type, "function"),
+			Type:  firstPresentString(item.Type, "function"),
 			Function: FunctionCall{
 				Name:      item.Function.Name,
 				Arguments: item.Function.Arguments,
@@ -1203,9 +1203,9 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 		} else if choice.Message.Content != "" {
 			r.text.WriteString(choice.Message.Content)
 		}
-		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+		if reasoning := firstPresentString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
 			r.reasoning.WriteString(reasoning)
-		} else if reasoning := firstNonEmptyString(choice.Message.ReasoningContent, choice.Message.Reasoning); reasoning != "" {
+		} else if reasoning := firstPresentString(choice.Message.ReasoningContent, choice.Message.Reasoning); reasoning != "" {
 			r.reasoning.WriteString(reasoning)
 		}
 		r.toolCalls = mergeToolCalls(r.toolCalls, convertToolCalls(choice.Delta.ToolCalls))
@@ -1324,28 +1324,28 @@ func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {
 			continue
 		}
 	merge:
-		if strings.TrimSpace(next.ID) != "" {
+		if next.ID != "" {
 			merged[index].ID = next.ID
 		}
 		if next.Index != nil {
 			merged[index].Index = next.Index
 		}
-		if strings.TrimSpace(next.Type) != "" {
+		if next.Type != "" {
 			merged[index].Type = next.Type
 		}
-		if strings.TrimSpace(next.Function.Name) != "" {
+		if next.Function.Name != "" {
 			merged[index].Function.Name = next.Function.Name
 		}
-		if strings.TrimSpace(next.Function.Arguments) != "" {
+		if next.Function.Arguments != "" {
 			merged[index].Function.Arguments += next.Function.Arguments
 		}
 	}
 	return merged
 }
 
-func firstNonEmptyString(values ...string) string {
+func firstPresentString(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
+		if value != "" {
 			return value
 		}
 	}
