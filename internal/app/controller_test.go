@@ -729,7 +729,6 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.Compaction.ProviderID = "test"
 	prefs.Compaction.ModelID = "compact-model"
 	prefs.Compaction.AutoCompactAt = 66
-	prefs.Compaction.KeepToolCalls = 3
 	prefs.Thinking.CavemanEnabled = true
 	prefs.Thinking.UseChatModel = false
 	prefs.Thinking.ProviderID = "test"

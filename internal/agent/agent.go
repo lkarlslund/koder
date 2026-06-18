@@ -865,13 +865,6 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 			}
 			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
-			if segmentStart < idx {
-				preserved, err := e.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
-				if err != nil {
-					return provider.PromptEnvelope{}, err
-				}
-				envelope.Items = append(envelope.Items, preserved...)
-			}
 			segmentStart = idx + 1
 			continue
 		}
@@ -912,25 +905,6 @@ func appendTimelinePromptMessages(items []provider.Message, item domain.Timeline
 	return append(items, messages...)
 }
 
-func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
-	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
-	}
-	if start >= len(items) {
-		return nil, nil
-	}
-	out := make([]provider.Message, 0, len(items)-start)
-	for _, item := range items[start:] {
-		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
-		if err != nil {
-			return nil, err
-		}
-		out = appendTimelinePromptMessages(out, item, messages...)
-	}
-	return out, nil
-}
-
 func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		return -1
@@ -941,27 +915,6 @@ func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string)
 		}
 	}
 	return -1
-}
-
-func preservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
-	if keepCalls <= 0 || len(items) == 0 {
-		return len(items)
-	}
-	remaining := keepCalls
-	firstToolIdx := len(items)
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		item := items[idx]
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok || len(assistant.Tools) == 0 {
-			continue
-		}
-		firstToolIdx = idx
-		remaining -= len(assistant.Tools)
-		if remaining <= 0 {
-			return idx
-		}
-	}
-	return firstToolIdx
 }
 
 func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
@@ -1169,7 +1122,7 @@ func compactedHistoryMessage(summary string) provider.Message {
 		Content: strings.TrimSpace(
 			"Compacted session summary for continuation:\n" +
 				summary +
-				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from the preserved context instead of restarting.",
+				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from this summary and later messages instead of restarting.",
 		),
 	}
 }
@@ -1389,10 +1342,6 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 		return providerCfg
 	}
 	return config.Provider{}
-}
-
-func (e *Engine) compactionKeepToolCalls() int {
-	return config.NormalizeCompactionKeepToolCalls(e.settings.Snapshot().Compaction.KeepToolCalls)
 }
 
 func (e *Engine) systemPrompt() string {
@@ -1679,7 +1628,7 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 }
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
-	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
+	keepStart := len(timeline)
 	base := compactionBaseForNextCut(timeline, len(timeline))
 	keepStart = max(keepStart, base.MinKeepStart)
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
@@ -1698,7 +1647,7 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
-	keepStart := preservedTimelineToolCallTailStart(timeline, e.compactionKeepToolCalls())
+	keepStart := len(timeline)
 	base := compactionBaseForNextCut(timeline, len(timeline))
 	keepStart = max(keepStart, base.MinKeepStart)
 	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
@@ -1746,7 +1695,7 @@ func compactionBaseForNextCut(timeline []domain.TimelineItem, keepStart int) com
 		if !validCompactionBoundary(timeline[:idx], compacted.FirstKeptItemID) {
 			continue
 		}
-		base.Start = firstKeptIdx
+		base.Start = idx + 1
 		base.Summary = compacted.Summary
 	}
 	return base
@@ -1771,13 +1720,6 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 				continue
 			}
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
-			if segmentStart < idx {
-				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(chat))
-				if err != nil {
-					return provider.PromptEnvelope{}, err
-				}
-				envelope.Items = append(envelope.Items, preserved...)
-			}
 			segmentStart = idx + 1
 			continue
 		}
@@ -1829,25 +1771,6 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 		segmentStart = idx + 1
 	}
 	return segmentStart
-}
-
-func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
-	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
-	}
-	if start >= len(items) {
-		return nil, nil
-	}
-	out := make([]provider.Message, 0, len(items)-start)
-	for _, item := range items[start:] {
-		messages, err := e.compactionMessagesForTimelineItem(session, item, preserveThinking)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, messages...)
-	}
-	return out, nil
 }
 
 func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {

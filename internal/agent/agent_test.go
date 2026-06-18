@@ -1543,9 +1543,8 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	}
 }
 
-func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.T) {
+func TestBuildConversationCompactionSummaryReplacesRecentToolCallBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1569,63 +1568,19 @@ func TestBuildConversationKeepsRecentToolCallAfterCompactionBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) < 3 {
-		t.Fatalf("expected summary plus preserved tool call, got %#v", conversation)
-	}
-	if !strings.Contains(conversation[len(conversation)-3].Content, "summary block") {
+	joined := providerMessagesText(conversation)
+	if !strings.Contains(joined, "summary block") {
 		t.Fatalf("expected compact summary in context, got %#v", conversation)
 	}
-	if len(conversation[len(conversation)-2].ToolCalls) != 1 || conversation[len(conversation)-2].ToolCalls[0].ID != "call_1" {
-		t.Fatalf("expected preserved structured tool call, got %#v", conversation[len(conversation)-2])
-	}
-	if conversation[len(conversation)-1].Role != provider.RoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" {
-		t.Fatalf("expected preserved tool result, got %#v", conversation[len(conversation)-1])
-	}
-	if strings.Contains(conversation[len(conversation)-3].Content, "old question") {
-		t.Fatalf("expected pre-tool history summarized away, got %#v", conversation[len(conversation)-3])
+	for _, stale := range []string{"old question", "call_1", "/tmp/project"} {
+		if strings.Contains(joined, stale) {
+			t.Fatalf("expected compaction summary to replace stale tool boundary %q, got %#v", stale, conversation)
+		}
 	}
 }
 
-func TestPreservedTimelineToolCallTailStartCountsToolCalls(t *testing.T) {
-	items := []domain.TimelineItem{
-		{
-			ID:      "old-user",
-			Content: domain.UserMessage{Text: "old"},
-		},
-		{
-			ID: "old-tools",
-			Content: domain.AssistantMessage{Tools: []domain.ToolCall{
-				{ToolCallID: "call_1", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
-				{ToolCallID: "call_2", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
-			}},
-		},
-		{
-			ID:      "middle-user",
-			Content: domain.UserMessage{Text: "middle"},
-		},
-		{
-			ID: "latest-tools",
-			Content: domain.AssistantMessage{Tools: []domain.ToolCall{
-				{ToolCallID: "call_3", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
-				{ToolCallID: "call_4", Tool: domain.ToolKindBash, Status: domain.ToolStatusDone},
-			}},
-		},
-	}
-
-	if got := preservedTimelineToolCallTailStart(items, 2); got != 3 {
-		t.Fatalf("expected preserve boundary at latest tool item, got %d", got)
-	}
-	if got := preservedTimelineToolCallTailStart(items, 3); got != 1 {
-		t.Fatalf("expected preserve boundary to include previous tool item, got %d", got)
-	}
-	if got := preservedTimelineToolCallTailStart(items, 0); got != len(items) {
-		t.Fatalf("expected no preserved tail when keep count is zero, got %d", got)
-	}
-}
-
-func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *testing.T) {
+func TestBuildConversationAfterCompactionDropsEntireSavedBoundarySuffix(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1660,16 +1615,15 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 	if strings.Contains(got, "summarize this away") {
 		t.Fatalf("expected messages before saved boundary to be removed from replay, got %#v", conversation)
 	}
-	for _, want := range []string{"/tmp/project", "keep this question raw", "keep this answer raw"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected replay to keep entire suffix after boundary including %q, got %#v", want, conversation)
+	for _, stale := range []string{"/tmp/project", "keep this question raw", "keep this answer raw"} {
+		if strings.Contains(got, stale) {
+			t.Fatalf("expected summary to replace saved boundary suffix %q, got %#v", stale, conversation)
 		}
 	}
 }
 
-func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
+func TestBuildCompactionConversationIncludesRecentToolTailInSummarySource(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1685,7 +1639,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 
 	appendUserTimelineItem(t, st, chat.ID, "old question")
 	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
-	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -1699,18 +1653,17 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	if len(conversation) == 0 {
 		t.Fatal("expected compaction source conversation")
 	}
-	if firstKeptItemID != toolItem.ID {
-		t.Fatalf("expected compaction boundary at tool call item, got %s want %s", firstKeptItemID, toolItem.ID)
+	if firstKeptItemID != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKeptItemID)
 	}
-	last := conversation[len(conversation)-1]
-	if strings.Contains(last.Content, "/tmp/project") || len(last.ToolCalls) != 0 {
-		t.Fatalf("expected preserved tool tail to be excluded from compaction source, got %#v", last)
+	joined := providerMessagesText(conversation)
+	if !strings.Contains(joined, "/tmp/project") {
+		t.Fatalf("expected recent tool output to be included in compaction source, got %#v", conversation)
 	}
 }
 
 func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
 	workdir := t.TempDir()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1744,7 +1697,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 		Summary:    "Viewed image screen.png",
 	})
 	tailReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_tail", Args: map[string]string{"command": "pwd"}}
-	tailItem := appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
+	appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -1755,8 +1708,8 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstKeptItemID != tailItem.ID {
-		t.Fatalf("expected preserved tail to start at latest tool call, got %s want %s", firstKeptItemID, tailItem.ID)
+	if firstKeptItemID != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKeptItemID)
 	}
 	payload, err := json.Marshal(conversation)
 	if err != nil {
@@ -1779,14 +1732,13 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 		!strings.Contains(rendered, "Viewed image screen.png") {
 		t.Fatalf("expected image metadata in text-only compaction request, got %s", rendered)
 	}
-	if strings.Contains(rendered, "/tmp/project") {
-		t.Fatalf("expected preserved tail output excluded from compaction source, got %s", rendered)
+	if !strings.Contains(rendered, "/tmp/project") {
+		t.Fatalf("expected recent tool output included in compaction source, got %s", rendered)
 	}
 }
 
 func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 0
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1837,7 +1789,6 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 
 func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1858,7 +1809,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	appendCompactionTimelineItem(t, st, chat.ID, "previous compact summary", previousToolItem.ID)
 	appendUserTimelineItem(t, st, chat.ID, "new raw history")
 	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "go test"}}
-	latestToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
+	appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", tools.BashStoredResult{Command: "go test", Output: "ok"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -1869,8 +1820,8 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstKeptItemID != latestToolItem.ID {
-		t.Fatalf("expected latest tool call to be preserved from compaction source, got %s want %s", firstKeptItemID, latestToolItem.ID)
+	if firstKeptItemID != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKeptItemID)
 	}
 	rendered := ""
 	for _, msg := range conversation {
@@ -1879,13 +1830,19 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	if strings.Contains(rendered, "old raw history") {
 		t.Fatalf("expected previous raw history to remain summarized away, got %q", rendered)
 	}
-	for _, want := range []string{"previous compact summary", "/tmp/project", "new raw history"} {
+	if strings.Contains(rendered, "/tmp/project") {
+		t.Fatalf("expected previous raw tool tail to remain summarized away, got %q", rendered)
+	}
+	for _, want := range []string{"previous compact summary", "new raw history", "ok"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
 		}
 	}
-	if strings.Contains(rendered, "go test") || strings.Contains(rendered, "call_latest") {
-		t.Fatalf("expected latest preserved tool call excluded from compaction source, got %q", rendered)
+	if !strings.Contains(rendered, "go test") {
+		t.Fatalf("expected latest tool call included in compaction source, got %q", rendered)
+	}
+	if strings.Contains(rendered, "call_latest") {
+		t.Fatalf("expected compaction source to avoid provider tool call IDs, got %q", rendered)
 	}
 }
 
@@ -5327,8 +5284,8 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	if !strings.Contains(requestBodies[0], "early-history-marker") {
 		t.Fatalf("expected compaction request to include older prefix, got %s", requestBodies[0])
 	}
-	if strings.Contains(requestBodies[0], "late-tail-marker") {
-		t.Fatalf("expected preserved tail to be excluded from compaction request, got %s", requestBodies[0])
+	if !strings.Contains(requestBodies[0], "late-tail-marker") {
+		t.Fatalf("expected current tail to be included in compaction request, got %s", requestBodies[0])
 	}
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -5341,15 +5298,14 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 			firstKeptItemID = compacted.FirstKeptItemID
 		}
 	}
-	if strings.TrimSpace(firstKeptItemID) == "" {
-		t.Fatal("expected compaction to preserve a tail boundary")
+	if strings.TrimSpace(firstKeptItemID) != "" {
+		t.Fatalf("expected compaction to avoid raw replay boundary, got %s", firstKeptItemID)
 	}
 }
 
-func TestBuildCompactionRequestKeepsConfiguredReplayBoundary(t *testing.T) {
+func TestBuildCompactionRequestUsesSummaryOnlyBoundary(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Compaction.AutoAtPercent = 80
-	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 12000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5373,17 +5329,15 @@ func TestBuildCompactionRequestKeepsConfiguredReplayBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == firstKept })
-	want := preservedTimelineToolCallTailStart(timeline, engine.compactionKeepToolCalls())
-	if idx != want {
-		t.Fatalf("expected compaction boundary to stay at configured preserved tail, got %d want %d", idx, want)
+	if firstKept != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKept)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "tail marker") {
-		t.Fatalf("expected preserved tail to be excluded from compaction source, got %s", string(body))
+	if !strings.Contains(string(body), "tail marker") {
+		t.Fatalf("expected current tail to be included in compaction source, got %s", string(body))
 	}
 }
 
@@ -5470,12 +5424,8 @@ func TestCompactionRequestStartsAfterLatestValidCompaction(t *testing.T) {
 	if len(req.Messages) == 0 {
 		t.Fatal("expected compaction request messages")
 	}
-	if firstKept == "old-1" || firstKept == "old-2" {
-		t.Fatalf("compaction recut old compacted prefix, firstKept=%s", firstKept)
-	}
-	idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == firstKept })
-	if idx <= 3 {
-		t.Fatalf("expected first kept item inside current segment after previous compaction, got %s at index %d", firstKept, idx)
+	if firstKept != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKept)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -5488,12 +5438,14 @@ func TestCompactionRequestStartsAfterLatestValidCompaction(t *testing.T) {
 	if strings.Contains(bodyText, "old prefix") {
 		t.Fatalf("did not expect next chunk request to replay already summarized prefix, got %s", bodyText)
 	}
+	if !strings.Contains(bodyText, "tail should remain") {
+		t.Fatalf("expected current tail in compaction request, got %s", bodyText)
+	}
 }
 
 func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Compaction.AutoAtPercent = 80
-	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5520,9 +5472,8 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstKeptIdx := firstKeptTimelineIndex(timeline, firstKept)
-	if firstKeptIdx <= 3 {
-		t.Fatalf("expected repeated compaction first kept item inside current segment, got %q at %d", firstKept, firstKeptIdx)
+	if firstKept != "" {
+		t.Fatalf("expected repeated compaction to avoid raw replay boundary, got %s", firstKept)
 	}
 	timeline = append(timeline, domain.TimelineItem{
 		ID:  "compact-2",
@@ -5544,15 +5495,14 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 	if strings.Contains(joined, "old prefix") || strings.Contains(joined, "current segment start") {
 		t.Fatalf("expected repeated compaction to replace prior history, got %s", joined)
 	}
-	if !strings.Contains(joined, "tail should remain raw") {
-		t.Fatalf("expected preserved tail after repeated compaction, got %s", joined)
+	if strings.Contains(joined, "tail should remain raw") {
+		t.Fatalf("expected latest compaction summary to replace raw tail, got %s", joined)
 	}
 }
 
 func TestRepeatedCompactionWithoutCurrentToolTailKeepsCurrentSegmentBoundary(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Compaction.AutoAtPercent = 80
-	cfg.Compaction.KeepToolCalls = 1
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 8000})
 	engine := New(cfg, nil, nil)
 	session := domain.Session{ID: "session-1"}
@@ -5570,8 +5520,8 @@ func TestRepeatedCompactionWithoutCurrentToolTailKeepsCurrentSegmentBoundary(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstKept != "current-user" {
-		t.Fatalf("expected first kept item at current segment start, got %s", firstKept)
+	if firstKept != "" {
+		t.Fatalf("expected no raw replay boundary after compaction, got %s", firstKept)
 	}
 }
 

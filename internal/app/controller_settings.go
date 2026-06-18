@@ -1147,7 +1147,6 @@ func compactionPreferencesFromConfig(cfg config.Config) CompactionPreferences {
 	}
 	return CompactionPreferences{
 		AutoCompactAt:        cfg.Compaction.AutoAtPercent,
-		KeepToolCalls:        config.NormalizeCompactionKeepToolCalls(cfg.Compaction.KeepToolCalls),
 		ProviderID:           providerID,
 		ModelID:              modelID,
 		UseChatModel:         providerID == "" && modelID == "",
@@ -1448,7 +1447,6 @@ func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences)
 		return fmt.Errorf("auto compact threshold must be greater than zero")
 	}
 	cfg.Compaction.AutoAtPercent = prefs.AutoCompactAt
-	cfg.Compaction.KeepToolCalls = config.NormalizeCompactionKeepToolCalls(prefs.KeepToolCalls)
 	if prefs.UseChatModel {
 		cfg.Compaction.ProviderID = ""
 		cfg.Compaction.ModelID = ""

@@ -54,7 +54,6 @@ type Compaction struct {
 	ProviderID    string `toml:"provider_id"`
 	ModelID       string `toml:"model_id"`
 	AutoAtPercent int    `toml:"auto_at_percent"`
-	KeepToolCalls int    `toml:"keep_tool_calls"`
 }
 
 type Tools struct {
@@ -157,10 +156,8 @@ const providerConfigurationHint = "configure at least one provider in config.tom
 const defaultMaxToolLoopSteps = 500
 const defaultMaxChildChats = 1
 const defaultAutoCompactAt = 80
-const defaultCompactionKeepToolCalls = 2
 const defaultCavemanParallelism = 1
 const DefaultCavemanMinTokens = 64
-const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
 const previousDefaultCavemanThinkingPrompt = `Rewrite MODEL_THINKING into concise caveman notes for later context.
 
@@ -239,7 +236,6 @@ func Default() Config {
 		MaxChildChats:    defaultMaxChildChats,
 		Compaction: Compaction{
 			AutoAtPercent: defaultAutoCompactAt,
-			KeepToolCalls: defaultCompactionKeepToolCalls,
 		},
 		Tools:      Tools{Enabled: toolDefaults},
 		Providers:  map[string]Provider{},
@@ -301,7 +297,6 @@ func (c *Config) applyDefaults() {
 	if c.Compaction.AutoAtPercent <= 0 {
 		c.Compaction.AutoAtPercent = def.Compaction.AutoAtPercent
 	}
-	c.Compaction.KeepToolCalls = NormalizeCompactionKeepToolCalls(c.Compaction.KeepToolCalls)
 	if c.Providers == nil {
 		c.Providers = def.Providers
 	}
@@ -655,16 +650,6 @@ func NormalizeLlamaSlotScope(value string) string {
 	default:
 		return "chat"
 	}
-}
-
-func NormalizeCompactionKeepToolCalls(value int) int {
-	if value < 0 {
-		return 0
-	}
-	if value > maxCompactionKeepToolCalls {
-		return maxCompactionKeepToolCalls
-	}
-	return value
 }
 
 func mcpServerDefaults() MCPServer {

@@ -33,9 +33,6 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
 		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
 	}
-	if cfg.Compaction.KeepToolCalls != defaultCompactionKeepToolCalls {
-		t.Fatalf("expected default kept tool calls %d, got %d", defaultCompactionKeepToolCalls, cfg.Compaction.KeepToolCalls)
-	}
 	if cfg.Compaction.ProviderID != "" || cfg.Compaction.ModelID != "" {
 		t.Fatalf("expected chat model compaction default, got %q/%q", cfg.Compaction.ProviderID, cfg.Compaction.ModelID)
 	}
@@ -389,21 +386,6 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	}
 	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
 		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
-	}
-	if cfg.Compaction.KeepToolCalls != defaultCompactionKeepToolCalls {
-		t.Fatalf("expected kept tool calls backfilled to %d, got %d", defaultCompactionKeepToolCalls, cfg.Compaction.KeepToolCalls)
-	}
-}
-
-func TestNormalizeCompactionKeepToolCallsClampsRange(t *testing.T) {
-	if got := NormalizeCompactionKeepToolCalls(-1); got != 0 {
-		t.Fatalf("expected low clamp to 0, got %d", got)
-	}
-	if got := NormalizeCompactionKeepToolCalls(11); got != maxCompactionKeepToolCalls {
-		t.Fatalf("expected high clamp to %d, got %d", maxCompactionKeepToolCalls, got)
-	}
-	if got := NormalizeCompactionKeepToolCalls(4); got != 4 {
-		t.Fatalf("expected in-range value unchanged, got %d", got)
 	}
 }
 

@@ -44,13 +44,6 @@ func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat do
 			}
 			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
-			if segmentStart < idx {
-				preserved, err := r.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
-				if err != nil {
-					return provider.PromptEnvelope{}, err
-				}
-				envelope.Items = append(envelope.Items, preserved...)
-			}
 			segmentStart = idx + 1
 			continue
 		}
@@ -102,25 +95,6 @@ func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provid
 	return out
 }
 
-func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
-	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, r.compactionKeepToolCalls())
-	}
-	if start >= len(items) {
-		return nil, nil
-	}
-	out := make([]provider.Message, 0, len(items)-start)
-	for _, item := range items[start:] {
-		messages, err := r.ConversationMessagesForTimelineItem(session, chat, item, r.preserveThinkingEnabled(chat))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, messages...)
-	}
-	return out, nil
-}
-
 func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		return -1
@@ -131,27 +105,6 @@ func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string)
 		}
 	}
 	return -1
-}
-
-func preservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
-	if keepCalls <= 0 || len(items) == 0 {
-		return len(items)
-	}
-	remaining := keepCalls
-	firstToolIdx := len(items)
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		item := items[idx]
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok || len(assistant.Tools) == 0 {
-			continue
-		}
-		firstToolIdx = idx
-		remaining -= len(assistant.Tools)
-		if remaining <= 0 {
-			return idx
-		}
-	}
-	return firstToolIdx
 }
 
 func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
@@ -358,7 +311,7 @@ func compactedHistoryMessage(summary string) provider.Message {
 		Content: strings.TrimSpace(
 			"Compacted session summary for continuation:\n" +
 				summary +
-				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from the preserved context instead of restarting.",
+				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from this summary and later messages instead of restarting.",
 		),
 	}
 }
@@ -529,10 +482,6 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 		return providerCfg
 	}
 	return config.Provider{}
-}
-
-func (r *Runtime) compactionKeepToolCalls() int {
-	return config.NormalizeCompactionKeepToolCalls(r.settings.Snapshot().Compaction.KeepToolCalls)
 }
 
 func (r *Runtime) preserveThinkingEnabled(chat domain.Chat) bool {

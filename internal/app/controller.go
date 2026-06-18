@@ -273,7 +273,6 @@ type TTSPreferences struct {
 // CompactionPreferences contains global compaction controls.
 type CompactionPreferences struct {
 	AutoCompactAt        int    `json:"auto_compact_at"`
-	KeepToolCalls        int    `json:"keep_tool_calls"`
 	ProviderID           string `json:"provider_id"`
 	ModelID              string `json:"model_id"`
 	UseChatModel         bool   `json:"use_chat_model"`

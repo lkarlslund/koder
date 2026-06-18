@@ -39,7 +39,6 @@ type ModelSettings struct {
 
 type CompactionSettings struct {
 	ThresholdPercent int
-	KeepToolCalls    int
 	ProviderID       string
 	ModelID          string
 	Provider         config.Provider
@@ -145,7 +144,6 @@ func (s *Store) Compaction(chat domain.Chat, prompt string) (CompactionSettings,
 	}
 	return CompactionSettings{
 		ThresholdPercent: max(1, cfg.Compaction.AutoAtPercent),
-		KeepToolCalls:    config.NormalizeCompactionKeepToolCalls(cfg.Compaction.KeepToolCalls),
 		ProviderID:       model.ProviderID,
 		ModelID:          model.ModelID,
 		Provider:         model.Provider,

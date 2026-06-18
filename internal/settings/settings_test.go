@@ -76,7 +76,6 @@ func TestCompactionFallsBackToChatModel(t *testing.T) {
 	cfg := config.Default()
 	cfg.Providers["chat"] = config.Provider{BaseURL: "http://127.0.0.1:8080/v1"}
 	cfg.Compaction.AutoAtPercent = 66
-	cfg.Compaction.KeepToolCalls = 3
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "chat", ModelID: "model", ContextWindow: 999})
 	store := New(cfg)
 
@@ -84,7 +83,7 @@ func TestCompactionFallsBackToChatModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ProviderID != "chat" || got.ModelID != "model" || got.ThresholdPercent != 66 || got.KeepToolCalls != 3 || got.Prompt != "compact prompt" {
+	if got.ProviderID != "chat" || got.ModelID != "model" || got.ThresholdPercent != 66 || got.Prompt != "compact prompt" {
 		t.Fatalf("unexpected compaction settings: %#v", got)
 	}
 }
