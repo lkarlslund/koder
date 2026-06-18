@@ -960,7 +960,7 @@
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -976,7 +976,7 @@
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
-          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); });
+          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); this.observeLastTranscriptItem(); });
         },
         handleGlobalKeydown(event) {
           if (!event || event.defaultPrevented || event.isComposing) return;
@@ -1624,24 +1624,95 @@
           return this.$refs?.transcript || document.querySelector('.transcript');
         },
         onTranscriptScroll() {
-          this.scrollRestoreSeq++;
-          this.updateTranscriptStickiness();
+          if (this.transcriptUserScrollActive && !this.transcriptProgrammaticScroll) {
+            this.markTranscriptUserScrollIntent();
+            this.scrollRestoreSeq++;
+            this.updateTranscriptStickiness();
+          }
           this.scheduleTimelineRenderWindowRecalculation();
           const el = this.transcriptElement();
           if (!el || el.scrollTop > 96) return;
           this.loadOlderTimeline();
         },
+        markTranscriptUserScrollIntent() {
+          this.transcriptUserScrollActive = true;
+          if (this.transcriptUserScrollTimer) clearTimeout(this.transcriptUserScrollTimer);
+          this.transcriptUserScrollTimer = setTimeout(() => {
+            this.transcriptUserScrollActive = false;
+            this.transcriptUserScrollTimer = null;
+          }, 250);
+        },
+        onTranscriptWheel(event) {
+          this.markTranscriptUserScrollIntent();
+          if (event && Number(event.deltaY || 0) < 0) this.setTranscriptStickToBottom(false);
+          requestAnimationFrame(() => this.updateTranscriptStickiness());
+        },
+        onTranscriptKeydown(event) {
+          if (!event || event.defaultPrevented || event.isComposing) return;
+          if (event.key === 'End') {
+            event.preventDefault();
+            this.scrollRestoreSeq++;
+            this.scrollTranscriptToBottom();
+            return;
+          }
+          if (event.key === 'Home') {
+            event.preventDefault();
+            this.scrollRestoreSeq++;
+            this.setTranscriptStickToBottom(false);
+            this.loadAllTimeline();
+            return;
+          }
+          const scrollKeys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', ' '];
+          if (!scrollKeys.includes(event.key)) return;
+          this.markTranscriptUserScrollIntent();
+          if (event.key === 'ArrowUp' || event.key === 'PageUp') this.setTranscriptStickToBottom(false);
+          requestAnimationFrame(() => this.updateTranscriptStickiness());
+        },
+        transcriptBottomDistance(el = this.transcriptElement()) {
+          if (!el) return 0;
+          return el.scrollHeight - el.scrollTop - el.clientHeight;
+        },
+        transcriptNearBottom(el = this.transcriptElement()) {
+          return this.transcriptBottomDistance(el) <= 48;
+        },
+        setTranscriptStickToBottom(value) {
+          const next = !!value;
+          if (this.transcriptStickToBottom !== next) {
+            this.transcriptStickToBottom = next;
+            this.reportClientStateSoon();
+          }
+          return next;
+        },
         updateTranscriptStickiness() {
           const el = this.transcriptElement();
           if (!el) {
-            this.transcriptStickToBottom = true;
+            this.setTranscriptStickToBottom(true);
             this.reportClientStateSoon();
             return true;
           }
-          const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-          this.transcriptStickToBottom = distance <= 48;
-          this.reportClientStateSoon();
+          this.setTranscriptStickToBottom(this.transcriptNearBottom(el));
           return this.transcriptStickToBottom;
+        },
+        scrollTranscriptToBottom() {
+          const el = this.transcriptElement();
+          if (!el) return;
+          this.setTranscriptStickToBottom(true);
+          this.transcriptProgrammaticScroll = true;
+          this.recalculateTimelineRenderWindow();
+          el.scrollTop = el.scrollHeight;
+          requestAnimationFrame(() => {
+            el.scrollTop = el.scrollHeight;
+            setTimeout(() => { this.transcriptProgrammaticScroll = false; }, 0);
+          });
+        },
+        restoreTranscriptTop(top) {
+          const el = this.transcriptElement();
+          if (!el) return;
+          this.transcriptProgrammaticScroll = true;
+          el.scrollTop = Number(top || 0);
+          requestAnimationFrame(() => {
+            setTimeout(() => { this.transcriptProgrammaticScroll = false; }, 0);
+          });
         },
         timelineHasMore() {
           const snapshot = this.activeSnapshot();
@@ -1730,32 +1801,37 @@
             const el = this.transcriptElement();
             if (!el) return;
             if (options.replace) {
-              el.scrollTop = Number.isFinite(options.scrollTop) ? options.scrollTop : 0;
-              this.updateTranscriptStickiness();
+              this.setTranscriptStickToBottom(false);
+              this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
               return;
             }
             const previousHeight = Number(options.scrollHeight || 0);
             if (previousHeight > 0) {
-              el.scrollTop = el.scrollHeight - previousHeight + Number(options.scrollTop || 0);
-              this.updateTranscriptStickiness();
+              this.restoreTranscriptTop(el.scrollHeight - previousHeight + Number(options.scrollTop || 0));
             }
           });
         },
         transcriptScrollState() {
           const el = this.transcriptElement();
           if (!el) return {el: null, top: 0, nearBottom: true, stickToBottom: true};
-          const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-          const nearBottom = distance <= 48;
-          return {el, top: el.scrollTop, nearBottom, stickToBottom: this.transcriptStickToBottom || nearBottom};
+          const nearBottom = this.transcriptNearBottom(el);
+          return {el, top: el.scrollTop, nearBottom, stickToBottom: !!this.transcriptStickToBottom};
         },
         afterTranscriptDOMUpdate(fn, options = {}) {
           this.$nextTick(() => {
             requestAnimationFrame(() => {
               const run = () => {
                 this.measureRenderedTimelineItems();
+                this.observeLastTranscriptItem();
                 fn();
-                requestAnimationFrame(fn);
-                setTimeout(fn, 0);
+                requestAnimationFrame(() => {
+                  this.observeLastTranscriptItem();
+                  fn();
+                });
+                setTimeout(() => {
+                  this.observeLastTranscriptItem();
+                  fn();
+                }, 0);
               };
               if (options.renderDiagrams === false) {
                 run();
@@ -1764,9 +1840,16 @@
               const rendered = this.renderDiagrams(this.timelineItemElement(options.itemID));
               run();
               Promise.resolve(rendered).then(() => {
+                this.observeLastTranscriptItem();
                 fn();
-                requestAnimationFrame(fn);
-                setTimeout(fn, 0);
+                requestAnimationFrame(() => {
+                  this.observeLastTranscriptItem();
+                  fn();
+                });
+                setTimeout(() => {
+                  this.observeLastTranscriptItem();
+                  fn();
+                }, 0);
               });
             });
           });
@@ -1778,6 +1861,36 @@
           if (!root) return null;
           const escaped = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&');
           return root.querySelector('[data-timeline-item-id="' + escaped + '"]');
+        },
+        lastTranscriptItemElement() {
+          const root = this.transcriptElement();
+          if (!root) return null;
+          const rows = root.querySelectorAll('.transcript-turn[data-timeline-item-id]');
+          return rows.length ? rows[rows.length - 1] : null;
+        },
+        transcriptItemHeight(row) {
+          if (!row) return 0;
+          const rect = row.getBoundingClientRect();
+          return Math.max(0, Math.ceil(rect.height));
+        },
+        observeLastTranscriptItem() {
+          if (!window.ResizeObserver) return;
+          const row = this.lastTranscriptItemElement();
+          const itemID = row ? String(row.dataset.timelineItemId || '').trim() : '';
+          if (row && row === this.transcriptObservedLastItemElement && itemID === this.transcriptObservedLastItemID) return;
+          if (this.transcriptLastItemObserver) this.transcriptLastItemObserver.disconnect();
+          this.transcriptLastItemObserver = null;
+          this.transcriptObservedLastItemElement = row;
+          this.transcriptObservedLastItemID = itemID;
+          this.transcriptObservedLastItemHeight = this.transcriptItemHeight(row);
+          if (!row || !itemID) return;
+          this.transcriptLastItemObserver = new ResizeObserver(() => {
+            const nextHeight = this.transcriptItemHeight(row);
+            if (nextHeight === this.transcriptObservedLastItemHeight) return;
+            this.transcriptObservedLastItemHeight = nextHeight;
+            if (this.transcriptStickToBottom) this.scrollTranscriptToBottom();
+          });
+          this.transcriptLastItemObserver.observe(row);
         },
         renderDiagrams(root = null) {
           root = root || this.transcriptElement();
@@ -1824,14 +1937,10 @@
           const el = this.transcriptElement();
           if (!el) return;
           if (options.scrollToBottom || scroll.stickToBottom) {
-            this.transcriptStickToBottom = true;
-            this.recalculateTimelineRenderWindow();
-            el.scrollTop = el.scrollHeight;
-            requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+            this.scrollTranscriptToBottom();
             return;
           }
-          el.scrollTop = scroll.top;
-          this.updateTranscriptStickiness();
+          this.restoreTranscriptTop(scroll.top);
         },
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
@@ -2100,8 +2209,7 @@
             return this.setTimelineRenderWindow(0, length, 0);
           }
           const el = this.transcriptElement();
-          const nearBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 48;
-          if (nearBottom) {
+          if (this.transcriptStickToBottom || !el) {
             const start = Math.max(0, length - transcriptTailWindowSize - transcriptWindowOverscan);
             return this.setTimelineRenderWindow(start, length, transcriptWindowOverscan);
           }

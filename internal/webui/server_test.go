@@ -1422,7 +1422,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `timelineRenderWindowPending`) ||
 		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
 		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
-		!strings.Contains(fullPage, `requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; })`) ||
+		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `timeline-spacer`) {
 		t.Fatalf("expected browser to track transcript render windows")
@@ -1492,21 +1492,26 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `window.addEventListener('online'`) || !strings.Contains(fullPage, `window.addEventListener('focus'`) || !strings.Contains(fullPage, `visibilitychange`) {
 		t.Fatalf("expected browser to reconnect immediately when page becomes active or network returns")
 	}
-	if !strings.Contains(fullPage, `transcriptScrollState()`) || !strings.Contains(fullPage, `distance <= 48`) {
+	if !strings.Contains(fullPage, `transcriptScrollState()`) || !strings.Contains(fullPage, `transcriptBottomDistance`) || !strings.Contains(fullPage, `transcriptNearBottom`) {
 		t.Fatalf("expected transcript scroll anchoring when new output arrives")
 	}
-	if !strings.Contains(fullPage, `transcriptStickToBottom`) || !strings.Contains(fullPage, `updateTranscriptStickiness()`) {
-		t.Fatalf("expected transcript sticky-bottom intent to be tracked from scroll events")
+	if !strings.Contains(fullPage, `transcriptStickToBottom`) || !strings.Contains(fullPage, `setTranscriptStickToBottom`) ||
+		!strings.Contains(fullPage, `onTranscriptWheel($event)`) || !strings.Contains(fullPage, `onTranscriptKeydown($event)`) ||
+		!strings.Contains(fullPage, `event.key === 'End'`) {
+		t.Fatalf("expected transcript sticky-bottom intent to be tracked from explicit user scroll actions")
 	}
 	if !strings.Contains(fullPage, `@scroll.passive="onTranscriptScroll()"`) ||
-		!strings.Contains(fullPage, `@keydown.home.prevent="loadAllTimeline()"`) ||
+		!strings.Contains(fullPage, `@wheel.passive="onTranscriptWheel($event)"`) ||
+		!strings.Contains(fullPage, `@keydown="onTranscriptKeydown($event)"`) ||
 		!strings.Contains(fullPage, `load_timeline`) ||
 		!strings.Contains(fullPage, `mergeTimelinePage(page`) ||
 		!strings.Contains(fullPage, `timelineLoadingActive()`) {
-		t.Fatalf("expected transcript timeline to lazy-load older chunks and load all on Home")
+		t.Fatalf("expected transcript timeline to lazy-load older chunks and handle scroll keys")
 	}
-	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
-		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
+	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
+		!strings.Contains(fullPage, `restoreTranscriptTop(scroll.top)`) || !strings.Contains(fullPage, `ResizeObserver`) ||
+		!strings.Contains(fullPage, `observeLastTranscriptItem()`) {
+		t.Fatalf("expected transcript to follow only with bottom intent and monitor last-item height")
 	}
 	if !strings.Contains(fullPage, `scrollRestoreSeq`) ||
 		!strings.Contains(fullPage, `seq === this.scrollRestoreSeq`) ||

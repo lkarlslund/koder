@@ -90,7 +90,7 @@
       </section>
     </main>
 
-    <main class="transcript p-3" x-show="sessionLoadedMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @keydown.home.prevent="loadAllTimeline()">
+    <main class="transcript p-3" x-show="sessionLoadedMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
