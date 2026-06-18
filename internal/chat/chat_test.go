@@ -67,6 +67,12 @@ type emptyResponseRunner struct {
 	runtimeFakeRunner
 }
 
+type reasoningOnlyLoopRunner struct {
+	runtimeFakeRunner
+	mu    sync.Mutex
+	calls int
+}
+
 type cancelAwareRunner struct {
 	ctxSeen chan context.Context
 	events  chan domain.Event
@@ -138,6 +144,34 @@ func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *Chat, 
 }
 
 func (f *queuedSteerBoundaryRunner) MaxToolLoopSteps() int { return 2 }
+
+func (f *reasoningOnlyLoopRunner) MaxToolLoopSteps() int { return 5 }
+
+func (f *reasoningOnlyLoopRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 1 {
+		return ModelResponse{
+			ToolCallErrors: []provider.ToolCallError{{
+				Message: "fake tool result",
+				ToolCall: provider.ToolCall{
+					ID:   "fake-call",
+					Type: "function",
+					Function: provider.FunctionCall{
+						Name:      "fake_tool",
+						Arguments: "{}",
+					},
+				},
+			}},
+		}, nil
+	}
+	return ModelResponse{
+		RawReasoning: "partial hidden fragment",
+		Reasoning:    domain.ReasoningContent{Text: "partial hidden fragment"},
+	}, nil
+}
 
 func (f *queuedSteerBoundaryRunner) CompleteModelRequest(_ context.Context, _ domain.Session, chat domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
 	f.mu.Lock()
@@ -745,6 +779,58 @@ func TestRuntimePausesOnInitialEmptyProviderResponse(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatalf("timed out waiting for provider-refusal pause: %#v", rt.Snapshot())
+		}
+	}
+}
+
+func TestRuntimePausesOnRepeatedReasoningOnlyContinuation(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &reasoningOnlyLoopRunner{}
+	rt := newTestChat(t, st, session, chat, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "go on"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindMessageDone {
+				continue
+			}
+			timeline := rt.SnapshotTimeline()
+			if len(timeline) == 0 {
+				t.Fatal("expected timeline items")
+			}
+			notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
+			if !ok || notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonProviderRefusal) {
+				continue
+			}
+
+			turnInstructionUsers := 0
+			for _, item := range timeline {
+				user, ok := item.Content.(domain.UserMessage)
+				if ok && user.Source == domain.UserMessageSourceTurnInstruction && strings.HasPrefix(user.Text, "Continue from the latest tool result.") {
+					turnInstructionUsers++
+				}
+			}
+			if turnInstructionUsers != 1 {
+				t.Fatalf("expected one internal continuation prompt before pause, got %d; timeline=%#v", turnInstructionUsers, timeline)
+			}
+			runner.mu.Lock()
+			calls := runner.calls
+			runner.mu.Unlock()
+			if calls != 3 {
+				t.Fatalf("expected 3 model calls (tool result + one retry + pause), got %d", calls)
+			}
+			if !strings.Contains(notice.Text, "partial hidden fragment") {
+				t.Fatalf("expected provider reasoning in pause notice, got %q", notice.Text)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for reasoning-only pause: %#v", rt.Snapshot())
 		}
 	}
 }

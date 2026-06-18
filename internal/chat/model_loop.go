@@ -16,11 +16,12 @@ import (
 const AfterToolResultContinuationPrompt = "Continue from the latest tool result. If you learned a meaningful fact or changed direction, include one short visible progress sentence before the next tool call. Do not expose hidden reasoning. Either produce a visible answer for the user or make the next tool call."
 
 type modelTurnLoop struct {
-	model                ModelRuntime
-	session              domain.Session
-	tracker              ToolLoopTracker
-	autoContinuedBadStop bool
-	skipAutoCompactOnce  bool
+	model                    ModelRuntime
+	session                  domain.Session
+	tracker                  ToolLoopTracker
+	autoContinuedBadStop     bool
+	skipAutoCompactOnce      bool
+	consecutiveReasoningOnly int
 }
 
 func (l *modelTurnLoop) maxSteps() int {
@@ -111,6 +112,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 			})
 		} else if len(parsed.ToolCalls) > 0 {
+			l.consecutiveReasoningOnly = 0
 			assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
 			if err != nil {
 				return TurnStepResult{}, err
@@ -145,6 +147,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		}
 	}
 	if len(resp.ToolCallErrors) > 0 {
+		l.consecutiveReasoningOnly = 0
 		toolCalls := make([]domain.ToolCall, 0, len(resp.ToolCallErrors))
 		for _, callErr := range resp.ToolCallErrors {
 			toolCalls = append(toolCalls, l.model.FailedStreamedProviderToolCall(callErr))
@@ -159,6 +162,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 
 	call, plain := ParseToolCall(text)
 	if call != nil {
+		l.consecutiveReasoningOnly = 0
 		l.model.RecordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
 		assistantItem, err := rt.AppendAssistantToolRequests(ctx, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
 		if err != nil {
@@ -186,20 +190,27 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	l.tracker.Reset()
 
 	if strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
-		if step > 0 && strings.TrimSpace(resp.RawReasoning) != "" {
-			return TurnStepResult{
-				Continue:         true,
-				TurnInstructions: TurnInstructionBlocks("", AfterToolResultContinuationPrompt),
-			}, nil
-		}
-		if strings.TrimSpace(resp.RawReasoning) == "" {
+		if strings.TrimSpace(resp.RawReasoning) != "" {
+			l.consecutiveReasoningOnly++
+			if step > 0 && l.consecutiveReasoningOnly == 1 {
+				return TurnStepResult{
+					Continue:         true,
+					TurnInstructions: TurnInstructionBlocks("", AfterToolResultContinuationPrompt),
+				}, nil
+			}
 			l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
 				Reason: ContinuationPauseReasonProviderRefusal,
 				Body:   ProviderRefusalPauseBody(resp.RawReasoning),
 			}, out)
 			return TurnStepResult{Done: true}, nil
 		}
+		l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
+			Reason: ContinuationPauseReasonProviderRefusal,
+			Body:   ProviderRefusalPauseBody(resp.RawReasoning),
+		}, out)
+		return TurnStepResult{Done: true}, nil
 	}
+	l.consecutiveReasoningOnly = 0
 	if step > 0 && l.model.AutoContinueBadStopEnabled() && !l.autoContinuedBadStop && len(resp.ToolCalls) == 0 && shouldAutoContinueBadStop(text) {
 		l.autoContinuedBadStop = true
 		l.model.RecordLifecycle(session.ID, "auto_continue_bad_stop", strings.TrimSpace(text), map[string]string{"step": strconv.Itoa(step + 1)})
