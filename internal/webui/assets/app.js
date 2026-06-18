@@ -1521,7 +1521,12 @@
           const next = {...current};
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
-          if (delta.queue !== undefined) next.QueuedInputs = delta.queue;
+          if (delta.queue !== undefined) {
+            const queue = Array.isArray(delta.queue) ? delta.queue : [];
+            next.QueuedInputs = queue;
+            next.queued_inputs = queue;
+            next.queue = queue;
+          }
           if (delta.exec_processes !== undefined) next.ExecProcesses = delta.exec_processes;
           if (delta.context !== undefined) next.Context = delta.context;
           if (delta.status !== undefined) next.Status = delta.status;

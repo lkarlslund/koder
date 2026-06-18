@@ -1518,6 +1518,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `this.scrollRestoreSeq++`) {
 		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored after user scrolling")
 	}
+	if !strings.Contains(fullPage, `const queue = Array.isArray(delta.queue) ? delta.queue : []`) ||
+		!strings.Contains(fullPage, `next.queued_inputs = queue`) ||
+		!strings.Contains(fullPage, `next.queue = queue`) {
+		t.Fatalf("expected queue deltas to clear all browser queue aliases")
+	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
 		!strings.Contains(fullPage, `Promise.resolve(rendered).then`) ||
 		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
