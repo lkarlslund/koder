@@ -387,6 +387,9 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	if cfg.Compaction.AutoAtPercent != defaultAutoCompactAt {
 		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.Compaction.AutoAtPercent)
 	}
+	if cfg.Compaction.KeepToolCalls != defaultCompactionKeepToolCalls {
+		t.Fatalf("expected keep tool calls backfilled to %d, got %d", defaultCompactionKeepToolCalls, cfg.Compaction.KeepToolCalls)
+	}
 }
 
 func TestModelConfigHelpersNormalizeAndDefault(t *testing.T) {

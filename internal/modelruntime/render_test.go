@@ -12,7 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
-func TestBuildPromptEnvelopeCompactionSummaryReplacesRetainedToolTail(t *testing.T) {
+func TestBuildPromptEnvelopeCompactionSummaryPreservesRetainedToolTail(t *testing.T) {
 	t.Parallel()
 
 	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
@@ -58,9 +58,9 @@ func TestBuildPromptEnvelopeCompactionSummaryReplacesRetainedToolTail(t *testing
 	if !strings.Contains(joined, "state your current tasks") {
 		t.Fatalf("expected post-compaction user turn in prompt, got %s", joined)
 	}
-	for _, stale := range []string{"bad command 1", "bad command 2", "failed output 1", "failed output 2"} {
-		if strings.Contains(joined, stale) {
-			t.Fatalf("expected stale pre-compaction tool tail to be replaced by summary, found %q in %s", stale, joined)
+	for _, retained := range []string{"bad command 1", "bad command 2", "failed output 1", "failed output 2"} {
+		if !strings.Contains(joined, retained) {
+			t.Fatalf("expected retained pre-compaction tool tail %q in prompt, got %s", retained, joined)
 		}
 	}
 }
@@ -76,6 +76,7 @@ func assistantToolItem(itemID, callID, command, output string) domain.TimelineIt
 				Tool:       domain.ToolKindBash,
 				ToolCallID: domain.ToolCallID(callID),
 				Args:       map[string]string{"cmd": command},
+				Status:     domain.ToolStatusDone,
 				Result: &domain.ToolResult{
 					Status: domain.ToolResultStatusOK,
 					Text:   output,

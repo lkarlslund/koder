@@ -56,6 +56,7 @@ model_id = "qwen3-coder"
 
 [compaction]
 auto_at_percent = 85
+keep_tool_calls = 2
 
 [providers.local-llama]
 name = "Local llama.cpp"
