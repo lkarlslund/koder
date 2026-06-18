@@ -216,7 +216,7 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
-			if err := ensureTaskUpdateAllowed(runtime, tasks[idx]); err != nil {
+			if err := ensureTaskUpdateAllowed(runtime, milestone, tasks[idx]); err != nil {
 				return tools.Result{}, err
 			}
 			taskStatus, err := planning.ParseTaskStatus(req.Args["status"])
@@ -356,7 +356,7 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
-			if err := ensureTaskUpdateAllowed(runtime, tasks[idx]); err != nil {
+			if err := ensureTaskUpdateAllowed(runtime, milestone, tasks[idx]); err != nil {
 				return tools.Result{}, err
 			}
 			tasks[idx].Status = taskStatus
@@ -420,15 +420,18 @@ func ensureMilestoneAcceptsTasks(plan planning.Plan, ref string) error {
 	return nil
 }
 
-func ensureTaskUpdateAllowed(runtime tools.Runtime, task planning.Task) error {
+func ensureTaskUpdateAllowed(runtime tools.Runtime, milestone planning.Milestone, task planning.Task) error {
 	if runtime.ChatRole != chatrole.Orchestrator || task.Status != planning.TaskStatusInProgress {
+		return nil
+	}
+	if milestone.OwnerChatID == nil || *milestone.OwnerChatID == runtime.ChatID {
 		return nil
 	}
 	key := planning.TaskKey(task)
 	if key == "" {
 		key = string(task.ID)
 	}
-	return fmt.Errorf("task %s is in_progress and may be executing in a child chat; use chat_send to steer the worker instead of mutating the running task", key)
+	return fmt.Errorf("task %s is in_progress in milestone %q owned by chat %s; use chat_send to steer the worker instead of mutating the running task", key, planning.MilestoneKey(milestone), *milestone.OwnerChatID)
 }
 
 func persistedTaskBucket(ctx context.Context, control tools.SessionControl, sessionID id.ID, ref string) (planning.Plan, []planning.Task, string, error) {

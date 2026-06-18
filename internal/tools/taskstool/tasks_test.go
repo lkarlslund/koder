@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
@@ -304,7 +305,7 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	}
 }
 
-func TestOrchestratorCannotMutateInProgressTask(t *testing.T) {
+func TestOrchestratorCanMutateOwnInProgressTask(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -321,11 +322,39 @@ func TestOrchestratorCannotMutateInProgressTask(t *testing.T) {
 	if _, err := modeltest.UpdateTask(ctx, st, tasks[0].ID, planning.TaskStatusInProgress, tasks[0].Content, "worker started"); err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{SessionID: session.ID, ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
+	runtime := tools.Runtime{SessionID: session.ID, ChatID: "orchestrator-chat", ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
+
+	if _, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindTasksUpdate,
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator completed its own running task."},
+	}}); err != nil {
+		t.Fatalf("expected orchestrator to mutate unowned in-progress task, got %v", err)
+	}
+}
+
+func TestOrchestratorCannotMutateWorkerOwnedInProgressTask(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerID := id.ID("worker-chat")
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting, OwnerChatID: &workerID}}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := modeltest.UpdateTask(ctx, st, tasks[0].ID, planning.TaskStatusInProgress, tasks[0].Content, "worker started"); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, ChatID: "orchestrator-chat", ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
 
 	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
-		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator tried to complete running task."},
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator tried to complete worker task."},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "chat_send") {
 		t.Fatalf("expected running task steering error, got %v", err)
