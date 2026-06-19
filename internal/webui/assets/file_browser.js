@@ -29,6 +29,10 @@
     });
   }
 
+  function diagramExpandButton(title) {
+    return '<button type="button" class="media-expand-button" title="Expand ' + escapeHTML(title) + '"><i class="bi bi-arrows-angle-expand"></i></button>';
+  }
+
   function renderMermaidPlaceholders(html) {
     const template = document.createElement('template');
     template.innerHTML = html;
@@ -99,6 +103,7 @@
       viewMode: 'preview',
       childrenByPath: {},
       expanded: {},
+      imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
 
       init() {
         const match = location.pathname.match(/^\/s\/([^/]+)\/files$/);
@@ -118,6 +123,7 @@
             this.fileError = '';
           }
         });
+        document.addEventListener('click', event => this.handleMediaPreviewClick(event));
       },
 
       sessionURL() {
@@ -265,6 +271,62 @@
         return sanitizeHTML(html);
       },
 
+      handleMediaPreviewClick(event) {
+        const trigger = event.target?.closest?.('.mermaid-diagram .media-expand-button');
+        if (!trigger) return;
+        event.preventDefault();
+        const diagram = trigger.closest('.mermaid-diagram');
+        const svg = diagram?.querySelector('.mermaid-diagram-content svg');
+        this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+      },
+
+      openMermaidLightbox(html, title, meta) {
+        html = sanitizeMermaidSVG(html || '');
+        if (!html) return;
+        this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+      },
+
+      closeImageLightbox() {
+        this.imageLightbox = {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+      },
+
+      lightboxTransform() {
+        const box = this.imageLightbox || {};
+        return 'translate(' + (box.panX || 0) + 'px, ' + (box.panY || 0) + 'px) scale(' + (box.zoom || 1) + ')';
+      },
+
+      zoomLightbox(delta) {
+        const current = Number(this.imageLightbox.zoom || 1);
+        this.imageLightbox.zoom = Math.max(0.25, Math.min(8, current + delta));
+      },
+
+      resetLightboxView() {
+        this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0;
+      },
+
+      onLightboxWheel(event) {
+        event.preventDefault();
+        const direction = event.deltaY < 0 ? 0.2 : -0.2;
+        this.zoomLightbox(direction);
+      },
+
+      startLightboxPan(event) {
+        if (!this.imageLightbox.open) return;
+        this.imageLightbox.dragging = true;
+        this.imageLightbox.dragX = event.clientX - (this.imageLightbox.panX || 0);
+        this.imageLightbox.dragY = event.clientY - (this.imageLightbox.panY || 0);
+      },
+
+      moveLightboxPan(event) {
+        if (!this.imageLightbox.dragging) return;
+        this.imageLightbox.panX = event.clientX - (this.imageLightbox.dragX || 0);
+        this.imageLightbox.panY = event.clientY - (this.imageLightbox.dragY || 0);
+      },
+
+      stopLightboxPan() {
+        this.imageLightbox.dragging = false;
+      },
+
       renderDiagrams(root) {
         if (!root || !window.mermaid) return;
         configureMermaid();
@@ -275,8 +337,9 @@
           const id = 'files-mermaid-' + Math.random().toString(36).slice(2);
           try {
             const result = await mermaid.render(id, source);
-            diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>';
+            diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>' + diagramExpandButton('Mermaid diagram');
             diagram.dataset.mermaidState = 'done';
+            if (result.bindFunctions) result.bindFunctions(diagram);
           } catch (err) {
             const details = errorDetails(err);
             diagram.dataset.mermaidState = 'error';

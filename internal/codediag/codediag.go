@@ -51,7 +51,9 @@ func CheckFile(ctx context.Context, rootAbs, relPath, content string, options Op
 	options = normalizeOptions(options)
 	var report Report
 	if options.Mode == "auto" || options.Mode == "all" || options.Mode == "syntax" {
-		report.Diagnostics = append(report.Diagnostics, syntaxDiagnostics(relPath, content)...)
+		syntaxReport := syntaxReport(ctx, relPath, content)
+		report.Diagnostics = append(report.Diagnostics, syntaxReport.Diagnostics...)
+		report.Skipped = append(report.Skipped, syntaxReport.Skipped...)
 	}
 	if options.Mode == "auto" || options.Mode == "all" || options.Mode == "lsp" {
 		lspReport := codesearchtool.LSPDiagnostics(ctx, rootAbs, relPath, content, content, false)
@@ -70,7 +72,10 @@ func CheckEdit(ctx context.Context, rootAbs, relPath, before, after string, opti
 	options = normalizeOptions(options)
 	var report Report
 	if options.Mode == "auto" || options.Mode == "all" || options.Mode == "syntax" {
-		report.Diagnostics = append(report.Diagnostics, introduced(syntaxDiagnostics(relPath, before), syntaxDiagnostics(relPath, after))...)
+		beforeReport := syntaxReport(ctx, relPath, before)
+		afterReport := syntaxReport(ctx, relPath, after)
+		report.Diagnostics = append(report.Diagnostics, introduced(beforeReport.Diagnostics, afterReport.Diagnostics)...)
+		report.Skipped = append(report.Skipped, afterReport.Skipped...)
 	}
 	if options.Mode == "auto" || options.Mode == "all" || options.Mode == "lsp" {
 		lspReport := codesearchtool.LSPDiagnostics(ctx, rootAbs, relPath, before, after, !options.IncludeExisting)
@@ -196,24 +201,30 @@ func normalizeReport(report Report) Report {
 }
 
 func syntaxDiagnostics(path, content string) []Diagnostic {
+	return syntaxReport(context.Background(), path, content).Diagnostics
+}
+
+func syntaxReport(ctx context.Context, path, content string) Report {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go":
 		fset := token.NewFileSet()
 		if _, err := parser.ParseFile(fset, path, content, parser.AllErrors); err != nil {
-			return []Diagnostic{syntaxDiagnostic(path, err.Error())}
+			return Report{Diagnostics: []Diagnostic{syntaxDiagnostic(path, err.Error())}}
 		}
 	case ".json":
 		var value any
 		if err := json.Unmarshal([]byte(content), &value); err != nil {
-			return []Diagnostic{syntaxDiagnostic(path, err.Error())}
+			return Report{Diagnostics: []Diagnostic{syntaxDiagnostic(path, err.Error())}}
 		}
 	case ".toml":
 		var value map[string]any
 		if err := toml.Unmarshal([]byte(content), &value); err != nil {
-			return []Diagnostic{syntaxDiagnostic(path, err.Error())}
+			return Report{Diagnostics: []Diagnostic{syntaxDiagnostic(path, err.Error())}}
 		}
+	case ".md", ".markdown", ".mdown", ".mkd":
+		return markdownRendererDiagnostics(ctx, path, content)
 	}
-	return nil
+	return Report{}
 }
 
 func syntaxDiagnostic(path, message string) Diagnostic {

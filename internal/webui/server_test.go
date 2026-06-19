@@ -146,6 +146,8 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		`/assets/vendor/marked/marked.umd.js`,
 		`/assets/vendor/highlight/highlight.min.js`,
 		`/assets/file_browser.js`,
+		`imageLightbox.open`,
+		`image-lightbox`,
 		currentAssetHash,
 	} {
 		if !strings.Contains(text, want) {
