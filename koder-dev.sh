@@ -8,6 +8,8 @@ SETTLE_SECONDS="${KODER_DEV_SETTLE_SECONDS:-10}"
 POLL_SECONDS="${KODER_DEV_POLL_SECONDS:-1}"
 STOP_GRACE_SECONDS="${KODER_DEV_STOP_GRACE_SECONDS:-5}"
 STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-20}"
+SHUTDOWN_GRACE_SECONDS="${KODER_DEV_SHUTDOWN_GRACE_SECONDS:-60}"
+SHUTDOWN_TIMEOUT_SECONDS="${KODER_DEV_SHUTDOWN_TIMEOUT_SECONDS:-75}"
 RESTART_EXIT_CODE="${KODER_DEV_RESTART_EXIT_CODE:-75}"
 KODER_OUTPUT_LOG="${KODER_DEV_OUTPUT_LOG:-$(mktemp "/tmp/koder-dev-${USER:-user}.output.XXXXXX.log")}"
 KODER_DEV_WEB_BIND="${KODER_DEV_WEB_BIND:-0.0.0.0:7979}"
@@ -117,6 +119,15 @@ stop_koder() {
   local waited=0
   local stat=""
   local exit_status=0
+  local grace_seconds="$STOP_GRACE_SECONDS"
+  local timeout_seconds="$STOP_TIMEOUT_SECONDS"
+  if [[ "$reason" == "shutdown" ]]; then
+    grace_seconds="$SHUTDOWN_GRACE_SECONDS"
+    timeout_seconds="$SHUTDOWN_TIMEOUT_SECONDS"
+  fi
+  if (( timeout_seconds < grace_seconds )); then
+    timeout_seconds="$grace_seconds"
+  fi
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     wait "$pid" 2>/dev/null || true
     return 0
@@ -145,14 +156,14 @@ stop_koder() {
       report_stopped_status "$reason" "$exit_status"
       return "$exit_status"
     fi
-    if (( waited >= STOP_GRACE_SECONDS )); then
+    if (( waited >= grace_seconds )); then
       break
     fi
     sleep 1
     waited=$((waited + 1))
   done
 
-  log "koder pid=$pid did not stop after ${STOP_GRACE_SECONDS}s; terminating"
+  log "koder pid=$pid did not stop after ${grace_seconds}s; terminating"
   kill -TERM "$pid" 2>/dev/null || true
   while true; do
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -167,8 +178,8 @@ stop_koder() {
       report_stopped_status "$reason" "$exit_status"
       return "$exit_status"
     fi
-    if (( waited >= STOP_TIMEOUT_SECONDS )); then
-      log "koder pid=$pid did not terminate after ${STOP_TIMEOUT_SECONDS}s; killing"
+    if (( waited >= timeout_seconds )); then
+      log "koder pid=$pid did not terminate after ${timeout_seconds}s; killing"
       kill -KILL "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || exit_status=$?
       report_stopped_status "$reason" "$exit_status"
