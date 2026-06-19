@@ -1472,6 +1472,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) ||
 		!strings.Contains(fullPage, `function execStartResultLines(data)`) ||
 		!strings.Contains(fullPage, `function renderExecStartResult(data)`) ||
+		!strings.Contains(fullPage, `toolCommandInspectable(tool)`) ||
+		!strings.Contains(fullPage, `openToolCommandModal(tool)`) ||
+		!strings.Contains(fullPage, `tool-command-modal`) ||
+		!strings.Contains(fullPage, `toolCommandText(tool)`) ||
+		!strings.Contains(fullPage, `add('exit code', firstValue(data, ['exit_code', 'ExitCode']))`) ||
+		!strings.Contains(fullPage, `toolCommandModal.output`) ||
+		!strings.Contains(fullPage, `tool-command-output`) ||
 		!strings.Contains(fullPage, `'... ' + (lines.length - 1) + ' lines omitted ...'`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}

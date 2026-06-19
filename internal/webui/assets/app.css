@@ -167,6 +167,15 @@
     .tool-diff-add { background: rgba(var(--bs-success-rgb), .18); color: var(--bs-success-text-emphasis); }
     .tool-diff-del { background: rgba(var(--bs-danger-rgb), .18); color: var(--bs-danger-text-emphasis); }
     .tool-diff-empty { color: var(--bs-secondary-color); }
+    .tool-command-button { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; padding: 0; border: 1px solid var(--bs-border-color); border-radius: .25rem; background: var(--bs-body-bg); color: var(--bs-secondary-color); font-size: .78rem; line-height: 1; }
+    .tool-command-button:hover, .tool-command-button:focus-visible { color: var(--bs-body-color); background: var(--bs-secondary-bg); }
+    .tool-command-modal { width: min(92vw, 840px); max-height: min(86vh, 720px); display: flex; flex-direction: column; }
+    .tool-command-modal-body { min-height: 0; overflow: auto; padding: 1rem; display: grid; gap: .75rem; }
+    .tool-command-meta { display: grid; gap: .35rem; }
+    .tool-command-meta-row { display: grid; grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr); gap: .75rem; align-items: baseline; font-size: .86rem; }
+    .tool-command-full { margin: 0; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: #0d1117; color: #c9d1d9; font-family: var(--bs-font-monospace); font-size: .86rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+    .tool-command-output { border: 1px solid var(--bs-border-color); border-radius: .35rem; overflow: hidden; }
+    .tool-command-output-body { margin: 0; max-height: min(38vh, 22rem); overflow: auto; padding: .75rem; background: #0d1117; color: #c9d1d9; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
     .tool-image-result { font-family: var(--bs-body-font-family); white-space: normal; }
     .tool-image-preview { position: relative; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); overflow: hidden; cursor: zoom-in; }
     .tool-image-thumb { width: 5.5rem; height: 5.5rem; }

@@ -958,6 +958,7 @@
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
+        toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
@@ -3160,6 +3161,53 @@
         toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
         toolStatusBadgeClass(tool) { return toolStatusBadgeClassName(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
+        toolCommandInspectable(tool) {
+          return String((tool && tool.tool) || '') === 'exec_command' && this.toolCommandText(tool) !== '';
+        },
+        toolCommandText(tool) {
+          const args = toolArgs(tool);
+          const data = toolData(tool);
+          return String(firstValue(args, ['cmd', 'command']) || firstValue(data, ['command', 'Command']) || '').trim();
+        },
+        toolCommandMeta(tool) {
+          const args = toolArgs(tool);
+          const data = toolData(tool);
+          const rows = [];
+          const add = (label, value) => {
+            const text = String(value ?? '').trim();
+            if (text) rows.push({label, value: text});
+          };
+          add('workdir', firstValue(args, ['workdir']) || firstValue(data, ['workdir', 'Workdir']));
+          add('shell', firstValue(args, ['shell']) || firstValue(data, ['shell', 'Shell']));
+          const timeout = timeoutLabel(firstValue(args, ['timeout_ms']) || firstValue(data, ['timeout_ms', 'TimeoutMS']));
+          const wait = timeoutLabel(firstValue(args, ['yield_time_ms']) || firstValue(data, ['yield_time_ms', 'YieldTimeMS']));
+          add('process id', firstValue(data, ['process_id', 'ProcessID']));
+          add('state', firstValue(data, ['state', 'State']));
+          add('exit code', firstValue(data, ['exit_code', 'ExitCode']));
+          if (timeout) add('timeout', timeout);
+          if (wait) add('startup wait', wait);
+          for (const key of ['tty', 'login']) {
+            const value = args[key] ?? data[key] ?? data[key.charAt(0).toUpperCase() + key.slice(1)];
+            if (value !== undefined && value !== null && value !== '') add(key, String(value));
+          }
+          return rows;
+        },
+        openToolCommandModal(tool) {
+          const command = this.toolCommandText(tool);
+          if (!command) return;
+          const args = toolArgs(tool);
+          const comment = String(firstValue(args, ['comment']) || firstValue(toolData(tool), ['comment', 'Comment']) || '').trim();
+          this.toolCommandModal = {
+            open: true,
+            command,
+            subtitle: comment || this.toolCallID(tool) || 'Exact command',
+            meta: this.toolCommandMeta(tool),
+            output: String(firstValue(toolData(tool), ['output', 'Output']) || toolResultText(tool) || toolErrorText(tool) || '').trim(),
+          };
+        },
+        closeToolCommandModal() {
+          this.toolCommandModal = {open: false, command: '', subtitle: '', meta: [], output: ''};
+        },
         toolApprovalPending(tool) {
           return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
         },

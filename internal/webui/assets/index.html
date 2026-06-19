@@ -159,6 +159,7 @@
                       <i class="bi bi-wrench-adjustable"></i>
                       <span x-text="toolTitle(tool)"></span>
                       <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-text="toolStatusBadge(tool)"></span>
+                      <button type="button" class="tool-command-button" x-show="toolCommandInspectable(tool)" title="Show exact command" @click.stop="openToolCommandModal(tool)"><i class="bi bi-terminal"></i></button>
                     </div>
                     <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
                   </div>
@@ -527,6 +528,35 @@
           </label>
         </template>
         <div class="alert alert-danger py-2 mb-0" x-show="timelineAction.error" x-text="timelineAction.error" style="display: none;"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="toolCommandModal.open" x-transition @click.self="closeToolCommandModal()" @keydown.escape.window="closeToolCommandModal()" style="display: none;">
+    <section class="tool-command-modal bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div class="min-w-0">
+          <div class="fw-semibold"><i class="bi bi-terminal me-1"></i> Exec command</div>
+          <div class="small text-secondary text-truncate" x-text="toolCommandModal.subtitle"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeToolCommandModal()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="tool-command-modal-body">
+        <div class="tool-command-meta" x-show="toolCommandModal.meta.length > 0">
+          <template x-for="row in toolCommandModal.meta" :key="row.label">
+            <div class="tool-command-meta-row">
+              <span class="text-secondary" x-text="row.label"></span>
+              <span class="font-monospace" x-text="row.value"></span>
+            </div>
+          </template>
+        </div>
+        <pre class="tool-command-full" x-text="toolCommandModal.command"></pre>
+        <template x-if="toolCommandModal.output">
+          <section class="tool-command-output">
+            <div class="tool-result-header">Output</div>
+            <pre class="tool-command-output-body" x-text="toolCommandModal.output"></pre>
+          </section>
+        </template>
       </div>
     </section>
   </div>
