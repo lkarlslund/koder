@@ -138,6 +138,13 @@ html, body {
   padding: 1rem;
 }
 
+.file-browser-markdown .mermaid-error-detail {
+  margin-bottom: .75rem;
+  border: 1px solid var(--bs-danger-border-subtle);
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger-text-emphasis);
+}
+
 @media (max-width: 760px) {
   .file-browser-layout {
     grid-template-columns: 1fr;

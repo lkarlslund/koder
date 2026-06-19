@@ -78,6 +78,14 @@
     window.koderFilesMermaidConfigured = true;
   }
 
+  function errorDetails(err) {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err;
+    const message = String(err.message || err.str || err.name || err);
+    const hash = String(err.hash?.text || err.hash?.token || '').trim();
+    return hash ? message + '\nNear: ' + hash : message;
+  }
+
   window.koderFilesApp = function () {
     return {
       sessionID: '',
@@ -96,11 +104,41 @@
         const match = location.pathname.match(/^\/s\/([^/]+)\/files$/);
         this.sessionID = match ? decodeURIComponent(match[1]) : '';
         configureMermaid();
-        this.loadTree('');
+        this.loadTree('').then(() => {
+          const path = this.pathFromURL();
+          if (path) this.openPathFromURL(path);
+        });
+        window.addEventListener('popstate', () => {
+          const path = this.pathFromURL();
+          if (path) {
+            this.openPathFromURL(path, {replaceURL: true});
+          } else {
+            this.selectedPath = '';
+            this.file = null;
+            this.fileError = '';
+          }
+        });
       },
 
       sessionURL() {
         return this.sessionID ? '/s/' + encodeURIComponent(this.sessionID) : '/';
+      },
+
+      filesURL(path) {
+        const base = this.sessionURL() + '/files';
+        const value = String(path || '').trim();
+        return value ? base + '?path=' + encodeURIComponent(value) : base;
+      },
+
+      pathFromURL() {
+        return String(new URLSearchParams(location.search).get('path') || '').trim();
+      },
+
+      setFileURL(path, options = {}) {
+        const target = this.filesURL(path);
+        if (location.pathname + location.search === target) return;
+        if (options.replaceURL) history.replaceState(null, '', target);
+        else history.pushState(null, '', target);
       },
 
       nodeIndent(depth) {
@@ -141,6 +179,23 @@
         await this.loadFile(node.path);
       },
 
+      async openPathFromURL(path, options = {}) {
+        const clean = String(path || '').replace(/^\/+/, '');
+        if (!clean) return;
+        await this.expandParents(clean);
+        await this.loadFile(clean, {replaceURL: options.replaceURL});
+      },
+
+      async expandParents(path) {
+        const parts = String(path || '').split('/').filter(Boolean);
+        let parent = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+          parent = parent ? parent + '/' + parts[i] : parts[i];
+          this.expanded[parent] = true;
+          if (!this.childrenByPath[parent]) await this.loadTree(parent);
+        }
+      },
+
       async loadTree(path) {
         if (!this.sessionID) return;
         this.treeLoading = true;
@@ -158,12 +213,13 @@
         }
       },
 
-      async loadFile(path) {
+      async loadFile(path, options = {}) {
         if (!this.sessionID || !path) return;
         this.selectedPath = path;
         this.fileLoading = true;
         this.fileError = '';
         this.file = null;
+        this.setFileURL(path, options);
         try {
           const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/read?path=' + encodeURIComponent(path), {cache: 'no-store'});
           if (!response.ok) throw new Error(await response.text() || 'file load failed');
@@ -221,9 +277,10 @@
             const result = await mermaid.render(id, source);
             diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>';
             diagram.dataset.mermaidState = 'done';
-          } catch (_) {
+          } catch (err) {
+            const details = errorDetails(err);
             diagram.dataset.mermaidState = 'error';
-            diagram.innerHTML = '<div class="mermaid-error">Mermaid render failed</div><pre>' + escapeHTML(source) + '</pre>';
+            diagram.innerHTML = '<div class="mermaid-error">Mermaid render failed</div><pre class="mermaid-error-detail">' + escapeHTML(details) + '</pre><pre>' + escapeHTML(source) + '</pre>';
           }
         });
       },
