@@ -439,6 +439,18 @@ func (c *Controller) StateForSelection(ctx context.Context, selection Selection)
 	return c.stateForSelection(ctx, selection, true)
 }
 
+// SessionByID returns a session snapshot without changing controller selection.
+func (c *Controller) SessionByID(ctx context.Context, sessionID id.ID) (domain.Session, error) {
+	if sessionID == "" {
+		return domain.Session{}, fmt.Errorf("session id is required")
+	}
+	_, session, _, _, err := c.resolveStateRuntime(ctx, Selection{SessionID: sessionID}, false)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return session, nil
+}
+
 func (c *Controller) stateForSelection(ctx context.Context, selection Selection, touch bool) (State, error) {
 	c.mu.RLock()
 	base := State{

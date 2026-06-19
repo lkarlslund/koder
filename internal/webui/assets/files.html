@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en" x-data="koderFilesApp()" x-init="init()" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>koder files</title>
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/vendor/highlight/github-dark.min.css" rel="stylesheet">
+  <link href="/assets/vendor/katex/katex.min.css" rel="stylesheet">
+  <script defer src="/assets/vendor/marked/marked.umd.js"></script>
+  <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
+  <script defer src="/assets/vendor/highlight/highlight.min.js"></script>
+  <script defer src="/assets/vendor/katex/katex.min.js"></script>
+  <script defer src="/assets/vendor/mermaid/mermaid.min.js"></script>
+  <link href="/assets/app.css" rel="stylesheet">
+  <link href="/assets/file_browser.css" rel="stylesheet">
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/file_browser.js"></script>
+  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
+</head>
+<body class="bg-body text-body">
+  <div class="file-browser-shell">
+    <nav class="file-browser-topbar navbar bg-body-tertiary px-3">
+      <div class="d-flex align-items-center gap-2 min-w-0">
+        <i class="bi bi-folder2-open text-primary"></i>
+        <span class="fw-semibold">koder files</span>
+        <span class="text-secondary small text-truncate" :title="projectRoot" x-text="projectRoot"></span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm btn-outline-secondary" type="button" title="Refresh tree" @click="refresh()"><i class="bi bi-arrow-clockwise"></i></button>
+        <a class="btn btn-sm btn-outline-secondary" :href="sessionURL()" title="Open session"><i class="bi bi-chat-left-text"></i></a>
+      </div>
+    </nav>
+
+    <div class="file-browser-layout">
+      <aside class="file-browser-tree-pane">
+        <div class="file-browser-tree-header">
+          <span class="small text-secondary">Files</span>
+          <span class="spinner-border spinner-border-sm text-secondary" x-show="treeLoading" style="display: none;"></span>
+        </div>
+        <template x-if="treeError">
+          <div class="alert alert-danger m-2 py-2 small" x-text="treeError"></div>
+        </template>
+        <div class="file-browser-tree" role="tree">
+          <template x-for="node in visibleNodes()" :key="node.path || '/'">
+            <button type="button" class="file-browser-node" :class="{active: selectedPath === node.path}" :style="nodeIndent(node.depth)" @click="openNode(node)" role="treeitem">
+              <i class="bi" :class="nodeIcon(node)"></i>
+              <span class="text-truncate" x-text="node.name"></span>
+            </button>
+          </template>
+        </div>
+      </aside>
+
+      <main class="file-browser-main">
+        <template x-if="!selectedPath && !fileLoading">
+          <section class="file-browser-empty">
+            <i class="bi bi-file-earmark-code"></i>
+            <div>Select a file</div>
+          </section>
+        </template>
+
+        <template x-if="fileError">
+          <div class="alert alert-danger m-3" x-text="fileError"></div>
+        </template>
+
+        <template x-if="fileLoading">
+          <section class="file-browser-empty">
+            <span class="spinner-border text-primary"></span>
+            <div>Loading file</div>
+          </section>
+        </template>
+
+        <template x-if="file && !fileLoading">
+          <section class="file-browser-file">
+            <header class="file-browser-file-header">
+              <div class="min-w-0">
+                <div class="fw-semibold text-truncate" x-text="file.path"></div>
+                <div class="small text-secondary" x-text="fileMeta()"></div>
+              </div>
+              <template x-if="file.markdown && !file.binary && !file.too_large">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Markdown view">
+                  <button type="button" class="btn" :class="viewMode === 'preview' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'preview'">Preview</button>
+                  <button type="button" class="btn" :class="viewMode === 'source' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'source'">Source</button>
+                </div>
+              </template>
+            </header>
+
+            <template x-if="file.too_large">
+              <div class="file-browser-empty">
+                <i class="bi bi-file-earmark-break"></i>
+                <div>File is too large to preview</div>
+              </div>
+            </template>
+
+            <template x-if="file.binary">
+              <div class="file-browser-empty">
+                <i class="bi bi-file-earmark-binary"></i>
+                <div>Binary file</div>
+              </div>
+            </template>
+
+            <template x-if="file.markdown && viewMode === 'preview' && !file.binary && !file.too_large">
+              <article class="markdown-body file-browser-markdown" x-html="markdownHTML(file.content)" x-effect="renderDiagrams($el, file.path)"></article>
+            </template>
+
+            <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large">
+              <pre class="file-browser-code"><code class="hljs" x-html="highlightedContent()"></code></pre>
+            </template>
+          </section>
+        </template>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

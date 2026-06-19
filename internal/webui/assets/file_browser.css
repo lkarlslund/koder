@@ -1,0 +1,151 @@
+html, body {
+  height: 100%;
+}
+
+.file-browser-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+.file-browser-topbar {
+  flex: 0 0 auto;
+  min-height: 3rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.file-browser-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 24rem) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.file-browser-tree-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.file-browser-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.5rem;
+  padding: 0 .75rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.file-browser-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: .35rem 0;
+}
+
+.file-browser-node {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  width: 100%;
+  height: 1.9rem;
+  border: 0;
+  border-radius: 0;
+  color: var(--bs-body-color);
+  background: transparent;
+  text-align: left;
+  font-size: .88rem;
+}
+
+.file-browser-node:hover {
+  background: var(--bs-secondary-bg);
+}
+
+.file-browser-node.active {
+  color: var(--bs-primary-text-emphasis);
+  background: var(--bs-primary-bg-subtle);
+}
+
+.file-browser-node .bi {
+  flex: 0 0 1rem;
+  color: var(--bs-secondary-color);
+}
+
+.file-browser-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bs-body-bg);
+}
+
+.file-browser-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  height: 100%;
+  min-height: 18rem;
+  color: var(--bs-secondary-color);
+}
+
+.file-browser-empty .bi {
+  font-size: 2rem;
+}
+
+.file-browser-file {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.file-browser-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 0 0 auto;
+  min-height: 3.5rem;
+  padding: .65rem .85rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.file-browser-code {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  border-radius: 0;
+  background: #0d1117;
+}
+
+.file-browser-code code {
+  font-size: .88rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.file-browser-markdown {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+@media (max-width: 760px) {
+  .file-browser-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(12rem, 38vh) minmax(0, 1fr);
+  }
+
+  .file-browser-tree-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--bs-border-color);
+  }
+}

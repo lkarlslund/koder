@@ -118,6 +118,112 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	}
 }
 
+func TestServerServesSessionFileBrowserRoute(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL() + "/s/" + string(state.Session.ID) + "/files")
+	if err != nil {
+		t.Fatalf("get file browser: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected file browser ok, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		`koderFilesApp()`,
+		`/assets/vendor/marked/marked.umd.js`,
+		`/assets/vendor/highlight/highlight.min.js`,
+		`/assets/file_browser.js`,
+		currentAssetHash,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("file browser HTML missing %q", want)
+		}
+	}
+}
+
+func TestSessionFileBrowserAPI(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workdir, "cmd"), 0o755); err != nil {
+		t.Fatalf("mkdir cmd: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("# Project\n\n```go\npackage main\n```\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "cmd", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	ctrl := newTestControllerWithWorkdir(t, workdir)
+	state := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/tree")
+	if err != nil {
+		t.Fatalf("get tree: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected tree ok, got %d: %s", resp.StatusCode, body)
+	}
+	var tree fileTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		t.Fatalf("decode tree: %v", err)
+	}
+	if tree.SessionID != state.Session.ID || tree.ProjectRoot != workdir {
+		t.Fatalf("unexpected tree response session/root: %#v", tree)
+	}
+	if !slices.ContainsFunc(tree.Entries, func(entry fileTreeEntry) bool { return entry.Name == "cmd" && entry.Dir }) {
+		t.Fatalf("tree missing cmd directory: %#v", tree.Entries)
+	}
+	if !slices.ContainsFunc(tree.Entries, func(entry fileTreeEntry) bool { return entry.Name == "README.md" && !entry.Dir }) {
+		t.Fatalf("tree missing README.md: %#v", tree.Entries)
+	}
+
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=README.md")
+	if err != nil {
+		t.Fatalf("read markdown: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected read ok, got %d: %s", resp.StatusCode, body)
+	}
+	var file fileContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		t.Fatalf("decode file: %v", err)
+	}
+	if !file.Markdown || file.Language != "markdown" || !strings.Contains(file.Content, "# Project") {
+		t.Fatalf("unexpected markdown response: %#v", file)
+	}
+
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=../outside.txt")
+	if err != nil {
+		t.Fatalf("read traversal: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected traversal bad request, got %d", resp.StatusCode)
+	}
+}
+
 func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := selectedTestState(t, ctrl).Session.ID

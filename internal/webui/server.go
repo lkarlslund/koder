@@ -114,6 +114,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/restart-needed", s.handleRestartNeeded)
 	mux.HandleFunc("/api/rpc", s.handleHTTPRPC)
 	mux.HandleFunc("/api/rpc/", s.handleHTTPRPC)
+	mux.HandleFunc("/api/sessions/", s.handleSessionFilesAPI)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -196,6 +197,12 @@ func (s *Server) markConnected() {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
+	if _, ok := fileBrowserSessionFromPath(r.URL.Path); ok {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte(renderFileBrowserHTML()))
+		return
+	}
 	if r.URL.Path != "/" {
 		selection, ok := routeSelectionFromPath(r.URL.Path)
 		if !ok || selection.SessionID == "" {

@@ -1991,6 +1991,13 @@
           const session = String(id || '').trim();
           return session ? '/s/' + encodeURIComponent(session) : '/';
         },
+        sessionFilesURL(id) {
+          const session = String(id || this.currentSessionID() || '').trim();
+          return session ? this.sessionURL(session) + '/files' : '';
+        },
+        openSessionFiles() {
+          this.openURLInNewTab(this.sessionFilesURL());
+        },
         chatURL(chatID, sessionID) {
           const session = String(sessionID || this.currentSessionID() || '').trim();
           const chat = String(chatID || '').trim();
