@@ -11,15 +11,25 @@ STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-20}"
 SHUTDOWN_GRACE_SECONDS="${KODER_DEV_SHUTDOWN_GRACE_SECONDS:-60}"
 SHUTDOWN_TIMEOUT_SECONDS="${KODER_DEV_SHUTDOWN_TIMEOUT_SECONDS:-75}"
 RESTART_EXIT_CODE="${KODER_DEV_RESTART_EXIT_CODE:-75}"
-KODER_OUTPUT_LOG="${KODER_DEV_OUTPUT_LOG:-$(mktemp "/tmp/koder-dev-${USER:-user}.output.XXXXXX.log")}"
+KODER_DEV_LOG_DIR="${KODER_DEV_LOG_DIR:-/tmp/koder-dev-${USER:-user}}"
+KODER_SUPERVISOR_LOG="${KODER_DEV_SUPERVISOR_LOG:-$KODER_DEV_LOG_DIR/supervisor.log}"
+KODER_OUTPUT_LOG_REQUESTED="${KODER_DEV_OUTPUT_LOG:-}"
+KODER_OUTPUT_LOG=""
+KODER_OUTPUT_LATEST_LOG="${KODER_DEV_OUTPUT_LATEST_LOG:-$KODER_DEV_LOG_DIR/output.latest.log}"
 KODER_DEV_WEB_BIND="${KODER_DEV_WEB_BIND:-0.0.0.0:7979}"
+
+mkdir -p "$KODER_DEV_LOG_DIR"
 
 child_pid=""
 shutting_down=0
 restart_failures=0
+launch_count=0
 
 log() {
-  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+  local line
+  line="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+  printf '%s\n' "$line"
+  printf '%s\n' "$line" >>"$KODER_SUPERVISOR_LOG"
 }
 
 now_ms() {
@@ -103,13 +113,28 @@ launch_args() {
 launch_koder() {
   local args=()
   local started
+  local started_label
   started="$(now_ms)"
+  started_label="$(date '+%Y%m%d-%H%M%S')"
+  launch_count=$((launch_count + 1))
   mapfile -d '' -t args < <(launch_args "$@")
-  : >"$KODER_OUTPUT_LOG"
+  if [[ -n "$KODER_OUTPUT_LOG_REQUESTED" ]]; then
+    KODER_OUTPUT_LOG="$KODER_OUTPUT_LOG_REQUESTED"
+  else
+    KODER_OUTPUT_LOG="$KODER_DEV_LOG_DIR/output.${started_label}.${launch_count}.log"
+  fi
+  {
+    printf '\n[%s] launching koder child #%d\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$launch_count"
+    printf '[%s] command:' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf ' %q' "$BIN" "${args[@]}"
+    printf '\n'
+  } >>"$KODER_OUTPUT_LOG"
+  ln -sfn "$KODER_OUTPUT_LOG" "$KODER_OUTPUT_LATEST_LOG" 2>/dev/null || true
   "$BIN" "${args[@]}" > >(tee -a "$KODER_OUTPUT_LOG") 2>&1 &
   child_pid="$!"
   log "launched koder pid=$child_pid in $(elapsed_ms "$started")ms"
   log "koder output log: $KODER_OUTPUT_LOG"
+  log "koder latest output log: $KODER_OUTPUT_LATEST_LOG"
 }
 
 stop_koder() {
@@ -422,7 +447,7 @@ log_signature_changes() {
           print "  " line
         }
       }
-    ' >&2 || true
+    ' | tee -a "$KODER_SUPERVISOR_LOG" >&2 || true
 }
 
 wait_for_settle() {
