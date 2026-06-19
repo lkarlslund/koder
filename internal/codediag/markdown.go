@@ -213,7 +213,8 @@ globalThis.mermaid.initialize({startOnLoad: false, securityLevel: 'strict'});
     try {
       await globalThis.mermaid.parse(String(item.source || ''));
     } catch (err) {
-      const hash = err && err.hash ? err.hash : {};
+      const hash = err && err.hash ? err.hash : null;
+      if (!hash) continue;
       const loc = hash.loc || {};
       out.push({
         index: item.index,

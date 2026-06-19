@@ -62,6 +62,21 @@ func TestCheckFileReportsMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
 	}
 }
 
+func TestCheckFileIgnoresMermaidNodeSanitizerEnvironmentError(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	content := "```mermaid\nflowchart TD\nA[\"hello\"] --> B[\"world\"]\n```\n"
+
+	report := CheckFile(t.Context(), t.TempDir(), "README.md", content, Options{Mode: "syntax"})
+	if len(report.Skipped) > 0 {
+		t.Skipf("mermaid validation skipped: %v", report.Skipped)
+	}
+	if len(report.Diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics for valid labeled mermaid diagram, got %#v", report.Diagnostics)
+	}
+}
+
 func TestCheckEditSuppressesExistingMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not available")
