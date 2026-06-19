@@ -1678,6 +1678,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
 		t.Fatalf("expected sidebar to filter milestones by status")
 	}
+	if !strings.Contains(fullPage, `milestoneStatusLabel(status)`) || !strings.Contains(fullPage, `if (value === 'completed') return 'Completed'`) {
+		t.Fatalf("expected milestone completed filter label to match milestone status wording")
+	}
 	if !strings.Contains(fullPage, `taskItemsForMilestone(node.milestone)`) {
 		t.Fatalf("expected sidebar to render tasks as milestone children")
 	}

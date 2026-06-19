@@ -2739,10 +2739,15 @@
         milestoneStatusFilterOptions() {
           return this.statusFilterOptions(this.milestoneItems().map(milestone => this.milestoneStatus(milestone)), this.milestoneFilterStatuses(), status => ({
             status,
-            label: this.statusLabel(status),
+            label: this.milestoneStatusLabel(status),
             icon: this.milestoneIcon(status),
             count: 0,
           }));
+        },
+        milestoneStatusLabel(status) {
+          const value = String(status || '').trim();
+          if (value === 'completed') return 'Completed';
+          return this.statusLabel(value);
         },
         milestoneFilterStatuses() {
           return ['executing', 'decomposing', 'ready', 'pending', 'completed', 'blocked', 'cancelled'];
