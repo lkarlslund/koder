@@ -1,6 +1,6 @@
 module github.com/lkarlslund/koder
 
-go 1.26.0
+go 1.26.2
 
 require (
 	github.com/coder/websocket v1.8.14
@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/pelletier/go-toml/v2 v2.3.0
+	github.com/sammcj/mermaid-check v0.0.4
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.2

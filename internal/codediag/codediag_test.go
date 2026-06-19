@@ -1,7 +1,6 @@
 package codediag
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -41,20 +40,14 @@ func TestCheckFileReportsJSONSyntaxDiagnostic(t *testing.T) {
 }
 
 func TestCheckFileReportsMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not available")
-	}
-	content := "Before\n\n```mermaid\nflowchart TD\nA -->\n```\n"
+	content := "Before\n\n```mermaid\nflowchart TD\nsubgraph Broken\nA --> B\n```\n"
 
 	report := CheckFile(t.Context(), t.TempDir(), "README.md", content, Options{Mode: "syntax"})
-	if len(report.Skipped) > 0 {
-		t.Skipf("mermaid validation skipped: %v", report.Skipped)
-	}
 	if len(report.Diagnostics) != 1 {
 		t.Fatalf("expected one diagnostic, got %#v", report.Diagnostics)
 	}
 	diagnostic := report.Diagnostics[0]
-	if diagnostic.Tool != "mermaid" || diagnostic.Code != "renderer" || diagnostic.Line < 4 {
+	if diagnostic.Tool != "mermaid" || diagnostic.Code != "parser" || diagnostic.Line < 4 {
 		t.Fatalf("unexpected mermaid diagnostic: %#v", diagnostic)
 	}
 	if !strings.Contains(Text(report), "syntax/mermaid: README.md") {
@@ -62,32 +55,29 @@ func TestCheckFileReportsMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
 	}
 }
 
-func TestCheckFileIgnoresMermaidNodeSanitizerEnvironmentError(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not available")
-	}
+func TestCheckFileIgnoresValidMermaidFlowchart(t *testing.T) {
 	content := "```mermaid\nflowchart TD\nA[\"hello\"] --> B[\"world\"]\n```\n"
 
 	report := CheckFile(t.Context(), t.TempDir(), "README.md", content, Options{Mode: "syntax"})
-	if len(report.Skipped) > 0 {
-		t.Skipf("mermaid validation skipped: %v", report.Skipped)
-	}
 	if len(report.Diagnostics) != 0 {
 		t.Fatalf("expected no diagnostics for valid labeled mermaid diagram, got %#v", report.Diagnostics)
 	}
 }
 
-func TestCheckEditSuppressesExistingMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not available")
+func TestCheckFileIgnoresValidMermaidFlowchartWithSubgraph(t *testing.T) {
+	content := "```mermaid\nflowchart TD\nStart([AS-REQ Request Enters])\nsubgraph P1 [\"Phase 1: Request Validation\"]\nC1[\"*param_1 != 1 ?\"]\nR1_Yes[\"Return 0 (not AS-REQ)\"]\nend\nStart --> C1\nC1 -->|\"yes\"| R1_Yes\n```\n"
+
+	report := CheckFile(t.Context(), t.TempDir(), "README.md", content, Options{Mode: "syntax"})
+	if len(report.Diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics for valid subgraph mermaid diagram, got %#v", report.Diagnostics)
 	}
-	before := "```mermaid\nflowchart TD\nA -->\n```\n"
+}
+
+func TestCheckEditSuppressesExistingMarkdownMermaidSyntaxDiagnostic(t *testing.T) {
+	before := "```mermaid\nflowchart TD\nsubgraph Broken\nA --> B\n```\n"
 	after := before
 
 	report := CheckEdit(t.Context(), t.TempDir(), "README.md", before, after, Options{Mode: "syntax"})
-	if len(report.Skipped) > 0 {
-		t.Skipf("mermaid validation skipped: %v", report.Skipped)
-	}
 	if len(report.Diagnostics) != 0 {
 		t.Fatalf("expected no introduced diagnostics, got %#v", report.Diagnostics)
 	}
