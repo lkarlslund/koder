@@ -1061,6 +1061,7 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 }
 
 func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.CancelReason) error {
+	started := time.Now()
 	c.shutdownMu.Lock()
 	defer c.shutdownMu.Unlock()
 
@@ -1068,15 +1069,15 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	agent := c.agent
 	c.mu.Unlock()
 	if agent == nil {
-		slog.Info("controller shutdown complete", "reason", reason, "agent", false)
+		slog.Info("controller shutdown complete", "reason", reason, "agent", false, "elapsed_ms", time.Since(started).Milliseconds())
 		return nil
 	}
 	slog.Info("controller shutdown requested", "reason", reason, "agent", true)
 	if err := agent.Shutdown(ctx, reason); err != nil {
-		slog.Error("controller shutdown failed", "reason", reason, "error", err)
+		slog.Error("controller shutdown failed", "reason", reason, "error", err, "elapsed_ms", time.Since(started).Milliseconds())
 		return err
 	}
-	slog.Info("controller shutdown complete", "reason", reason, "agent", true)
+	slog.Info("controller shutdown complete", "reason", reason, "agent", true, "elapsed_ms", time.Since(started).Milliseconds())
 	return nil
 }
 

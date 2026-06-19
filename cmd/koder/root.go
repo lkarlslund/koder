@@ -169,7 +169,9 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	server, err := startWebUI(ctx, controller, bind, startupOpts.NoOpenBrowser, recorder, func() error {
 		select {
 		case restartRequested <- struct{}{}:
+			slog.Info("koder process restart enqueued")
 		default:
+			slog.Info("koder process restart already pending")
 		}
 		return nil
 	})
@@ -195,6 +197,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 			}
 			return ctx.Err()
 		case <-restartRequested:
+			slog.Info("koder restart request received by root loop", "exit_code", processRestartExitCode)
 			slog.Info("koder exiting for process restart", "exit_code", processRestartExitCode)
 			return errProcessRestart
 		case signal := <-sig:

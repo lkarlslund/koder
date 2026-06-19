@@ -1060,6 +1060,7 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 	if s == nil {
 		return nil
 	}
+	started := time.Now()
 	s.mu.RLock()
 	sessionID := s.session.ID
 	runtimes := make([]*chatpkg.Chat, 0, len(s.runtimes))
@@ -1095,11 +1096,11 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 			err = rt.Shutdown(ctx, reason)
 		}
 		if err != nil {
-			slog.Error("session shutdown failed", "session_id", sessionID, "reason", reason, "error", err)
+			slog.Error("session shutdown failed", "session_id", sessionID, "reason", reason, "error", err, "elapsed_ms", time.Since(started).Milliseconds())
 			return err
 		}
 	}
-	slog.Info("session shutdown complete", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes))
+	slog.Info("session shutdown complete", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "elapsed_ms", time.Since(started).Milliseconds())
 	return nil
 }
 

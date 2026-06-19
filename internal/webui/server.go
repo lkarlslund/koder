@@ -1102,6 +1102,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 }
 
 func (s *Server) restartAfterShutdown(reason chat.CancelReason, hard bool) {
+	started := time.Now()
+	slog.Info("restart shutdown starting", "hard", hard, "reason", reason)
 	done := make(chan error, 1)
 	go func() {
 		done <- s.controller.ShutdownWithCancelReason(context.Background(), reason)
@@ -1113,22 +1115,23 @@ func (s *Server) restartAfterShutdown(reason chat.CancelReason, hard bool) {
 				slog.Error("shutdown for process restart", "error", err, "hard", hard)
 				return
 			}
-			slog.Info("shutdown for process restart complete", "hard", hard)
+			slog.Info("shutdown for process restart complete", "hard", hard, "elapsed_ms", time.Since(started).Milliseconds())
 		case <-time.After(750 * time.Millisecond):
-			slog.Warn("hard restart proceeding before shutdown completed")
+			slog.Warn("hard restart proceeding before shutdown completed", "elapsed_ms", time.Since(started).Milliseconds())
 		}
 	} else {
 		if err := <-done; err != nil {
 			slog.Error("shutdown for process restart", "error", err, "hard", hard)
 			return
 		}
-		slog.Info("shutdown for process restart complete", "hard", hard)
+		slog.Info("shutdown for process restart complete", "hard", hard, "elapsed_ms", time.Since(started).Milliseconds())
 	}
+	requestStarted := time.Now()
 	if err := s.requestProcessRestart(); err != nil {
 		slog.Error("request process restart", "error", err, "hard", hard)
 		return
 	}
-	slog.Info("process restart requested", "hard", hard)
+	slog.Info("process restart requested", "hard", hard, "shutdown_elapsed_ms", time.Since(started).Milliseconds(), "request_elapsed_ms", time.Since(requestStarted).Milliseconds())
 }
 
 func (s *Server) requestProcessRestart() error {

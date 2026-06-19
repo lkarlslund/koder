@@ -1046,6 +1046,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	started := time.Now()
 	shouldCancelActive := len(cancelActive) > 0 && cancelActive[0]
 	autoRestart := len(cancelActive) > 1 && cancelActive[1]
 	r.mu.Lock()
@@ -1100,6 +1101,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 		cancel()
 	}
 
+	waitStarted := time.Now()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -1115,6 +1117,7 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 		case <-ticker.C:
 		}
 	}
+	waitElapsed := time.Since(waitStarted)
 	if wasActive && interruptReason != "" && !shouldCancelActive {
 		r.queueShutdownContinuation()
 	}
@@ -1123,11 +1126,20 @@ func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string, canc
 			return err
 		}
 	}
+	persistStarted := time.Now()
 	if err := r.Persist(context.Background(), nil); err != nil {
 		return err
 	}
+	persistElapsed := time.Since(persistStarted)
 	r.Close()
-	slog.Info("chat close complete", "chat_id", chatID, "session_id", sessionID, "reason", interruptReason)
+	slog.Info("chat close complete",
+		"chat_id", chatID,
+		"session_id", sessionID,
+		"reason", interruptReason,
+		"active_wait_ms", waitElapsed.Milliseconds(),
+		"persist_ms", persistElapsed.Milliseconds(),
+		"elapsed_ms", time.Since(started).Milliseconds(),
+	)
 	return nil
 }
 

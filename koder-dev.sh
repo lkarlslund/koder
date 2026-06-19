@@ -20,6 +20,15 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+now_ms() {
+  date '+%s%3N'
+}
+
+elapsed_ms() {
+  local start="$1"
+  printf '%s' "$(( $(now_ms) - start ))"
+}
+
 exit_status_text() {
   local status="$1"
   if (( status == 0 )); then
@@ -60,7 +69,10 @@ trap 'handle_signal INT 130' INT
 trap 'handle_signal TERM 1' TERM
 
 build_koder() {
+  local started
+  started="$(now_ms)"
   "$BUILD_SCRIPT" "$BIN" >/dev/null
+  log "build completed in $(elapsed_ms "$started")ms"
 }
 
 has_web_bind_arg() {
@@ -88,11 +100,13 @@ launch_args() {
 
 launch_koder() {
   local args=()
+  local started
+  started="$(now_ms)"
   mapfile -d '' -t args < <(launch_args "$@")
   : >"$KODER_OUTPUT_LOG"
   "$BIN" "${args[@]}" > >(tee -a "$KODER_OUTPUT_LOG") 2>&1 &
   child_pid="$!"
-  log "launched koder pid=$child_pid"
+  log "launched koder pid=$child_pid in $(elapsed_ms "$started")ms"
   log "koder output log: $KODER_OUTPUT_LOG"
 }
 
