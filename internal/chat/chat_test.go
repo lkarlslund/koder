@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 var errTestProviderFailure = errors.New("provider failed")
@@ -76,6 +77,12 @@ type reasoningOnlyLoopRunner struct {
 type cancelAwareRunner struct {
 	ctxSeen chan context.Context
 	events  chan domain.Event
+}
+
+type restartToolBoundaryRunner struct {
+	runtimeFakeRunner
+	ctxSeen chan context.Context
+	release chan struct{}
 }
 
 type pendingToolFakeRunner struct {
@@ -254,6 +261,35 @@ func (f *cancelAwareRunner) CompleteModelRequest(ctx context.Context, _ domain.S
 	f.ctxSeen <- ctx
 	forwardFakeEvents(f.events, out)
 	return ModelResponse{Text: "done"}, nil
+}
+
+func (f *restartToolBoundaryRunner) CompleteModelRequest(ctx context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	f.ctxSeen <- ctx
+	<-f.release
+	return ModelResponse{
+		ToolCalls: []provider.ToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: provider.FunctionCall{
+				Name:      string(domain.ToolKindBash),
+				Arguments: `{"cmd":"echo hi"}`,
+			},
+		}},
+	}, nil
+}
+
+func (f *restartToolBoundaryRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
+	return ToolCallParseResult{
+		ToolCalls: []domain.ToolCall{{
+			ToolCallID: "call_1",
+			Tool:       domain.ToolKindBash,
+		}},
+		Requests: []tools.Request{{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"cmd": "echo hi"},
+		}},
+	}
 }
 
 func (f *cancelAwareRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
@@ -3080,6 +3116,71 @@ func TestRuntimeRestartShutdownMarksAutoRestart(t *testing.T) {
 	}
 	if !chatRecord.AutoRestart {
 		t.Fatalf("expected chat to be marked auto-restart, got %#v", chatRecord)
+	}
+}
+
+func TestRuntimeRestartShutdownStopsAfterCurrentLLMTurnBeforeTools(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &restartToolBoundaryRunner{
+		ctxSeen: make(chan context.Context, 1),
+		release: make(chan struct{}),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "use a tool"})
+
+	select {
+	case <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for model request")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.Shutdown(context.Background(), CancelReasonRestartInterrupt)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for rt.Snapshot().StatusText != "Stopping after current turn" {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for stop-after-current-turn state, snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(runner.release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for shutdown")
+	}
+
+	var pendingTools int
+	for _, item := range rt.SnapshotTimeline() {
+		switch payload := item.Content.(type) {
+		case domain.AssistantMessage:
+			for _, call := range payload.Tools {
+				if call.ToolCallID == "call_1" && call.Status == domain.ToolStatusPending {
+					pendingTools++
+				}
+				if call.ToolCallID == "call_1" && call.Status != domain.ToolStatusPending {
+					t.Fatalf("expected restart to leave tool pending, got %#v", call)
+				}
+			}
+		case domain.Notice:
+			if strings.Contains(payload.Text, "tool runtime service is not configured") {
+				t.Fatalf("tool execution was attempted during restart shutdown: %#v", payload)
+			}
+		}
+	}
+	if pendingTools != 1 {
+		t.Fatalf("expected one pending tool call after restart shutdown, got %d; timeline=%#v", pendingTools, rt.SnapshotTimeline())
 	}
 }
 

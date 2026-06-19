@@ -1088,17 +1088,27 @@ func (s *Session) shutdownRuntimes(ctx context.Context, reason chatpkg.CancelRea
 	}
 	s.subsMu.Unlock()
 	slog.Info("session shutdown requested", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "subscribers", len(subs))
+	errs := make(chan error, len(runtimes))
 	for _, rt := range runtimes {
-		var err error
-		if reason == "" {
-			err = rt.DrainAndClose(ctx)
-		} else {
-			err = rt.Shutdown(ctx, reason)
+		go func(rt *chatpkg.Chat) {
+			if reason == "" {
+				errs <- rt.DrainAndClose(ctx)
+				return
+			}
+			errs <- rt.Shutdown(ctx, reason)
+		}(rt)
+	}
+	var firstErr error
+	for range runtimes {
+		if err := <-errs; err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
-		if err != nil {
-			slog.Error("session shutdown failed", "session_id", sessionID, "reason", reason, "error", err, "elapsed_ms", time.Since(started).Milliseconds())
-			return err
-		}
+	}
+	if firstErr != nil {
+		slog.Error("session shutdown failed", "session_id", sessionID, "reason", reason, "error", firstErr, "elapsed_ms", time.Since(started).Milliseconds())
+		return firstErr
 	}
 	slog.Info("session shutdown complete", "session_id", sessionID, "reason", reason, "runtimes", len(runtimes), "elapsed_ms", time.Since(started).Milliseconds())
 	return nil

@@ -937,6 +937,15 @@ func (r *Chat) StopAfterCurrentTurn() {
 	r.Cancel(CancelReasonUserInterrupt)
 }
 
+func (r *Chat) shouldStopAfterCurrentLLMTurn() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.draining && r.cancelState != CancelStateCancelling
+}
+
 func (r *Chat) Interrupt() {
 	r.Cancel(CancelReasonUserInterruptHard)
 }
