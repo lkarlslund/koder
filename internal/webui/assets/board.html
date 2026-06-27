@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" x-data="koderBoardApp()" x-init="init()" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>koder board</title>
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/app.css" rel="stylesheet">
+  <link href="/assets/planning_board.css" rel="stylesheet">
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/planning_board.js"></script>
+  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
+</head>
+<body class="bg-body text-body">
+  <div class="planning-board-shell">
+    <nav class="planning-board-topbar navbar bg-body-tertiary px-3">
+      <div class="d-flex align-items-center gap-2 min-w-0">
+        <i class="bi bi-kanban text-primary"></i>
+        <span class="fw-semibold">koder board</span>
+        <span class="text-secondary small text-truncate" :title="projectRoot" x-text="projectRoot"></span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge text-bg-secondary" x-show="saving" style="display: none;">Saving</span>
+        <button class="btn btn-sm btn-outline-secondary" type="button" title="Refresh board" @click="loadBoard()"><i class="bi bi-arrow-clockwise"></i></button>
+        <button class="btn btn-sm btn-primary" type="button" title="Add milestone" @click="openMilestoneEditor()"><i class="bi bi-plus-lg"></i></button>
+        <a class="btn btn-sm btn-outline-secondary" :href="sessionURL()" title="Open session"><i class="bi bi-chat-left-text"></i></a>
+      </div>
+    </nav>
+
+    <main class="planning-board-main">
+      <template x-if="error">
+        <div class="alert alert-danger m-3" x-text="error"></div>
+      </template>
+      <template x-if="loading && milestones().length === 0">
+        <section class="planning-board-empty">
+          <span class="spinner-border text-primary"></span>
+          <div>Loading board</div>
+        </section>
+      </template>
+      <template x-if="!loading && milestones().length === 0">
+        <section class="planning-board-empty">
+          <i class="bi bi-kanban"></i>
+          <div>No milestones yet</div>
+          <button class="btn btn-primary" type="button" @click="openMilestoneEditor()"><i class="bi bi-plus-lg"></i> Add milestone</button>
+        </section>
+      </template>
+
+      <section class="planning-board" x-show="milestones().length > 0" style="display: none;">
+        <header class="planning-board-header">
+          <div>
+            <div class="small text-secondary">Milestone swimlanes</div>
+            <div class="fw-semibold" x-text="boardSummary()"></div>
+          </div>
+          <div class="planning-lane-key">
+            <template x-for="status in taskStatuses" :key="status.key">
+              <span><i class="bi" :class="status.icon"></i><span x-text="status.label"></span></span>
+            </template>
+          </div>
+        </header>
+
+        <template x-for="(milestone, index) in milestones()" :key="milestoneKey(milestone)">
+          <section class="milestone-swimlane" :data-milestone-key="milestoneKey(milestone)" draggable="true" @dragstart="startMilestoneDrag(milestone)" @dragover.prevent @drop="dropMilestone(index)">
+            <aside class="milestone-rail">
+              <div class="milestone-rail-top">
+                <div class="milestone-order">
+                  <button type="button" class="rail-icon-button" title="Move milestone up" @click="moveMilestone(index, -1)" :disabled="index === 0"><i class="bi bi-arrow-up"></i></button>
+                  <button type="button" class="rail-icon-button" title="Move milestone down" @click="moveMilestone(index, 1)" :disabled="index === milestones().length - 1"><i class="bi bi-arrow-down"></i></button>
+                </div>
+                <div class="min-w-0">
+                  <div class="milestone-title-row">
+                    <span class="badge milestone-key" x-text="milestoneKey(milestone)"></span>
+                    <span class="badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatusLabel(milestoneStatus(milestone))"></span>
+                  </div>
+                  <h2 x-text="milestoneTitle(milestone)"></h2>
+                  <p x-show="milestoneNotes(milestone)" x-text="milestoneNotes(milestone)"></p>
+                </div>
+              </div>
+              <div class="milestone-meta">
+                <span x-text="milestoneTaskSummary(milestone)"></span>
+                <span x-show="milestoneDependsOnKey(milestone)">depends on <strong x-text="milestoneDependsOnKey(milestone)"></strong></span>
+              </div>
+              <div class="milestone-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openMilestoneEditor(milestone)" title="Edit milestone"><i class="bi bi-pencil"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openTaskEditor(milestone)" title="Add task"><i class="bi bi-plus-lg"></i></button>
+              </div>
+            </aside>
+
+            <div class="task-lanes">
+              <template x-for="status in taskStatuses" :key="status.key">
+                <section class="task-lane" :class="'task-lane-' + status.key.replaceAll('_', '-')" @dragover.prevent @drop="dropTask(milestone, status.key)">
+                  <header>
+                    <span><i class="bi" :class="status.icon"></i><span x-text="status.label"></span></span>
+                    <span class="badge rounded-pill text-bg-secondary" x-text="tasksForStatus(milestone, status.key).length"></span>
+                  </header>
+                  <div class="task-stack">
+                    <template x-for="task in tasksForStatus(milestone, status.key)" :key="taskKey(task)">
+                      <article class="task-card" draggable="true" @dragstart="startTaskDrag(task)" @dblclick="openTaskEditor(milestone, task)">
+                        <div class="task-card-header">
+                          <span class="task-key" x-text="taskKey(task)"></span>
+                          <button type="button" class="task-edit-button" title="Edit task" @click.stop="openTaskEditor(milestone, task)"><i class="bi bi-pencil"></i></button>
+                        </div>
+                        <div class="task-card-body" x-text="taskContent(task)"></div>
+                        <div class="task-card-note" x-show="taskNote(task)" x-text="taskNote(task)"></div>
+                      </article>
+                    </template>
+                    <button type="button" class="task-add-inline" @click="openTaskEditor(milestone, null, status.key)"><i class="bi bi-plus-lg"></i></button>
+                  </div>
+                </section>
+              </template>
+            </div>
+          </section>
+        </template>
+      </section>
+    </main>
+
+    <div class="modal-backdrop-lite planning-modal" x-show="milestoneEditor.open" x-transition @click.self="closeMilestoneEditor()" @keydown.escape.window="closeMilestoneEditor()" style="display: none;">
+      <section class="planning-dialog border rounded shadow">
+        <header>
+          <div>
+            <div class="small text-secondary" x-text="milestoneEditor.key ? 'Edit milestone' : 'New milestone'"></div>
+            <h2 x-text="milestoneEditor.key || 'Milestone'"></h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeMilestoneEditor()" title="Close"><i class="bi bi-x-lg"></i></button>
+        </header>
+        <label>Title<input class="form-control" x-model="milestoneEditor.title"></label>
+        <label>Status<select class="form-select" x-model="milestoneEditor.status">
+          <template x-for="status in milestoneStatuses" :key="status.key"><option :value="status.key" x-text="status.label"></option></template>
+        </select></label>
+        <label>Depends on<select class="form-select" x-model="milestoneEditor.depends_on_key">
+          <option value="">None</option>
+          <template x-for="milestone in milestones().filter(m => milestoneKey(m) !== milestoneEditor.key)" :key="milestoneKey(milestone)">
+            <option :value="milestoneKey(milestone)" x-text="milestoneKey(milestone) + ' · ' + milestoneTitle(milestone)"></option>
+          </template>
+        </select></label>
+        <label>Notes<textarea class="form-control" rows="4" x-model="milestoneEditor.notes"></textarea></label>
+        <footer>
+          <button type="button" class="btn btn-outline-secondary" @click="closeMilestoneEditor()">Cancel</button>
+          <button type="button" class="btn btn-primary" @click="saveMilestone()" :disabled="saving"><i class="bi bi-check-lg"></i> Save</button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop-lite planning-modal" x-show="taskEditor.open" x-transition @click.self="closeTaskEditor()" @keydown.escape.window="closeTaskEditor()" style="display: none;">
+      <section class="planning-dialog border rounded shadow">
+        <header>
+          <div>
+            <div class="small text-secondary" x-text="taskEditor.key ? 'Edit task' : 'New task'"></div>
+            <h2 x-text="taskEditor.key || taskEditor.milestone_key"></h2>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeTaskEditor()" title="Close"><i class="bi bi-x-lg"></i></button>
+        </header>
+        <label>Milestone<select class="form-select" x-model="taskEditor.milestone_key">
+          <template x-for="milestone in milestones()" :key="milestoneKey(milestone)">
+            <option :value="milestoneKey(milestone)" x-text="milestoneKey(milestone) + ' · ' + milestoneTitle(milestone)"></option>
+          </template>
+        </select></label>
+        <label>Status<select class="form-select" x-model="taskEditor.status">
+          <template x-for="status in taskStatuses" :key="status.key"><option :value="status.key" x-text="status.label"></option></template>
+        </select></label>
+        <label>Task<textarea class="form-control" rows="4" x-model="taskEditor.content"></textarea></label>
+        <label>Note<textarea class="form-control" rows="3" x-model="taskEditor.note"></textarea></label>
+        <footer>
+          <button type="button" class="btn btn-outline-secondary" @click="closeTaskEditor()">Cancel</button>
+          <button type="button" class="btn btn-primary" @click="saveTask()" :disabled="saving"><i class="bi bi-check-lg"></i> Save</button>
+        </footer>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

@@ -114,7 +114,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/restart-needed", s.handleRestartNeeded)
 	mux.HandleFunc("/api/rpc", s.handleHTTPRPC)
 	mux.HandleFunc("/api/rpc/", s.handleHTTPRPC)
-	mux.HandleFunc("/api/sessions/", s.handleSessionFilesAPI)
+	mux.HandleFunc("/api/sessions/", s.handleSessionAPI)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -201,6 +201,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write([]byte(renderFileBrowserHTML()))
+		return
+	}
+	if _, ok := planningBoardSessionFromPath(r.URL.Path); ok {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte(renderPlanningBoardHTML()))
 		return
 	}
 	if r.URL.Path != "/" {

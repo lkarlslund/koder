@@ -1256,6 +1256,86 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	return item, nil
 }
 
+func (s *Session) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milestoneKey string, status planning.TaskStatus, position int, note string) (planning.Task, error) {
+	if err := s.requireSession(sessionID); err != nil {
+		return planning.Task{}, err
+	}
+	taskKey = strings.TrimSpace(taskKey)
+	if taskKey == "" {
+		return planning.Task{}, fmt.Errorf("task key is required")
+	}
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	now := time.Now().UTC()
+
+	s.mu.RLock()
+	var item planning.Task
+	oldMilestoneKey := ""
+	found := false
+	for key, tasks := range s.tasksByKey {
+		for _, candidate := range tasks {
+			if planning.TaskKey(candidate) == taskKey {
+				item = candidate
+				oldMilestoneKey = key
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if !found {
+		return planning.Task{}, fmt.Errorf("task %s not found", taskKey)
+	}
+	if milestoneKey == "" {
+		milestoneKey = oldMilestoneKey
+	}
+	item.MilestoneKey = milestoneKey
+	item.Status = status
+	if strings.TrimSpace(note) != "" {
+		item.Note = strings.TrimSpace(note)
+	}
+	item.UpdatedAt = now
+
+	s.mu.Lock()
+	oldTasks := removeTaskByKey(s.tasksByKey[oldMilestoneKey], taskKey)
+	newTasks := oldTasks
+	if oldMilestoneKey != milestoneKey {
+		newTasks = slices.Clone(s.tasksByKey[milestoneKey])
+	}
+	insertAt := position
+	if insertAt < 0 || insertAt > len(newTasks) {
+		insertAt = len(newTasks)
+	}
+	newTasks = append(newTasks, planning.Task{})
+	copy(newTasks[insertAt+1:], newTasks[insertAt:])
+	newTasks[insertAt] = item
+	normalizeTaskPositions(newTasks)
+	s.tasksByKey[milestoneKey] = newTasks
+	if oldMilestoneKey != milestoneKey {
+		normalizeTaskPositions(oldTasks)
+		s.tasksByKey[oldMilestoneKey] = oldTasks
+	}
+	toSave := slices.Clone(newTasks)
+	if oldMilestoneKey != milestoneKey {
+		toSave = append(toSave, oldTasks...)
+	}
+	plan := cloneMilestonePlan(s.plan)
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
+	s.mu.Unlock()
+
+	for _, task := range toSave {
+		if err := s.planSrc.SaveTask(ctx, task); err != nil {
+			return planning.Task{}, err
+		}
+	}
+	slog.Info("task moved", "session_id", sessionID, "task_key", taskKey, "milestone_key", milestoneKey, "status", item.Status, "position", position)
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
+	return item, nil
+}
+
 func (s *Session) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
@@ -1595,6 +1675,23 @@ func flattenTasks(src map[string][]planning.Task) []planning.Task {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
 	return out
+}
+
+func removeTaskByKey(tasks []planning.Task, taskKey string) []planning.Task {
+	out := make([]planning.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if planning.TaskKey(task) != taskKey {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+func normalizeTaskPositions(tasks []planning.Task) {
+	planning.SortTasks(tasks)
+	for idx := range tasks {
+		tasks[idx].Position = idx
+	}
 }
 
 func nextTaskKey(items []planning.Task, milestoneKey string) string {

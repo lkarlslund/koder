@@ -1996,6 +1996,13 @@
           const session = String(id || this.currentSessionID() || '').trim();
           return session ? this.sessionURL(session) + '/files' : '';
         },
+        sessionBoardURL(id) {
+          const session = String(id || this.currentSessionID() || '').trim();
+          return session ? this.sessionURL(session) + '/board' : '';
+        },
+        openSessionBoard() {
+          this.openURLInNewTab(this.sessionBoardURL());
+        },
         openSessionFiles() {
           this.openURLInNewTab(this.sessionFilesURL());
         },

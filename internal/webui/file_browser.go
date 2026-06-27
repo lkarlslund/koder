@@ -68,22 +68,16 @@ func fileBrowserSessionFromPath(rawPath string) (id.ID, bool) {
 	return id.ID(strings.TrimSpace(parts[1])), true
 }
 
-func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, sessionID id.ID, parts []string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimSpace(r.URL.Path), "/"), "/")
-	if len(parts) != 5 || parts[0] != "api" || parts[1] != "sessions" || parts[3] != "files" {
+	if len(parts) != 1 {
 		http.NotFound(w, r)
 		return
 	}
-	sessionID := id.ID(strings.TrimSpace(parts[2]))
-	if sessionID == "" {
-		http.Error(w, "session id is required", http.StatusBadRequest)
-		return
-	}
-	switch parts[4] {
+	switch parts[0] {
 	case "tree":
 		s.handleSessionFileTree(w, r, sessionID)
 	case "read":

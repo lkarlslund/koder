@@ -1195,13 +1195,23 @@ func (c *Controller) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) UpdateTask(ctx context.Context, taskID id.ID, status planning.TaskStatus, content, note string) (planning.Task, error) {
-	c.mu.RLock()
-	sessionID := c.session.ID
-	c.mu.RUnlock()
+func (c *Controller) UpdateTask(ctx context.Context, sessionID, taskID id.ID, status planning.TaskStatus, content, note string) (planning.Task, error) {
 	if c.agent != nil && sessionID != "" {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			updated, err := owner.UpdateTask(ctx, taskID, status, content, note)
+			if err != nil {
+				return planning.Task{}, err
+			}
+			return updated, nil
+		}
+	}
+	return planning.Task{}, fmt.Errorf("no live session owner")
+}
+
+func (c *Controller) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milestoneKey string, status planning.TaskStatus, position int, note string) (planning.Task, error) {
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			updated, err := owner.MoveTask(ctx, sessionID, taskKey, milestoneKey, status, position, note)
 			if err != nil {
 				return planning.Task{}, err
 			}

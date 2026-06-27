@@ -1,0 +1,359 @@
+html,
+body {
+  height: 100%;
+}
+
+.planning-board-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+}
+
+.planning-board-topbar {
+  flex: 0 0 auto;
+  min-height: 3rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.planning-board-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bs-body-bg);
+}
+
+.planning-board-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  min-height: 18rem;
+  color: var(--bs-secondary-color);
+}
+
+.planning-board-empty .bi {
+  font-size: 2rem;
+}
+
+.planning-board {
+  min-width: 74rem;
+  padding: .9rem;
+}
+
+.planning-board-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: .75rem;
+  align-items: end;
+  padding: .5rem 0 .75rem;
+  background: var(--bs-body-bg);
+}
+
+.planning-lane-key {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(12rem, 1fr));
+  gap: .75rem;
+  color: var(--bs-secondary-color);
+  font-size: .83rem;
+}
+
+.planning-lane-key span,
+.task-lane header span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.milestone-swimlane {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: .75rem;
+  align-items: stretch;
+  margin-bottom: .85rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.milestone-swimlane:hover .milestone-rail {
+  background: var(--bs-tertiary-bg);
+}
+
+.milestone-rail {
+  display: flex;
+  flex-direction: column;
+  gap: .7rem;
+  padding: .85rem .75rem;
+  background: color-mix(in srgb, var(--bs-tertiary-bg) 72%, transparent);
+  border-left: .22rem solid var(--bs-primary);
+}
+
+.milestone-rail-top {
+  display: flex;
+  gap: .65rem;
+  min-width: 0;
+}
+
+.milestone-order {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  flex: 0 0 auto;
+}
+
+.rail-icon-button,
+.task-edit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .35rem;
+  color: var(--bs-secondary-color);
+  background: transparent;
+}
+
+.rail-icon-button:hover,
+.task-edit-button:hover {
+  color: var(--bs-body-color);
+  background: var(--bs-secondary-bg);
+}
+
+.rail-icon-button:disabled {
+  opacity: .35;
+}
+
+.milestone-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-bottom: .4rem;
+}
+
+.milestone-key,
+.task-key {
+  font-family: var(--bs-font-monospace);
+  letter-spacing: 0;
+}
+
+.milestone-rail h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.milestone-rail p {
+  margin: .45rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .86rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.milestone-meta {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  color: var(--bs-secondary-color);
+  font-size: .78rem;
+}
+
+.milestone-actions {
+  display: flex;
+  gap: .4rem;
+  margin-top: auto;
+}
+
+.task-lanes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(12rem, 1fr));
+  gap: .75rem;
+  padding-top: .75rem;
+}
+
+.task-lane {
+  display: flex;
+  flex-direction: column;
+  min-height: 9rem;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.task-lane header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  min-height: 2.3rem;
+  padding: .45rem .55rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--bs-secondary-color);
+  font-size: .82rem;
+}
+
+.task-stack {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  flex: 1 1 auto;
+  padding: .5rem;
+}
+
+.task-card {
+  border: 1px solid var(--bs-border-color);
+  border-radius: .45rem;
+  background: var(--bs-body-bg);
+  box-shadow: 0 .2rem .5rem rgba(0, 0, 0, .12);
+}
+
+.task-card:hover {
+  border-color: var(--bs-primary-border-subtle);
+}
+
+.task-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .45rem;
+  padding: .45rem .5rem .15rem;
+}
+
+.task-key {
+  color: var(--bs-secondary-color);
+  font-size: .76rem;
+}
+
+.task-card-body {
+  padding: .15rem .5rem .55rem;
+  font-size: .88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.task-card-note {
+  margin: 0 .5rem .5rem;
+  padding: .35rem .45rem;
+  border-left: .18rem solid var(--bs-info);
+  color: var(--bs-secondary-color);
+  background: var(--bs-secondary-bg);
+  font-size: .78rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.task-add-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: .45rem;
+  color: var(--bs-secondary-color);
+  background: transparent;
+}
+
+.task-add-inline:hover {
+  color: var(--bs-body-color);
+  background: var(--bs-secondary-bg);
+}
+
+.planning-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, .58);
+}
+
+.planning-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+  width: min(42rem, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1rem;
+  background: var(--bs-body-bg);
+}
+
+.planning-dialog header,
+.planning-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.planning-dialog h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.planning-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  color: var(--bs-secondary-color);
+  font-size: .82rem;
+}
+
+.planning-badge-muted {
+  color: var(--bs-secondary-color);
+  background: var(--bs-secondary-bg);
+}
+
+.planning-badge-info {
+  color: var(--bs-info-text-emphasis);
+  background: var(--bs-info-bg-subtle);
+}
+
+.planning-badge-ready {
+  color: var(--bs-primary-text-emphasis);
+  background: var(--bs-primary-bg-subtle);
+}
+
+.planning-badge-active {
+  color: var(--bs-warning-text-emphasis);
+  background: var(--bs-warning-bg-subtle);
+}
+
+.planning-badge-done {
+  color: var(--bs-success-text-emphasis);
+  background: var(--bs-success-bg-subtle);
+}
+
+.planning-badge-blocked {
+  color: var(--bs-danger-text-emphasis);
+  background: var(--bs-danger-bg-subtle);
+}
+
+.planning-badge-cancelled {
+  color: var(--bs-secondary-color);
+  background: var(--bs-dark-bg-subtle);
+}
+
+@media (max-width: 920px) {
+  .planning-board {
+    min-width: 0;
+  }
+
+  .planning-board-header,
+  .milestone-swimlane {
+    grid-template-columns: 1fr;
+  }
+
+  .planning-lane-key,
+  .task-lanes {
+    grid-template-columns: 1fr;
+  }
+}

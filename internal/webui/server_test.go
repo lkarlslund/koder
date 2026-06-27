@@ -156,6 +156,42 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 	}
 }
 
+func TestServerServesSessionPlanningBoardRoute(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL() + "/s/" + string(state.Session.ID) + "/board")
+	if err != nil {
+		t.Fatalf("get planning board: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected planning board ok, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		`koderBoardApp()`,
+		`/assets/planning_board.js`,
+		`/assets/planning_board.css`,
+		`milestone-swimlane`,
+		currentAssetHash,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("planning board HTML missing %q", want)
+		}
+	}
+}
+
 func TestSessionFileBrowserAPI(t *testing.T) {
 	workdir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workdir, "cmd"), 0o755); err != nil {
@@ -223,6 +259,102 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected traversal bad request, got %d", resp.StatusCode)
+	}
+}
+
+func TestSessionPlanningBoardAPI(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	ctx := context.Background()
+	if _, err := ctrl.SetMilestonePlan(ctx, state.Session.ID, "Ship it", []planning.Milestone{
+		{Key: "M001", Title: "Alpha", Status: planning.MilestoneStatusReady, Position: 0},
+	}); err != nil {
+		t.Fatalf("set milestone plan: %v", err)
+	}
+	tasks, err := ctrl.AddTasks(ctx, state.Session.ID, "M001", []string{"Implement alpha"})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	base := srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/board"
+	resp, err := http.Get(base)
+	if err != nil {
+		t.Fatalf("get board: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected board ok, got %d: %s", resp.StatusCode, body)
+	}
+	var board planningBoardResponse
+	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
+		t.Fatalf("decode board: %v", err)
+	}
+	if board.SessionID != state.Session.ID || board.ProjectRoot == "" {
+		t.Fatalf("unexpected board identity: %#v", board)
+	}
+	if len(board.Plan.Milestones) != 1 || planning.MilestoneKey(board.Plan.Milestones[0]) != "M001" {
+		t.Fatalf("unexpected milestones: %#v", board.Plan.Milestones)
+	}
+	if got := board.TasksByKey["M001"]; len(got) != 1 || planning.TaskKey(got[0]) != planning.TaskKey(tasks[0]) {
+		t.Fatalf("unexpected tasks: %#v", board.TasksByKey)
+	}
+
+	resp, err = http.Post(base+"/tasks/update", "application/json", bytes.NewBufferString(fmt.Sprintf(`{"task_key":%q,"status":"completed","note":"done"}`, planning.TaskKey(tasks[0]))))
+	if err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected task update ok, got %d: %s", resp.StatusCode, body)
+	}
+	board = planningBoardResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
+		t.Fatalf("decode task update: %v", err)
+	}
+	if got := board.TasksByKey["M001"][0]; got.Status != planning.TaskStatusCompleted || got.Note != "done" {
+		t.Fatalf("task update not reflected: %#v", got)
+	}
+
+	resp, err = http.Post(base+"/milestones", "application/json", bytes.NewBufferString(`{"key":"M001","title":"Alpha updated","status":"executing","notes":"watching"}`))
+	if err != nil {
+		t.Fatalf("update milestone: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected milestone update ok, got %d: %s", resp.StatusCode, body)
+	}
+	board = planningBoardResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
+		t.Fatalf("decode milestone update: %v", err)
+	}
+	if got := board.Plan.Milestones[0]; got.Title != "Alpha updated" || got.Status != planning.MilestoneStatusExecuting || got.Notes != "watching" {
+		t.Fatalf("milestone update not reflected: %#v", got)
+	}
+
+	resp, err = http.Post(base+"/tasks", "application/json", bytes.NewBufferString(`{"milestone_key":"M001","content":"Implement beta"}`))
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected task create ok, got %d: %s", resp.StatusCode, body)
+	}
+	board = planningBoardResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
+		t.Fatalf("decode task create: %v", err)
+	}
+	if got := board.TasksByKey["M001"]; len(got) != 2 {
+		t.Fatalf("expected two tasks, got %#v", got)
 	}
 }
 
