@@ -256,12 +256,29 @@ type linter struct {
 }
 
 var linters = []linter{
+	{Tool: "go", Extensions: []string{".go"}, Command: goTestCommand},
 	{Tool: "bash", Extensions: []string{".sh", ".bash"}, Command: func(path string) []string { return []string{"bash", "-n", path} }},
-	{Tool: "sh", Extensions: []string{".zsh"}, Command: func(path string) []string { return []string{"sh", "-n", path} }},
+	{Tool: "zsh", Extensions: []string{".zsh"}, Command: func(path string) []string { return []string{"zsh", "-n", path} }},
 	{Tool: "node", Extensions: []string{".js", ".mjs", ".cjs"}, Command: func(path string) []string { return []string{"node", "--check", path} }},
 	{Tool: "python", Extensions: []string{".py"}, Command: func(path string) []string { return []string{"python", "-m", "py_compile", path} }},
 	{Tool: "ruby", Extensions: []string{".rb"}, Command: func(path string) []string { return []string{"ruby", "-c", path} }},
 	{Tool: "php", Extensions: []string{".php"}, Command: func(path string) []string { return []string{"php", "-l", path} }},
+}
+
+func goTestCommand(path string) []string {
+	dir := filepath.ToSlash(filepath.Dir(cleanLintPath(path)))
+	if dir == "." || dir == "" {
+		return []string{"go", "test", "-run", "^$", "."}
+	}
+	return []string{"go", "test", "-run", "^$", "./" + dir}
+}
+
+func cleanLintPath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." {
+		return ""
+	}
+	return path
 }
 
 func shellDiagnostics(ctx context.Context, rootAbs, relPath, _ string, timeout time.Duration) Report {

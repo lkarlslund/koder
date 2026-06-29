@@ -1,6 +1,7 @@
 package codediag
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -90,5 +91,29 @@ func TestNewProblemsTextReportsOnlyErrorsConcise(t *testing.T) {
 	}})
 	if text != "config.json\n- [syntax error] Line 2: invalid JSON" {
 		t.Fatalf("unexpected problems text: %q", text)
+	}
+}
+
+func TestShellLinterCommands(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{name: "go root package", path: "main.go", want: []string{"go", "test", "-run", "^$", "."}},
+		{name: "go nested package", path: "internal/app/controller.go", want: []string{"go", "test", "-run", "^$", "./internal/app"}},
+		{name: "zsh syntax", path: "scripts/dev.zsh", want: []string{"zsh", "-n", "scripts/dev.zsh"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			linter, ok := linterForPath(tt.path)
+			if !ok {
+				t.Fatalf("expected linter for %s", tt.path)
+			}
+			if got := linter.Command(tt.path); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("unexpected command: got %#v want %#v", got, tt.want)
+			}
+		})
 	}
 }
