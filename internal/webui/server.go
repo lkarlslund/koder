@@ -434,6 +434,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("websocket connected", "client", clientID, "remote", r.RemoteAddr, "session", initialSelection.SessionID, "chat", initialSelection.ChatID)
 	if initialSelection.SessionID != "" || initialSelection.ChatID != "" {
+		if initialSelection.SessionID != "" {
+			if err := s.controller.EnsureSessionWorkspace(ctx, initialSelection.SessionID); err != nil {
+				slog.Debug("ensure websocket session workspace", "client", clientID, "session", initialSelection.SessionID, "error", err)
+			}
+		}
 		s.setClientSelection(clientID, initialSelection)
 	}
 	if s.debug != nil {
@@ -619,6 +624,13 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 		clientID = "http-" + string(id.New())
 	}
 	if req.SelectedSession != "" || req.SelectedChat != "" {
+		if req.SelectedSession != "" {
+			if current := s.clientSelection(clientID); current.SessionID != req.SelectedSession {
+				if err := s.controller.EnsureSessionWorkspace(r.Context(), req.SelectedSession); err != nil {
+					slog.Debug("ensure http rpc session workspace", "client", clientID, "session", req.SelectedSession, "error", err)
+				}
+			}
+		}
 		s.setClientSelection(clientID, clientSelection{SessionID: req.SelectedSession, ChatID: req.SelectedChat})
 	}
 	result, err := s.handleRPC(r.Context(), clientID, req.Method, req.Params)
@@ -882,6 +894,9 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if !exists {
 			return nil, fmt.Errorf("session not found: %s", in.SessionID)
 		}
+		if err := s.controller.EnsureSessionWorkspace(ctx, in.SessionID); err != nil {
+			return nil, err
+		}
 		s.setClientSelection(clientID, clientSelection{SessionID: in.SessionID})
 		return s.stateForClient(ctx, clientID)
 	case "new_session":
@@ -893,6 +908,9 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		_ = decodeParams(params, &in)
 		session, err := s.controller.CreateSession(ctx, in.Title, in.ProjectRoot, in.CreateProjectRoot)
 		if err != nil {
+			return nil, err
+		}
+		if err := s.controller.EnsureSessionWorkspace(ctx, session.ID); err != nil {
 			return nil, err
 		}
 		s.setClientSelection(clientID, clientSelection{SessionID: session.ID})

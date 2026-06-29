@@ -487,7 +487,6 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 	if snapshot.Session.ID == "" {
 		snapshot.Session = session
 	}
-	c.ensureSessionWorkspace(owner)
 	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
 	statuses := idleStatusesForChats(ownerSnapshot.Chats)
 	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
@@ -1490,6 +1489,26 @@ func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection
 		return workspacepkg.Status{}, err
 	}
 	return owner.WorkspaceStatus(), nil
+}
+
+// EnsureSessionWorkspace starts workspace monitoring for a selected session.
+func (c *Controller) EnsureSessionWorkspace(ctx context.Context, sessionID id.ID) error {
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	session := owner.Snapshot().Session
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
+	}
+	c.ensureSessionWorkspace(owner)
+	return nil
 }
 
 func (c *Controller) refreshSessionWorkspace(ctx context.Context, owner *sessionpkg.Session, trigger workspaceRefreshTrigger) error {

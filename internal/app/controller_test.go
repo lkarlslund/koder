@@ -1507,6 +1507,58 @@ func TestControllerStartDoesNotWaitForWorkspaceSnapshot(t *testing.T) {
 	close(releaseSnapshot)
 }
 
+func TestControllerStateForSelectionDoesNotStartWorkspaceSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workdir := t.TempDir()
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	session, err := modeltest.CreateSession(ctx, st, "Workspace", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := setSessionProjectRoot(ctx, st, session.ID, workdir); err != nil {
+		t.Fatalf("set project root: %v", err)
+	}
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	snapshotStarted := make(chan struct{})
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+		select {
+		case <-snapshotStarted:
+		default:
+			close(snapshotStarted)
+		}
+		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+	}
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	if _, err := ctrl.StateForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	select {
+	case <-snapshotStarted:
+		t.Fatal("state selection should not start workspace snapshot")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := ctrl.EnsureSessionWorkspace(ctx, session.ID); err != nil {
+		t.Fatalf("ensure workspace: %v", err)
+	}
+	select {
+	case <-snapshotStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected explicit workspace activation to start snapshot")
+	}
+}
+
 func TestControllerWorkspaceWatcherRefreshesChangedStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
