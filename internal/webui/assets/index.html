@@ -92,7 +92,7 @@
       </section>
     </main>
 
-    <main class="transcript p-3" x-show="sessionLoadedMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
+    <main class="transcript p-3" x-show="sessionLoadedMode()" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
       <div class="chat-switch-overlay" x-show="switchingChatMode()" x-transition.opacity style="display: none;" aria-live="polite">
         <div class="chat-switch-panel">
           <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
@@ -494,7 +494,7 @@
         <button class="btn btn-danger interrupt-button" type="button" :disabled="!chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
         </button>
-        <textarea class="form-control composer-input" rows="1" x-milestoneKey="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)" @paste.prevent="onComposerPaste($event)"></textarea>
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)" @paste.prevent="onComposerPaste($event)"></textarea>
         <div class="btn-group composer-send-group">
           <button class="btn btn-primary" type="submit" title="Send"><i class="bi bi-send-fill"></i></button>
           <button class="btn btn-primary dropdown-toggle dropdown-toggle-split" type="button" title="More send actions" :aria-expanded="composerSendMenuOpen ? 'true' : 'false'" @click="toggleComposerSendMenu()"><span class="visually-hidden">More send actions</span></button>
@@ -535,7 +535,7 @@
         <template x-if="timelineAction.mode === 'fork'">
           <label class="form-label mb-0">
             <span class="small text-secondary">New chat name</span>
-            <input class="form-control mt-1" x-milestoneKey="timelineForkTitle" x-model="timelineAction.forkTitle" autocomplete="off" @keydown.enter.prevent="saveTimelineAction()">
+            <input class="form-control mt-1" x-ref="timelineForkTitle" x-model="timelineAction.forkTitle" autocomplete="off" @keydown.enter.prevent="saveTimelineAction()">
           </label>
         </template>
         <div class="alert alert-danger py-2 mb-0" x-show="timelineAction.error" x-text="timelineAction.error" style="display: none;"></div>
@@ -585,7 +585,7 @@
         </div>
       </header>
       <div class="p-3 border-bottom">
-        <input class="form-control" type="search" x-model="modelQuery" placeholder="Filter models" x-milestoneKey="modelSearch">
+        <input class="form-control" type="search" x-model="modelQuery" placeholder="Filter models" x-ref="modelSearch">
       </div>
       <div class="model-dialog-body">
         <div class="model-list list-group list-group-flush">

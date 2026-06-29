@@ -1838,6 +1838,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}
+	if !strings.Contains(fullPage, `x-ref="composerInput"`) {
+		t.Fatalf("expected composer input to be available through Alpine refs")
+	}
+	if strings.Contains(fullPage, `x-milestoneKey=`) {
+		t.Fatalf("expected markup not to contain stale renamed Alpine refs")
+	}
 	if !strings.Contains(fullPage, `@input="onComposerInput()"`) {
 		t.Fatalf("expected composer input to resize itself as text changes")
 	}
