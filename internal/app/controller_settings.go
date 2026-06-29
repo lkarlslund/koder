@@ -723,15 +723,13 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	if existingOK && existing.ContextWindow == contextWindow && strings.TrimSpace(existing.ModelPreset) == preset {
 		return
 	}
+	model := existing
+	model.ProviderID = providerID
+	model.ModelID = modelID
+	model.ContextWindow = contextWindow
+	model.ModelPreset = preset
 	c.mu.Lock()
-	c.cfg.SetModelConfig(config.ModelConfig{
-		ProviderID:       providerID,
-		ModelID:          modelID,
-		SourceProviderID: existing.SourceProviderID,
-		SourceModelID:    existing.SourceModelID,
-		ContextWindow:    contextWindow,
-		ModelPreset:      preset,
-	})
+	c.cfg.SetModelConfig(model)
 	if err := c.cfg.Save(); err == nil && c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}

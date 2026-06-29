@@ -424,7 +424,7 @@ func (c *Controller) State() State {
 	c.mu.RUnlock()
 	ctx := context.Background()
 	if selection.SessionID != "" {
-		if state, err := c.stateForSelection(ctx, selection, false); err == nil {
+		if state, err := c.stateForSelection(ctx, selection); err == nil {
 			return state
 		}
 	}
@@ -436,7 +436,7 @@ func (c *Controller) State() State {
 
 // StateForSelection returns a detached browser state for a single client selection.
 func (c *Controller) StateForSelection(ctx context.Context, selection Selection) (State, error) {
-	return c.stateForSelection(ctx, selection, false)
+	return c.stateForSelection(ctx, selection)
 }
 
 // SessionByID returns a session snapshot without changing controller selection.
@@ -444,14 +444,14 @@ func (c *Controller) SessionByID(ctx context.Context, sessionID id.ID) (domain.S
 	if sessionID == "" {
 		return domain.Session{}, fmt.Errorf("session id is required")
 	}
-	_, session, _, _, err := c.resolveStateRuntime(ctx, Selection{SessionID: sessionID}, false)
+	_, session, _, _, err := c.resolveStateRuntime(ctx, Selection{SessionID: sessionID})
 	if err != nil {
 		return domain.Session{}, err
 	}
 	return session, nil
 }
 
-func (c *Controller) stateForSelection(ctx context.Context, selection Selection, touch bool) (State, error) {
+func (c *Controller) stateForSelection(ctx context.Context, selection Selection) (State, error) {
 	c.mu.RLock()
 	base := State{
 		Theme:         c.theme,
@@ -470,7 +470,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 	if selection.SessionID == "" {
 		return base, nil
 	}
-	owner, session, chatRecord, rt, err := c.resolveStateRuntime(ctx, selection, touch)
+	owner, session, chatRecord, rt, err := c.resolveStateRuntime(ctx, selection)
 	if err != nil {
 		return State{}, err
 	}
@@ -526,10 +526,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection,
 	}, nil
 }
 
-func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selection, touch bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
-	if touch {
-		return c.resolveSelectedRuntime(ctx, selection, true)
-	}
+func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selection) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
 	if selection.SessionID == "" {
 		return nil, domain.Session{}, domain.Chat{}, nil, fmt.Errorf("session id is required")
 	}
