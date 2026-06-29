@@ -142,7 +142,16 @@ func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID
 }
 
 func controllerSelection(ctrl *Controller) Selection {
-	state := ctrl.State()
+	ctx := context.Background()
+	sessions, err := ctrl.Sessions(ctx)
+	if err != nil || len(sessions.Sessions) == 0 {
+		return Selection{}
+	}
+	session := newestSession(sessions.Sessions)
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: session.ID})
+	if err != nil {
+		return Selection{SessionID: session.ID}
+	}
 	return Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID}
 }
 
@@ -153,6 +162,15 @@ func newSelectedChat(t *testing.T, ctrl *Controller, selection Selection, title 
 		t.Fatalf("new selected chat: %v", err)
 	}
 	return chatRecord
+}
+
+func eventStateProjectRoot(t *testing.T, ctrl *Controller, selection Selection) string {
+	t.Helper()
+	state, err := ctrl.StateForSelection(context.Background(), selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	return state.Session.ProjectRoot
 }
 
 func TestControllerStartDoesNotActivateSession(t *testing.T) {
@@ -189,12 +207,16 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 
 func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	ctrl, _, execManager := newTestControllerWithExec(t)
-	state := ctrl.State()
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(context.Background(), selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
 	snap, err := execManager.Start(context.Background(), execruntime.StartRequest{
-		SessionID: state.Session.ID,
-		ChatID:    state.ActiveChatID,
+		SessionID: selection.SessionID,
+		ChatID:    selection.ChatID,
 		Command:   "printf hi",
 		Workdir:   state.Session.ProjectRoot,
 		YieldTime: 50 * time.Millisecond,
@@ -204,7 +226,11 @@ func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	}
 	deadline := time.After(2 * time.Second)
 	for {
-		current := ctrl.State().Snapshots[state.ActiveChatID].ExecProcesses
+		selectedState, err := ctrl.StateForSelection(context.Background(), selection)
+		if err != nil {
+			t.Fatalf("state for selection: %v", err)
+		}
+		current := selectedState.Snapshots[selection.ChatID].ExecProcesses
 		for _, process := range current {
 			if process.ProcessID == snap.ProcessID && strings.Contains(process.Output, "hi") {
 				return
@@ -231,7 +257,7 @@ func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
 		SessionID: selection.SessionID,
 		ChatID:    selection.ChatID,
 		Command:   "sleep 1",
-		Workdir:   ctrl.State().Session.ProjectRoot,
+		Workdir:   eventStateProjectRoot(t, ctrl, selection),
 	})
 	if err != nil {
 		t.Fatalf("start exec: %v", err)
@@ -424,7 +450,11 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 func TestControllerSelectionStateReflectsChatMetadataChanges(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	ctx := context.Background()
-	state := ctrl.State()
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if state.ActiveChatID == "" {
 		t.Fatal("expected active chat")
 	}
@@ -495,7 +525,11 @@ func TestControllerSelectionStateReflectsInactiveChatMetadataChanges(t *testing.
 func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	ctx := context.Background()
-	state := ctrl.State()
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
@@ -558,7 +592,7 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 		})
 	})
 
-	options, err := ctrl.ModelOptions(context.Background())
+	options, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
 	if err != nil {
 		t.Fatalf("model options: %v", err)
 	}
@@ -607,7 +641,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 		}
 	})
 
-	options, err := ctrl.ModelOptions(context.Background())
+	options, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
 	if err != nil {
 		t.Fatalf("model options: %v", err)
 	}
@@ -646,7 +680,7 @@ func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T)
 	})
 	_ = st
 
-	options, err := ctrl.ModelOptions(context.Background())
+	options, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
 	if err != nil {
 		t.Fatalf("model options: %v", err)
 	}
@@ -669,7 +703,7 @@ func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.
 		}
 	})
 
-	_, err := ctrl.ModelOptions(context.Background())
+	_, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
 	if err == nil || !strings.Contains(err.Error(), "failed to load models from test") {
 		t.Fatalf("expected provider failure, got %v", err)
 	}
@@ -1039,7 +1073,11 @@ func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 		}
 	})
 
-	state := ctrl.State()
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(context.Background(), selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if state.ContextWindow != 262144 {
 		t.Fatalf("expected detected context window 262144, got %d", state.ContextWindow)
 	}
@@ -1075,9 +1113,14 @@ func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 
 func TestControllerAccessPresetsAreExposed(t *testing.T) {
 	ctrl, _ := newTestController(t)
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(context.Background(), selection)
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 
 	var got []string
-	for _, preset := range ctrl.State().Access.Presets {
+	for _, preset := range state.Access.Presets {
 		got = append(got, preset.ID)
 	}
 	want := []string{"locked-down", "normal-coding", "allow-all"}
@@ -1407,7 +1450,10 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 		t.Fatalf("refresh workspace: %v", err)
 	}
 
-	state := ctrl.State()
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: session.ID})
+	if err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
 	if !state.Workspace.Available {
 		t.Fatalf("expected git workspace status, got %#v", state.Workspace)
 	}
@@ -1469,10 +1515,7 @@ func TestControllerRefreshWorkspaceUsesSelectedSession(t *testing.T) {
 		t.Fatalf("start controller: %v", err)
 	}
 	sessionA := activateTestSession(t, ctrl, workspaceA)
-	sessionB := activateTestSession(t, ctrl, workspaceB)
-	if ctrl.State().Session.ID != sessionB.ID {
-		t.Fatalf("expected controller mirror to point at session b")
-	}
+	_ = activateTestSession(t, ctrl, workspaceB)
 
 	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: sessionA.ID}); err != nil {
 		t.Fatalf("refresh selected workspace: %v", err)
@@ -1680,6 +1723,14 @@ func TestControllerWorkspaceWatcherThrottlesRefreshes(t *testing.T) {
 	baseline := snapshots.Load()
 	if baseline < 1 {
 		t.Fatalf("expected at least one workspace snapshot, got %d", baseline)
+	}
+	for {
+		time.Sleep(10 * time.Millisecond)
+		next := snapshots.Load()
+		if next == baseline {
+			break
+		}
+		baseline = next
 	}
 	events, unsub := ctrl.Subscribe()
 	defer unsub()

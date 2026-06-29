@@ -1025,7 +1025,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.CompleteComposer(in.Text, in.Cursor)
+		return s.controller.CompleteComposerForSelection(ctx, s.appSelection(clientID), in.Text, in.Cursor)
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "save_preferences":
@@ -1043,7 +1043,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return s.controller.ResetPrompt(in.Target)
 	case "list_models":
-		options, err := s.controller.ModelOptions(ctx)
+		options, err := s.controller.ModelOptionsForSelection(ctx, s.appSelection(clientID))
 		if err != nil {
 			return nil, err
 		}

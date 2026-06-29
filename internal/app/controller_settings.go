@@ -133,23 +133,6 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}
-	if c.chat.ID != "" && (strings.TrimSpace(c.chat.ProviderID) == "" || !c.cfg.HasUsableProvider(c.chat.ProviderID) || c.chat.ProviderID == originalID) {
-		if c.agent == nil {
-			c.mu.Unlock()
-			return ProviderState{}, fmt.Errorf("no chat agent")
-		}
-		owner, err := c.agent.LoadSession(ctx, c.session.ID)
-		if err != nil {
-			c.mu.Unlock()
-			return ProviderState{}, err
-		}
-		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, catalogDraft.ProviderID, catalogDraft.Model)
-		if err != nil {
-			c.mu.Unlock()
-			return ProviderState{}, err
-		}
-		c.chat = chatRecord
-	}
 	state := c.providerStateLocked()
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
@@ -192,23 +175,6 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	}
 	if c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
-	}
-	if c.chat.ID != "" && c.chat.ProviderID == providerID {
-		if c.agent == nil {
-			c.mu.Unlock()
-			return ProviderState{}, fmt.Errorf("no chat agent")
-		}
-		owner, err := c.agent.LoadSession(ctx, c.session.ID)
-		if err != nil {
-			c.mu.Unlock()
-			return ProviderState{}, err
-		}
-		chatRecord, err := owner.SetChatModel(ctx, c.chat.ID, c.cfg.Defaults.ProviderID, c.cfg.Defaults.ModelID)
-		if err != nil {
-			c.mu.Unlock()
-			return ProviderState{}, err
-		}
-		c.chat = chatRecord
 	}
 	state := c.providerStateLocked()
 	c.mu.Unlock()
@@ -319,13 +285,22 @@ func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
 	return promptPreference(target)
 }
 
-// ModelOptions lists selectable models across configured providers.
-func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
+// ModelOptionsForSelection lists selectable models across configured providers,
+// marking the model for the explicitly selected chat when one is selected.
+func (c *Controller) ModelOptionsForSelection(ctx context.Context, selection Selection) ([]ModelOption, error) {
 	c.mu.RLock()
 	cfg := c.cfg
-	currentProvider := strings.TrimSpace(c.chat.ProviderID)
-	currentModel := strings.TrimSpace(c.chat.ModelID)
 	c.mu.RUnlock()
+	currentProvider := ""
+	currentModel := ""
+	if selection.SessionID != "" && selection.ChatID != "" {
+		_, _, chatRecord, _, err := c.resolveStateRuntime(ctx, selection)
+		if err != nil {
+			return nil, err
+		}
+		currentProvider = strings.TrimSpace(chatRecord.ProviderID)
+		currentModel = strings.TrimSpace(chatRecord.ModelID)
+	}
 	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
 }
 
@@ -446,7 +421,7 @@ func wavFromPCM16(pcm []byte, sampleRate int, channels int) []byte {
 }
 
 func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
-	return modelOptionsForConfig(ctx, c.cfg, strings.TrimSpace(c.chat.ProviderID), strings.TrimSpace(c.chat.ModelID))
+	return modelOptionsForConfig(ctx, c.cfg, "", "")
 }
 
 func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
@@ -641,9 +616,6 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	session := owner.Snapshot().Session
 	rt.SetChat(chatRecord)
 	rt.SetSession(session)
-	c.mu.Lock()
-	c.chat = chatRecord
-	c.mu.Unlock()
 	return nil
 }
 
@@ -675,11 +647,6 @@ func (c *Controller) SetAccessSettingsForSelection(ctx context.Context, selectio
 			runtimes = append(runtimes, rt)
 		}
 	}
-	c.mu.Lock()
-	if c.session.ID == session.ID {
-		c.session = session
-	}
-	c.mu.Unlock()
 	for _, rt := range runtimes {
 		rt.SetSession(session)
 	}

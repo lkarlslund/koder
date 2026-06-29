@@ -961,7 +961,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -4008,7 +4008,6 @@
           const source = value || {};
           const sessions = source.sessions || source.Sessions || [];
           return {
-            active_id: source.active_id || source.ActiveID || '',
             project_root: source.project_root || source.ProjectRoot || '',
             sessions: Array.isArray(sessions) ? sessions : [],
           };

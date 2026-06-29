@@ -507,7 +507,6 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 		ID     int  `json:"id"`
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveID id.ID `json:"active_id"`
 			Sessions []struct {
 				ID id.ID `json:"id"`
 			} `json:"sessions"`
@@ -523,7 +522,7 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 	if payload.ID != 7 {
 		t.Fatalf("expected response id 7, got %d", payload.ID)
 	}
-	if payload.Result.ActiveID != "" || len(payload.Result.Sessions) != 1 {
+	if len(payload.Result.Sessions) != 1 {
 		t.Fatalf("unexpected sessions response: %#v", payload.Result)
 	}
 }
@@ -816,7 +815,14 @@ func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	sessions, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessions.Sessions) != 1 {
+		t.Fatalf("expected one session, got %#v", sessions.Sessions)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessions.Sessions[0].ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -880,7 +886,14 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	sessions, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessions.Sessions) != 1 {
+		t.Fatalf("expected one session, got %#v", sessions.Sessions)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessions.Sessions[0].ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -1074,7 +1087,14 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	sessions, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessions.Sessions) != 1 {
+		t.Fatalf("expected one session, got %#v", sessions.Sessions)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessions.Sessions[0].ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -2677,7 +2697,6 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	var listResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveID id.ID `json:"active_id"`
 			Sessions []struct {
 				ID id.ID
 			} `json:"sessions"`
@@ -2690,7 +2709,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	if !listResp.OK {
 		t.Fatalf("expected list_sessions ok, got %s", listResp.Error)
 	}
-	if listResp.Result.ActiveID != "" || len(listResp.Result.Sessions) != 1 || listResp.Result.Sessions[0].ID != initialID {
+	if len(listResp.Result.Sessions) != 1 || listResp.Result.Sessions[0].ID != initialID {
 		t.Fatalf("unexpected initial session list: %#v", listResp.Result)
 	}
 
@@ -3071,7 +3090,14 @@ func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testi
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	sessions, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessions.Sessions) != 1 {
+		t.Fatalf("expected one session, got %#v", sessions.Sessions)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessions.Sessions[0].ID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}

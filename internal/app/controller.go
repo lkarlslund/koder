@@ -347,21 +347,18 @@ type ComposerCompletionItem struct {
 
 // SessionState describes workspace-scoped sessions.
 type SessionState struct {
-	ActiveID    id.ID            `json:"active_id"`
 	ProjectRoot string           `json:"project_root"`
 	Sessions    []domain.Session `json:"sessions"`
 }
 
-// Controller owns session/chat state independently from any renderer.
+// Controller owns process-wide configuration and session runtimes.
 type Controller struct {
 	cfg   config.Config
 	agent *agent.Engine
 
 	shutdownMu                  sync.Mutex
 	mu                          sync.RWMutex
-	session                     domain.Session
-	chat                        domain.Chat
-	workspace                   workspacepkg.Status
+	projectRoot                 string
 	workspaceSnapshot           func(context.Context, string) (workspacepkg.Status, error)
 	workspaceRefreshMinInterval time.Duration
 	theme                       string
@@ -400,18 +397,16 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 		return fmt.Errorf("no chat agent")
 	}
 	c.mu.Lock()
-	c.session = domain.Session{ProjectRoot: strings.TrimSpace(projectRoot)}
-	c.chat = domain.Chat{}
-	c.workspace = workspacepkg.Status{ProjectRoot: strings.TrimSpace(projectRoot)}
+	c.projectRoot = strings.TrimSpace(projectRoot)
 	c.lastErr = ""
 	c.mu.Unlock()
 	return nil
 }
 
-// State returns a detached snapshot of current browser app UI state.
+// State returns process-wide browser app metadata. It never includes a selected
+// session or chat; callers that render a session must use StateForSelection.
 func (c *Controller) State() State {
 	c.mu.RLock()
-	selection := Selection{SessionID: c.session.ID, ChatID: c.chat.ID}
 	base := State{
 		Theme:         c.theme,
 		Build:         version.Current(),
@@ -419,15 +414,10 @@ func (c *Controller) State() State {
 		RestartBuild:  c.restartBuild,
 		Error:         c.lastErr,
 		TTS:           ttsPreferencesFromConfig(c.cfg.UI.TTS),
-		ProjectRoot:   c.session.ProjectRoot,
+		ProjectRoot:   c.projectRoot,
 	}
 	c.mu.RUnlock()
 	ctx := context.Background()
-	if selection.SessionID != "" {
-		if state, err := c.stateForSelection(ctx, selection); err == nil {
-			return state
-		}
-	}
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
 		base.Sessions = sessions
 	}
@@ -1294,16 +1284,10 @@ func (c *Controller) UpdateChat(ctx context.Context, sessionID id.ID, ownerChatI
 		return chattool.Status{}, err
 	}
 	if nextChatID != "" {
-		session, chatRecord, _, touchErr := owner.TouchSelection(ctx, nextChatID)
+		_, _, _, touchErr := owner.TouchSelection(ctx, nextChatID)
 		if touchErr != nil {
 			return chattool.Status{}, touchErr
 		}
-		c.mu.Lock()
-		if c.session.ID == session.ID {
-			c.session = session
-			c.chat = chatRecord
-		}
-		c.mu.Unlock()
 	}
 	return status, nil
 }
@@ -1335,17 +1319,16 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 		return SessionState{}, err
 	}
 	c.mu.RLock()
-	activeID := c.session.ID
-	projectRoot := c.session.ProjectRoot
+	projectRoot := c.projectRoot
 	c.mu.RUnlock()
-	return SessionState{ActiveID: activeID, ProjectRoot: projectRoot, Sessions: sessions}, nil
+	return SessionState{ProjectRoot: projectRoot, Sessions: sessions}, nil
 }
 
 // CreateSession creates a new session without changing controller selection.
 func (c *Controller) CreateSession(ctx context.Context, title string, projectRoot string, createProjectRoot bool) (domain.Session, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		c.mu.RLock()
-		projectRoot = c.session.ProjectRoot
+		projectRoot = c.projectRoot
 		c.mu.RUnlock()
 	}
 	if c.agent == nil {
@@ -1360,8 +1343,6 @@ func (c *Controller) CreateSession(ctx context.Context, title string, projectRoo
 	if err != nil {
 		return domain.Session{}, err
 	}
-	c.mu.Lock()
-	c.mu.Unlock()
 	c.broadcast("sessions_delta", map[string]any{"sessions": sessions})
 	return session, nil
 }
@@ -1390,12 +1371,7 @@ func (c *Controller) RenameSession(ctx context.Context, sessionID id.ID, title s
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	if c.session.ID == sessionID {
-		c.session = updated
-	}
-	c.mu.Unlock()
-	c.broadcast("snapshot", c.State())
+	c.broadcast("sessions_delta", map[string]any{"session": updated})
 	return nil
 }
 
@@ -1427,13 +1403,6 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	if c.session.ID == sessionID {
-		c.session = domain.Session{}
-		c.chat = domain.Chat{}
-		c.workspace = workspacepkg.Status{}
-	}
-	c.mu.Unlock()
 	c.broadcast("sessions_delta", map[string]any{"sessions": sessions, "deleted_session_id": sessionID})
 	return nil
 }
@@ -1523,9 +1492,6 @@ func (c *Controller) refreshSessionWorkspace(ctx context.Context, owner *session
 	}
 	force := trigger == workspaceRefreshInitial || trigger == workspaceRefreshUser || trigger == workspaceRefreshTimer
 	return owner.RefreshWorkspace(ctx, snapshot, minInterval, force, func(status workspacepkg.Status) {
-		c.mu.Lock()
-		c.workspace = status
-		c.mu.Unlock()
 		c.broadcastWorkspace(sessionID, status)
 	})
 }
@@ -1564,15 +1530,13 @@ func (c *Controller) replaceWorkspaceWatcher(owner *sessionpkg.Session) {
 		snapshot = workspacepkg.Snapshot
 	}
 	owner.ReplaceWorkspaceWatcher(snapshot, minInterval, func(status workspacepkg.Status) {
-		c.mu.Lock()
-		c.workspace = status
-		c.mu.Unlock()
 		c.broadcastWorkspace(sessionID, status)
 	})
 }
 
-// CompleteComposer returns command, skill, and reference completions for the current composer token.
-func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompletions, error) {
+// CompleteComposerForSelection returns command, skill, and reference completions
+// for a composer token in an explicitly selected session.
+func (c *Controller) CompleteComposerForSelection(ctx context.Context, selection Selection, text string, cursor int) (ComposerCompletions, error) {
 	if cursor < 0 || cursor > len(text) {
 		cursor = len(text)
 	}
@@ -1592,10 +1556,18 @@ func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompleti
 		}
 		return out, nil
 	}
+	projectRoot := ""
+	if selection.SessionID != "" {
+		session, err := c.SessionByID(ctx, selection.SessionID)
+		if err != nil {
+			return ComposerCompletions{}, err
+		}
+		projectRoot = session.ProjectRoot
+	}
 	if query, start, ok := composerSkillQuery(text, cursor); ok {
-		c.mu.RLock()
-		projectRoot := c.session.ProjectRoot
-		c.mu.RUnlock()
+		if projectRoot == "" {
+			return ComposerCompletions{}, fmt.Errorf("session id is required for skill completions")
+		}
 		items := matchingComposerSkills(projectRoot, query)
 		if len(items) == 1 && strings.EqualFold(items[0].Name, query) {
 			items = nil
@@ -1613,18 +1585,15 @@ func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompleti
 		return out, nil
 	}
 	if query, start, end, pathMode, ok := composerMentionQuery(text, cursor); ok {
+		if projectRoot == "" {
+			return ComposerCompletions{}, fmt.Errorf("session id is required for file completions")
+		}
 		var matches []reference.Entry
 		var err error
 		if pathMode {
-			c.mu.RLock()
-			projectRoot := c.session.ProjectRoot
-			c.mu.RUnlock()
 			matches, err = reference.PathCompletions(projectRoot, query, 8)
 		} else {
 			var catalog []reference.Entry
-			c.mu.RLock()
-			projectRoot := c.session.ProjectRoot
-			c.mu.RUnlock()
 			catalog, err = reference.Entries(projectRoot)
 			matches = reference.Search(catalog, query, 8)
 		}
@@ -1894,9 +1863,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		snapshots[chatRecord.ID] = rt.Snapshot()
 	}
 	c.mu.Lock()
-	c.session = session
-	c.chat = chatRecord
-	c.workspace = owner.WorkspaceStatus()
 	c.lastErr = ""
 	c.mu.Unlock()
 
@@ -1905,7 +1871,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 	for _, loaded := range runtimes {
 		loaded.Kick()
 	}
-	c.broadcast("snapshot", c.State())
 	return nil
 }
 
