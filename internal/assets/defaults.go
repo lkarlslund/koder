@@ -24,7 +24,7 @@ func DefaultContent(target string) ([]byte, error) {
 	return content, nil
 }
 
-// UserDefaults returns the embedded defaults managed in ~/.koder.
+// UserDefaults returns the embedded defaults managed under the configured asset root.
 func UserDefaults() ([]Asset, error) {
 	var out []Asset
 	err := fs.WalkDir(defaultsFS, "defaults", func(path string, entry fs.DirEntry, err error) error {

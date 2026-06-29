@@ -71,6 +71,46 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestLoadWithDataDirUsesSingleRoot(t *testing.T) {
+	dataDir := t.TempDir()
+
+	cfg, err := LoadWithOptions(LoadOptions{DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Path() != filepath.Join(dataDir, "config.toml") {
+		t.Fatalf("unexpected config path: %s", cfg.Path())
+	}
+	if cfg.StateDir() != filepath.Join(dataDir, "state") {
+		t.Fatalf("unexpected state dir: %s", cfg.StateDir())
+	}
+	if cfg.CacheDir() != filepath.Join(dataDir, "cache") {
+		t.Fatalf("unexpected cache dir: %s", cfg.CacheDir())
+	}
+	if cfg.ManagedAssetsDir() != filepath.Join(dataDir, "assets") {
+		t.Fatalf("unexpected managed assets dir: %s", cfg.ManagedAssetsDir())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "config.toml")); err != nil {
+		t.Fatalf("expected config file: %v", err)
+	}
+}
+
+func TestLoadUsesKoderDataDirEnv(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("KODER_DATA_DIR", dataDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Path() != filepath.Join(dataDir, "config.toml") {
+		t.Fatalf("unexpected config path: %s", cfg.Path())
+	}
+	if cfg.ManagedAssetsDir() != filepath.Join(dataDir, "assets") {
+		t.Fatalf("unexpected managed assets dir: %s", cfg.ManagedAssetsDir())
+	}
+}
+
 func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)

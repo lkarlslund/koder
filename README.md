@@ -12,7 +12,7 @@ It is meant for developers who want an agent that stays close to the codebase: i
 - **Use safer code tools.** The model gets typed tools for reading, globbing, grep-style search, code search, targeted edits, explicit full-file writes, shell/exec sessions, image viewing, web fetch/search, skills, and task orchestration.
 - **Avoid accidental rewrites.** Targeted changes should go through `edit`. The `write` tool creates new files by default and refuses to overwrite an existing file unless `force_overwrite=true`.
 - **Scale work with chats.** Use milestones, tasks, and background chats to separate planning, decomposition, and execution work without losing the main thread.
-- **Customize behavior.** User-editable managed assets live under `~/.koder`, including prompts and bundled skills.
+- **Customize behavior.** User-editable managed assets include prompts and bundled skills; by default they live under `~/.koder`, or under `<data-dir>/assets` when `--data-dir` is used.
 - **Inspect what happened.** Optional local debug APIs expose runtime state, sessions, transcripts, events, and HTTP activity for troubleshooting.
 
 ## Quick Start
@@ -28,6 +28,13 @@ By default, `koder` binds the web UI on a local ephemeral port and opens your br
 ```bash
 koder --project-root /path/to/worktree --web-bind 127.0.0.1:8080
 koder --project-root /path/to/worktree --nobrowser
+```
+
+To run a separate Koder instance with isolated config, sessions, cache, and
+managed assets, use a separate data directory:
+
+```bash
+koder --data-dir /tmp/koder-test --web-bind 127.0.0.1:7980 --nobrowser
 ```
 
 Check configuration and provider connectivity:
@@ -92,6 +99,7 @@ Permission profiles control network access, root filesystem mode, workspace mode
 
 ```bash
 koder
+koder --data-dir /tmp/koder-test
 koder --project-root /path/to/worktree
 koder --web-bind 127.0.0.1:8080
 koder --nobrowser

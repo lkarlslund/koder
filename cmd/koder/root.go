@@ -57,12 +57,13 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 	bindStartupFlags(cmd, &opts)
-	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newSessionCommand(), newDebugCommand(), newSkillCommand(), newExecCommand())
+	cmd.AddCommand(newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts))
 	return cmd
 }
 
 type startupOptions struct {
 	projectRoot   string
+	dataDir       string
 	noOpenBrowser bool
 	webBind       string
 	webBindSet    bool
@@ -71,6 +72,7 @@ type startupOptions struct {
 func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.projectRoot, "project-root", "", "Start koder with this local project folder")
+	flags.StringVar(&opts.dataDir, "data-dir", "", "Store config, sessions, cache, and managed assets under this directory")
 	flags.BoolVar(&opts.noOpenBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
 }
@@ -107,7 +109,12 @@ func (o startupOptions) resolve() (string, error) {
 	return abs, nil
 }
 
+func (o startupOptions) loadOptions() config.LoadOptions {
+	return config.LoadOptions{DataDir: strings.TrimSpace(o.dataDir)}
+}
+
 type startupConfig struct {
+	LoadOptions     config.LoadOptions
 	NoOpenBrowser   bool
 	WebBind         string
 	WebBindExplicit bool
@@ -115,11 +122,11 @@ type startupConfig struct {
 
 func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startupOpts startupConfig) error {
 	defer codesearchtool.CloseLanguageServers()
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithOptions(startupOpts.LoadOptions)
 	if err != nil {
 		return err
 	}
-	if err := syncManagedUserAssets(ctx); err != nil {
+	if err := syncManagedUserAssets(ctx, cfg); err != nil {
 		return err
 	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: cfg.Store.Backend})
@@ -142,16 +149,12 @@ func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startup
 	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
 }
 
-func syncManagedUserAssets(ctx context.Context) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("locate home directory for managed assets: %w", err)
-	}
+func syncManagedUserAssets(ctx context.Context, cfg config.Config) error {
 	items, err := assets.UserDefaults()
 	if err != nil {
 		return err
 	}
-	_, err = assets.Sync(ctx, filepath.Join(home, ".koder"), items)
+	_, err = assets.Sync(ctx, cfg.ManagedAssetsDir(), items)
 	return err
 }
 
@@ -229,6 +232,7 @@ func startWebUI(ctx context.Context, controller *app.Controller, bind string, no
 
 func startupOptsFromFlags(opts startupOptions) startupConfig {
 	return startupConfig{
+		LoadOptions:     opts.loadOptions(),
 		NoOpenBrowser:   opts.noOpenBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
@@ -274,12 +278,12 @@ func isReusableWebBind(bind string) bool {
 	return err == nil && port != "" && port != "0"
 }
 
-func newDoctorCommand() *cobra.Command {
+func newDoctorCommand(startup *startupOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Validate config and provider connectivity",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
+			cfg, err := config.LoadWithOptions(startup.loadOptions())
 			if err != nil {
 				return err
 			}
@@ -327,12 +331,12 @@ func newVersionCommand() *cobra.Command {
 	}
 }
 
-func newSessionCommand() *cobra.Command {
+func newSessionCommand(startup *startupOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
 		Short: "Inspect stored sessions",
 	}
-	cmd.AddCommand(newSessionDumpCommand(), newSessionTailCommand())
+	cmd.AddCommand(newSessionDumpCommand(startup), newSessionTailCommand())
 	return cmd
 }
 
@@ -353,7 +357,7 @@ func newDebugCommand() *cobra.Command {
 	return cmd
 }
 
-func newSessionDumpCommand() *cobra.Command {
+func newSessionDumpCommand(startup *startupOptions) *cobra.Command {
 	var sessionID id.ID
 	cmd := &cobra.Command{
 		Use:   "dump",
@@ -362,7 +366,7 @@ func newSessionDumpCommand() *cobra.Command {
 			if sessionID == "" {
 				return fmt.Errorf("--id is required")
 			}
-			cfg, err := config.Load()
+			cfg, err := config.LoadWithOptions(startup.loadOptions())
 			if err != nil {
 				return err
 			}

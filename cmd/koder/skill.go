@@ -11,18 +11,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/skills"
 )
 
 const maxSkillNameLen = 64
 const maxDescriptionLen = 1024
 
-func newSkillCommand() *cobra.Command {
+func newSkillCommand(startup *startupOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
 		Short: "Manage koder skills",
 	}
-	cmd.AddCommand(newSkillValidateCommand(), newSkillVerifyCommand(), newSkillListCommand())
+	cmd.AddCommand(newSkillValidateCommand(), newSkillVerifyCommand(startup), newSkillListCommand(startup))
 	return cmd
 }
 
@@ -39,7 +40,7 @@ func newSkillValidateCommand() *cobra.Command {
 }
 
 // newSkillVerifyCommand returns `koder skill verify <name>`.
-func newSkillVerifyCommand() *cobra.Command {
+func newSkillVerifyCommand(startup *startupOptions) *cobra.Command {
 	var workdir string
 	verifyCmd := &cobra.Command{
 		Use:   "verify <name>",
@@ -54,7 +55,11 @@ func newSkillVerifyCommand() *cobra.Command {
 					return err
 				}
 			}
-			sk, found := skills.Find(dir, args[0])
+			opts, err := skillDiscoverOptions(startup)
+			if err != nil {
+				return err
+			}
+			sk, found := skills.FindWithOptions(dir, args[0], opts)
 			if !found {
 				return fmt.Errorf("skill %q not found; run 'koder skill list' to see available skills", args[0])
 			}
@@ -74,7 +79,7 @@ type discoveryPath struct {
 
 // collectDiscoveryPaths returns the directories koder would search
 // for skills, matching the logic in skills.Discover.
-func collectDiscoveryPaths(workdir string) []discoveryPath {
+func collectDiscoveryPaths(workdir string, opts skills.DiscoverOptions) []discoveryPath {
 	projectRoot := agents.FindProjectRoot(workdir)
 	workdir = cleanPathAbs(workdir)
 	projectRoot = cleanPathAbs(projectRoot)
@@ -101,13 +106,27 @@ func collectDiscoveryPaths(workdir string) []discoveryPath {
 			path:  filepath.Join(home, ".agents", "skills"),
 			scope: skills.ScopeUser,
 		})
+		out = append(out, discoveryPath{
+			path:  filepath.Join(home, ".koder", "skills"),
+			scope: skills.ScopeUser,
+		})
+	}
+	for _, root := range opts.UserRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		out = append(out, discoveryPath{
+			path:  root,
+			scope: skills.ScopeUser,
+		})
 	}
 
 	return out
 }
 
 // newSkillListCommand returns `koder skill list`.
-func newSkillListCommand() *cobra.Command {
+func newSkillListCommand(startup *startupOptions) *cobra.Command {
 	var workdir string
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -123,8 +142,12 @@ func newSkillListCommand() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			items := skills.Discover(dir)
-			paths := collectDiscoveryPaths(dir)
+			opts, err := skillDiscoverOptions(startup)
+			if err != nil {
+				return err
+			}
+			items := skills.DiscoverWithOptions(dir, opts)
+			paths := collectDiscoveryPaths(dir, opts)
 
 			if len(items) == 0 {
 				fmt.Fprintln(out, "No skills found.")
@@ -171,6 +194,19 @@ func newSkillListCommand() *cobra.Command {
 	}
 	listCmd.Flags().StringVar(&workdir, "workdir", "", "Working directory for skill discovery (default: $PWD)")
 	return listCmd
+}
+
+func skillDiscoverOptions(startup *startupOptions) (skills.DiscoverOptions, error) {
+	if startup == nil {
+		startup = &startupOptions{}
+	}
+	cfg, err := config.LoadWithOptions(startup.loadOptions())
+	if err != nil {
+		return skills.DiscoverOptions{}, err
+	}
+	return skills.DiscoverOptions{
+		UserRoots: []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
+	}, nil
 }
 
 // validateSkill validates a SKILL.md at the given path.

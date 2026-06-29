@@ -43,7 +43,7 @@ type structuredOutputSchema struct {
 	compiled *jsonschema.Schema
 }
 
-func newExecCommand() *cobra.Command {
+func newExecCommand(startup *startupOptions) *cobra.Command {
 	opts := execOptions{maxTurns: 20}
 	cmd := &cobra.Command{
 		Use:   "exec [prompt]",
@@ -54,7 +54,7 @@ func newExecCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := runExec(cmd.Context(), opts, prompt)
+			out, err := runExec(cmd.Context(), startup.loadOptions(), opts, prompt)
 			if err != nil {
 				return err
 			}
@@ -95,12 +95,12 @@ func execPrompt(args []string, in io.Reader) (string, error) {
 	return prompt, nil
 }
 
-func runExec(ctx context.Context, opts execOptions, prompt string) (string, error) {
-	cfg, err := config.Load()
+func runExec(ctx context.Context, loadOpts config.LoadOptions, opts execOptions, prompt string) (string, error) {
+	cfg, err := config.LoadWithOptions(loadOpts)
 	if err != nil {
 		return "", err
 	}
-	if err := syncManagedUserAssets(ctx); err != nil {
+	if err := syncManagedUserAssets(ctx, cfg); err != nil {
 		return "", err
 	}
 	if err := cfg.RequireProvider(); err != nil {

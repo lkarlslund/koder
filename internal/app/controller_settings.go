@@ -223,7 +223,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		return PreferencesState{}, err
 	}
 	applyToolDefaultPreferences(&next, prefs.ToolDefaults)
-	if err := writePromptPreferences(prefs.Prompts); err != nil {
+	if err := writePromptPreferences(next.ManagedAssetsDir(), prefs.Prompts); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
@@ -272,7 +272,7 @@ func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
 	if err != nil {
 		return PromptPreference{}, err
 	}
-	path, err := managedPromptPath(target)
+	path, err := managedPromptPath(c.cfg.ManagedAssetsDir(), target)
 	if err != nil {
 		return PromptPreference{}, err
 	}
@@ -282,7 +282,7 @@ func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return PromptPreference{}, fmt.Errorf("write prompt %s: %w", target, err)
 	}
-	return promptPreference(target)
+	return promptPreference(c.cfg.ManagedAssetsDir(), target)
 }
 
 // ModelOptionsForSelection lists selectable models across configured providers,
@@ -745,7 +745,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 	liveModels := slices.Clone(models)
 	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Compaction.ProviderID), strings.TrimSpace(c.cfg.Compaction.ModelID))
 	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.Thinking.CavemanProviderID), strings.TrimSpace(c.cfg.Thinking.CavemanModelID))
-	prompts, err := promptPreferences()
+	prompts, err := promptPreferences(c.cfg.ManagedAssetsDir())
 	if err != nil {
 		return PreferencesState{}, err
 	}
@@ -1521,10 +1521,10 @@ func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreferen
 	cfg.Tools.Enabled = next
 }
 
-func promptPreferences() ([]PromptPreference, error) {
+func promptPreferences(root string) ([]PromptPreference, error) {
 	out := make([]PromptPreference, 0, 2)
 	for _, target := range []string{"system-prompt.md", "compaction-prompt.md"} {
-		item, err := promptPreference(target)
+		item, err := promptPreference(root, target)
 		if err != nil {
 			return nil, err
 		}
@@ -1533,8 +1533,8 @@ func promptPreferences() ([]PromptPreference, error) {
 	return out, nil
 }
 
-func promptPreference(target string) (PromptPreference, error) {
-	path, err := managedPromptPath(target)
+func promptPreference(root string, target string) (PromptPreference, error) {
+	path, err := managedPromptPath(root, target)
 	if err != nil {
 		return PromptPreference{}, err
 	}
@@ -1553,13 +1553,13 @@ func promptPreference(target string) (PromptPreference, error) {
 	}, nil
 }
 
-func writePromptPreferences(prompts []PromptPreference) error {
+func writePromptPreferences(root string, prompts []PromptPreference) error {
 	for _, prompt := range prompts {
 		target := strings.TrimSpace(prompt.Target)
 		if target != "system-prompt.md" && target != "compaction-prompt.md" {
 			continue
 		}
-		path, err := managedPromptPath(target)
+		path, err := managedPromptPath(root, target)
 		if err != nil {
 			return err
 		}
@@ -1573,12 +1573,12 @@ func writePromptPreferences(prompts []PromptPreference) error {
 	return nil
 }
 
-func managedPromptPath(target string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return "", fmt.Errorf("locate home directory for prompt assets: %w", err)
+func managedPromptPath(root string, target string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("managed asset root is empty")
 	}
-	return filepath.Join(home, ".koder", target), nil
+	return filepath.Join(root, target), nil
 }
 
 func normalizeTheme(theme string) string {

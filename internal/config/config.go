@@ -134,6 +134,11 @@ type Config struct {
 	configDir        string
 	stateDir         string
 	cacheDir         string
+	managedAssetsDir string
+}
+
+type LoadOptions struct {
+	DataDir string
 }
 
 func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
@@ -185,14 +190,22 @@ Rules:
 - Be much shorter than input; prefer 1-6 short lines.`
 
 func Load() (Config, error) {
-	cfg := Default()
-	configDir := configDir()
-	cfg.configDir = configDir
-	cfg.stateDir = stateDir()
-	cfg.cacheDir = cacheDir()
-	cfg.path = filepath.Join(configDir, "config.toml")
+	return LoadWithOptions(LoadOptions{})
+}
 
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
+func LoadWithOptions(opts LoadOptions) (Config, error) {
+	cfg := Default()
+	paths, err := resolvePaths(opts)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.configDir = paths.configDir
+	cfg.stateDir = paths.stateDir
+	cfg.cacheDir = paths.cacheDir
+	cfg.managedAssetsDir = paths.managedAssetsDir
+	cfg.path = paths.configPath
+
+	if err := os.MkdirAll(cfg.configDir, 0o755); err != nil {
 		return Config{}, fmt.Errorf("create config dir: %w", err)
 	}
 	if err := os.MkdirAll(cfg.stateDir, 0o755); err != nil {
@@ -219,10 +232,11 @@ func Load() (Config, error) {
 	if !strings.Contains(string(data), "auto_continue") {
 		cfg.UI.AutoContinue = true
 	}
-	cfg.configDir = configDir
-	cfg.stateDir = stateDir()
-	cfg.cacheDir = cacheDir()
-	cfg.path = filepath.Join(configDir, "config.toml")
+	cfg.configDir = paths.configDir
+	cfg.stateDir = paths.stateDir
+	cfg.cacheDir = paths.cacheDir
+	cfg.managedAssetsDir = paths.managedAssetsDir
+	cfg.path = paths.configPath
 	cfg.applyDefaults()
 	return cfg, nil
 }
@@ -435,6 +449,18 @@ func (c Config) WithStateDir(path string) Config {
 
 func (c Config) CacheDir() string {
 	return c.cacheDir
+}
+
+func (c Config) WithManagedAssetsDir(path string) Config {
+	c.managedAssetsDir = strings.TrimSpace(path)
+	return c
+}
+
+func (c Config) ManagedAssetsDir() string {
+	if strings.TrimSpace(c.managedAssetsDir) != "" {
+		return c.managedAssetsDir
+	}
+	return managedAssetsDir()
 }
 
 func (c Config) Provider(id string) (Provider, bool) {
@@ -778,4 +804,45 @@ func cacheDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".cache", "koder")
+}
+
+func managedAssetsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".koder")
+}
+
+type resolvedPaths struct {
+	configDir        string
+	stateDir         string
+	cacheDir         string
+	managedAssetsDir string
+	configPath       string
+}
+
+func resolvePaths(opts LoadOptions) (resolvedPaths, error) {
+	dataDir := strings.TrimSpace(opts.DataDir)
+	if dataDir == "" {
+		dataDir = strings.TrimSpace(os.Getenv("KODER_DATA_DIR"))
+	}
+	if dataDir == "" {
+		cfgDir := configDir()
+		return resolvedPaths{
+			configDir:        cfgDir,
+			stateDir:         stateDir(),
+			cacheDir:         cacheDir(),
+			managedAssetsDir: managedAssetsDir(),
+			configPath:       filepath.Join(cfgDir, "config.toml"),
+		}, nil
+	}
+	abs, err := filepath.Abs(dataDir)
+	if err != nil {
+		return resolvedPaths{}, fmt.Errorf("resolve data dir: %w", err)
+	}
+	return resolvedPaths{
+		configDir:        abs,
+		stateDir:         filepath.Join(abs, "state"),
+		cacheDir:         filepath.Join(abs, "cache"),
+		managedAssetsDir: filepath.Join(abs, "assets"),
+		configPath:       filepath.Join(abs, "config.toml"),
+	}, nil
 }

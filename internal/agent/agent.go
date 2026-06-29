@@ -95,11 +95,12 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.modelRuntime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
-		Settings: settingsStore,
-		Debug:    debug,
-		Sessions: e.registry,
-		Exec:     execRuntime,
-		MCP:      e.mcp,
+		Settings:         settingsStore,
+		Debug:            debug,
+		Sessions:         e.registry,
+		Exec:             execRuntime,
+		MCP:              e.mcp,
+		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
 	return e
@@ -1405,23 +1406,15 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 }
 
 func (e *Engine) systemPrompt() string {
-	return managedPrompt("system-prompt.md")
+	return managedPrompt(e.cfg.ManagedAssetsDir(), "system-prompt.md")
 }
 
 func systemPrompt() string {
-	return managedPrompt("system-prompt.md")
-}
-
-func managedAssetRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".koder")
+	return managedPrompt(config.Default().ManagedAssetsDir(), "system-prompt.md")
 }
 
 func (e *Engine) compactPrompt() string {
-	return managedPrompt("compaction-prompt.md")
+	return managedPrompt(e.cfg.ManagedAssetsDir(), "compaction-prompt.md")
 }
 
 func (e *Engine) compactPromptWithInstructions(instructions string) string {
@@ -1433,8 +1426,8 @@ func (e *Engine) compactPromptWithInstructions(instructions string) string {
 	return strings.TrimSpace(prompt + "\n\nAdditional compaction instructions:\n" + instructions)
 }
 
-func managedPrompt(name string) string {
-	if root := managedAssetRoot(); root != "" {
+func managedPrompt(root string, name string) string {
+	if root = strings.TrimSpace(root); root != "" {
 		data, err := os.ReadFile(filepath.Join(root, name))
 		if err == nil {
 			return strings.TrimSpace(string(data))

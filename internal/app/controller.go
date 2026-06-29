@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1567,7 +1568,7 @@ func (c *Controller) CompleteComposerForSelection(ctx context.Context, selection
 		if projectRoot == "" {
 			return ComposerCompletions{}, fmt.Errorf("session id is required for skill completions")
 		}
-		items := matchingComposerSkills(projectRoot, query)
+		items := c.matchingComposerSkills(projectRoot, query)
 		if len(items) == 1 && strings.EqualFold(items[0].Name, query) {
 			items = nil
 		}
@@ -1745,9 +1746,10 @@ func isComposerTokenBoundary(r rune) bool {
 	}
 }
 
-func matchingComposerSkills(workdir string, query string) []skills.Skill {
+func (c *Controller) matchingComposerSkills(workdir string, query string) []skills.Skill {
 	var matches []skills.Skill
-	for _, item := range skills.Discover(workdir) {
+	opts := skills.DiscoverOptions{UserRoots: []string{filepath.Join(c.cfg.ManagedAssetsDir(), "skills")}}
+	for _, item := range skills.DiscoverWithOptions(workdir, opts) {
 		name := strings.ToLower(strings.TrimSpace(item.Name))
 		if query == "" || strings.HasPrefix(name, query) {
 			matches = append(matches, item)

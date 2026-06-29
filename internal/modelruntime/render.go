@@ -339,7 +339,7 @@ func (r *Runtime) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCa
 func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
-		Text: systemPrompt(),
+		Text: r.systemPrompt(),
 	}, {
 		Kind: provider.InstructionKindEnvironment,
 		Text: r.sessionEnvironmentPrompt(session),
@@ -356,7 +356,8 @@ func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Ch
 			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
-	if skillText := strings.TrimSpace(skills.PromptContext(sessionProjectRoot(session))); skillText != "" {
+	skillOpts := skills.DiscoverOptions{UserRoots: []string{filepath.Join(r.cfg.ManagedAssetsDir(), "skills")}}
+	if skillText := strings.TrimSpace(skills.PromptContextWithOptions(sessionProjectRoot(session), skillOpts)); skillText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindSkills,
 			Text: skillText,
@@ -583,20 +584,12 @@ func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string
 	return firstKeptTimelineIndex(items, firstKeptItemID) >= 0
 }
 
-func systemPrompt() string {
-	return managedPrompt("system-prompt.md")
+func (r *Runtime) systemPrompt() string {
+	return managedPrompt(r.cfg.ManagedAssetsDir(), "system-prompt.md")
 }
 
-func managedAssetRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".koder")
-}
-
-func managedPrompt(name string) string {
-	if root := managedAssetRoot(); root != "" {
+func managedPrompt(root string, name string) string {
+	if root = strings.TrimSpace(root); root != "" {
 		data, err := os.ReadFile(filepath.Join(root, name))
 		if err == nil {
 			return strings.TrimSpace(string(data))

@@ -109,14 +109,18 @@ func TestBindStartupFlagsRegistersBrowserFlags(t *testing.T) {
 	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
 		t.Fatal("expected nobrowser flag to be registered")
 	}
+	if dataDirFlag := cmd.PersistentFlags().Lookup("data-dir"); dataDirFlag == nil {
+		t.Fatal("expected data-dir flag to be registered")
+	}
 	if webBindFlag := cmd.PersistentFlags().Lookup("web-bind"); webBindFlag == nil {
 		t.Fatal("expected web-bind flag to be registered")
 	}
 }
 
 func TestStartupConfigFromFlags(t *testing.T) {
-	got := startupOptsFromFlags(startupOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
-	if !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
+	dataDir := t.TempDir()
+	got := startupOptsFromFlags(startupOptions{dataDir: dataDir, noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
+	if got.LoadOptions.DataDir != dataDir || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
 		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }
@@ -258,13 +262,12 @@ func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 }
 
 func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	cfg := config.Default().WithManagedAssetsDir(filepath.Join(t.TempDir(), "assets"))
 
-	if err := syncManagedUserAssets(context.Background()); err != nil {
+	if err := syncManagedUserAssets(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(home, ".koder", "skills", "skill-creator", "SKILL.md")
+	path := filepath.Join(cfg.ManagedAssetsDir(), "skills", "skill-creator", "SKILL.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +275,7 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 	if !strings.Contains(string(data), "name: skill-creator") {
 		t.Fatalf("expected skill creator default, got %q", string(data))
 	}
-	if _, err := os.Stat(filepath.Join(home, ".koder", "managed-assets.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg.ManagedAssetsDir(), "managed-assets.json")); err != nil {
 		t.Fatalf("expected managed asset manifest: %v", err)
 	}
 }
@@ -355,7 +358,7 @@ func TestDoctorCommandRejectsMissingProviderConfig(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	cmd := newDoctorCommand()
+	cmd := newDoctorCommand(&startupOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -413,7 +416,7 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	cmd := newDoctorCommand()
+	cmd := newDoctorCommand(&startupOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -428,7 +431,7 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 }
 
 func TestSessionDumpCommandRejectsMissingID(t *testing.T) {
-	cmd := newSessionDumpCommand()
+	cmd := newSessionDumpCommand(&startupOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)

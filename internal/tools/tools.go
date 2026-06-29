@@ -144,6 +144,7 @@ type Runtime struct {
 	TaskControl           TaskControl
 	Services              map[string]any
 	AllowedTools          map[ID]bool
+	ManagedSkillsDir      string
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	FileTracker           FileTracker

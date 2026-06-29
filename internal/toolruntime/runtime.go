@@ -24,19 +24,21 @@ import (
 )
 
 type Runtime struct {
-	settings *settings.Store
-	debug    *debugsrv.Recorder
-	sessions *sessionpkg.Registry
-	exec     *execruntime.Manager
-	mcp      *mcp.Manager
+	settings         *settings.Store
+	debug            *debugsrv.Recorder
+	sessions         *sessionpkg.Registry
+	exec             *execruntime.Manager
+	mcp              *mcp.Manager
+	managedSkillsDir string
 }
 
 type Config struct {
-	Settings *settings.Store
-	Debug    *debugsrv.Recorder
-	Sessions *sessionpkg.Registry
-	Exec     *execruntime.Manager
-	MCP      *mcp.Manager
+	Settings         *settings.Store
+	Debug            *debugsrv.Recorder
+	Sessions         *sessionpkg.Registry
+	Exec             *execruntime.Manager
+	MCP              *mcp.Manager
+	ManagedSkillsDir string
 }
 
 func New(cfg Config) *Runtime {
@@ -45,11 +47,12 @@ func New(cfg Config) *Runtime {
 		exec = execruntime.NewManager()
 	}
 	return &Runtime{
-		settings: cfg.Settings,
-		debug:    cfg.Debug,
-		sessions: cfg.Sessions,
-		exec:     exec,
-		mcp:      cfg.MCP,
+		settings:         cfg.Settings,
+		debug:            cfg.Debug,
+		sessions:         cfg.Sessions,
+		exec:             exec,
+		mcp:              cfg.MCP,
+		managedSkillsDir: strings.TrimSpace(cfg.ManagedSkillsDir),
 	}
 }
 
@@ -105,6 +108,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		Exec:                  r.exec,
 		MCP:                   r.mcp,
 		AllowedTools:          r.toolStates(session),
+		ManagedSkillsDir:      r.managedSkillsDir,
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
 		AccessSettings:        r.accessSettings(session),
 	}

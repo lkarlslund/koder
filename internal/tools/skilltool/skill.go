@@ -27,7 +27,7 @@ func init() {
 func (tool) ID() tools.ID             { return tools.Skill }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	spec.Usage = skills.ToolDescription(spec.Usage, runtime.Workdir)
+	spec.Usage = skills.ToolDescriptionWithOptions(spec.Usage, runtime.Workdir, skills.DiscoverOptions{UserRoots: managedSkillRoots(runtime)})
 	return spec, true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -40,9 +40,9 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 func (tool) Preview(req tools.Request) string { return req.Args["name"] }
 func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	skill, ok := skills.Find(runtime.Workdir, req.Args["name"])
+	skill, ok := skills.FindWithOptions(runtime.Workdir, req.Args["name"], skills.DiscoverOptions{UserRoots: managedSkillRoots(runtime)})
 	if !ok {
-		return tools.Result{}, skillNotFound(runtime.Workdir, req.Args["name"])
+		return tools.Result{}, skillNotFound(runtime, req.Args["name"])
 	}
 	body, err := os.ReadFile(skill.Path)
 	if err != nil {
@@ -66,11 +66,18 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 	return "skill", result.Output
 }
 
-func skillNotFound(workdir string, name string) error {
-	candidates := skills.AvailableNames(workdir)
+func skillNotFound(runtime tools.Runtime, name string) error {
+	candidates := skills.AvailableNamesWithOptions(runtime.Workdir, skills.DiscoverOptions{UserRoots: managedSkillRoots(runtime)})
 	sort.Strings(candidates)
 	if len(candidates) == 0 {
 		return fmt.Errorf("skill %q not found", name)
 	}
 	return fmt.Errorf("skill %q not found; available skills: %s", name, strings.Join(candidates, ", "))
+}
+
+func managedSkillRoots(runtime tools.Runtime) []string {
+	if strings.TrimSpace(runtime.ManagedSkillsDir) == "" {
+		return nil
+	}
+	return []string{runtime.ManagedSkillsDir}
 }

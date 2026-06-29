@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -45,7 +46,7 @@ func TestRunExecSubmitsStructuredOutputTool(t *testing.T) {
 	defer server.Close()
 
 	withExecTestConfig(t, server.URL+"/v1")
-	got, err := runExec(context.Background(), execOptions{
+	got, err := runExec(context.Background(), config.LoadOptions{}, execOptions{
 		cwd:        t.TempDir(),
 		jsonSchema: `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`,
 		maxTurns:   3,
@@ -86,7 +87,7 @@ func TestRunExecHidesStructuredOutputWithoutSchema(t *testing.T) {
 	defer server.Close()
 
 	withExecTestConfig(t, server.URL+"/v1")
-	got, err := runExec(context.Background(), execOptions{cwd: t.TempDir(), maxTurns: 1}, "return answer")
+	got, err := runExec(context.Background(), config.LoadOptions{}, execOptions{cwd: t.TempDir(), maxTurns: 1}, "return answer")
 	if err != nil {
 		t.Fatalf("runExec: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestRunExecRetriesInvalidStructuredOutput(t *testing.T) {
 	defer server.Close()
 
 	withExecTestConfig(t, server.URL+"/v1")
-	got, err := runExec(context.Background(), execOptions{
+	got, err := runExec(context.Background(), config.LoadOptions{}, execOptions{
 		cwd:        t.TempDir(),
 		jsonSchema: `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`,
 		maxTurns:   3,
@@ -149,7 +150,7 @@ func TestRunExecPlainTextFailsWhenStructuredOutputRequired(t *testing.T) {
 	defer server.Close()
 
 	withExecTestConfig(t, server.URL+"/v1")
-	_, err := runExec(context.Background(), execOptions{
+	_, err := runExec(context.Background(), config.LoadOptions{}, execOptions{
 		cwd:        t.TempDir(),
 		jsonSchema: `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`,
 		maxTurns:   1,

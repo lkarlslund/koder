@@ -28,7 +28,15 @@ type Skill struct {
 	Scope       Scope
 }
 
+type DiscoverOptions struct {
+	UserRoots []string
+}
+
 func Discover(workdir string) []Skill {
+	return DiscoverWithOptions(workdir, DiscoverOptions{})
+}
+
+func DiscoverWithOptions(workdir string, opts DiscoverOptions) []Skill {
 	projectRoot := agents.FindProjectRoot(workdir)
 	roots := projectRoots(workdir, projectRoot)
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
@@ -38,6 +46,16 @@ func Discover(workdir string) []Skill {
 		})
 		roots = append(roots, rootSpec{
 			Path:  filepath.Join(home, ".koder", "skills"),
+			Scope: ScopeUser,
+		})
+	}
+	for _, root := range opts.UserRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		roots = append(roots, rootSpec{
+			Path:  root,
 			Scope: ScopeUser,
 		})
 	}
@@ -73,8 +91,12 @@ func Discover(workdir string) []Skill {
 }
 
 func Find(workdir string, name string) (Skill, bool) {
+	return FindWithOptions(workdir, name, DiscoverOptions{})
+}
+
+func FindWithOptions(workdir string, name string, opts DiscoverOptions) (Skill, bool) {
 	needle := normalizeName(name)
-	for _, skill := range Discover(workdir) {
+	for _, skill := range DiscoverWithOptions(workdir, opts) {
 		if normalizeName(skill.Name) == needle {
 			return skill, true
 		}
@@ -83,7 +105,11 @@ func Find(workdir string, name string) (Skill, bool) {
 }
 
 func AvailableNames(workdir string) []string {
-	items := Discover(workdir)
+	return AvailableNamesWithOptions(workdir, DiscoverOptions{})
+}
+
+func AvailableNamesWithOptions(workdir string, opts DiscoverOptions) []string {
+	items := DiscoverWithOptions(workdir, opts)
 	names := make([]string, 0, len(items))
 	for _, item := range items {
 		names = append(names, item.Name)
@@ -92,7 +118,11 @@ func AvailableNames(workdir string) []string {
 }
 
 func ToolDescription(base string, workdir string) string {
-	items := Discover(workdir)
+	return ToolDescriptionWithOptions(base, workdir, DiscoverOptions{})
+}
+
+func ToolDescriptionWithOptions(base string, workdir string, opts DiscoverOptions) string {
+	items := DiscoverWithOptions(workdir, opts)
 	if len(items) == 0 {
 		return base
 	}
@@ -116,7 +146,11 @@ func ToolDescription(base string, workdir string) string {
 }
 
 func PromptContext(workdir string) string {
-	items := Discover(workdir)
+	return PromptContextWithOptions(workdir, DiscoverOptions{})
+}
+
+func PromptContextWithOptions(workdir string, opts DiscoverOptions) string {
+	items := DiscoverWithOptions(workdir, opts)
 	if len(items) == 0 {
 		return ""
 	}
