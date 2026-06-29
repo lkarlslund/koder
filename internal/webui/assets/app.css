@@ -137,7 +137,7 @@
     .markdown-body table { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
     .markdown-body th, .markdown-body td { border: 1px solid var(--bs-border-color); padding: .35rem .5rem; vertical-align: top; }
     .markdown-body th { background: var(--bs-secondary-bg); font-weight: 600; }
-    .markdown-body code { color: var(--bs-code-color); background: var(--bs-secondary-bg); border-radius: .25rem; padding: .1rem .25rem; }
+    .markdown-body code { color: #c9d1d9; background: #0d1117; border-radius: .25rem; padding: .1rem .25rem; }
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
     .markdown-body svg { max-width: 100%; height: auto; }

@@ -1529,6 +1529,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
 	}
+	if !strings.Contains(fullPage, `.markdown-body code { color: #c9d1d9; background: #0d1117;`) {
+		t.Fatalf("expected inline markdown code to use GitHub dark colors")
+	}
 	if !strings.Contains(fullPage, `katex.renderToString`) ||
 		!strings.Contains(fullPage, `renderMathInHTML(html)`) ||
 		!strings.Contains(fullPage, `koder-math-inline`) ||
