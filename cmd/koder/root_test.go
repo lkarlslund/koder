@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/config"
@@ -18,186 +16,66 @@ import (
 	"github.com/lkarlslund/koder/internal/version"
 )
 
-func TestStartupOptionsResolveDefaultsToCurrentDirectory(t *testing.T) {
-	originalWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
+func TestRootOnlyRegistersDataDirGlobally(t *testing.T) {
+	cmd := NewRootCommand()
+	if flag := cmd.PersistentFlags().Lookup("data-dir"); flag == nil {
+		t.Fatal("expected data-dir global flag")
 	}
-	t.Cleanup(func() {
-		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
-			t.Fatalf("restore cwd: %v", chdirErr)
+	for _, name := range []string{"project-root", "web-bind", "nobrowser"} {
+		if flag := cmd.PersistentFlags().Lookup(name); flag != nil {
+			t.Fatalf("did not expect %s as a global flag", name)
 		}
-	})
-
-	workdir := t.TempDir()
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-
-	got, err := (startupOptions{}).resolve()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got != workdir {
-		t.Fatalf("expected %q, got %q", workdir, got)
 	}
 }
 
-func TestStartupOptionsResolveRelativeProjectRoot(t *testing.T) {
-	base := t.TempDir()
-	workdir := filepath.Join(base, "workspace")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	originalWD, err := os.Getwd()
+func TestServeRegistersBrowserFlags(t *testing.T) {
+	cmd := NewRootCommand()
+	serve, _, err := cmd.Find([]string{"serve"})
 	if err != nil {
-		t.Fatalf("getwd: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
-			t.Fatalf("restore cwd: %v", chdirErr)
+	for _, name := range []string{"web-bind", "nobrowser"} {
+		if flag := serve.Flags().Lookup(name); flag == nil {
+			t.Fatalf("expected serve flag %s", name)
 		}
-	})
-	if err := os.Chdir(base); err != nil {
-		t.Fatalf("chdir: %v", err)
 	}
-
-	got, err := (startupOptions{projectRoot: "workspace"}).resolve()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got != workdir {
-		t.Fatalf("expected %q, got %q", workdir, got)
+	if flag := serve.Flags().Lookup("project-root"); flag != nil {
+		t.Fatal("did not expect project-root serve flag")
 	}
 }
 
-func TestStartupOptionsResolveProjectRoot(t *testing.T) {
-	workdir := t.TempDir()
-
-	got, err := (startupOptions{projectRoot: workdir}).resolve()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got != workdir {
-		t.Fatalf("expected %q, got %q", workdir, got)
-	}
-}
-
-func TestStartupOptionsResolveRejectsFilePath(t *testing.T) {
-	base := t.TempDir()
-	file := filepath.Join(base, "not-a-dir")
-	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	_, err := (startupOptions{projectRoot: file}).resolve()
-	if err == nil {
-		t.Fatal("expected directory error")
-	}
-}
-
-func TestBindStartupFlagsRegistersBrowserFlags(t *testing.T) {
-	var opts startupOptions
-	cmd := &cobra.Command{}
-	bindStartupFlags(cmd, &opts)
-
-	projectRootFlag := cmd.PersistentFlags().Lookup("project-root")
-	if projectRootFlag == nil {
-		t.Fatal("expected project-root flag to be registered")
-	}
-	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
-		t.Fatal("expected nobrowser flag to be registered")
-	}
-	if dataDirFlag := cmd.PersistentFlags().Lookup("data-dir"); dataDirFlag == nil {
-		t.Fatal("expected data-dir flag to be registered")
-	}
-	if webBindFlag := cmd.PersistentFlags().Lookup("web-bind"); webBindFlag == nil {
-		t.Fatal("expected web-bind flag to be registered")
-	}
-}
-
-func TestStartupConfigFromFlags(t *testing.T) {
+func TestServeConfigFromFlags(t *testing.T) {
 	dataDir := t.TempDir()
-	got := startupOptsFromFlags(startupOptions{dataDir: dataDir, noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
+	got := serveConfigFromFlags(&rootOptions{dataDir: dataDir}, serveOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
 	if got.LoadOptions.DataDir != dataDir || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
 		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }
 
-func TestStartupOptionsCapturesExplicitWebBind(t *testing.T) {
-	var opts startupOptions
-	cmd := &cobra.Command{
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			opts.captureFlagState(cmd)
-			return nil
-		},
-	}
-	bindStartupFlags(cmd, &opts)
-	cmd.SetArgs([]string{"--web-bind=127.0.0.1:34567"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if !opts.webBindSet {
-		t.Fatal("expected explicit web bind to be captured")
-	}
-}
-
-func TestWebBindForLaunchUsesGlobalLastBind(t *testing.T) {
-	st := newRootTestStore(t)
-
-	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
+func TestWebBindForLaunchDefaultsWithoutStoredFallback(t *testing.T) {
+	bind, err := webBindForLaunch(serveConfig{WebBind: defaultWebBind})
 	if err != nil {
 		t.Fatalf("launch bind: %v", err)
 	}
 	if bind != defaultWebBind {
-		t.Fatalf("expected default bind before cache, got bind=%q", bind)
-	}
-	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:45678"); err != nil {
-		t.Fatalf("save bind: %v", err)
-	}
-	bind, err = webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
-	if err != nil {
-		t.Fatalf("launch bind: %v", err)
-	}
-	if bind != "127.0.0.1:45678" {
-		t.Fatalf("expected saved bind, got bind=%q", bind)
+		t.Fatalf("expected default bind, got bind=%q", bind)
 	}
 }
 
 func TestWebBindForLaunchRespectsExplicitBind(t *testing.T) {
-	st := newRootTestStore(t)
-	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:45678"); err != nil {
-		t.Fatalf("save bind: %v", err)
-	}
-
-	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	bind, err := webBindForLaunch(serveConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
 	if err != nil {
 		t.Fatalf("launch bind: %v", err)
 	}
 	if bind != "127.0.0.1:0" {
 		t.Fatalf("expected explicit ephemeral bind, got bind=%q", bind)
 	}
-	bind, err = webBindForLaunch(context.Background(), st, startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	bind, err = webBindForLaunch(serveConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
 	if err != nil {
 		t.Fatalf("launch bind: %v", err)
 	}
 	if bind != "127.0.0.1:33333" {
 		t.Fatalf("expected explicit fixed bind, got bind=%q", bind)
-	}
-}
-
-func TestWebBindForLaunchIgnoresSavedEphemeralRecords(t *testing.T) {
-	st := newRootTestStore(t)
-	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:0"); err != nil {
-		t.Fatalf("save bind: %v", err)
-	}
-	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
-	if err != nil {
-		t.Fatalf("launch bind: %v", err)
-	}
-	if bind != defaultWebBind {
-		t.Fatalf("expected default bind after ephemeral record, got bind=%q", bind)
 	}
 }
 
@@ -250,7 +128,7 @@ func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := []string{"doctor", "version", "session", "debug", "skill", "exec"}
+	want := []string{"serve", "doctor", "version", "session", "debug", "skill", "exec"}
 	for _, name := range want {
 		if child, _, err := cmd.Find([]string{name}); err != nil || child == nil || child.Name() != name {
 			t.Fatalf("expected subcommand %q to be registered, child=%v err=%v", name, child, err)
@@ -258,6 +136,12 @@ func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 	}
 	if child, _, err := cmd.Find([]string{"resume"}); err == nil && child != nil && child.Name() == "resume" {
 		t.Fatal("resume command should not be registered")
+	}
+	if child, _, err := cmd.Find([]string{"debug", "tail"}); err != nil || child == nil || child.Name() != "tail" {
+		t.Fatalf("expected debug tail to be registered, child=%v err=%v", child, err)
+	}
+	if child, _, err := cmd.Find([]string{"session", "tail"}); err == nil && child != nil && child.Name() == "tail" {
+		t.Fatal("session tail should not be registered")
 	}
 }
 
@@ -358,7 +242,7 @@ func TestDoctorCommandRejectsMissingProviderConfig(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	cmd := newDoctorCommand(&startupOptions{})
+	cmd := newDoctorCommand(&rootOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -416,7 +300,7 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	cmd := newDoctorCommand(&startupOptions{})
+	cmd := newDoctorCommand(&rootOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -431,7 +315,7 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 }
 
 func TestSessionDumpCommandRejectsMissingID(t *testing.T) {
-	cmd := newSessionDumpCommand(&startupOptions{})
+	cmd := newSessionDumpCommand(&rootOptions{})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)

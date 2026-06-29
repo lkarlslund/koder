@@ -45,7 +45,7 @@ koder debug info
 For polling recorded session events:
 
 ```sh
-koder session tail --id <session-id> --addr http://127.0.0.1:7979
+koder debug tail --session <session-id> --url http://127.0.0.1:7979
 ```
 
 ## Data Sources

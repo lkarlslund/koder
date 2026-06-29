@@ -17,24 +17,24 @@ It is meant for developers who want an agent that stays close to the codebase: i
 
 ## Quick Start
 
-Build or install `koder`, then start it in a repository:
+Build or install `koder`, then start the browser server:
 
 ```bash
-koder --project-root /path/to/worktree
+koder serve
 ```
 
 By default, `koder` binds the web UI on a local ephemeral port and opens your browser. To choose the address or avoid opening a browser:
 
 ```bash
-koder --project-root /path/to/worktree --web-bind 127.0.0.1:8080
-koder --project-root /path/to/worktree --nobrowser
+koder serve --web-bind 127.0.0.1:8080
+koder serve --nobrowser
 ```
 
 To run a separate Koder instance with isolated config, sessions, cache, and
 managed assets, use a separate data directory:
 
 ```bash
-koder --data-dir /tmp/koder-test --web-bind 127.0.0.1:7980 --nobrowser
+koder --data-dir /tmp/koder-test serve --web-bind 127.0.0.1:7980 --nobrowser
 ```
 
 Check configuration and provider connectivity:
@@ -98,13 +98,15 @@ Permission profiles control network access, root filesystem mode, workspace mode
 ## Useful Commands
 
 ```bash
-koder
-koder --data-dir /tmp/koder-test
-koder --project-root /path/to/worktree
-koder --web-bind 127.0.0.1:8080
-koder --nobrowser
+koder serve
+koder --data-dir /tmp/koder-test serve
+koder serve --web-bind 127.0.0.1:8080
+koder serve --nobrowser
 koder doctor
+koder doctor --provider local-llama --model qwen3-coder
+koder doctor --tts
 koder debug info
+koder debug tail --session <session-id> --url http://127.0.0.1:7979
 koder session --help
 koder skill --help
 koder version

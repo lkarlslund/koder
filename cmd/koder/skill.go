@@ -18,12 +18,12 @@ import (
 const maxSkillNameLen = 64
 const maxDescriptionLen = 1024
 
-func newSkillCommand(startup *startupOptions) *cobra.Command {
+func newSkillCommand(root *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
 		Short: "Manage koder skills",
 	}
-	cmd.AddCommand(newSkillValidateCommand(), newSkillVerifyCommand(startup), newSkillListCommand(startup))
+	cmd.AddCommand(newSkillValidateCommand(), newSkillVerifyCommand(root), newSkillListCommand(root))
 	return cmd
 }
 
@@ -40,7 +40,7 @@ func newSkillValidateCommand() *cobra.Command {
 }
 
 // newSkillVerifyCommand returns `koder skill verify <name>`.
-func newSkillVerifyCommand(startup *startupOptions) *cobra.Command {
+func newSkillVerifyCommand(root *rootOptions) *cobra.Command {
 	var workdir string
 	verifyCmd := &cobra.Command{
 		Use:   "verify <name>",
@@ -55,7 +55,7 @@ func newSkillVerifyCommand(startup *startupOptions) *cobra.Command {
 					return err
 				}
 			}
-			opts, err := skillDiscoverOptions(startup)
+			opts, err := skillDiscoverOptions(root)
 			if err != nil {
 				return err
 			}
@@ -126,7 +126,7 @@ func collectDiscoveryPaths(workdir string, opts skills.DiscoverOptions) []discov
 }
 
 // newSkillListCommand returns `koder skill list`.
-func newSkillListCommand(startup *startupOptions) *cobra.Command {
+func newSkillListCommand(root *rootOptions) *cobra.Command {
 	var workdir string
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -142,7 +142,7 @@ func newSkillListCommand(startup *startupOptions) *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			opts, err := skillDiscoverOptions(startup)
+			opts, err := skillDiscoverOptions(root)
 			if err != nil {
 				return err
 			}
@@ -196,11 +196,11 @@ func newSkillListCommand(startup *startupOptions) *cobra.Command {
 	return listCmd
 }
 
-func skillDiscoverOptions(startup *startupOptions) (skills.DiscoverOptions, error) {
-	if startup == nil {
-		startup = &startupOptions{}
+func skillDiscoverOptions(root *rootOptions) (skills.DiscoverOptions, error) {
+	if root == nil {
+		root = &rootOptions{}
 	}
-	cfg, err := config.LoadWithOptions(startup.loadOptions())
+	cfg, err := config.LoadWithOptions(root.loadOptions())
 	if err != nil {
 		return skills.DiscoverOptions{}, err
 	}

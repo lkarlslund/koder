@@ -28,7 +28,7 @@ type execOptions struct {
 	providerID        string
 	modelID           string
 	jsonSchema        string
-	outputSchemaPath  string
+	schemaFile        string
 	outputLastMessage string
 	maxTurns          int
 }
@@ -43,7 +43,7 @@ type structuredOutputSchema struct {
 	compiled *jsonschema.Schema
 }
 
-func newExecCommand(startup *startupOptions) *cobra.Command {
+func newExecCommand(root *rootOptions) *cobra.Command {
 	opts := execOptions{maxTurns: 20}
 	cmd := &cobra.Command{
 		Use:   "exec [prompt]",
@@ -54,7 +54,7 @@ func newExecCommand(startup *startupOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := runExec(cmd.Context(), startup.loadOptions(), opts, prompt)
+			out, err := runExec(cmd.Context(), root.loadOptions(), opts, prompt)
 			if err != nil {
 				return err
 			}
@@ -74,7 +74,7 @@ func newExecCommand(startup *startupOptions) *cobra.Command {
 	flags.StringVar(&opts.providerID, "provider", "", "Provider id to use (default: configured default provider)")
 	flags.StringVar(&opts.modelID, "model", "", "Model id to use (default: configured default model)")
 	flags.StringVar(&opts.jsonSchema, "json-schema", "", "Inline JSON Schema or @path for structured final output")
-	flags.StringVar(&opts.outputSchemaPath, "output-schema", "", "Path to a JSON Schema file for structured final output")
+	flags.StringVar(&opts.schemaFile, "schema-file", "", "Path to a JSON Schema file for structured final output")
 	flags.StringVarP(&opts.outputLastMessage, "output-last-message", "o", "", "Write final output to this file")
 	flags.IntVar(&opts.maxTurns, "max-turns", opts.maxTurns, "Maximum model turns before failing")
 	return cmd
@@ -155,12 +155,12 @@ func execWorkdir(raw string) (string, error) {
 }
 
 func loadStructuredOutputSchema(opts execOptions) (*structuredOutputSchema, error) {
-	if strings.TrimSpace(opts.jsonSchema) != "" && strings.TrimSpace(opts.outputSchemaPath) != "" {
-		return nil, errors.New("--json-schema and --output-schema are mutually exclusive")
+	if strings.TrimSpace(opts.jsonSchema) != "" && strings.TrimSpace(opts.schemaFile) != "" {
+		return nil, errors.New("--json-schema and --schema-file are mutually exclusive")
 	}
 	source := strings.TrimSpace(opts.jsonSchema)
-	if source == "" && strings.TrimSpace(opts.outputSchemaPath) != "" {
-		source = "@" + strings.TrimSpace(opts.outputSchemaPath)
+	if source == "" && strings.TrimSpace(opts.schemaFile) != "" {
+		source = "@" + strings.TrimSpace(opts.schemaFile)
 	}
 	if source == "" {
 		return nil, nil

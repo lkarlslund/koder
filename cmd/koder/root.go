@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -28,7 +27,6 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/runtimeprefs"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/version"
@@ -41,43 +39,58 @@ const processRestartExitCode = 75
 var errProcessRestart = errors.New("process restart requested")
 
 func NewRootCommand() *cobra.Command {
-	opts := startupOptions{}
+	opts := rootOptions{}
 	cmd := &cobra.Command{
 		Use:           "koder",
 		Short:         "Browser coding agent",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			opts.captureFlagState(cmd)
-			workdir, err := opts.resolve()
-			if err != nil {
-				return err
-			}
-			return runKoder(cmd.Context(), app.StartupModeNew, workdir, startupOptsFromFlags(opts))
-		},
+		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	bindStartupFlags(cmd, &opts)
-	cmd.AddCommand(newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts))
+	bindRootFlags(cmd, &opts)
+	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts))
 	return cmd
 }
 
-type startupOptions struct {
-	projectRoot   string
-	dataDir       string
+type rootOptions struct {
+	dataDir string
+}
+
+func bindRootFlags(cmd *cobra.Command, opts *rootOptions) {
+	flags := cmd.PersistentFlags()
+	flags.StringVar(&opts.dataDir, "data-dir", "", "Store config, sessions, cache, and managed assets under this directory")
+}
+
+func (o *rootOptions) loadOptions() config.LoadOptions {
+	if o == nil {
+		return config.LoadOptions{}
+	}
+	return config.LoadOptions{DataDir: strings.TrimSpace(o.dataDir)}
+}
+
+type serveOptions struct {
 	noOpenBrowser bool
 	webBind       string
 	webBindSet    bool
 }
 
-func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
-	flags := cmd.PersistentFlags()
-	flags.StringVar(&opts.projectRoot, "project-root", "", "Start koder with this local project folder")
-	flags.StringVar(&opts.dataDir, "data-dir", "", "Store config, sessions, cache, and managed assets under this directory")
+func newServeCommand(root *rootOptions) *cobra.Command {
+	opts := serveOptions{webBind: defaultWebBind}
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the browser web UI server",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts.captureFlagState(cmd)
+			return runKoder(cmd.Context(), app.StartupModeNew, serveConfigFromFlags(root, opts))
+		},
+	}
+	flags := cmd.Flags()
 	flags.BoolVar(&opts.noOpenBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
+	return cmd
 }
 
-func (o *startupOptions) captureFlagState(cmd *cobra.Command) {
+func (o *serveOptions) captureFlagState(cmd *cobra.Command) {
 	if cmd == nil {
 		return
 	}
@@ -86,43 +99,16 @@ func (o *startupOptions) captureFlagState(cmd *cobra.Command) {
 	}
 }
 
-func (o startupOptions) resolve() (string, error) {
-	projectRoot := strings.TrimSpace(o.projectRoot)
-	if projectRoot == "" {
-		var err error
-		projectRoot, err = os.Getwd()
-		if err != nil {
-			return "", err
-		}
-	}
-	abs, err := filepath.Abs(projectRoot)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("project root must be a directory: %s", abs)
-	}
-	return abs, nil
-}
-
-func (o startupOptions) loadOptions() config.LoadOptions {
-	return config.LoadOptions{DataDir: strings.TrimSpace(o.dataDir)}
-}
-
-type startupConfig struct {
+type serveConfig struct {
 	LoadOptions     config.LoadOptions
 	NoOpenBrowser   bool
 	WebBind         string
 	WebBindExplicit bool
 }
 
-func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startupOpts startupConfig) error {
+func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) error {
 	defer codesearchtool.CloseLanguageServers()
-	cfg, err := config.LoadWithOptions(startupOpts.LoadOptions)
+	cfg, err := config.LoadWithOptions(serveOpts.LoadOptions)
 	if err != nil {
 		return err
 	}
@@ -146,7 +132,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startup
 	}()
 
 	engine := agent.New(cfg, st, recorder, mcpManager)
-	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
+	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)
 }
 
 func syncManagedUserAssets(ctx context.Context, cfg config.Config) error {
@@ -158,17 +144,17 @@ func syncManagedUserAssets(ctx context.Context, cfg config.Config) error {
 	return err
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
+func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode app.StartupMode, recorder *debugsrv.Recorder, serveOpts serveConfig) error {
 	controller := app.New(cfg, engine)
-	if err := controller.Start(ctx, mode, workdir); err != nil {
+	if err := controller.Start(ctx, mode, ""); err != nil {
 		return err
 	}
-	bind, err := webBindForLaunch(ctx, st, startupOpts)
+	bind, err := webBindForLaunch(serveOpts)
 	if err != nil {
 		return err
 	}
 	restartRequested := make(chan struct{}, 1)
-	server, err := startWebUI(ctx, controller, bind, startupOpts.NoOpenBrowser, recorder, func() error {
+	server, err := startWebUI(ctx, controller, bind, serveOpts.NoOpenBrowser, recorder, func() error {
 		select {
 		case restartRequested <- struct{}{}:
 			slog.Info("koder process restart enqueued")
@@ -179,9 +165,6 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	})
 	if err != nil {
 		return err
-	}
-	if err := saveLastWebBind(ctx, st, server.Addr()); err != nil {
-		fmt.Fprintf(os.Stderr, "koder web ui: failed to save web bind: %v\n", err)
 	}
 	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.AppURL())
 	if recorder != nil {
@@ -230,43 +213,27 @@ func startWebUI(ctx context.Context, controller *app.Controller, bind string, no
 	})
 }
 
-func startupOptsFromFlags(opts startupOptions) startupConfig {
-	return startupConfig{
-		LoadOptions:     opts.loadOptions(),
+func serveConfigFromFlags(root *rootOptions, opts serveOptions) serveConfig {
+	if root == nil {
+		root = &rootOptions{}
+	}
+	return serveConfig{
+		LoadOptions:     root.loadOptions(),
 		NoOpenBrowser:   opts.noOpenBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
 	}
 }
 
-func webBindForLaunch(ctx context.Context, st *store.Store, startupOpts startupConfig) (string, error) {
-	bind := strings.TrimSpace(startupOpts.WebBind)
-	if startupOpts.WebBindExplicit {
+func webBindForLaunch(serveOpts serveConfig) (string, error) {
+	bind := strings.TrimSpace(serveOpts.WebBind)
+	if serveOpts.WebBindExplicit {
 		if bind == "" {
 			return defaultWebBind, nil
 		}
 		return bind, nil
 	}
-	if st != nil {
-		state, err := runtimeprefs.Global(ctx, st)
-		if err != nil {
-			return "", err
-		}
-		if isReusableWebBind(state.LastWebBind) {
-			return state.LastWebBind, nil
-		}
-	}
 	return defaultWebBind, nil
-}
-
-func saveLastWebBind(ctx context.Context, st *store.Store, bind string) error {
-	if !isReusableWebBind(bind) {
-		return nil
-	}
-	if st == nil {
-		return nil
-	}
-	return runtimeprefs.SetLastWebBind(ctx, st, bind)
 }
 
 func isReusableWebBind(bind string) bool {
@@ -278,41 +245,99 @@ func isReusableWebBind(bind string) bool {
 	return err == nil && port != "" && port != "0"
 }
 
-func newDoctorCommand(startup *startupOptions) *cobra.Command {
-	return &cobra.Command{
+func newDoctorCommand(root *rootOptions) *cobra.Command {
+	var opts doctorOptions
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Validate config and provider connectivity",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.LoadWithOptions(startup.loadOptions())
-			if err != nil {
-				return err
-			}
-			if err := cfg.RequireProvider(); err != nil {
-				return err
-			}
-			providerCfg, ok := cfg.Provider(cfg.Defaults.ProviderID)
-			if !ok {
-				return fmt.Errorf("default provider %q not configured", cfg.Defaults.ProviderID)
-			}
-			client, err := provider.New(cfg.Defaults.ProviderID, providerCfg, nil)
-			if err != nil {
-				return err
-			}
-			if err := client.Health(cmd.Context()); err != nil {
-				return err
-			}
-			models, err := client.ListModels(cmd.Context())
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "config: %s\n", cfg.Path())
-			fmt.Fprintf(cmd.OutOrStdout(), "provider: %s\n", cfg.Defaults.ProviderID)
-			for _, model := range models {
-				fmt.Fprintf(cmd.OutOrStdout(), "model: %s (%s)\n", model.ID, strings.TrimSpace(model.OwnedBy))
-			}
-			return nil
+			return runDoctor(cmd.Context(), cmd.OutOrStdout(), root.loadOptions(), opts)
 		},
 	}
+	flags := cmd.Flags()
+	flags.StringVar(&opts.providerID, "provider", "", "Provider id to check")
+	flags.StringVar(&opts.modelID, "model", "", "Model id to check")
+	flags.BoolVar(&opts.tts, "tts", false, "Check the configured TTS provider/model")
+	flags.BoolVar(&opts.listModels, "list-models", false, "List models returned by the provider")
+	return cmd
+}
+
+type doctorOptions struct {
+	providerID string
+	modelID    string
+	tts        bool
+	listModels bool
+}
+
+func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, opts doctorOptions) error {
+	cfg, err := config.LoadWithOptions(loadOpts)
+	if err != nil {
+		return err
+	}
+	providerID := strings.TrimSpace(opts.providerID)
+	modelID := strings.TrimSpace(opts.modelID)
+	if opts.tts {
+		if providerID == "" {
+			providerID = strings.TrimSpace(cfg.UI.TTS.ProviderID)
+		}
+		if modelID == "" {
+			modelID = strings.TrimSpace(cfg.UI.TTS.ModelID)
+		}
+	}
+	if providerID == "" {
+		if err := cfg.RequireProvider(); err != nil {
+			return err
+		}
+		providerID = strings.TrimSpace(cfg.Defaults.ProviderID)
+	}
+	if modelID == "" && !opts.tts {
+		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok {
+		return fmt.Errorf("provider %q not configured", providerID)
+	}
+	client, err := provider.New(providerID, providerCfg, nil)
+	if err != nil {
+		return err
+	}
+	if err := client.Health(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "config: %s\n", cfg.Path())
+	fmt.Fprintf(out, "provider: %s\n", providerID)
+	if modelID != "" {
+		fmt.Fprintf(out, "model: %s\n", modelID)
+	}
+	if opts.tts {
+		fmt.Fprintln(out, "mode: tts")
+	}
+	if !opts.listModels && modelID == "" {
+		return nil
+	}
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return err
+	}
+	if modelID != "" && !modelListContains(models, modelID) {
+		return fmt.Errorf("model %q was not returned by provider %q", modelID, providerID)
+	}
+	if opts.listModels {
+		for _, model := range models {
+			fmt.Fprintf(out, "model: %s (%s)\n", model.ID, strings.TrimSpace(model.OwnedBy))
+		}
+	}
+	return nil
+}
+
+func modelListContains(models []domain.Model, modelID string) bool {
+	modelID = strings.TrimSpace(modelID)
+	for _, model := range models {
+		if strings.TrimSpace(model.ID) == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func newVersionCommand() *cobra.Command {
@@ -331,12 +356,12 @@ func newVersionCommand() *cobra.Command {
 	}
 }
 
-func newSessionCommand(startup *startupOptions) *cobra.Command {
+func newSessionCommand(root *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
 		Short: "Inspect stored sessions",
 	}
-	cmd.AddCommand(newSessionDumpCommand(startup), newSessionTailCommand())
+	cmd.AddCommand(newSessionDumpCommand(root))
 	return cmd
 }
 
@@ -354,10 +379,11 @@ func newDebugCommand() *cobra.Command {
 			return nil
 		},
 	})
+	cmd.AddCommand(newDebugTailCommand())
 	return cmd
 }
 
-func newSessionDumpCommand(startup *startupOptions) *cobra.Command {
+func newSessionDumpCommand(root *rootOptions) *cobra.Command {
 	var sessionID id.ID
 	cmd := &cobra.Command{
 		Use:   "dump",
@@ -366,7 +392,7 @@ func newSessionDumpCommand(startup *startupOptions) *cobra.Command {
 			if sessionID == "" {
 				return fmt.Errorf("--id is required")
 			}
-			cfg, err := config.LoadWithOptions(startup.loadOptions())
+			cfg, err := config.LoadWithOptions(root.loadOptions())
 			if err != nil {
 				return err
 			}
@@ -412,21 +438,21 @@ func newSessionDumpCommand(startup *startupOptions) *cobra.Command {
 	return cmd
 }
 
-func newSessionTailCommand() *cobra.Command {
+func newDebugTailCommand() *cobra.Command {
 	var sessionID id.ID
-	var addr string
+	var url string
 	var interval time.Duration
 	cmd := &cobra.Command{
 		Use:   "tail",
 		Short: "Poll live debug events for a session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if sessionID == "" {
-				return fmt.Errorf("--id is required")
+				return fmt.Errorf("--session is required")
 			}
-			if strings.TrimSpace(addr) == "" {
-				return fmt.Errorf("set --addr to the running web UI address")
+			if strings.TrimSpace(url) == "" {
+				return fmt.Errorf("set --url to the running web UI URL")
 			}
-			baseURL := debugBaseURL(addr)
+			baseURL := debugBaseURL(url)
 			type payload struct {
 				Events []debugsrv.RecordedEvent `json:"events"`
 			}
@@ -464,8 +490,8 @@ func newSessionTailCommand() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar((*string)(&sessionID), "id", "", "Session ID to tail")
-	cmd.Flags().StringVar(&addr, "addr", "", "Running web UI address or URL, for example 127.0.0.1:44323")
+	cmd.Flags().StringVar((*string)(&sessionID), "session", "", "Session ID to tail")
+	cmd.Flags().StringVar(&url, "url", "", "Running web UI URL or address, for example http://127.0.0.1:44323")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "Polling interval")
 	return cmd
 }
