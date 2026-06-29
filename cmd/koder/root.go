@@ -53,11 +53,11 @@ func NewRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runKoder(cmd.Context(), app.StartupModeNew, workdir, startupOptsFromFlags(opts, false))
+			return runKoder(cmd.Context(), app.StartupModeNew, workdir, startupOptsFromFlags(opts))
 		},
 	}
 	bindStartupFlags(cmd, &opts)
-	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newResumeCommand(), newSessionCommand(), newDebugCommand(), newSkillCommand(), newExecCommand())
+	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newSessionCommand(), newDebugCommand(), newSkillCommand(), newExecCommand())
 	return cmd
 }
 
@@ -108,7 +108,6 @@ func (o startupOptions) resolve() (string, error) {
 }
 
 type startupConfig struct {
-	ShowAllSessions bool
 	NoOpenBrowser   bool
 	WebBind         string
 	WebBindExplicit bool
@@ -228,9 +227,8 @@ func startWebUI(ctx context.Context, controller *app.Controller, bind string, no
 	})
 }
 
-func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConfig {
+func startupOptsFromFlags(opts startupOptions) startupConfig {
 	return startupConfig{
-		ShowAllSessions: showAllSessions,
 		NoOpenBrowser:   opts.noOpenBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
@@ -274,26 +272,6 @@ func isReusableWebBind(bind string) bool {
 	}
 	_, port, err := net.SplitHostPort(bind)
 	return err == nil && port != "" && port != "0"
-}
-
-func newResumeCommand() *cobra.Command {
-	opts := startupOptions{}
-	var showAllSessions bool
-	cmd := &cobra.Command{
-		Use:   "resume",
-		Short: "Resume an existing session from a picker",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			opts.captureFlagState(cmd)
-			workdir, err := opts.resolve()
-			if err != nil {
-				return err
-			}
-			return runKoder(cmd.Context(), app.StartupModeResume, workdir, startupOptsFromFlags(opts, showAllSessions))
-		},
-	}
-	bindStartupFlags(cmd, &opts)
-	cmd.Flags().BoolVar(&showAllSessions, "all-sessions", false, "Show sessions from every working directory")
-	return cmd
 }
 
 func newDoctorCommand() *cobra.Command {

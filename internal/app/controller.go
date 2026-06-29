@@ -32,7 +32,6 @@ type StartupMode int
 
 const (
 	StartupModeNew StartupMode = iota
-	StartupModeResume
 )
 
 const defaultWorkspaceRefreshMinInterval = 10 * time.Second

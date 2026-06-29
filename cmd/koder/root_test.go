@@ -115,8 +115,8 @@ func TestBindStartupFlagsRegistersBrowserFlags(t *testing.T) {
 }
 
 func TestStartupConfigFromFlags(t *testing.T) {
-	got := startupOptsFromFlags(startupOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true}, true)
-	if !got.ShowAllSessions || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
+	got := startupOptsFromFlags(startupOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
+	if !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
 		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }
@@ -246,11 +246,14 @@ func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := []string{"doctor", "version", "resume", "session", "debug", "skill", "exec"}
+	want := []string{"doctor", "version", "session", "debug", "skill", "exec"}
 	for _, name := range want {
 		if child, _, err := cmd.Find([]string{name}); err != nil || child == nil || child.Name() != name {
 			t.Fatalf("expected subcommand %q to be registered, child=%v err=%v", name, child, err)
 		}
+	}
+	if child, _, err := cmd.Find([]string{"resume"}); err == nil && child != nil && child.Name() == "resume" {
+		t.Fatal("resume command should not be registered")
 	}
 }
 

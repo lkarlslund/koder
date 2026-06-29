@@ -1233,8 +1233,8 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 
 	engine := agent.New(cfg, st, nil, nil)
 	ctrl := New(cfg, engine)
-	if err := ctrl.Start(ctx, StartupModeResume, workspaceA); err != nil {
-		t.Fatalf("start resume: %v", err)
+	if err := ctrl.Start(ctx, StartupModeNew, workspaceA); err != nil {
+		t.Fatalf("start: %v", err)
 	}
 	if got := ctrl.State().Session.ID; got != "" {
 		t.Fatalf("expected no active session at startup, got %s", got)

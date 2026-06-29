@@ -30,13 +30,6 @@ koder --project-root /path/to/worktree --web-bind 127.0.0.1:8080
 koder --project-root /path/to/worktree --nobrowser
 ```
 
-Resume previous work:
-
-```bash
-koder resume --project-root /path/to/worktree
-koder resume --all-sessions
-```
-
 Check configuration and provider connectivity:
 
 ```bash
@@ -102,8 +95,6 @@ koder
 koder --project-root /path/to/worktree
 koder --web-bind 127.0.0.1:8080
 koder --nobrowser
-koder resume --project-root /path/to/worktree
-koder resume --all-sessions
 koder doctor
 koder debug info
 koder session --help
