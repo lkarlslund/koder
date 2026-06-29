@@ -78,7 +78,7 @@
                 <div class="fw-semibold text-truncate" x-text="file.path"></div>
                 <div class="small text-secondary" x-text="fileMeta()"></div>
               </div>
-              <template x-if="file.markdown && !file.binary && !file.too_large">
+              <template x-if="file.markdown && !file.binary && !file.too_large && !isImageFile()">
                 <div class="btn-group btn-group-sm" role="group" aria-label="Markdown view">
                   <button type="button" class="btn" :class="viewMode === 'preview' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'preview'">Preview</button>
                   <button type="button" class="btn" :class="viewMode === 'source' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'source'">Source</button>
@@ -86,25 +86,32 @@
               </template>
             </header>
 
-            <template x-if="file.too_large">
+            <template x-if="isImageFile()">
+              <div class="file-browser-image-preview">
+                <img :src="imagePreviewURL()" :alt="file.path" :data-source-path="file.path">
+                <button type="button" class="media-expand-button" title="Expand image"><i class="bi bi-arrows-angle-expand"></i></button>
+              </div>
+            </template>
+
+            <template x-if="file.too_large && !isImageFile()">
               <div class="file-browser-empty">
                 <i class="bi bi-file-earmark-break"></i>
                 <div>File is too large to preview</div>
               </div>
             </template>
 
-            <template x-if="file.binary">
+            <template x-if="file.binary && !isImageFile()">
               <div class="file-browser-empty">
                 <i class="bi bi-file-earmark-binary"></i>
                 <div>Binary file</div>
               </div>
             </template>
 
-            <template x-if="file.markdown && viewMode === 'preview' && !file.binary && !file.too_large">
-              <article class="markdown-body file-browser-markdown" x-html="markdownHTML(file.content)" x-effect="renderDiagrams($el, file.path)"></article>
+            <template x-if="file.markdown && viewMode === 'preview' && !file.binary && !file.too_large && !isImageFile()">
+              <article class="markdown-body file-browser-markdown" x-html="markdownHTML(file.content, file.path)" x-effect="renderDiagrams($el, file.path)"></article>
             </template>
 
-            <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large">
+            <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large && !isImageFile()">
               <pre class="file-browser-code"><code class="hljs" x-html="highlightedContent()"></code></pre>
             </template>
           </section>
@@ -131,6 +138,7 @@
         <div class="image-lightbox-body" @wheel="onLightboxWheel($event)" @pointerdown="startLightboxPan($event)" @pointermove.window="moveLightboxPan($event)" @pointerup.window="stopLightboxPan()" @pointercancel.window="stopLightboxPan()">
           <div class="image-lightbox-content" :class="{'is-dragging': imageLightbox.dragging}" :style="{transform: lightboxTransform()}">
             <div x-show="imageLightbox.kind === 'svg'" class="image-lightbox-svg" x-html="imageLightbox.html"></div>
+            <img x-show="imageLightbox.kind === 'image'" class="image-lightbox-img" :src="imageLightbox.src" :alt="imageLightbox.title || 'Image'">
           </div>
         </div>
       </section>

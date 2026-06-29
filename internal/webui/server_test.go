@@ -160,6 +160,7 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		`/assets/file_browser.js`,
 		`imageLightbox.open`,
 		`image-lightbox`,
+		`image-lightbox-img`,
 		currentAssetHash,
 	} {
 		if !strings.Contains(text, want) {
@@ -212,6 +213,13 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("# Project\n\n```go\npackage main\n```\n"), 0o644); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
+	if err := os.Mkdir(filepath.Join(workdir, "images"), 0o755); err != nil {
+		t.Fatalf("mkdir images: %v", err)
+	}
+	imageBytes := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89")
+	if err := os.WriteFile(filepath.Join(workdir, "images", "pixel.png"), imageBytes, 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(workdir, "cmd", "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write main.go: %v", err)
 	}
@@ -262,6 +270,43 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	}
 	if !file.Markdown || file.Language != "markdown" || !strings.Contains(file.Content, "# Project") {
 		t.Fatalf("unexpected markdown response: %#v", file)
+	}
+
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=images/pixel.png")
+	if err != nil {
+		t.Fatalf("read image metadata: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected image read ok, got %d: %s", resp.StatusCode, body)
+	}
+	file = fileContentResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		t.Fatalf("decode image file: %v", err)
+	}
+	if !file.Image || file.Binary || file.Content != "" || file.MIME != "image/png" {
+		t.Fatalf("unexpected image metadata response: %#v", file)
+	}
+
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/raw?path=images/pixel.png")
+	if err != nil {
+		t.Fatalf("read raw image: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected raw image ok, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "image/png") {
+		t.Fatalf("expected raw image content type, got %q", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read raw image body: %v", err)
+	}
+	if !bytes.Equal(body, imageBytes) {
+		t.Fatalf("unexpected raw image body: got %d bytes want %d", len(body), len(imageBytes))
 	}
 
 	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=../outside.txt")

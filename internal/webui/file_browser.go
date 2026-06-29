@@ -52,6 +52,7 @@ type fileContentResponse struct {
 	Modified    string `json:"modified,omitempty"`
 	Content     string `json:"content,omitempty"`
 	Binary      bool   `json:"binary,omitempty"`
+	Image       bool   `json:"image,omitempty"`
 	TooLarge    bool   `json:"too_large,omitempty"`
 	Markdown    bool   `json:"markdown,omitempty"`
 }
@@ -82,6 +83,8 @@ func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, s
 		s.handleSessionFileTree(w, r, sessionID)
 	case "read":
 		s.handleSessionFileRead(w, r, sessionID)
+	case "raw":
+		s.handleSessionFileRaw(w, r, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -137,10 +140,20 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 		Path:        rel,
 		Name:        info.Name(),
 		Language:    languageForFile(rel),
-		MIME:        mime.TypeByExtension(strings.ToLower(filepath.Ext(rel))),
 		Size:        info.Size(),
 		Modified:    info.ModTime().Format(timeFormatRFC3339()),
 		Markdown:    isMarkdownFile(rel),
+	}
+	mimeType, err := detectFileBrowserMIME(full, rel)
+	if err != nil {
+		writeFileBrowserError(w, err)
+		return
+	}
+	resp.MIME = mimeType
+	resp.Image = isFileBrowserImageMIME(mimeType)
+	if resp.Image {
+		writeFileBrowserJSON(w, r, resp)
+		return
 	}
 	if info.Size() > maxFileBrowserFileBytes {
 		resp.TooLarge = true
@@ -159,6 +172,41 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 	}
 	resp.Content = string(data)
 	writeFileBrowserJSON(w, r, resp)
+}
+
+func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	if err != nil {
+		writeFileBrowserError(w, err)
+		return
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		writeFileBrowserError(w, fmt.Errorf("stat path: %w", err))
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "path is a directory", http.StatusBadRequest)
+		return
+	}
+	mimeType, err := detectFileBrowserMIME(full, rel)
+	if err != nil {
+		writeFileBrowserError(w, err)
+		return
+	}
+	if !isFileBrowserImageMIME(mimeType) {
+		http.Error(w, "file is not a supported image", http.StatusBadRequest)
+		return
+	}
+	file, err := os.Open(full)
+	if err != nil {
+		writeFileBrowserError(w, fmt.Errorf("open file: %w", err))
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
 func (s *Server) sessionFilePath(ctx context.Context, sessionID id.ID, rawRel string) (string, string, string, error) {
@@ -273,6 +321,36 @@ func looksBinary(data []byte) bool {
 		return true
 	}
 	return !utf8.Valid(data)
+}
+
+func detectFileBrowserMIME(full, rel string) (string, error) {
+	extMIME := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(rel))))
+	if isFileBrowserImageMIME(extMIME) {
+		return extMIME, nil
+	}
+	file, err := os.Open(full)
+	if err != nil {
+		return extMIME, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+	var sniff [512]byte
+	n, err := file.Read(sniff[:])
+	if err != nil && n == 0 {
+		return extMIME, nil
+	}
+	detected := http.DetectContentType(sniff[:n])
+	if detected == "application/octet-stream" && extMIME != "" {
+		return extMIME, nil
+	}
+	if detected != "" {
+		return detected, nil
+	}
+	return extMIME, nil
+}
+
+func isFileBrowserImageMIME(mimeType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	return strings.HasPrefix(normalized, "image/")
 }
 
 func isMarkdownFile(name string) bool {

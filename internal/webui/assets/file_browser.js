@@ -71,6 +71,51 @@
     return template.innerHTML;
   }
 
+  function isExternalResourceURL(value) {
+    const src = String(value || '').trim();
+    return !src || src.startsWith('#') || src.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(src);
+  }
+
+  function resolveMarkdownAssetPath(src, basePath) {
+    src = String(src || '').trim();
+    if (isExternalResourceURL(src)) return '';
+    const cleanSrc = src.split('#')[0].split('?')[0].replace(/\\/g, '/');
+    if (!cleanSrc) return '';
+    if (cleanSrc.startsWith('/')) return cleanSrc.replace(/^\/+/, '');
+    const base = String(basePath || '').replace(/\\/g, '/');
+    const baseDir = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '';
+    const parts = (baseDir ? baseDir + '/' + cleanSrc : cleanSrc).split('/');
+    const stack = [];
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      if (part === '..') {
+        if (!stack.length) return '';
+        stack.pop();
+        continue;
+      }
+      stack.push(part);
+    }
+    return stack.join('/');
+  }
+
+  function rewriteMarkdownImageSources(html, basePath, rawURLForPath) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll('img').forEach(img => {
+      const original = img.getAttribute('src') || '';
+      const resolved = resolveMarkdownAssetPath(original, basePath);
+      if (!resolved) return;
+      img.setAttribute('src', rawURLForPath(resolved));
+      img.setAttribute('loading', 'lazy');
+      img.setAttribute('decoding', 'async');
+      img.setAttribute('data-source-path', resolved);
+      img.classList.add('file-browser-markdown-image');
+      img.removeAttribute('srcset');
+      if (!img.getAttribute('title')) img.setAttribute('title', resolved);
+    });
+    return template.innerHTML;
+  }
+
   function configureMermaid() {
     if (!window.mermaid || window.koderFilesMermaidConfigured) return;
     mermaid.initialize({
@@ -134,6 +179,10 @@
         const base = this.sessionURL() + '/files';
         const value = String(path || '').trim();
         return value ? base + '?path=' + encodeURIComponent(value) : base;
+      },
+
+      rawFileURL(path) {
+        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/raw?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
       },
 
       pathFromURL() {
@@ -247,6 +296,15 @@
         return parts.join(' · ');
       },
 
+      isImageFile() {
+        const mime = String(this.file?.mime || '').toLowerCase();
+        return Boolean(this.file?.image || mime.startsWith('image/'));
+      },
+
+      imagePreviewURL() {
+        return this.file?.path ? this.rawFileURL(this.file.path) : '';
+      },
+
       highlightedContent() {
         const text = this.file?.content || '';
         const language = this.file?.language || '';
@@ -259,12 +317,13 @@
         }
       },
 
-      markdownHTML(source) {
+      markdownHTML(source, filePath) {
         const text = String(source || '');
         if (!text.trim()) return '';
         if (!window.marked) return '<pre>' + escapeHTML(text) + '</pre>';
         marked.setOptions({gfm: true, breaks: false});
         let html = marked.parse(text);
+        html = rewriteMarkdownImageSources(html, filePath || this.file?.path || '', path => this.rawFileURL(path));
         html = sanitizeHTML(html);
         html = renderMermaidPlaceholders(html);
         html = highlightMarkdownCode(html);
@@ -272,18 +331,32 @@
       },
 
       handleMediaPreviewClick(event) {
-        const trigger = event.target?.closest?.('.mermaid-diagram .media-expand-button');
-        if (!trigger) return;
+        const mermaidTrigger = event.target?.closest?.('.mermaid-diagram .media-expand-button');
+        if (mermaidTrigger) {
+          event.preventDefault();
+          const diagram = mermaidTrigger.closest('.mermaid-diagram');
+          const svg = diagram?.querySelector('.mermaid-diagram-content svg');
+          this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+          return;
+        }
+        const imageTrigger = event.target?.closest?.('.file-browser-image-preview .media-expand-button, .file-browser-markdown img');
+        if (!imageTrigger) return;
         event.preventDefault();
-        const diagram = trigger.closest('.mermaid-diagram');
-        const svg = diagram?.querySelector('.mermaid-diagram-content svg');
-        this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+        const img = imageTrigger.matches('img') ? imageTrigger : imageTrigger.closest('.file-browser-image-preview')?.querySelector('img');
+        if (!img?.src) return;
+        this.openImageLightbox(img.src, img.getAttribute('data-source-path') || img.getAttribute('alt') || this.file?.path || 'Image', 'Drag to pan, wheel or buttons to zoom');
       },
 
       openMermaidLightbox(html, title, meta) {
         html = sanitizeMermaidSVG(html || '');
         if (!html) return;
         this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+      },
+
+      openImageLightbox(src, title, meta) {
+        src = String(src || '').trim();
+        if (!src) return;
+        this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
       },
 
       closeImageLightbox() {
