@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1557,6 +1558,73 @@ func TestControllerWorkspaceWatcherRefreshesChangedStatus(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatalf("expected refreshed workspace delta, state=%#v", ctrl.State().Workspace)
+		}
+	}
+}
+
+func TestControllerWorkspaceWatcherThrottlesRefreshes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workdir := t.TempDir()
+	runGit(t, workdir, "init")
+	runGit(t, workdir, "config", "user.email", "test@example.com")
+	runGit(t, workdir, "config", "user.name", "Test User")
+	path := filepath.Join(workdir, "tracked.txt")
+	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workdir, "add", "tracked.txt")
+	runGit(t, workdir, "commit", "-m", "initial")
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	ctrl.workspaceRefreshMinInterval = time.Hour
+	var snapshots atomic.Int32
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+		snapshots.Add(1)
+		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+	}
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	session := activateTestSession(t, ctrl, workdir)
+	if _, err := ctrl.RefreshWorkspaceForSelection(ctx, Selection{SessionID: session.ID}); err != nil {
+		t.Fatalf("initial refresh workspace: %v", err)
+	}
+	baseline := snapshots.Load()
+	if baseline < 1 {
+		t.Fatalf("expected at least one workspace snapshot, got %d", baseline)
+	}
+	events, unsub := ctrl.Subscribe()
+	defer unsub()
+
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type != "workspace_delta" {
+				continue
+			}
+			status := event.Payload.(map[string]any)["workspace_status"].(workspacepkg.Status)
+			if status.Stale {
+				if got := snapshots.Load(); got != baseline {
+					t.Fatalf("watcher bypassed refresh throttle, snapshots=%d baseline=%d", got, baseline)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("expected stale workspace delta, snapshots=%d baseline=%d", snapshots.Load(), baseline)
 		}
 	}
 }

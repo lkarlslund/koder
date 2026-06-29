@@ -93,6 +93,15 @@
     </main>
 
     <main class="transcript p-3" x-show="sessionLoadedMode()" x-milestoneKey="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
+      <div class="chat-switch-overlay" x-show="switchingChatMode()" x-transition.opacity style="display: none;" aria-live="polite">
+        <div class="chat-switch-panel">
+          <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
+          <span>
+            <span class="fw-semibold">Loading chat</span>
+            <span class="d-block small text-secondary text-truncate" x-text="switchingChat.title || switchingChat.id"></span>
+          </span>
+        </div>
+      </div>
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
@@ -317,7 +326,7 @@
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
-            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" draggable="true" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat)}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
+            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" draggable="true" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat)}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
               <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
                 <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder"></i>
                 <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>

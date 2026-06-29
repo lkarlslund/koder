@@ -1534,6 +1534,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `katex.renderToString`) ||
 		!strings.Contains(fullPage, `renderMathInHTML(html)`) ||
+		!strings.Contains(fullPage, `containsMarkdownMath`) ||
 		!strings.Contains(fullPage, `koder-math-inline`) ||
 		!strings.Contains(fullPage, `pre, code, kbd, samp`) {
 		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
@@ -1792,6 +1793,14 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
+	}
+	if !strings.Contains(fullPage, `switchingChatMode()`) ||
+		!strings.Contains(fullPage, `beginSwitchingChat(target)`) ||
+		!strings.Contains(fullPage, `clearSwitchingChat()`) ||
+		!strings.Contains(fullPage, `class="chat-switch-overlay"`) ||
+		!strings.Contains(fullPage, `Loading chat`) ||
+		!strings.Contains(fullPage, `'chat-switching': switchingChat.id === chatID(chat)`) {
+		t.Fatalf("expected explicit chat switches to show immediate loading feedback")
 	}
 	if !strings.Contains(fullPage, `selectionFromLocation()`) ||
 		!strings.Contains(fullPage, `params.set('chat', route.chatID)`) ||

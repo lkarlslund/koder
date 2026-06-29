@@ -122,6 +122,14 @@
         return escapeHTML(displayMode ? '$$' + source + '$$' : '$' + source + '$');
       }
     }
+    function containsMarkdownMath(text) {
+      const source = String(text || '');
+      if (!/[\\$]/.test(source)) return false;
+      for (let i = 0; i < source.length; i++) {
+        if (mathTokenAt(source, i)) return true;
+      }
+      return false;
+    }
     function renderMathTextNode(node) {
       const text = node.textContent || '';
       if (!/[\\$]/.test(text)) return;
@@ -152,7 +160,7 @@
       node.replaceWith(fragment);
     }
     function renderMathInHTML(html) {
-      if (!html || !window.katex) return html;
+      if (!html || !window.katex || !containsMarkdownMath(html)) return html;
       const template = document.createElement('template');
       template.innerHTML = html;
       const ignored = 'pre, code, kbd, samp, script, style, .katex, .mermaid-diagram';
@@ -953,7 +961,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1959,6 +1967,7 @@
           const seq = ++this.scrollRestoreSeq;
           this.state = this.cacheStateTimelines(s || {});
           this.hydratingSession = {active: false, id: '', title: '', error: ''};
+          this.clearSwitchingChat();
           if (!this.restartNeeded()) {
             this.restartRequestPending = false;
             this.restartAcknowledged = false;
@@ -1993,6 +2002,7 @@
         welcomeMode() { return !this.currentSessionID() && !this.hydratingSession.active; },
         hydratingSessionMode() { return !!this.hydratingSession.active; },
         sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
+        switchingChatMode() { return !!this.switchingChat.active; },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
         sessionURL(id) {
           const session = String(id || '').trim();
@@ -2904,6 +2914,10 @@
           const title = String(chat?.Title || chat?.title || '').trim();
           return title || 'Chat';
         },
+        chatByID(id) {
+          const target = String(id || '').trim();
+          return (this.state.chats || this.state.Chats || []).find(chat => this.chatID(chat) === target) || null;
+        },
         chatArchived(chat) { return !!(chat?.Archived || chat?.archived); },
         visibleChats() {
           const chats = this.state.chats || this.state.Chats || [];
@@ -3606,7 +3620,20 @@
             this.openURLInNewTab(this.chatURL(id));
             return;
           }
-          this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); });
+          const target = String(id || '').trim();
+          if (!target || target === String(this.activeChatID() || '')) return;
+          this.beginSwitchingChat(target);
+          this.rpc('switch_chat', {chat_id: target}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.clearSwitchingChat(); this.showToast(err.message); });
+        },
+        beginSwitchingChat(id) {
+          const chat = this.chatByID(id);
+          this.switchingChat = {active: true, id, title: chat ? this.chatTitle(chat) : 'Loading chat', startedAt: Date.now()};
+          this.reportClientStateSoon();
+        },
+        clearSwitchingChat() {
+          if (!this.switchingChat.active) return;
+          this.switchingChat = {active: false, id: '', title: '', startedAt: 0};
+          this.reportClientStateSoon();
         },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
         renameChat(chat) {
