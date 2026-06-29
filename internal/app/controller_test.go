@@ -1240,7 +1240,7 @@ func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 }
 
 func TestControllerStateForSelectionDoesNotSwitchControllerState(t *testing.T) {
-	ctrl, _ := newTestController(t)
+	ctrl, st := newTestController(t)
 	ctx := context.Background()
 
 	firstState := ctrl.State()
@@ -1262,12 +1262,38 @@ func TestControllerStateForSelectionDoesNotSwitchControllerState(t *testing.T) {
 	if secondState.ActiveChatID == "" {
 		t.Fatalf("expected selected state to include active chat")
 	}
+	storedSessionBefore, err := modeltest.GetSession(ctx, st, secondSession.ID)
+	if err != nil {
+		t.Fatalf("get stored session: %v", err)
+	}
+	storedChatBefore, err := testGetChat(ctx, st, secondState.ActiveChatID)
+	if err != nil {
+		t.Fatalf("get stored chat: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := ctrl.StateForSelection(ctx, Selection{SessionID: secondSession.ID, ChatID: secondState.ActiveChatID}); err != nil {
+		t.Fatalf("state for selected chat: %v", err)
+	}
+	storedSessionAfter, err := modeltest.GetSession(ctx, st, secondSession.ID)
+	if err != nil {
+		t.Fatalf("get stored session after state read: %v", err)
+	}
+	storedChatAfter, err := testGetChat(ctx, st, secondState.ActiveChatID)
+	if err != nil {
+		t.Fatalf("get stored chat after state read: %v", err)
+	}
+	if !storedSessionAfter.UpdatedAt.Equal(storedSessionBefore.UpdatedAt) {
+		t.Fatalf("state read touched session updated_at: before=%s after=%s", storedSessionBefore.UpdatedAt, storedSessionAfter.UpdatedAt)
+	}
+	if !storedChatAfter.UpdatedAt.Equal(storedChatBefore.UpdatedAt) {
+		t.Fatalf("state read touched chat updated_at: before=%s after=%s", storedChatBefore.UpdatedAt, storedChatAfter.UpdatedAt)
+	}
 	if got := ctrl.State().Session.ID; got != firstSessionID {
 		t.Fatalf("expected controller state to remain %s after second selection state, got %s", firstSessionID, got)
 	}
 }
 
-func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
+func TestControllerStateForSelectionDoesNotPersistLastUsedChat(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.Defaults.ProviderID = "test"
@@ -1286,9 +1312,9 @@ func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	activateTestSession(t, ctrl, workdir)
 	selection := controllerSelection(ctrl)
 	first := selection.ChatID
-	_ = newSelectedChat(t, ctrl, selection, "Side")
+	side := newSelectedChat(t, ctrl, selection, "Side")
 	if _, err := ctrl.StateForSelection(ctx, selection); err != nil {
-		t.Fatalf("touch first chat: %v", err)
+		t.Fatalf("read first chat state: %v", err)
 	}
 
 	next := New(cfg, agent.New(cfg, st, nil, nil))
@@ -1299,8 +1325,8 @@ func TestControllerSelectedChatPersistsLastUsedChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state after restart: %v", err)
 	}
-	if got := state.ActiveChatID; got != first {
-		t.Fatalf("expected restarted controller to focus chat %s, got %s", first, got)
+	if got := state.ActiveChatID; got != side.ID {
+		t.Fatalf("expected state read not to persist viewed chat %s; restarted controller focused %s, want newest chat %s", first, got, side.ID)
 	}
 }
 

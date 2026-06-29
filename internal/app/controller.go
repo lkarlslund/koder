@@ -436,7 +436,7 @@ func (c *Controller) State() State {
 
 // StateForSelection returns a detached browser state for a single client selection.
 func (c *Controller) StateForSelection(ctx context.Context, selection Selection) (State, error) {
-	return c.stateForSelection(ctx, selection, true)
+	return c.stateForSelection(ctx, selection, false)
 }
 
 // SessionByID returns a session snapshot without changing controller selection.
