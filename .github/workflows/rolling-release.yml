@@ -1,0 +1,185 @@
+name: Rolling release
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Rebuild and replace assets even when the latest release is already at HEAD"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build rolling release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Compute release metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(gh release list --limit 100 --json tagName --jq '[.[].tagName | select(test("^r[0-9]{4}$"))][0] // ""')"
+          if [[ -n "$latest_tag" ]]; then
+            git fetch --force origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}" || true
+          fi
+
+          release_has_expected_assets() {
+            local tag="$1"
+            local missing=0
+            local asset
+            local expected_assets=(
+              "koder-${tag}-linux-amd64"
+              "koder-${tag}-linux-amd64.sha256"
+              "koder-${tag}-linux-arm64"
+              "koder-${tag}-linux-arm64.sha256"
+            )
+
+            mapfile -t release_assets < <(gh release view "$tag" --json assets --jq '.assets[].name')
+            for asset in "${expected_assets[@]}"; do
+              if ! printf '%s\n' "${release_assets[@]}" | grep -Fxq "$asset"; then
+                echo "Release ${tag} is missing ${asset}."
+                missing=1
+              fi
+            done
+
+            return "$missing"
+          }
+
+          repair_release=false
+          if [[ -n "$latest_tag" ]] && git rev-parse -q --verify "refs/tags/${latest_tag}" >/dev/null; then
+            if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "${latest_tag}")" ]]; then
+              if [[ "${FORCE_REBUILD}" != "true" ]] && release_has_expected_assets "$latest_tag"; then
+                echo "changed=false" >>"$GITHUB_OUTPUT"
+                echo "No changes since ${latest_tag}, and all expected assets exist; skipping release."
+                exit 0
+              fi
+
+              repair_release=true
+              tag="$latest_tag"
+              changelog_range="${latest_tag}..HEAD"
+            else
+              previous_number="${latest_tag#r}"
+              next_number=$((10#$previous_number + 1))
+              tag="$(printf 'r%04d' "$next_number")"
+              changelog_range="${latest_tag}..HEAD"
+            fi
+          else
+            next_number=1
+            tag="$(printf 'r%04d' "$next_number")"
+            changelog_range="HEAD"
+          fi
+
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          built_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+          {
+            echo "changed=true"
+            echo "repair_release=${repair_release}"
+            echo "tag=${tag}"
+            echo "short_sha=${short_sha}"
+            echo "built_at=${built_at}"
+          } >>"$GITHUB_OUTPUT"
+
+          {
+            echo "## koder ${tag}"
+            echo
+            echo "Linux x64 and Linux ARM64 rolling release built from ${short_sha}."
+            echo
+            echo "### Changelog"
+            echo
+            if [[ "$repair_release" == "true" ]]; then
+              echo "- Rebuilt release assets for ${short_sha}."
+            else
+              git log --no-merges --format='- %s (%h)' "$changelog_range"
+            fi
+          } > release-notes.md
+
+      - name: Run tests
+        if: steps.meta.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          go test ./cmd/... ./internal/...
+
+      - name: Build Linux x64 artifact
+        if: steps.meta.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.tag }}
+          COMMIT: ${{ steps.meta.outputs.short_sha }}
+          DIRTY: "false"
+          BUILD_TIME: ${{ steps.meta.outputs.built_at }}
+          KODER_EXTRA_LDFLAGS: "-s -w"
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          scripts/build-koder "dist/koder-${VERSION}-linux-amd64"
+          sha256sum "dist/koder-${VERSION}-linux-amd64" > "dist/koder-${VERSION}-linux-amd64.sha256"
+
+      - name: Build Linux ARM64 artifact
+        if: steps.meta.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.tag }}
+          COMMIT: ${{ steps.meta.outputs.short_sha }}
+          DIRTY: "false"
+          BUILD_TIME: ${{ steps.meta.outputs.built_at }}
+          KODER_EXTRA_LDFLAGS: "-s -w"
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          scripts/build-koder "dist/koder-${VERSION}-linux-arm64"
+          sha256sum "dist/koder-${VERSION}-linux-arm64" > "dist/koder-${VERSION}-linux-arm64.sha256"
+
+      - name: Publish GitHub release
+        if: steps.meta.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          REPAIR_RELEASE: ${{ steps.meta.outputs.repair_release }}
+        run: |
+          set -euo pipefail
+          if [[ "$REPAIR_RELEASE" == "true" ]]; then
+            gh release upload "$TAG" \
+              "dist/koder-${TAG}-linux-amd64" \
+              "dist/koder-${TAG}-linux-amd64.sha256" \
+              "dist/koder-${TAG}-linux-arm64" \
+              "dist/koder-${TAG}-linux-arm64.sha256" \
+              --clobber
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              "dist/koder-${TAG}-linux-amd64" \
+              "dist/koder-${TAG}-linux-amd64.sha256" \
+              "dist/koder-${TAG}-linux-arm64" \
+              "dist/koder-${TAG}-linux-arm64.sha256"
+          fi

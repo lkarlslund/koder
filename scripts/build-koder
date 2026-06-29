@@ -21,7 +21,11 @@ LDFLAGS=(
   "-X" "github.com/lkarlslund/koder/internal/version.Dirty=$DIRTY"
   "-X" "github.com/lkarlslund/koder/internal/version.BuildTime=$BUILD_TIME"
 )
+EXTRA_LDFLAGS=()
+if [[ -n "${KODER_EXTRA_LDFLAGS:-}" ]]; then
+  read -r -a EXTRA_LDFLAGS <<<"$KODER_EXTRA_LDFLAGS"
+fi
 
 cd "$ROOT_DIR"
-go build -ldflags "$(printf '%s ' "${LDFLAGS[@]}")" -o "$OUT" ./cmd/koder
+go build -trimpath -ldflags "$(printf '%s ' "${EXTRA_LDFLAGS[@]}" "${LDFLAGS[@]}")" -o "$OUT" ./cmd/koder
 echo "$OUT"
