@@ -1019,13 +1019,20 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"accepted": true}, s.controller.DenyForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
 	case "composer_completions":
 		var in struct {
-			Text   string `json:"text"`
-			Cursor int    `json:"cursor"`
+			Text      string `json:"text"`
+			Cursor    int    `json:"cursor"`
+			SessionID id.ID  `json:"session_id"`
+			ChatID    id.ID  `json:"chat_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.CompleteComposerForSelection(ctx, s.appSelection(clientID), in.Text, in.Cursor)
+		selection := s.appSelection(clientID)
+		if in.SessionID != "" {
+			selection.SessionID = in.SessionID
+			selection.ChatID = in.ChatID
+		}
+		return s.controller.CompleteComposerForSelection(ctx, selection, in.Text, in.Cursor)
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "save_preferences":

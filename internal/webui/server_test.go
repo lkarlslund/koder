@@ -3186,6 +3186,82 @@ func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testi
 	}
 }
 
+func TestWebSocketComposerCompletionsUseExplicitSelection(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".agents", "skills", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".agents", "skills", "review", "SKILL.md"), []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := newTestControllerWithWorkdir(t, workdir)
+	state := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	req := fmt.Sprintf(`{"id":1,"method":"composer_completions","params":{"text":"Use $rev","cursor":8,"session_id":%q,"chat_id":%q}}`, state.Session.ID, state.ActiveChatID)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(req)); err != nil {
+		t.Fatalf("write explicit skill completion request: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Kind  string `json:"kind"`
+			Items []struct {
+				InsertText string `json:"insert_text"`
+			} `json:"items"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode skill completions: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected skill completions ok, got %s", resp.Error)
+	}
+	if resp.Result.Kind != "skill" || len(resp.Result.Items) != 1 || resp.Result.Items[0].InsertText != "$review" {
+		t.Fatalf("unexpected skill completions: %#v", resp.Result)
+	}
+
+	req = fmt.Sprintf(`{"id":2,"method":"composer_completions","params":{"text":"Read @REA","cursor":9,"session_id":%q,"chat_id":%q}}`, state.Session.ID, state.ActiveChatID)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(req)); err != nil {
+		t.Fatalf("write explicit reference completion request: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	resp = struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Kind  string `json:"kind"`
+			Items []struct {
+				InsertText string `json:"insert_text"`
+			} `json:"items"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}{}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode reference completions: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected reference completions ok, got %s", resp.Error)
+	}
+	if resp.Result.Kind != "reference" || len(resp.Result.Items) == 0 || resp.Result.Items[0].InsertText != "@README.md" {
+		t.Fatalf("unexpected reference completions: %#v", resp.Result)
+	}
+}
+
 func TestClipboardImageUploadEndpointReturnsDraftAttachment(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())

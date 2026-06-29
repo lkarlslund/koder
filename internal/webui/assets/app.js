@@ -3564,7 +3564,12 @@
           const el = this.$refs.composerInput; if (!el) return;
           const cursor = el.selectionStart ?? this.draft.length;
           const seq = ++this.completionSeq;
-          this.rpc('composer_completions', {text: this.draft, cursor}).then(result => {
+          this.rpc('composer_completions', {
+            text: this.draft,
+            cursor,
+            session_id: this.currentSessionID(),
+            chat_id: String(this.activeChatID() || ''),
+          }).then(result => {
             if (seq !== this.completionSeq) return;
             const items = result.items || [];
             this.completion = {kind: result.kind || '', query: result.query || '', start: result.start || 0, end: result.end || cursor, items, selected: 0};
