@@ -2010,6 +2010,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}
+	if !strings.Contains(fullPage, `rename_chat`) ||
+		!strings.Contains(fullPage, `renameChat(chat)`) ||
+		!strings.Contains(fullPage, `chatTitle(chat)`) ||
+		!strings.Contains(fullPage, `title="Rename chat"`) ||
+		!strings.Contains(fullPage, `bi-pencil`) {
+		t.Fatalf("expected chat sidebar rename action")
+	}
 	if !strings.Contains(fullPage, `visibleChats()`) ||
 		!strings.Contains(fullPage, `chatStatusFilterOptions()`) ||
 		!strings.Contains(fullPage, `chatFilterStatuses()`) ||
@@ -2042,6 +2049,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chat-list-main`) ||
 		!strings.Contains(fullPage, `chat-list-content`) ||
 		!strings.Contains(fullPage, `chat-title`) ||
+		!strings.Contains(fullPage, `chat-title-edit`) ||
 		!strings.Contains(fullPage, `.sidebar-list .chat-list-main, .sidebar-list .chat-list-content, .sidebar-list .chat-title { min-width: 0; }`) ||
 		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }`) {
 		t.Fatalf("expected chat rows to constrain title overflow inside sidebar")
@@ -2577,6 +2585,65 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	}
 	if !foundArchived {
 		t.Fatalf("expected archived chat to remain listed as archived: %#v", state.Chats)
+	}
+}
+
+func TestWebSocketRenameChatUpdatesChatTitle(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	sessionID := state.Session.ID
+	chatID := state.ActiveChatID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(sessionID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"rename_chat","params":{"chat_id":"%s","title":"Renamed chat"}}`, chatID))); err != nil {
+		t.Fatalf("write rename_chat: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ActiveChatID id.ID         `json:"active_chat_id"`
+			Chats        []domain.Chat `json:"chats"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected rename_chat ok, got %s", resp.Error)
+	}
+	if resp.Result.ActiveChatID != chatID {
+		t.Fatalf("expected active chat to remain %s, got %s", chatID, resp.Result.ActiveChatID)
+	}
+	found := false
+	for _, chat := range resp.Result.Chats {
+		if chat.ID == chatID {
+			found = true
+			if chat.Title != "Renamed chat" {
+				t.Fatalf("expected renamed chat title in response, got %q", chat.Title)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected renamed chat in response: %#v", resp.Result.Chats)
+	}
+	state, err = ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID, ChatID: chatID})
+	if err != nil {
+		t.Fatalf("state for session: %v", err)
+	}
+	if state.Snapshot.Chat.Title != "Renamed chat" {
+		t.Fatalf("expected renamed chat title in controller state, got %q", state.Snapshot.Chat.Title)
 	}
 }
 

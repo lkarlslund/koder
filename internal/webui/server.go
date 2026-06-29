@@ -33,6 +33,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 const defaultOpenDelay = 5 * time.Second
@@ -812,6 +813,29 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		selection := s.clientSelection(clientID)
 		selection.ChatID = chatRecord.ID
 		s.setClientSelection(clientID, selection)
+		return s.stateForClient(ctx, clientID)
+	case "rename_chat":
+		var in struct {
+			ChatID id.ID  `json:"chat_id"`
+			Title  string `json:"title"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if in.ChatID == "" {
+			return nil, fmt.Errorf("chat id is required")
+		}
+		title := strings.TrimSpace(in.Title)
+		if title == "" {
+			return nil, fmt.Errorf("chat title is required")
+		}
+		selection := s.clientSelection(clientID)
+		if selection.SessionID == "" {
+			return nil, fmt.Errorf("session is required")
+		}
+		if _, err := s.controller.UpdateChat(ctx, selection.SessionID, in.ChatID, in.ChatID, chattool.UpdateRequest{Title: title}); err != nil {
+			return nil, err
+		}
 		return s.stateForClient(ctx, clientID)
 	case "rollback_chat":
 		var in struct {

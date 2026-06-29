@@ -51,10 +51,12 @@
     .sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }
     .sidebar-list .chat-list-item .btn { line-height: 1.1; }
     .sidebar-list .chat-list-main, .sidebar-list .chat-list-content, .sidebar-list .chat-title { min-width: 0; }
-    .sidebar-list .chat-list-main { overflow: hidden; }
+    .sidebar-list .chat-list-main { overflow: hidden; cursor: pointer; }
     .sidebar-list .chat-title { flex: 1 1 auto; }
     .sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }
     .sidebar-list .chat-list-item.dragging { opacity: .55; }
+    .chat-title-edit { flex: 0 0 auto; color: inherit; opacity: .55; }
+    .chat-title-edit:hover, .chat-title-edit:focus-visible { opacity: 1; }
     .chat-drag-handle { color: var(--bs-secondary-color); cursor: grab; }
     .status-filter-row { display: flex; flex-wrap: wrap; gap: .25rem; margin: .2rem 0 .3rem; }
     .status-filter-button { display: inline-flex; align-items: center; gap: .25rem; min-height: 1.35rem; max-width: 100%; padding: .08rem .38rem; border: 1px solid var(--bs-border-color); border-radius: .3rem; background: transparent; color: var(--bs-secondary-color); font-size: .72rem; line-height: 1.1; }

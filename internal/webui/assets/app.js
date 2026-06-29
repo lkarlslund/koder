@@ -2900,6 +2900,10 @@
           return 'planning-badge-pending';
         },
         chatID(chat) { return String(chat?.ID || chat?.id || '').trim(); },
+        chatTitle(chat) {
+          const title = String(chat?.Title || chat?.title || '').trim();
+          return title || 'Chat';
+        },
         chatArchived(chat) { return !!(chat?.Archived || chat?.archived); },
         visibleChats() {
           const chats = this.state.chats || this.state.Chats || [];
@@ -3605,6 +3609,26 @@
           this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); });
         },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
+        renameChat(chat) {
+          const id = this.chatID(chat);
+          if (!id) return;
+          const current = this.chatTitle(chat);
+          const title = window.prompt('Rename chat', current);
+          if (title === null) return;
+          const next = String(title || '').trim();
+          if (!next) {
+            this.showToast('Chat title is required');
+            return;
+          }
+          if (next === current) return;
+          this.rpc('rename_chat', {chat_id: id, title: next})
+            .then(s => {
+              this.applyState(s);
+              this.writeSelectedChat();
+              this.syncActiveChatURL();
+            })
+            .catch(err => this.showToast(err.message));
+        },
         startChatDrag(ev, id) {
           if (!id) return;
           this.dragChatID = id;
