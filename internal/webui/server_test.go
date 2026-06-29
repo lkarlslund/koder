@@ -108,13 +108,25 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 		t.Fatalf("expected session chat app ok, got %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(srv.URL() + "/s/019e72fa-1cb8-73ef-a5ca-247275f3f62f")
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err = noRedirect.Get(srv.URL() + "/s/019e72fa-1cb8-73ef-a5ca-247275f3f62f")
 	if err != nil {
 		t.Fatalf("get missing session url: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected missing session to serve welcome app shell, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		t.Fatalf("expected missing session to redirect to root, got status=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	resp, err = noRedirect.Get(srv.URL() + "/s/" + string(secondID) + "/c/019e72fa-1cb8-73ef-a5ca-247275f3f62f")
+	if err != nil {
+		t.Fatalf("get missing chat url: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		t.Fatalf("expected missing chat to redirect to root, got status=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
 
@@ -2104,6 +2116,8 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `Hydrating session`) ||
 		!strings.Contains(fullPage, `hydratingSessionMode()`) ||
+		!strings.Contains(fullPage, `initializeRouteHydration()`) ||
+		!strings.Contains(fullPage, `if (!route.sessionID) return`) ||
 		!strings.Contains(fullPage, `beginHydratingSession(id)`) ||
 		!strings.Contains(fullPage, `history.pushState(null, '', this.sessionURL(id))`) ||
 		!strings.Contains(fullPage, `spinner-border text-primary`) {

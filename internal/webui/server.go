@@ -215,10 +215,26 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		if !s.routeSelectionExists(r.Context(), selection) {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(renderIndexHTML()))
+}
+
+func (s *Server) routeSelectionExists(ctx context.Context, selection clientSelection) bool {
+	if selection.SessionID == "" {
+		return false
+	}
+	if selection.ChatID == "" {
+		_, err := s.controller.SessionByID(ctx, selection.SessionID)
+		return err == nil
+	}
+	_, err := s.controller.StateForSelection(ctx, app.Selection{SessionID: selection.SessionID, ChatID: selection.ChatID})
+	return err == nil
 }
 
 func routeSelectionFromPath(path string) (clientSelection, bool) {
