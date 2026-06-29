@@ -102,12 +102,57 @@ has_web_bind_arg() {
   return 1
 }
 
+explicit_koder_subcommand() {
+  local expect_value=0
+  local arg
+  for arg in "$@"; do
+    if (( expect_value )); then
+      expect_value=0
+      continue
+    fi
+    case "$arg" in
+      --)
+        return 1
+        ;;
+      --data-dir|--config|--config-file)
+        expect_value=1
+        ;;
+      --data-dir=*|--config=*|--config-file=*)
+        ;;
+      -*)
+        ;;
+      serve|doctor|version|session|debug|skill|exec|completion|help)
+        printf '%s\n' "$arg"
+        return 0
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+  return 1
+}
+
 launch_args() {
-  if has_web_bind_arg "$@"; then
+  local subcommand
+  subcommand="$(explicit_koder_subcommand "$@" || true)"
+  if [[ "$subcommand" != "" && "$subcommand" != "serve" ]]; then
     printf '%s\0' "$@"
     return 0
   fi
-  printf '%s\0' "--web-bind=$KODER_DEV_WEB_BIND" "$@"
+  if [[ "$subcommand" == "serve" ]]; then
+    if has_web_bind_arg "$@"; then
+      printf '%s\0' "$@"
+      return 0
+    fi
+    printf '%s\0' "$@" "--web-bind=$KODER_DEV_WEB_BIND"
+    return 0
+  fi
+  if has_web_bind_arg "$@"; then
+    printf '%s\0' "serve" "$@"
+    return 0
+  fi
+  printf '%s\0' "serve" "--web-bind=$KODER_DEV_WEB_BIND" "$@"
 }
 
 launch_koder() {
