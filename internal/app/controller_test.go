@@ -1164,6 +1164,75 @@ func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 	}
 }
 
+func TestControllerNewSessionUsesSavedAccessDefaults(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: "https://example.invalid/v1"},
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	cfg.Permissions.Profile = "full-access"
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	projectRoot := t.TempDir()
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	activateTestSession(t, ctrl, projectRoot)
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	ctx := context.Background()
+	prefs, err := ctrl.Preferences(ctx)
+	if err != nil {
+		t.Fatalf("preferences: %v", err)
+	}
+	prefs.Access.Settings = accesssettings.AllowAll()
+	updated, err := ctrl.SavePreferences(ctx, prefs)
+	if err != nil {
+		t.Fatalf("save preferences: %v", err)
+	}
+	if !updated.Access.Settings.Network || updated.Access.Settings.Root != accesssettings.ModeReadWrite {
+		t.Fatalf("expected saved access defaults to be allow-all, got %#v", updated.Access.Settings)
+	}
+
+	newProjectRoot := t.TempDir()
+	session, err := ctrl.CreateSession(ctx, "Default Access", newProjectRoot, false)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	stored, err := modeltest.GetSession(ctx, st, session.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !stored.AccessSettings.Network || stored.AccessSettings.Root != accesssettings.ModeReadWrite || stored.AccessSettings.Project != accesssettings.ModeReadWrite {
+		t.Fatalf("expected new session to use saved access defaults, got %#v", stored.AccessSettings)
+	}
+	if stored.PermissionProfile != "full-access" {
+		t.Fatalf("expected new session to use configured permission profile, got %q", stored.PermissionProfile)
+	}
+	chats, err := testChatCollection(st).List(ctx, store.ByIndex[domain.Chat]("session", string(session.ID)))
+	if err != nil {
+		t.Fatalf("list chats: %v", err)
+	}
+	if len(chats) != 1 || chats[0].PermissionProfile != "full-access" {
+		t.Fatalf("expected initial chat to inherit permission profile, got %#v", chats)
+	}
+}
+
 func TestControllerSetAccessSettingsSurvivesRuntimeUpdate(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	ctx := context.Background()

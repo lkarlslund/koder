@@ -16,10 +16,11 @@ import (
 )
 
 type RegistryConfig struct {
-	DefaultProvider string
-	DefaultModel    string
-	AccessSettings  accesssettings.Settings
-	MaxChildChats   int
+	DefaultProvider   string
+	DefaultModel      string
+	PermissionProfile string
+	AccessSettings    accesssettings.Settings
+	MaxChildChats     int
 }
 
 type Registry struct {
@@ -198,7 +199,7 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 		}
 	}
 	cfg := r.currentConfig()
-	session, err := createSessionRecord(ctx, r.store, r.chatsSrc, title, cfg.DefaultProvider, cfg.DefaultModel, nil)
+	session, err := createSessionRecord(ctx, r.store, r.chatsSrc, title, cfg.DefaultProvider, cfg.DefaultModel, cfg.PermissionProfile, nil)
 	if err != nil {
 		return nil, err
 	}

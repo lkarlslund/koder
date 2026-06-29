@@ -30,7 +30,7 @@ func testSources(st *store.Store) (*chatpkg.Source, *planning.Source) {
 
 func testCreateSessionRecord(ctx context.Context, st *store.Store) (domain.Session, *chatpkg.Source, *planning.Source, error) {
 	chatsSrc, planSrc := testSources(st)
-	sessionRecord, err := createSessionRecord(ctx, st, chatsSrc, "test", "provider", "model", nil)
+	sessionRecord, err := createSessionRecord(ctx, st, chatsSrc, "test", "provider", "model", "", nil)
 	return sessionRecord, chatsSrc, planSrc, err
 }
 

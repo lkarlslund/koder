@@ -23,13 +23,13 @@ func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 	})
 }
 
-func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
+func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID, permissionProfile string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
 		ID:                id.NewAt(now),
 		ParentID:          parentID,
 		Title:             title,
-		PermissionProfile: "",
+		PermissionProfile: permissionProfile,
 		PermissionRules:   nil,
 		ToolStates:        map[domain.ToolKind]bool{},
 		AccessSettings:    accesssettings.Default(),

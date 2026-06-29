@@ -13,10 +13,11 @@ import (
 
 func sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
 	return sessionpkg.RegistryConfig{
-		DefaultProvider: defaults.ProviderID,
-		DefaultModel:    defaults.ModelID,
-		AccessSettings:  defaults.Access,
-		MaxChildChats:   defaults.MaxChildChats,
+		DefaultProvider:   defaults.ProviderID,
+		DefaultModel:      defaults.ModelID,
+		PermissionProfile: defaults.PermissionProfile,
+		AccessSettings:    defaults.Access,
+		MaxChildChats:     defaults.MaxChildChats,
 	}
 }
 
