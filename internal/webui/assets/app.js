@@ -2016,7 +2016,9 @@
         },
         sessionBoardURL(id) {
           const session = String(id || this.currentSessionID() || '').trim();
-          return session ? this.sessionURL(session) + '/board' : '';
+          if (!session) return '';
+          const chat = String(this.activeChatID() || '').trim();
+          return this.sessionURL(session) + '/board' + (chat ? '?chat=' + encodeURIComponent(chat) : '');
         },
         openSessionBoard() {
           this.openURLInNewTab(this.sessionBoardURL());

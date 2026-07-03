@@ -81,6 +81,7 @@
                 <span x-show="milestoneDependsOnKey(milestone)">depends on <strong x-text="milestoneDependsOnKey(milestone)"></strong></span>
               </div>
               <div class="milestone-actions">
+                <button type="button" class="btn btn-sm btn-outline-primary" @click="startChatForMilestone(milestone)" title="Start execution chat" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @click="openMilestoneEditor(milestone)" title="Edit milestone"><i class="bi bi-pencil"></i></button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @click="openTaskEditor(milestone)" title="Add task"><i class="bi bi-plus-lg"></i></button>
               </div>
@@ -98,7 +99,10 @@
                       <article class="task-card" draggable="true" @dragstart="startTaskDrag(task)" @dblclick="openTaskEditor(milestone, task)">
                         <div class="task-card-header">
                           <span class="task-key" x-text="taskKey(task)"></span>
-                          <button type="button" class="task-edit-button" title="Edit task" @click.stop="openTaskEditor(milestone, task)"><i class="bi bi-pencil"></i></button>
+                          <span class="d-flex align-items-center gap-1">
+                            <button type="button" class="task-edit-button" title="Start execution chat for task" @click.stop="startChatForMilestone(milestone, task)" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
+                            <button type="button" class="task-edit-button" title="Edit task" @click.stop="openTaskEditor(milestone, task)"><i class="bi bi-pencil"></i></button>
+                          </span>
                         </div>
                         <div class="task-card-body" x-text="taskContent(task)"></div>
                         <div class="task-card-note" x-show="taskNote(task)" x-text="taskNote(task)"></div>

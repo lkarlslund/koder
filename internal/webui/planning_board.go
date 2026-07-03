@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 const planningBoardAssetPath = "assets/board.html"
@@ -50,6 +52,14 @@ type boardTaskUpdateRequest struct {
 	Content      string `json:"content"`
 	Note         string `json:"note"`
 	Position     *int   `json:"position"`
+}
+
+type boardStartChatRequest struct {
+	ParentChatID id.ID  `json:"parent_chat_id"`
+	MilestoneKey string `json:"milestone_key"`
+	TaskKey      string `json:"task_key,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Objective    string `json:"objective,omitempty"`
 }
 
 func renderPlanningBoardHTML() string {
@@ -107,6 +117,8 @@ func (s *Server) handlePlanningBoardAPI(w http.ResponseWriter, r *http.Request, 
 		s.handlePlanningBoardTaskAdd(w, r, sessionID)
 	case "tasks/update":
 		s.handlePlanningBoardTaskUpdate(w, r, sessionID)
+	case "chats/start":
+		s.handlePlanningBoardStartChat(w, r, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -342,6 +354,74 @@ func findBoardTask(tasks []planning.Task, taskKey string) (planning.Task, bool) 
 		}
 	}
 	return planning.Task{}, false
+}
+
+func (s *Server) handlePlanningBoardStartChat(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req boardStartChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode chat start: %v", err), http.StatusBadRequest)
+		return
+	}
+	parentChatID := id.ID(strings.TrimSpace(string(req.ParentChatID)))
+	if parentChatID == "" {
+		writePlanningBoardError(w, fmt.Errorf("parent_chat_id is required"))
+		return
+	}
+	milestoneKey := strings.TrimSpace(req.MilestoneKey)
+	if milestoneKey == "" {
+		writePlanningBoardError(w, fmt.Errorf("milestone_key is required"))
+		return
+	}
+	plan, err := s.controller.GetMilestonePlan(r.Context(), sessionID)
+	if err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	var milestone planning.Milestone
+	found := false
+	for _, item := range plan.Milestones {
+		if planning.MilestoneKey(item) == milestoneKey {
+			milestone = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		writePlanningBoardError(w, fmt.Errorf("milestone %s not found", milestoneKey))
+		return
+	}
+	objective := strings.TrimSpace(req.Objective)
+	if objective == "" {
+		objective = "Execute milestone " + milestoneKey + ": " + strings.TrimSpace(milestone.Title)
+	}
+	if taskKey := strings.TrimSpace(req.TaskKey); taskKey != "" {
+		tasks, err := s.controller.ListTasks(r.Context(), sessionID, milestoneKey)
+		if err != nil {
+			writePlanningBoardError(w, err)
+			return
+		}
+		task, ok := findBoardTask(tasks, taskKey)
+		if !ok {
+			writePlanningBoardError(w, fmt.Errorf("task %s not found", taskKey))
+			return
+		}
+		objective = "Execute task " + taskKey + " in milestone " + milestoneKey + ": " + task.Content
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		title = milestoneKey + " worker"
+	}
+	status, err := s.controller.StartChat(r.Context(), sessionID, parentChatID, chattool.StartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    objective,
+		Title:        title,
+		MilestoneKey: milestoneKey,
+	})
+	if err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	writeFileBrowserJSON(w, r, status)
 }
 
 func normalizeMilestonePositions(items []planning.Milestone) {

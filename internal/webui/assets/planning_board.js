@@ -28,6 +28,7 @@
   window.koderBoardApp = function () {
     return {
       sessionID: '',
+      parentChatID: '',
       projectRoot: '',
       loading: true,
       saving: false,
@@ -58,6 +59,7 @@
       init() {
         const match = location.pathname.match(/^\/s\/([^/]+)\/board$/);
         this.sessionID = match ? decodeURIComponent(match[1]) : '';
+        this.parentChatID = String(new URLSearchParams(location.search).get('chat') || '').trim();
         this.loadBoard();
         this.pollTimer = window.setInterval(() => {
           if (!document.hidden && !this.saving) this.loadBoard({quiet: true});
@@ -68,7 +70,9 @@
       },
 
       sessionURL() {
-        return this.sessionID ? '/s/' + encodeURIComponent(this.sessionID) : '/';
+        if (!this.sessionID) return '/';
+        const base = '/s/' + encodeURIComponent(this.sessionID);
+        return this.parentChatID ? base + '/c/' + encodeURIComponent(this.parentChatID) : base;
       },
 
       boardAPI(path) {
@@ -115,6 +119,36 @@
         } catch (err) {
           this.error = asText(err && err.message) || 'Save failed';
           throw err;
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async startChatForMilestone(milestone, task) {
+        if (!this.parentChatID) {
+          this.error = 'Open this board from a chat to start worker chats.';
+          return;
+        }
+        const milestoneKey = this.milestoneKey(milestone);
+        const taskKey = task ? this.taskKey(task) : '';
+        const title = taskKey ? milestoneKey + ' ' + taskKey : milestoneKey + ' worker';
+        this.saving = true;
+        try {
+          const resp = await fetch(this.boardAPI('/chats/start'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              parent_chat_id: this.parentChatID,
+              milestone_key: milestoneKey,
+              task_key: taskKey,
+              title
+            })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          this.error = '';
+          await this.loadBoard({quiet: true});
+        } catch (err) {
+          this.error = asText(err && err.message) || 'Start chat failed';
         } finally {
           this.saving = false;
         }
