@@ -610,6 +610,7 @@
                   <span class="badge text-bg-success" x-show="model.supports_tts">TTS</span>
                   <span class="badge text-bg-secondary" x-show="model.supports_chat === false">not chat</span>
                   <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
+                  <span class="badge text-bg-secondary" :title="providerHealthTitle(model.provider_id)" x-text="providerHealthBadge(model.provider_id)"></span>
                   <template x-for="badge in modelUsageBadgesForModel(model)" :key="badge">
                     <span class="badge text-bg-dark" x-text="badge"></span>
                   </template>
@@ -1043,7 +1044,7 @@
                     <div class="settings-empty">No providers configured</div>
                   </template>
                   <template x-for="item in settingsListRows('providers')" :key="item.id">
-                    <div class="settings-item-row" :title="modelUsageSummary(item.provider_id, item.model_id)">
+                    <div class="settings-item-row" :title="providerHealthTitle(item.id)">
                       <button type="button" class="settings-item-main" @click="editSettingsItem('providers', item.id)">
                         <span class="settings-item-title" x-text="settingsItemTitle('providers', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('providers', item)"></span>
@@ -1052,6 +1053,10 @@
                             <span class="badge text-bg-secondary" x-text="badge"></span>
                           </template>
                         </span>
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-primary" title="Test provider health" @click="testConfiguredProvider(item.id)" :disabled="providerHealthBusy(item.id)">
+                        <span class="spinner-border spinner-border-sm" x-show="providerHealthBusy(item.id)"></span>
+                        <i class="bi bi-heart-pulse" x-show="!providerHealthBusy(item.id)"></i>
                       </button>
                       <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit provider" @click="editSettingsItem('providers', item.id)"><i class="bi bi-pencil"></i></button>
                       <button type="button" class="btn btn-sm btn-outline-danger" title="Delete provider" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash"></i></button>

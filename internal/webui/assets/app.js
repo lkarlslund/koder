@@ -962,7 +962,7 @@
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
-        providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+        providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
@@ -4177,6 +4177,48 @@
         openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },
         providerRows() { return this.providerState.providers || []; },
+        providerHealthState(id) {
+          return this.providerHealth[String(id || '')] || {status: 'unknown', detail: 'Provider has not been tested in this browser session.', checked_at: ''};
+        },
+        providerHealthBadge(id) {
+          const state = this.providerHealthState(id);
+          if (state.status === 'healthy') return 'healthy';
+          if (state.status === 'failing') return 'failing';
+          if (state.status === 'checking') return 'checking';
+          return 'health unknown';
+        },
+        providerHealthTitle(id) {
+          const state = this.providerHealthState(id);
+          return (state.detail || 'Provider has not been tested.') + (state.checked_at ? '\nChecked ' + state.checked_at : '');
+        },
+        providerHealthBusy(id) {
+          return this.providerHealthState(id).status === 'checking';
+        },
+        setProviderHealth(id, state) {
+          id = String(id || '').trim();
+          if (!id) return;
+          this.providerHealth = Object.assign({}, this.providerHealth, {[id]: Object.assign({status: 'unknown', detail: '', checked_at: ''}, state || {})});
+        },
+        testConfiguredProvider(id) {
+          id = String(id || '').trim();
+          const draft = (this.providerState.drafts || {})[id];
+          if (!id || !draft || this.providerHealthBusy(id)) return;
+          this.setProviderHealth(id, {status: 'checking', detail: 'Testing provider...', checked_at: ''});
+          this.rpc('test_provider', draft).then(result => {
+            const count = result.model_count || 0;
+            const sample = (result.models || []).slice(0, 4).join(', ');
+            const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
+            this.setProviderHealth(id, {
+              status: 'healthy',
+              detail: 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected,
+              checked_at: new Date().toLocaleTimeString(),
+              model_count: count,
+              models: result.models || []
+            });
+          }).catch(err => {
+            this.setProviderHealth(id, {status: 'failing', detail: err.message || 'Provider test failed', checked_at: new Date().toLocaleTimeString()});
+          });
+        },
         setProviderDraft(draft) {
           this.providerDraft = Object.assign({headers: {}}, draft || {});
           this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
@@ -4491,10 +4533,12 @@
           const badges = [];
           if (kind === 'providers' && item.default) badges.push('default');
           if (kind === 'providers') badges.push(this.promptProgressBadge(item));
+          if (kind === 'providers') badges.push(this.providerHealthBadge(item.id));
           if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
           if (kind === 'models') badges.push('custom');
           if (kind === 'models' && item.backing_detected === false) badges.push('source missing');
           if (kind === 'models') badges.push(...this.modelUsageBadges(item.provider_id, item.model_id).filter(label => label !== 'default'));
+          if (kind === 'models') badges.push(this.providerHealthBadge(item.provider_id));
           if (item.disabled) badges.push('disabled');
           return badges.filter(Boolean);
         },
