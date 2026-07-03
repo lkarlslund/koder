@@ -969,7 +969,7 @@
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.clampSidebarRatio();
@@ -3709,6 +3709,55 @@
         deleteChat(id) {
           if (!id || !confirm('Archive this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
+        },
+        openCleanupDialog() {
+          this.cleanupDialog.open = true;
+          this.cleanupDialog.error = '';
+        },
+        closeCleanupDialog() {
+          if (this.cleanupDialog.busy) return;
+          this.cleanupDialog.open = false;
+          this.cleanupDialog.error = '';
+        },
+        cleanupStatusOptions() {
+          return [
+            {key: 'idle', label: 'Idle'},
+            {key: 'completed', label: 'Completed'},
+            {key: 'cancelled', label: 'Cancelled'},
+            {key: 'error', label: 'Error'}
+          ];
+        },
+        cleanupCandidates() {
+          const selected = this.cleanupDialog.statuses || {};
+          return (this.state.chats || this.state.Chats || []).filter(chat => {
+            if (this.chatArchived(chat)) return false;
+            return !!selected[this.chatStatusValue(chat)];
+          });
+        },
+        cleanupCandidateSummary() {
+          const count = this.cleanupCandidates().length;
+          return count + ' chat' + (count === 1 ? '' : 's') + ' will be archived';
+        },
+        async runChatCleanup() {
+          const candidates = this.cleanupCandidates();
+          if (!candidates.length || !confirm('Archive ' + candidates.length + ' matching chat' + (candidates.length === 1 ? '' : 's') + '?')) return;
+          this.cleanupDialog.busy = true;
+          this.cleanupDialog.error = '';
+          try {
+            let latest = null;
+            for (const chat of candidates) latest = await this.rpc('delete_chat', {chat_id: this.chatID(chat)});
+            if (latest) {
+              this.applyState(latest, {scrollToBottom: true});
+              this.writeSelectedChat();
+              this.syncActiveChatURL();
+            }
+            this.cleanupDialog.open = false;
+            this.showToast('Archived ' + candidates.length + ' chat' + (candidates.length === 1 ? '' : 's'));
+          } catch (err) {
+            this.cleanupDialog.error = err.message || 'Cleanup failed';
+          } finally {
+            this.cleanupDialog.busy = false;
+          }
         },
         showToast(message) {
           this.toast = message || '';

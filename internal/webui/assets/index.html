@@ -312,6 +312,7 @@
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
           <div class="d-flex align-items-center gap-1">
+            <button class="btn btn-sm btn-outline-secondary" title="Cleanup chats" @click="openCleanupDialog()"><i class="bi bi-magic"></i></button>
             <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
           </div>
         </div>
@@ -568,6 +569,38 @@
             <pre class="tool-command-output-body" x-text="toolCommandModal.output"></pre>
           </section>
         </template>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="cleanupDialog.open" x-transition @click.self="closeCleanupDialog()" @keydown.escape.window="closeCleanupDialog()" style="display: none;">
+    <section class="settings-item-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-magic me-1"></i> Cleanup chats</div>
+          <div class="small text-secondary" x-text="cleanupCandidateSummary()"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeCleanupDialog()" :disabled="cleanupDialog.busy"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="settings-item-form p-3">
+        <div class="settings-toggles">
+          <template x-for="status in cleanupStatusOptions()" :key="status.key">
+            <label class="toggle-switch">
+              <input class="toggle-switch-input" type="checkbox" x-model="cleanupDialog.statuses[status.key]">
+              <span class="toggle-switch-track" aria-hidden="true"></span>
+              <span class="toggle-switch-label" x-text="status.label"></span>
+            </label>
+          </template>
+        </div>
+        <div class="alert alert-danger py-2" x-show="cleanupDialog.error" x-text="cleanupDialog.error"></div>
+        <footer class="d-flex justify-content-end gap-2">
+          <button type="button" class="btn btn-outline-secondary" @click="closeCleanupDialog()" :disabled="cleanupDialog.busy">Cancel</button>
+          <button type="button" class="btn btn-primary" @click="runChatCleanup()" :disabled="cleanupDialog.busy || cleanupCandidates().length === 0">
+            <span class="spinner-border spinner-border-sm" x-show="cleanupDialog.busy"></span>
+            <i class="bi bi-archive" x-show="!cleanupDialog.busy"></i>
+            Archive
+          </button>
+        </footer>
       </div>
     </section>
   </div>
