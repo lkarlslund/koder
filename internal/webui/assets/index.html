@@ -625,6 +625,7 @@
             <div class="d-flex align-items-center gap-2">
               <button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="modelSettingsDraft && !modelSettingsIsDefault()" @click="setActiveModelAsDefault()" :disabled="modelSettingsSaving"><i class="bi bi-bookmark-check"></i></button>
               <button type="button" class="btn btn-sm btn-outline-primary" title="Customize detected model" x-show="modelSettingsDraft && !modelSettingsEditable()" @click="customizeModelSettings()"><i class="bi bi-stars"></i></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Duplicate model settings" x-show="modelSettingsDraft" @click="duplicateActiveModelSettings()" :disabled="modelSettingsSaving"><i class="bi bi-copy"></i></button>
               <button type="button" class="btn btn-sm btn-outline-danger" title="Delete custom model" x-show="modelSettingsPersistedCustom()" @click="deleteActiveModelConfig()" :disabled="modelSettingsSaving"><i class="bi bi-trash"></i></button>
               <button type="submit" class="btn btn-sm btn-primary" title="Save model settings" :disabled="!modelSettingsDraft || !modelSettingsEditable() || modelSettingsSaving">
                 <span class="spinner-border spinner-border-sm" x-show="modelSettingsSaving"></span>
@@ -1087,6 +1088,7 @@
                         </span>
                       </button>
                       <button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="!modelConfigIsDefault(item)" @click="setModelConfigAsDefault(item)"><i class="bi bi-bookmark-check"></i></button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Duplicate model" @click="duplicateModelConfig(modelConfigKey(item))"><i class="bi bi-copy"></i></button>
                       <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit model" @click="editSettingsItem('models', modelConfigKey(item))"><i class="bi bi-pencil"></i></button>
                       <button type="button" class="btn btn-sm btn-outline-danger" title="Delete model" @click="deleteSettingsItem('models', modelConfigKey(item))"><i class="bi bi-trash"></i></button>
                     </div>

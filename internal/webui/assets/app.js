@@ -3956,17 +3956,29 @@
           if (!this.modelSettingsDraft) return;
           const sourceProviderID = String(this.modelSettingsDraft.source_provider_id || this.modelSettingsDraft.provider_id || '').trim();
           const sourceModelID = String(this.modelSettingsDraft.source_model_id || this.modelSettingsDraft.model_id || '').trim();
-          this.modelSettingsDraft = Object.assign({}, this.modelSettingsDraft, {
+          this.modelSettingsDraft = this.duplicateModelDraft(this.modelSettingsDraft, sourceProviderID, sourceModelID);
+          this.modelSettingsStatus = 'Customize this model under a new name, then save.'; this.modelSettingsStatusKind = 'secondary';
+        },
+        duplicateModelDraft(source, providerID = '', sourceModelID = '') {
+          const raw = JSON.parse(JSON.stringify(source || {}));
+          const nextProviderID = String(providerID || raw.provider_id || raw.source_provider_id || '').trim();
+          const nextSourceProviderID = String(raw.source_provider_id || nextProviderID).trim();
+          const nextSourceModelID = String(sourceModelID || raw.source_model_id || raw.model_id || '').trim();
+          return this.normalizeModelSettingsDraft(Object.assign({}, raw, {
             original_provider_id: '',
             original_model_id: '',
-            provider_id: sourceProviderID,
-            model_id: this.uniqueCustomModelID(sourceProviderID, sourceModelID),
-            source_provider_id: sourceProviderID,
-            source_model_id: sourceModelID,
+            provider_id: nextProviderID,
+            model_id: this.uniqueCustomModelID(nextProviderID, nextSourceModelID),
+            source_provider_id: nextSourceProviderID,
+            source_model_id: nextSourceModelID,
             custom: true,
             editable: true,
-          });
-          this.modelSettingsStatus = 'Customize this model under a new name, then save.'; this.modelSettingsStatusKind = 'secondary';
+          }));
+        },
+        duplicateActiveModelSettings() {
+          if (!this.modelSettingsDraft) return;
+          this.modelSettingsDraft = this.duplicateModelDraft(this.modelSettingsDraft);
+          this.modelSettingsStatus = 'Duplicated model settings under a new name. Save to keep it.'; this.modelSettingsStatusKind = 'secondary';
         },
         activeModelSettingsKey() {
           const info = this.activeModelInfo();
@@ -4543,6 +4555,15 @@
           this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
           this.modelConfigExtraBodyOpen = false;
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
+        },
+        duplicateModelConfig(key) {
+          const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
+          if (!item) return;
+          this.modelConfigDraft = this.duplicateModelDraft(item);
+          this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
+          this.modelConfigExtraBodyOpen = this.modelExtraBodyHasContent(this.modelConfigDraft.extra_body);
+          this.modelConfigStatus = 'Duplicated model settings under a new name. Save to keep it.'; this.modelConfigStatusKind = 'secondary';
+          this.showModelConfigEditor = true;
         },
         editModelConfig(key) {
           const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
