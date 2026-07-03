@@ -3931,6 +3931,14 @@
         modelSettingsEditable() {
           return !!(this.modelSettingsDraft && (this.modelSettingsDraft.editable || this.modelSettingsDraft.custom));
         },
+        modelSettingsPersistedCustom() {
+          return !!(this.modelSettingsDraft && this.modelSettingsDraft.custom && this.modelSettingsDraft.original_provider_id && this.modelSettingsDraft.original_model_id);
+        },
+        modelSettingsIsDefault() {
+          const draft = this.modelSettingsDraft;
+          if (!draft) return false;
+          return (this.modelOptions || []).some(item => item.provider_id === draft.provider_id && item.model_id === draft.model_id && item.default);
+        },
         uniqueCustomModelID(providerID, sourceModelID) {
           const base = String(sourceModelID || 'model').trim() + ' custom';
           const used = new Set([...(this.modelOptions || []), ...(this.settings?.models || []), ...(this.modelConfigRows() || [])]
@@ -3992,6 +4000,28 @@
             this.modelSettingsDraft = this.normalizeModelSettingsDraft(result);
             this.modelSettingsStatus = 'Saved model settings'; this.modelSettingsStatusKind = 'success';
             return this.rpc('set_model', {provider_id: result.provider_id, model_id: result.model_id}).then(() => this.refreshModelOptions());
+          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
+        },
+        setActiveModelAsDefault() {
+          const draft = this.modelSettingsDraft;
+          if (!draft?.provider_id || !draft?.model_id) return;
+          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.rpc('set_default_model', {provider_id: draft.provider_id, model_id: draft.model_id}).then(result => {
+            this.setSettingsState(result);
+            this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {default: item.provider_id === draft.provider_id && item.model_id === draft.model_id}));
+            this.modelSettingsStatus = 'Set as default model'; this.modelSettingsStatusKind = 'success';
+          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
+        },
+        deleteActiveModelConfig() {
+          const draft = this.modelSettingsDraft;
+          if (!draft?.provider_id || !draft?.model_id || !this.modelSettingsPersistedCustom()) return;
+          if (!confirm('Delete custom model "' + draft.model_id + '"?')) return;
+          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.rpc('delete_model_config', {provider_id: draft.provider_id, model_id: draft.model_id}).then(result => {
+            this.setSettingsState(result);
+            this.modelSettingsDraft = null;
+            this.modelSettingsStatus = 'Deleted custom model'; this.modelSettingsStatusKind = 'success';
+            return this.refreshModelOptions();
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
@@ -4436,6 +4466,13 @@
         },
         modelConfigRows() { return this.settings?.model_configs || []; },
         modelConfigKey(item) { return JSON.stringify([item?.provider_id || '', item?.model_id || '']); },
+        modelConfigIsDefault(item) {
+          return !!(item && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id);
+        },
+        setModelConfigAsDefault(item) {
+          if (!item?.provider_id || !item?.model_id) return;
+          this.setDefaultModelValue(this.modelOptionValue(item));
+        },
         providerIDOptions() {
           const ids = new Set((this.providerRows() || []).map(item => String(item.id || '').trim()).filter(Boolean));
           return Array.from(ids).sort();
@@ -4571,7 +4608,26 @@
         },
         deleteModelConfig(key) {
           if (!this.settings || !key || !confirm('Delete this model setting?')) return;
+          const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
           this.settings.model_configs = this.modelConfigRows().filter(item => this.modelConfigKey(item) !== key);
+          if (item && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) {
+            const replacement = (this.settings.models || []).find(model => this.modelOptionValue(model) !== this.modelOptionValue(item) && model.supports_chat !== false);
+            this.setDefaultModelValue(replacement ? this.modelOptionValue(replacement) : '');
+          }
+          if (item && this.settings?.ui?.tts?.provider_id === item.provider_id && this.settings.ui.tts.model_id === item.model_id) {
+            this.settings.ui.tts.provider_id = '';
+            this.settings.ui.tts.model_id = '';
+          }
+          if (item && this.settings?.compaction?.provider_id === item.provider_id && this.settings.compaction.model_id === item.model_id) {
+            this.settings.compaction.use_chat_model = true;
+            this.settings.compaction.provider_id = '';
+            this.settings.compaction.model_id = '';
+          }
+          if (item && this.settings?.thinking?.provider_id === item.provider_id && this.settings.thinking.model_id === item.model_id) {
+            this.settings.thinking.use_chat_model = true;
+            this.settings.thinking.provider_id = '';
+            this.settings.thinking.model_id = '';
+          }
         },
         mcpRows() { return this.settings?.mcp_servers || []; },
         addMCPServer() {

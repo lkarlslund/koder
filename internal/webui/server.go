@@ -1096,6 +1096,24 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.SaveModelConfig(ctx, in)
+	case "delete_model_config":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			ModelID    string `json:"model_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.DeleteModelConfig(ctx, in.ProviderID, in.ModelID)
+	case "set_default_model":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			ModelID    string `json:"model_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SetDefaultModel(ctx, in.ProviderID, in.ModelID)
 	case "set_model":
 		var in struct {
 			ProviderID string `json:"provider_id"`

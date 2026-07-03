@@ -111,6 +111,7 @@ type ModelOption struct {
 	BackingDetected  bool   `json:"backing_detected"`
 	Editable         bool   `json:"editable"`
 	Current          bool   `json:"current"`
+	Default          bool   `json:"default"`
 }
 
 // ModelInfo describes the active model capabilities shown by web clients.

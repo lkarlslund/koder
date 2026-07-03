@@ -193,6 +193,7 @@ func (c *Controller) Preferences(ctx context.Context) (PreferencesState, error) 
 func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState) (PreferencesState, error) {
 	c.mu.Lock()
 	next := c.cfg
+	oldModels := slices.Clone(next.Models)
 	repairStaleGeneralProvider(&next, &prefs)
 	if err := applyGeneralPreferences(&next, prefs.General); err != nil {
 		c.mu.Unlock()
@@ -214,6 +215,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
+	repairRemovedCustomModelReferences(ctx, &next, oldModels)
 	if err := applyMCPPreferences(&next, prefs.MCPServers); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -455,6 +457,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			BackingDetected:  true,
 			Editable:         false,
 			Current:          providerID == currentProvider && modelID == currentModel,
+			Default:          providerID == cfg.Defaults.ProviderID && modelID == cfg.Defaults.ModelID,
 		})
 	}
 
@@ -526,6 +529,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			BackingDetected:  sourceDetected,
 			Editable:         true,
 			Current:          model.ProviderID == currentProvider && model.ModelID == currentModel,
+			Default:          model.ProviderID == cfg.Defaults.ProviderID && model.ModelID == cfg.Defaults.ModelID,
 		})
 		seen[key] = struct{}{}
 	}
@@ -545,6 +549,100 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		return nil, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
 	}
 	return options, nil
+}
+
+// SetDefaultModel persists the model used for new sessions.
+func (c *Controller) SetDefaultModel(ctx context.Context, providerID, modelID string) (PreferencesState, error) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" {
+		return PreferencesState{}, fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return PreferencesState{}, fmt.Errorf("model id is required")
+	}
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	if !cfg.HasUsableProvider(providerID) {
+		return PreferencesState{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	options, err := modelOptionsForConfig(ctx, cfg, "", "")
+	if err != nil {
+		return PreferencesState{}, err
+	}
+	found := false
+	for _, option := range options {
+		if option.ProviderID == providerID && option.ModelID == modelID {
+			if option.SupportsChat == false {
+				return PreferencesState{}, fmt.Errorf("model %s/%s does not support chat completions", providerID, modelID)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return PreferencesState{}, fmt.Errorf("model %s/%s is not configured or detected", providerID, modelID)
+	}
+	c.mu.Lock()
+	c.cfg.Defaults.ProviderID = providerID
+	c.cfg.Defaults.ModelID = modelID
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	state, err := c.preferencesStateLocked(ctx)
+	c.mu.Unlock()
+	if err != nil {
+		return PreferencesState{}, err
+	}
+	c.broadcast("snapshot", c.State())
+	return state, nil
+}
+
+// DeleteModelConfig deletes a custom model configuration.
+func (c *Controller) DeleteModelConfig(ctx context.Context, providerID, modelID string) (PreferencesState, error) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" {
+		return PreferencesState{}, fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return PreferencesState{}, fmt.Errorf("model id is required")
+	}
+	c.mu.RLock()
+	cfg := c.cfg
+	model, ok := cfg.ModelConfig(providerID, modelID)
+	c.mu.RUnlock()
+	if !ok {
+		return PreferencesState{}, fmt.Errorf("model %s/%s is not configured", providerID, modelID)
+	}
+	if !modelConfigIsCustom(model) {
+		return PreferencesState{}, fmt.Errorf("only custom model configurations can be deleted")
+	}
+	next := cfg
+	next.Models = slices.Clone(cfg.Models)
+	removeModelConfig(&next, providerID, modelID)
+	repairDeletedModelReferences(ctx, &next, providerID, modelID)
+	c.mu.Lock()
+	c.cfg = next
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	state, err := c.preferencesStateLocked(ctx)
+	c.mu.Unlock()
+	if err != nil {
+		return PreferencesState{}, err
+	}
+	c.broadcast("snapshot", c.State())
+	return state, nil
 }
 
 // ModelConfig returns editable settings for a provider/model pair.
@@ -740,6 +838,86 @@ func deleteModelConfigs(cfg *config.Config, providerID string) {
 	cfg.Models = out
 }
 
+func removeModelConfig(cfg *config.Config, providerID, modelID string) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if cfg == nil || providerID == "" || modelID == "" {
+		return
+	}
+	out := cfg.Models[:0]
+	for _, model := range cfg.Models {
+		if strings.TrimSpace(model.ProviderID) == providerID && strings.TrimSpace(model.ModelID) == modelID {
+			continue
+		}
+		out = append(out, model)
+	}
+	cfg.Models = out
+}
+
+func repairDeletedModelReferences(ctx context.Context, cfg *config.Config, providerID, modelID string) {
+	if cfg == nil {
+		return
+	}
+	matches := func(p, m string) bool {
+		return strings.TrimSpace(p) == providerID && strings.TrimSpace(m) == modelID
+	}
+	if matches(cfg.UI.TTS.ProviderID, cfg.UI.TTS.ModelID) {
+		cfg.UI.TTS.ProviderID = ""
+		cfg.UI.TTS.ModelID = ""
+	}
+	if matches(cfg.Compaction.ProviderID, cfg.Compaction.ModelID) {
+		cfg.Compaction.ProviderID = ""
+		cfg.Compaction.ModelID = ""
+	}
+	if matches(cfg.Thinking.CavemanProviderID, cfg.Thinking.CavemanModelID) {
+		cfg.Thinking.CavemanProviderID = ""
+		cfg.Thinking.CavemanModelID = ""
+	}
+	if !matches(cfg.Defaults.ProviderID, cfg.Defaults.ModelID) {
+		return
+	}
+	cfg.Defaults.ProviderID = ""
+	cfg.Defaults.ModelID = ""
+	options, err := modelOptionsForConfig(ctx, *cfg, "", "")
+	if err != nil {
+		return
+	}
+	for _, option := range options {
+		if option.SupportsChat == false {
+			continue
+		}
+		cfg.Defaults.ProviderID = option.ProviderID
+		cfg.Defaults.ModelID = option.ModelID
+		return
+	}
+}
+
+func repairRemovedCustomModelReferences(ctx context.Context, cfg *config.Config, oldModels []config.ModelConfig) {
+	if cfg == nil {
+		return
+	}
+	for _, oldModel := range oldModels {
+		if !modelConfigIsCustom(oldModel) {
+			continue
+		}
+		providerID := strings.TrimSpace(oldModel.ProviderID)
+		modelID := strings.TrimSpace(oldModel.ModelID)
+		if providerID == "" || modelID == "" || modelConfigExists(cfg.Models, providerID, modelID) {
+			continue
+		}
+		repairDeletedModelReferences(ctx, cfg, providerID, modelID)
+	}
+}
+
+func modelConfigExists(models []config.ModelConfig, providerID, modelID string) bool {
+	for _, model := range models {
+		if strings.TrimSpace(model.ProviderID) == providerID && strings.TrimSpace(model.ModelID) == modelID {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
 	models, _ := c.modelOptionsLocked(ctx)
 	liveModels := slices.Clone(models)
@@ -812,6 +990,7 @@ func ensureModelOption(options []ModelOption, cfg config.Config, providerID, mod
 		SupportsChat:     true,
 		Custom:           custom,
 		Editable:         custom,
+		Default:          providerID == cfg.Defaults.ProviderID && modelID == cfg.Defaults.ModelID,
 	})
 	slices.SortFunc(options, func(a, b ModelOption) int {
 		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {

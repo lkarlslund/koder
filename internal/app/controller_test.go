@@ -619,6 +619,103 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 }
 
+func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "base-model"
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:       "test",
+			ModelID:          "base-model custom",
+			SourceProviderID: "test",
+			SourceModelID:    "base-model",
+			ContextWindow:    65536,
+		})
+		cfg.UI.TTS.ProviderID = "test"
+		cfg.UI.TTS.ModelID = "base-model custom"
+		cfg.Compaction.ProviderID = "test"
+		cfg.Compaction.ModelID = "base-model custom"
+		cfg.Thinking.CavemanProviderID = "test"
+		cfg.Thinking.CavemanModelID = "base-model custom"
+	})
+
+	prefs, err := ctrl.SetDefaultModel(context.Background(), "test", "base-model custom")
+	if err != nil {
+		t.Fatalf("set default model: %v", err)
+	}
+	if prefs.General.DefaultProvider != "test" || prefs.General.DefaultModel != "base-model custom" {
+		t.Fatalf("expected custom default, got %#v", prefs.General)
+	}
+	options, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	var customDefault bool
+	for _, option := range options {
+		if option.ProviderID == "test" && option.ModelID == "base-model custom" {
+			customDefault = option.Default
+		}
+	}
+	if !customDefault {
+		t.Fatalf("expected custom model option to be marked default: %#v", options)
+	}
+
+	prefs, err = ctrl.DeleteModelConfig(context.Background(), "test", "base-model custom")
+	if err != nil {
+		t.Fatalf("delete custom model: %v", err)
+	}
+	if prefs.General.DefaultProvider != "test" || prefs.General.DefaultModel != "base-model" {
+		t.Fatalf("expected default to fall back to base model, got %#v", prefs.General)
+	}
+	if prefs.UI.TTS.ProviderID != "" || prefs.UI.TTS.ModelID != "" {
+		t.Fatalf("expected tts custom model reference to clear, got %#v", prefs.UI.TTS)
+	}
+	if !prefs.Compaction.UseChatModel || prefs.Compaction.ProviderID != "" || prefs.Compaction.ModelID != "" {
+		t.Fatalf("expected compaction custom model reference to clear to chat model, got %#v", prefs.Compaction)
+	}
+	if !prefs.Thinking.UseChatModel || prefs.Thinking.ProviderID != "" || prefs.Thinking.ModelID != "" {
+		t.Fatalf("expected thinking custom model reference to clear to chat model, got %#v", prefs.Thinking)
+	}
+	if len(prefs.ModelConfigs) != 0 {
+		t.Fatalf("expected custom model config to be deleted, got %#v", prefs.ModelConfigs)
+	}
+}
+
+func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
+		}
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:    "test",
+			ModelID:       "base-model",
+			ContextWindow: 65536,
+		})
+	})
+
+	if _, err := ctrl.DeleteModelConfig(context.Background(), "test", "base-model"); err == nil || !strings.Contains(err.Error(), "only custom") {
+		t.Fatalf("expected non-custom delete to fail, got %v", err)
+	}
+}
+
 func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1871,6 +1968,36 @@ func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Cont
 	cfg.Defaults.ModelID = "model"
 	if edit != nil {
 		edit(&cfg)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	projectRoot := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, engine)
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	activateTestSession(t, ctrl, projectRoot)
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	return ctrl, st
+}
+
+func newPersistentTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Controller, *store.Store) {
+	t.Helper()
+	cfg, err := config.LoadWithOptions(config.LoadOptions{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	if edit != nil {
+		edit(&cfg)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
 	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
