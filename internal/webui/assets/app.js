@@ -4358,6 +4358,35 @@
           if (model.custom && model.backing_detected === false) suffix.push('source missing');
           return suffix.length ? label + ' (' + suffix.join(', ') + ')' : label;
         },
+        modelUsageEntries(providerID, modelID) {
+          providerID = String(providerID || '').trim(); modelID = String(modelID || '').trim();
+          if (!providerID || !modelID) return [];
+          const entries = [];
+          const same = (p, m) => String(p || '') === providerID && String(m || '') === modelID;
+          if (same(this.settings?.general?.default_provider, this.settings?.general?.default_model)) entries.push({key: 'default', label: 'default', detail: 'Default model for new sessions'});
+          if (same(this.settings?.ui?.tts?.provider_id, this.settings?.ui?.tts?.model_id)) entries.push({key: 'tts', label: 'TTS', detail: 'TTS output model'});
+          if (this.settings?.compaction && !this.settings.compaction.use_chat_model && same(this.settings.compaction.provider_id, this.settings.compaction.model_id)) entries.push({key: 'compaction', label: 'compaction', detail: 'Compaction model'});
+          if (this.settings?.thinking && !this.settings.thinking.use_chat_model && same(this.settings.thinking.provider_id, this.settings.thinking.model_id)) entries.push({key: 'thinking', label: 'thinking', detail: 'Thinking helper model'});
+          const chats = (this.state.chats || this.state.Chats || []).filter(chat => {
+            if (chat?.Archived || chat?.archived) return false;
+            return same(chat?.ProviderID || chat?.provider_id, chat?.ModelID || chat?.model_id);
+          });
+          if (chats.length) {
+            const names = chats.slice(0, 4).map(chat => chat?.Title || chat?.title || chat?.ID || chat?.id || 'chat').join(', ');
+            entries.push({key: 'chats', label: 'chat x' + chats.length, detail: 'Open chats: ' + names + (chats.length > 4 ? ', ...' : '')});
+          }
+          return entries;
+        },
+        modelUsageBadges(providerID, modelID) {
+          return this.modelUsageEntries(providerID, modelID).map(item => item.label);
+        },
+        modelUsageSummary(providerID, modelID) {
+          const entries = this.modelUsageEntries(providerID, modelID);
+          return entries.length ? entries.map(item => item.detail).join('\n') : 'No current references';
+        },
+        modelUsageBadgesForModel(model) {
+          return this.modelUsageBadges(model?.provider_id, model?.model_id);
+        },
         labelForModelValue(value, fallback = '') {
           if (!value) return fallback;
           const model = (this.settings?.models || this.modelOptions || []).find(item => this.modelOptionValue(item) === value);
@@ -4465,6 +4494,7 @@
           if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
           if (kind === 'models') badges.push('custom');
           if (kind === 'models' && item.backing_detected === false) badges.push('source missing');
+          if (kind === 'models') badges.push(...this.modelUsageBadges(item.provider_id, item.model_id).filter(label => label !== 'default'));
           if (item.disabled) badges.push('disabled');
           return badges.filter(Boolean);
         },
@@ -4647,8 +4677,13 @@
           return parsed;
         },
         deleteModelConfig(key) {
-          if (!this.settings || !key || !confirm('Delete this model setting?')) return;
+          if (!this.settings || !key) return;
           const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
+          const usage = item ? this.modelUsageEntries(item.provider_id, item.model_id) : [];
+          const message = usage.length
+            ? 'Delete this model setting?\n\nCurrently used by:\n- ' + usage.map(entry => entry.detail).join('\n- ')
+            : 'Delete this model setting?';
+          if (!confirm(message)) return;
           this.settings.model_configs = this.modelConfigRows().filter(item => this.modelConfigKey(item) !== key);
           if (item && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) {
             const replacement = (this.settings.models || []).find(model => this.modelOptionValue(model) !== this.modelOptionValue(item) && model.supports_chat !== false);

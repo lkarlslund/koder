@@ -596,7 +596,7 @@
             <div class="list-group-item text-secondary">No models match the filter</div>
           </template>
           <template x-for="model in filteredModels()" :key="model.provider_id + '/' + model.model_id">
-            <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': modelPickerModelCurrent(model)}" @click="selectModel(model)">
+            <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': modelPickerModelCurrent(model)}" :title="modelUsageSummary(model.provider_id, model.model_id)" @click="selectModel(model)">
               <span class="text-start">
                 <span class="fw-semibold" x-text="model.model_id"></span>
                 <span class="d-block small opacity-75">
@@ -610,6 +610,9 @@
                   <span class="badge text-bg-success" x-show="model.supports_tts">TTS</span>
                   <span class="badge text-bg-secondary" x-show="model.supports_chat === false">not chat</span>
                   <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
+                  <template x-for="badge in modelUsageBadgesForModel(model)" :key="badge">
+                    <span class="badge text-bg-dark" x-text="badge"></span>
+                  </template>
                 </span>
               </span>
               <i class="bi bi-check-lg" x-show="modelPickerModelCurrent(model)"></i>
@@ -1040,7 +1043,7 @@
                     <div class="settings-empty">No providers configured</div>
                   </template>
                   <template x-for="item in settingsListRows('providers')" :key="item.id">
-                    <div class="settings-item-row">
+                    <div class="settings-item-row" :title="modelUsageSummary(item.provider_id, item.model_id)">
                       <button type="button" class="settings-item-main" @click="editSettingsItem('providers', item.id)">
                         <span class="settings-item-title" x-text="settingsItemTitle('providers', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('providers', item)"></span>
