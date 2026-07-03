@@ -960,7 +960,7 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary',
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary',
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -4263,7 +4263,8 @@
           }).finally(() => { this.settingsLoading = false; });
         },
         closeSettingsDialog() {
-          this.showSettings = false; this.settings = null; this.settingsStatus = '';
+          if (this.settingsDirty() && !confirm('Discard unsaved settings changes?')) return;
+          this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
           this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.reportClientStateSoon();
         },
         setSettingsState(state) {
@@ -4273,6 +4274,24 @@
           this.applyTTSSettings(this.settings.ui.tts);
           this.providerState = this.settings.providers || this.providerState;
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
+          this.settingsBaselineJSON = this.settingsSnapshotJSON();
+        },
+        settingsSnapshotJSON() {
+          try { return JSON.stringify(this.settings || {}); } catch (_) { return ''; }
+        },
+        settingsDirty() {
+          return !!(this.settings && this.settingsBaselineJSON && this.settingsSnapshotJSON() !== this.settingsBaselineJSON);
+        },
+        discardSettingsChanges() {
+          this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor();
+          this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
+          this.rpc('preferences_state', {}).then(state => {
+            this.setSettingsState(state);
+            if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
+            this.settingsStatus = 'Discarded unsaved changes'; this.settingsStatusKind = 'secondary';
+          }).catch(err => {
+            this.settingsStatus = err.message; this.settingsStatusKind = 'danger';
+          }).finally(() => { this.settingsLoading = false; });
         },
         settingsTabs() { return ['general', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
