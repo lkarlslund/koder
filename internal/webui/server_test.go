@@ -335,6 +335,8 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if len(updated.Snapshot.QueuedInputs) != 1 || !strings.Contains(updated.Snapshot.QueuedInputs[0].Text, "Use this file content from `README.md`") {
 		t.Fatalf("expected queued file content prompt, got %#v", updated.Snapshot.QueuedInputs)
 	}
+	cancel()
+	time.Sleep(20 * time.Millisecond)
 }
 
 func TestSessionPlanningBoardAPI(t *testing.T) {
