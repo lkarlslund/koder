@@ -35,6 +35,7 @@
         <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Open board" x-show="currentSessionID()" @click="openSessionBoard()" style="display: none;"><i class="bi bi-kanban"></i><span class="visually-hidden">Open board</span></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
+        <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
         <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
@@ -601,6 +602,33 @@
             Archive
           </button>
         </footer>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showObservability" x-transition @click.self="closeObservabilityPanel()" @keydown.escape.window="closeObservabilityPanel()" style="display: none;">
+    <section class="settings-item-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-activity me-1"></i> Observability</div>
+          <div class="small text-secondary">Live browser and active chat state</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeObservabilityPanel()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="settings-item-form p-3">
+        <div class="tool-command-meta">
+          <template x-for="row in observabilityRows()" :key="row.label">
+            <div class="tool-command-meta-row">
+              <span class="text-secondary" x-text="row.label"></span>
+              <span class="font-monospace text-break" x-text="row.value"></span>
+            </div>
+          </template>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <a class="btn btn-sm btn-outline-secondary" href="/debug/runtime" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Runtime</a>
+          <a class="btn btn-sm btn-outline-secondary" href="/debug/chats" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Chats</a>
+          <a class="btn btn-sm btn-outline-secondary" href="/debug/clients" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Clients</a>
+        </div>
       </div>
     </section>
   </div>

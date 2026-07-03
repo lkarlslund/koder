@@ -960,7 +960,7 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary',
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
         showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -3709,6 +3709,40 @@
         deleteChat(id) {
           if (!id || !confirm('Archive this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
+        },
+        openObservabilityPanel() {
+          this.showObservability = true;
+          this.reportClientStateSoon();
+        },
+        closeObservabilityPanel() {
+          this.showObservability = false;
+          this.reportClientStateSoon();
+        },
+        websocketAgeLabel() {
+          if (!this.lastWSMessageAt) return 'none';
+          const seconds = Math.max(0, Math.round((Date.now() - this.lastWSMessageAt) / 1000));
+          return seconds + 's ago';
+        },
+        formatBytes(value) {
+          const bytes = Number(value) || 0;
+          if (bytes < 1024) return bytes + ' B';
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB';
+          return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        },
+        observabilityRows() {
+          const pending = this.pendingText();
+          return [
+            {label: 'Connection', value: this.connectionLabel()},
+            {label: 'Last websocket', value: this.websocketAgeLabel() + ' / ' + this.formatBytes(this.lastWSMessageBytes || 0)},
+            {label: 'Session', value: this.currentSessionID() || '-'},
+            {label: 'Chat', value: (this.activeChatID() || '-') + ' / ' + this.statusText()},
+            {label: 'Model', value: [this.activeProvider(), this.activeModel()].filter(Boolean).join(' / ') || '-'},
+            {label: 'Queue', value: String(this.activeQueue().length) + ' queued / ' + String(this.approvals().length) + ' approvals'},
+            {label: 'Exec tools', value: String(this.runningExecProcessCount()) + ' running / ' + String(this.execProcessCount()) + ' total'},
+            {label: 'Pending text', value: this.formatBytes(byteCount(pending))},
+            {label: 'Tokens', value: this.activeTokenUsageLabel() + ' / cached ' + this.activeCachedTokenLabel()},
+            {label: 'Last error', value: this.error || '-'}
+          ];
         },
         openCleanupDialog() {
           this.cleanupDialog.open = true;
