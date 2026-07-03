@@ -2010,7 +2010,9 @@
         },
         sessionFilesURL(id) {
           const session = String(id || this.currentSessionID() || '').trim();
-          return session ? this.sessionURL(session) + '/files' : '';
+          if (!session) return '';
+          const chat = String(this.activeChatID() || '').trim();
+          return this.sessionURL(session) + '/files' + (chat ? '?chat=' + encodeURIComponent(chat) : '');
         },
         sessionBoardURL(id) {
           const session = String(id || this.currentSessionID() || '').trim();

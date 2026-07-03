@@ -138,6 +138,7 @@
   window.koderFilesApp = function () {
     return {
       sessionID: '',
+      chatID: '',
       projectRoot: '',
       treeLoading: false,
       treeError: '',
@@ -145,6 +146,9 @@
       file: null,
       fileLoading: false,
       fileError: '',
+      sendStatus: '',
+      sendStatusKind: 'secondary',
+      sendBusy: false,
       viewMode: 'preview',
       childrenByPath: {},
       expanded: {},
@@ -153,6 +157,7 @@
       init() {
         const match = location.pathname.match(/^\/s\/([^/]+)\/files$/);
         this.sessionID = match ? decodeURIComponent(match[1]) : '';
+        this.chatID = String(new URLSearchParams(location.search).get('chat') || '').trim();
         configureMermaid();
         this.loadTree('').then(() => {
           const path = this.pathFromURL();
@@ -172,13 +177,19 @@
       },
 
       sessionURL() {
-        return this.sessionID ? '/s/' + encodeURIComponent(this.sessionID) : '/';
+        if (!this.sessionID) return '/';
+        const base = '/s/' + encodeURIComponent(this.sessionID);
+        return this.chatID ? base + '/c/' + encodeURIComponent(this.chatID) : base;
       },
 
       filesURL(path) {
-        const base = this.sessionURL() + '/files';
+        const base = this.sessionID ? '/s/' + encodeURIComponent(this.sessionID) + '/files' : '/files';
         const value = String(path || '').trim();
-        return value ? base + '?path=' + encodeURIComponent(value) : base;
+        const params = new URLSearchParams();
+        if (this.chatID) params.set('chat', this.chatID);
+        if (value) params.set('path', value);
+        const query = params.toString();
+        return query ? base + '?' + query : base;
       },
 
       rawFileURL(path) {
@@ -194,6 +205,50 @@
         if (location.pathname + location.search === target) return;
         if (options.replaceURL) history.replaceState(null, '', target);
         else history.pushState(null, '', target);
+      },
+      selectedText() {
+        const text = String(window.getSelection?.().toString() || '').trim();
+        return text.length > 0 ? text : '';
+      },
+
+      async sendFileToChat(options = {}) {
+        if (!this.file || this.sendBusy) return;
+        if (!this.chatID) {
+          this.sendStatus = 'Open this file browser from a chat to send file context.';
+          this.sendStatusKind = 'danger';
+          return;
+        }
+        const selected = this.selectedText();
+        const payload = {
+          chat_id: this.chatID,
+          path: this.file.path,
+          text: options.selection ? selected : '',
+          include_content: !!options.content,
+          steer: !!options.steer
+        };
+        if (options.selection && !payload.text) {
+          this.sendStatus = 'Select text in the file preview first.';
+          this.sendStatusKind = 'danger';
+          return;
+        }
+        this.sendBusy = true;
+        this.sendStatus = '';
+        this.sendStatusKind = 'secondary';
+        try {
+          const resp = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          this.sendStatus = 'Queued in chat';
+          this.sendStatusKind = 'success';
+        } catch (err) {
+          this.sendStatus = String(err.message || err || 'Send failed').trim();
+          this.sendStatusKind = 'danger';
+        } finally {
+          this.sendBusy = false;
+        }
       },
 
       nodeIndent(depth) {

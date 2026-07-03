@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/app"
+	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/id"
 )
 
@@ -57,6 +59,14 @@ type fileContentResponse struct {
 	Markdown    bool   `json:"markdown,omitempty"`
 }
 
+type fileSendRequest struct {
+	ChatID         id.ID  `json:"chat_id"`
+	Path           string `json:"path"`
+	Text           string `json:"text,omitempty"`
+	IncludeContent bool   `json:"include_content,omitempty"`
+	Steer          bool   `json:"steer,omitempty"`
+}
+
 func renderFileBrowserHTML() string {
 	return strings.ReplaceAll(fileBrowserHTML, assetHashPlaceholder, currentAssetHash)
 }
@@ -70,21 +80,35 @@ func fileBrowserSessionFromPath(rawPath string) (id.ID, bool) {
 }
 
 func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, sessionID id.ID, parts []string) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if len(parts) != 1 {
 		http.NotFound(w, r)
 		return
 	}
 	switch parts[0] {
 	case "tree":
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		s.handleSessionFileTree(w, r, sessionID)
 	case "read":
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		s.handleSessionFileRead(w, r, sessionID)
 	case "raw":
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		s.handleSessionFileRaw(w, r, sessionID)
+	case "send":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleSessionFileSend(w, r, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -207,6 +231,77 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (s *Server) handleSessionFileSend(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req fileSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeFileBrowserError(w, fmt.Errorf("decode request: %w", err))
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+	if req.ChatID == "" {
+		writeFileBrowserError(w, fmt.Errorf("chat_id is required"))
+		return
+	}
+	if req.Path == "" {
+		writeFileBrowserError(w, fmt.Errorf("path is required"))
+		return
+	}
+	message, err := s.fileBrowserPromptForSend(r.Context(), sessionID, req)
+	if err != nil {
+		writeFileBrowserError(w, err)
+		return
+	}
+	kind := chat.QueueKindUser
+	if req.Steer {
+		kind = chat.QueueKindSteer
+	}
+	if err := s.controller.SendPromptWithKindSelection(r.Context(), app.Selection{SessionID: sessionID, ChatID: req.ChatID}, kind, message, nil); err != nil {
+		writeFileBrowserError(w, err)
+		return
+	}
+	writeFileBrowserJSON(w, r, map[string]bool{"queued": true})
+}
+
+func (s *Server) fileBrowserPromptForSend(ctx context.Context, sessionID id.ID, req fileSendRequest) (string, error) {
+	root, rel, full, err := s.sessionFilePath(ctx, sessionID, req.Path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("stat path: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory")
+	}
+	cleanPath := rel
+	if cleanPath == "" {
+		cleanPath = req.Path
+	}
+	if text := strings.TrimSpace(req.Text); text != "" {
+		return "Use this selection from `" + cleanPath + "`:\n\n```text\n" + text + "\n```", nil
+	}
+	if !req.IncludeContent {
+		return "Please inspect and use `" + cleanPath + "` in the session project rooted at `" + root + "`.", nil
+	}
+	if info.Size() > maxFileBrowserFileBytes {
+		return "Please inspect and use `" + cleanPath + "`. It is too large to include inline.", nil
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	if looksBinary(data) {
+		return "Please inspect and use binary file `" + cleanPath + "` in the session project.", nil
+	}
+	lang := languageForFile(cleanPath)
+	fence := "```"
+	if lang != "" {
+		fence += lang
+	}
+	return "Use this file content from `" + cleanPath + "`:\n\n" + fence + "\n" + string(data) + "\n```", nil
 }
 
 func (s *Server) sessionFilePath(ctx context.Context, sessionID id.ID, rawRel string) (string, string, string, error) {

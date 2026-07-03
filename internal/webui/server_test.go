@@ -317,6 +317,24 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected traversal bad request, got %d", resp.StatusCode)
 	}
+
+	sendBody := strings.NewReader(fmt.Sprintf(`{"chat_id":%q,"path":"README.md","include_content":true}`, state.ActiveChatID))
+	resp, err = http.Post(srv.URL()+"/api/sessions/"+string(state.Session.ID)+"/files/send", "application/json", sendBody)
+	if err != nil {
+		t.Fatalf("send file to chat: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected send ok, got %d: %s", resp.StatusCode, body)
+	}
+	updated, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+	if err != nil {
+		t.Fatalf("state after send: %v", err)
+	}
+	if len(updated.Snapshot.QueuedInputs) != 1 || !strings.Contains(updated.Snapshot.QueuedInputs[0].Text, "Use this file content from `README.md`") {
+		t.Fatalf("expected queued file content prompt, got %#v", updated.Snapshot.QueuedInputs)
+	}
 }
 
 func TestSessionPlanningBoardAPI(t *testing.T) {

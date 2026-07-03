@@ -78,13 +78,21 @@
                 <div class="fw-semibold text-truncate" x-text="file.path"></div>
                 <div class="small text-secondary" x-text="fileMeta()"></div>
               </div>
-              <template x-if="file.markdown && !file.binary && !file.too_large && !isImageFile()">
-                <div class="btn-group btn-group-sm" role="group" aria-label="Markdown view">
-                  <button type="button" class="btn" :class="viewMode === 'preview' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'preview'">Preview</button>
-                  <button type="button" class="btn" :class="viewMode === 'source' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'source'">Source</button>
+              <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Send file to chat">
+                  <button type="button" class="btn btn-outline-primary" title="Send file reference to chat" @click="sendFileToChat()" :disabled="sendBusy || !chatID"><i class="bi bi-send"></i></button>
+                  <button type="button" class="btn btn-outline-secondary" title="Send selected text to chat" @click="sendFileToChat({selection: true})" :disabled="sendBusy || !chatID"><i class="bi bi-cursor-text"></i></button>
+                  <button type="button" class="btn btn-outline-secondary" title="Send file content to chat" @click="sendFileToChat({content: true})" :disabled="sendBusy || !chatID || file.too_large"><i class="bi bi-file-earmark-arrow-up"></i></button>
                 </div>
-              </template>
+                <template x-if="file.markdown && !file.binary && !file.too_large && !isImageFile()">
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Markdown view">
+                    <button type="button" class="btn" :class="viewMode === 'preview' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'preview'">Preview</button>
+                    <button type="button" class="btn" :class="viewMode === 'source' ? 'btn-primary' : 'btn-outline-secondary'" @click="viewMode = 'source'">Source</button>
+                  </div>
+                </template>
+              </div>
             </header>
+            <div class="alert mx-3 mt-3 mb-0 py-2" x-show="sendStatus" :class="sendStatusKind === 'success' ? 'alert-success' : (sendStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="sendStatus"></div>
 
             <template x-if="isImageFile()">
               <div class="file-browser-image-preview">
