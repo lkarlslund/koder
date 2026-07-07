@@ -969,7 +969,7 @@
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.clampSidebarRatio();
@@ -3342,7 +3342,62 @@
           if (bytes) lines.push(String(bytes) + ' output bytes captured');
           return lines.filter(Boolean).join('\n');
         },
+        execProcessByID(processID) {
+          processID = String(processID || '').trim();
+          if (!processID) return null;
+          return this.allExecProcesses().find(process => this.execProcessID(process) === processID) || null;
+        },
+        openExecProcessConsole(process) {
+          const processID = this.execProcessID(process);
+          if (!processID) return;
+          this.hideExecProcessTooltip();
+          this.execProcessModal = {open: true, processID};
+        },
+        closeExecProcessConsole() {
+          this.execProcessModal = {open: false, processID: ''};
+        },
+        execProcessModalProcess() {
+          return this.execProcessByID(this.execProcessModal.processID);
+        },
+        execProcessModalSubtitle() {
+          const process = this.execProcessModalProcess();
+          if (!process) return this.execProcessModal.processID || 'Process unavailable';
+          return this.execProcessLabel(process);
+        },
+        execProcessModalCommand() {
+          const process = this.execProcessModalProcess();
+          if (!process) return '';
+          return this.execProcessCommand(process) || this.execProcessID(process);
+        },
+        execProcessModalMeta() {
+          const process = this.execProcessModalProcess();
+          if (!process) return [];
+          const rows = [];
+          const add = (label, value) => {
+            const text = String(value ?? '').trim();
+            if (text) rows.push({label, value: text});
+          };
+          add('process id', this.execProcessID(process));
+          add('state', this.execProcessState(process));
+          add('exit code', this.execProcessExitCode(process));
+          add('workdir', process?.workdir || process?.Workdir || '');
+          add('timeout', this.execProcessTimeout(process));
+          const bytes = process?.output_bytes || process?.OutputBytes || 0;
+          if (bytes) add('output bytes', String(bytes));
+          return rows;
+        },
+        execProcessModalOutput() {
+          const process = this.execProcessModalProcess();
+          if (!process) return 'Process is no longer available in this chat snapshot.';
+          return this.execProcessOutput(process);
+        },
+        copyExecProcessOutput() {
+          const output = this.execProcessModalOutput();
+          if (!navigator.clipboard || !output) return;
+          navigator.clipboard.writeText(output).then(() => this.showToast('Copied process output')).catch(() => this.showToast('Could not copy process output'));
+        },
         showExecProcessTooltip(process, event) {
+          if (this.execProcessModal.open) return;
           this.execHover = {...this.execHover, open: true, title: this.execProcessTooltip(process), output: this.execProcessOutput(process)};
           this.positionExecProcessTooltip(event);
         },

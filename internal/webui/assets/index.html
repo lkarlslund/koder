@@ -305,7 +305,7 @@
         </div>
         <div class="exec-process-list">
           <template x-for="process in execProcesses()" :key="execProcessID(process)">
-            <div class="exec-process-row" @mouseenter="showExecProcessTooltip(process, $event)" @mousemove="positionExecProcessTooltip($event)" @mouseleave="hideExecProcessTooltip()" @focusin="showExecProcessTooltip(process, $event)" @focusout="hideExecProcessTooltip()">
+            <div class="exec-process-row" role="button" tabindex="0" title="Open process console" @click="openExecProcessConsole(process)" @keydown.enter.prevent="openExecProcessConsole(process)" @keydown.space.prevent="openExecProcessConsole(process)" @mouseenter="showExecProcessTooltip(process, $event)" @mousemove="positionExecProcessTooltip($event)" @mouseleave="hideExecProcessTooltip()" @focusin="showExecProcessTooltip(process, $event)" @focusout="hideExecProcessTooltip()">
               <i class="bi bi-terminal"></i>
               <span class="exec-process-command text-truncate" :title="execProcessTooltip(process)" x-text="execProcessCommand(process)"></span>
               <span class="badge exec-process-state" :class="execProcessClass(process)" x-text="execProcessLabel(process)"></span>
@@ -516,6 +516,36 @@
   <div class="exec-process-tooltip shadow" x-show="execHover.open" :style="execHoverStyle()" style="display: none;">
     <div class="exec-process-tooltip-title" x-text="execHover.title"></div>
     <pre x-text="execHover.output"></pre>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="execProcessModal.open" x-transition @click.self="closeExecProcessConsole()" @keydown.escape.window="closeExecProcessConsole()" style="display: none;">
+    <section class="tool-command-modal bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div class="min-w-0">
+          <div class="fw-semibold"><i class="bi bi-terminal me-1"></i> Process console</div>
+          <div class="small text-secondary text-truncate" x-text="execProcessModalSubtitle()"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Copy output" @click="copyExecProcessOutput()"><i class="bi bi-copy"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeExecProcessConsole()"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </header>
+      <div class="tool-command-modal-body">
+        <div class="tool-command-meta" x-show="execProcessModalMeta().length > 0">
+          <template x-for="row in execProcessModalMeta()" :key="row.label">
+            <div class="tool-command-meta-row">
+              <span class="text-secondary" x-text="row.label"></span>
+              <span class="font-monospace" x-text="row.value"></span>
+            </div>
+          </template>
+        </div>
+        <pre class="tool-command-full" x-text="execProcessModalCommand()"></pre>
+        <section class="tool-command-output">
+          <div class="tool-result-header">Output</div>
+          <pre class="tool-command-output-body exec-process-console-output" x-text="execProcessModalOutput()"></pre>
+        </section>
+      </div>
+    </section>
   </div>
 
   <div class="modal-backdrop-lite" x-show="timelineAction.open" x-transition @keydown.escape.window="closeTimelineAction()" style="display: none;">
