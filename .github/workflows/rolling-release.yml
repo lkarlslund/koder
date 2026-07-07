@@ -132,6 +132,8 @@ jobs:
 
       - name: Run tests
         if: steps.meta.outputs.changed == 'true'
+        env:
+          KODER_BWRAP_DISABLE_NET_UNSHARE: "1"
         run: |
           set -euo pipefail
           go test ./cmd/... ./internal/...

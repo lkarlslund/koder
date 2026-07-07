@@ -12,6 +12,8 @@ import (
 )
 
 func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
+	t.Setenv(envDisableNetUnshare, "")
+
 	args, err := Args(Command{
 		Executable: "/bin/bash",
 		Args:       []string{"-lc", "pwd"},
@@ -30,6 +32,27 @@ func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected args to contain %q, got %#v", want, args)
 		}
+	}
+}
+
+func TestArgsCanDisableNetworkNamespaceForRestrictedRunners(t *testing.T) {
+	t.Setenv(envDisableNetUnshare, "1")
+
+	args, err := Args(Command{
+		Executable: "/bin/bash",
+		Args:       []string{"-lc", "pwd"},
+		Workdir:    t.TempDir(),
+		Settings: accesssettings.Settings{
+			Root:    accesssettings.ModeReadOnly,
+			Project: accesssettings.ModeReadWrite,
+			Tmp:     accesssettings.TmpEphemeral,
+		},
+	})
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	if slices.Contains(args, "--unshare-net") {
+		t.Fatalf("expected network namespace unshare to be disabled: %#v", args)
 	}
 }
 

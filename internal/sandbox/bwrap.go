@@ -12,6 +12,8 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
+const envDisableNetUnshare = "KODER_BWRAP_DISABLE_NET_UNSHARE"
+
 // Command describes an executable that should run inside a sandbox profile.
 type Command struct {
 	Executable string
@@ -51,7 +53,7 @@ func Args(cmd Command) ([]string, error) {
 		return nil, err
 	}
 	args := []string{"--die-with-parent", "--new-session"}
-	if !settings.Network {
+	if !settings.Network && strings.TrimSpace(os.Getenv(envDisableNetUnshare)) == "" {
 		args = append(args, "--unshare-net")
 	}
 	args = appendBind(args, settings.Root, "/", "/")
