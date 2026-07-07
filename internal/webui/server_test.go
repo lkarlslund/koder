@@ -318,6 +318,13 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 		t.Fatalf("expected traversal bad request, got %d", resp.StatusCode)
 	}
 
+	if _, err := ctrl.NewChatForSelection(context.Background(), app.Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID}, "Other chat"); err != nil {
+		t.Fatalf("create second chat before archiving target: %v", err)
+	}
+	archived := true
+	if _, err := ctrl.UpdateChat(context.Background(), state.Session.ID, state.ActiveChatID, state.ActiveChatID, chattool.UpdateRequest{Archived: &archived}); err != nil {
+		t.Fatalf("archive chat before send: %v", err)
+	}
 	sendBody := strings.NewReader(fmt.Sprintf(`{"chat_id":%q,"path":"README.md","include_content":true}`, state.ActiveChatID))
 	resp, err = http.Post(srv.URL()+"/api/sessions/"+string(state.Session.ID)+"/files/send", "application/json", sendBody)
 	if err != nil {
@@ -328,12 +335,19 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected send ok, got %d: %s", resp.StatusCode, body)
 	}
-	updated, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
-	if err != nil {
-		t.Fatalf("state after send: %v", err)
-	}
-	if len(updated.Snapshot.QueuedInputs) != 1 || !strings.Contains(updated.Snapshot.QueuedInputs[0].Text, "Use this file content from `README.md`") {
-		t.Fatalf("expected queued file content prompt, got %#v", updated.Snapshot.QueuedInputs)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		updated, err := ctrl.StateForSelection(context.Background(), app.Selection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+		if err != nil {
+			t.Fatalf("state after send: %v", err)
+		}
+		if len(updated.Snapshot.QueuedInputs) == 1 && strings.Contains(updated.Snapshot.QueuedInputs[0].Text, "Use this file content from `README.md`") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected queued file content prompt, got %#v", updated.Snapshot.QueuedInputs)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
 	time.Sleep(20 * time.Millisecond)
