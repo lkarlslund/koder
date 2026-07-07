@@ -394,7 +394,6 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 // Start initializes global browser state. Sessions are activated by explicit
 // client selection or creation, not by process startup.
 func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot string) error {
-	_ = ctx
 	_ = mode
 	if c == nil {
 		return fmt.Errorf("controller is nil")
@@ -406,6 +405,7 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	c.projectRoot = strings.TrimSpace(projectRoot)
 	c.lastErr = ""
 	c.mu.Unlock()
+	c.warmConfiguredModelDetection(ctx)
 	return nil
 }
 

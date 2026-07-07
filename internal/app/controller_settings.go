@@ -711,10 +711,31 @@ func (c *Controller) DeleteModelConfig(ctx context.Context, providerID, modelID 
 }
 
 // ModelConfig returns editable settings for a provider/model pair.
-func (c *Controller) ModelConfig(providerID, modelID string) ModelConfigPreference {
+func (c *Controller) ModelConfig(ctx context.Context, providerID, modelID string) ModelConfigPreference {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID))
+	cfg := c.cfg
+	c.mu.RUnlock()
+	model := modelConfigForPair(cfg, providerID, modelID)
+	pref := modelConfigPreferenceFromConfig(model)
+	if pref.Custom {
+		return pref
+	}
+	sourceProviderID := strings.TrimSpace(pref.SourceProviderID)
+	if sourceProviderID == "" {
+		sourceProviderID = strings.TrimSpace(pref.ProviderID)
+	}
+	sourceModelID := strings.TrimSpace(pref.SourceModelID)
+	if sourceModelID == "" {
+		sourceModelID = strings.TrimSpace(pref.ModelID)
+	}
+	providerCfg, ok := cfg.Provider(sourceProviderID)
+	if !ok || !provider.SupportsContextWindowDetection(providerCfg) {
+		return pref
+	}
+	if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
+		pref.ContextWindow = detected
+	}
+	return pref
 }
 
 // SaveModelConfig validates and persists one provider/model settings row.
@@ -912,6 +933,30 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		c.agent.UpdateConfig(c.cfg)
 	}
 	c.mu.Unlock()
+}
+
+func (c *Controller) warmConfiguredModelDetection(ctx context.Context) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	seen := map[string]struct{}{}
+	add := func(providerID, modelID string) {
+		providerID = strings.TrimSpace(providerID)
+		modelID = strings.TrimSpace(modelID)
+		if providerID == "" || modelID == "" {
+			return
+		}
+		key := providerID + "\x00" + modelID
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		c.ensureModelConfig(ctx, providerID, modelID)
+	}
+	add(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
+	add(cfg.Compaction.ProviderID, cfg.Compaction.ModelID)
+	add(cfg.Thinking.CavemanProviderID, cfg.Thinking.CavemanModelID)
+	add(cfg.UI.TTS.ProviderID, cfg.UI.TTS.ModelID)
 }
 
 func firstModelForProvider(cfg config.Config, providerID string) string {

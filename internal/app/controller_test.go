@@ -1313,6 +1313,48 @@ func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	}
 }
 
+func TestControllerStartWarmsDefaultModelContextWindow(t *testing.T) {
+	var propsCalls atomic.Int32
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slots":
+			http.NotFound(w, r)
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "live-model" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			propsCalls.Add(1)
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":65536}}`))
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"live-model","status":{"args":["llama-server","--ctx-size","131072"]}}]}`))
+		default:
+			t.Fatalf("unexpected model server path: %s", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "live-model"
+	})
+
+	ctrl.mu.RLock()
+	model, ok := ctrl.cfg.ModelConfig("test", "live-model")
+	ctrl.mu.RUnlock()
+	if !ok {
+		t.Fatalf("expected default model config to be warmed")
+	}
+	if model.ContextWindow != 65536 {
+		t.Fatalf("expected warmed context window 65536, got %#v", model)
+	}
+	if propsCalls.Load() == 0 {
+		t.Fatalf("expected startup to probe model props")
+	}
+}
+
 func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
 	ctx := context.Background()

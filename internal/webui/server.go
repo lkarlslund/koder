@@ -1095,7 +1095,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.ModelConfig(in.ProviderID, in.ModelID), nil
+		return s.controller.ModelConfig(ctx, in.ProviderID, in.ModelID), nil
 	case "save_model_config":
 		var in app.ModelConfigPreference
 		if err := decodeParams(params, &in); err != nil {
