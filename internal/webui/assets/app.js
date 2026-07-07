@@ -967,7 +967,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
-        imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
+        imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
@@ -1042,31 +1042,31 @@
           if (trigger.matches('.mermaid-diagram .media-expand-button')) {
             const diagram = trigger.closest('.mermaid-diagram');
             const svg = diagram?.querySelector('.mermaid-diagram-content svg');
-            this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+            this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, pinch, wheel or buttons to zoom');
             return;
           }
           if (trigger.dataset.lightboxSvg) {
-            this.openSVGLightbox(trigger.dataset.lightboxSvg || '', trigger.dataset.lightboxTitle || 'SVG preview', trigger.dataset.lightboxMeta || 'Drag to pan, wheel or buttons to zoom');
+            this.openSVGLightbox(trigger.dataset.lightboxSvg || '', trigger.dataset.lightboxTitle || 'SVG preview', trigger.dataset.lightboxMeta || 'Drag to pan, pinch, wheel or buttons to zoom');
             return;
           }
           this.openImageLightbox(trigger.dataset.lightboxSrc || '', trigger.dataset.lightboxTitle || '', trigger.dataset.lightboxMeta || '');
         },
         openImageLightbox(src, title, meta) {
           if (!src) return;
-          this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image preview', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+          this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image preview', meta: meta || 'Drag to pan, pinch, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
         },
         openSVGLightbox(html, title, meta) {
           html = sanitizeDiagramSVG(html || '');
           if (!html) return;
-          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'SVG preview', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'SVG preview', meta: meta || 'Drag to pan, pinch, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
         },
         openMermaidLightbox(html, title, meta) {
           html = sanitizeMermaidSVG(html || '');
           if (!html) return;
-          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+          this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, pinch, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
         },
         closeImageLightbox() {
-          this.imageLightbox = {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+          this.imageLightbox = {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
         },
         lightboxTransform() {
           const box = this.imageLightbox || {};
@@ -1074,10 +1074,14 @@
         },
         zoomLightbox(delta) {
           const current = Number(this.imageLightbox.zoom || 1);
-          this.imageLightbox.zoom = Math.max(0.25, Math.min(8, current + delta));
+          this.imageLightbox.zoom = this.clampLightboxZoom(current + delta);
+        },
+        clampLightboxZoom(value) {
+          const zoom = Number(value || 1);
+          return Math.max(0.25, Math.min(8, zoom));
         },
         resetLightboxView() {
-          this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0;
+          this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0; this.imageLightbox.pinchDistance = 0; this.imageLightbox.pinchZoom = 1;
         },
         onLightboxWheel(event) {
           event.preventDefault();
@@ -1086,17 +1090,68 @@
         },
         startLightboxPan(event) {
           if (!this.imageLightbox.open) return;
+          event.preventDefault();
+          event.currentTarget?.setPointerCapture?.(event.pointerId);
+          const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+          pointers[event.pointerId] = {x: event.clientX, y: event.clientY};
+          this.imageLightbox.pointers = pointers;
+          const active = Object.values(pointers);
+          if (active.length >= 2) {
+            this.imageLightbox.dragging = false;
+            this.imageLightbox.pinchDistance = this.lightboxPointerDistance(active[0], active[1]);
+            this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+            return;
+          }
           this.imageLightbox.dragging = true;
           this.imageLightbox.dragX = event.clientX - (this.imageLightbox.panX || 0);
           this.imageLightbox.dragY = event.clientY - (this.imageLightbox.panY || 0);
         },
         moveLightboxPan(event) {
+          const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+          if (pointers[event.pointerId]) {
+            pointers[event.pointerId] = {x: event.clientX, y: event.clientY};
+            this.imageLightbox.pointers = pointers;
+            const active = Object.values(pointers);
+            if (active.length >= 2) {
+              event.preventDefault();
+              const distance = this.lightboxPointerDistance(active[0], active[1]);
+              const baseDistance = Number(this.imageLightbox.pinchDistance || distance);
+              const baseZoom = Number(this.imageLightbox.pinchZoom || this.imageLightbox.zoom || 1);
+              if (baseDistance > 0) this.imageLightbox.zoom = this.clampLightboxZoom(baseZoom * (distance / baseDistance));
+              return;
+            }
+          }
           if (!this.imageLightbox.dragging) return;
           this.imageLightbox.panX = event.clientX - (this.imageLightbox.dragX || 0);
           this.imageLightbox.panY = event.clientY - (this.imageLightbox.dragY || 0);
         },
-        stopLightboxPan() {
+        stopLightboxPan(event) {
+          const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+          if (event?.pointerId !== undefined) delete pointers[event.pointerId];
+          this.imageLightbox.pointers = pointers;
+          const active = Object.values(pointers);
+          if (active.length >= 2) {
+            this.imageLightbox.dragging = false;
+            this.imageLightbox.pinchDistance = this.lightboxPointerDistance(active[0], active[1]);
+            this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+            return;
+          }
+          if (active.length === 1) {
+            this.imageLightbox.dragging = true;
+            this.imageLightbox.dragX = active[0].x - (this.imageLightbox.panX || 0);
+            this.imageLightbox.dragY = active[0].y - (this.imageLightbox.panY || 0);
+            this.imageLightbox.pinchDistance = 0;
+            this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+            return;
+          }
           this.imageLightbox.dragging = false;
+          this.imageLightbox.pinchDistance = 0;
+          this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+        },
+        lightboxPointerDistance(a, b) {
+          const dx = Number(a?.x || 0) - Number(b?.x || 0);
+          const dy = Number(a?.y || 0) - Number(b?.y || 0);
+          return Math.hypot(dx, dy);
         },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
@@ -1931,7 +1986,7 @@
             button.title = 'Expand image';
             button.dataset.lightboxSrc = img.currentSrc || img.src || '';
             button.dataset.lightboxTitle = img.alt || 'Image preview';
-            button.dataset.lightboxMeta = 'Drag to pan, wheel or buttons to zoom';
+            button.dataset.lightboxMeta = 'Drag to pan, pinch, wheel or buttons to zoom';
             button.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
             wrapper.appendChild(button);
           });
@@ -1948,7 +2003,7 @@
             button.title = 'Expand SVG';
             button.dataset.lightboxSvg = svg.outerHTML;
             button.dataset.lightboxTitle = 'SVG preview';
-            button.dataset.lightboxMeta = 'Drag to pan, wheel or buttons to zoom';
+            button.dataset.lightboxMeta = 'Drag to pan, pinch, wheel or buttons to zoom';
             button.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
             wrapper.appendChild(button);
           });

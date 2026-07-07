@@ -2027,7 +2027,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `media-expand-button`) ||
 		!strings.Contains(fullPage, `openSVGLightbox`) ||
 		!strings.Contains(fullPage, `onLightboxWheel($event)`) ||
-		!strings.Contains(fullPage, `lightboxTransform()`) {
+		!strings.Contains(fullPage, `lightboxTransform()`) ||
+		!strings.Contains(fullPage, `pinchDistance`) {
 		t.Fatalf("expected images and diagrams to support expandable pan/zoom lightbox")
 	}
 	if !strings.Contains(fullPage, `visibleMilestones()`) ||

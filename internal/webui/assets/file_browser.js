@@ -152,7 +152,7 @@
       viewMode: 'preview',
       childrenByPath: {},
       expanded: {},
-      imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0},
+      imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
 
       init() {
         const match = location.pathname.match(/^\/s\/([^/]+)\/files$/);
@@ -391,7 +391,7 @@
           event.preventDefault();
           const diagram = mermaidTrigger.closest('.mermaid-diagram');
           const svg = diagram?.querySelector('.mermaid-diagram-content svg');
-          this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, wheel or buttons to zoom');
+          this.openMermaidLightbox(svg ? svg.outerHTML : '', 'Mermaid diagram', 'Drag to pan, pinch, wheel or buttons to zoom');
           return;
         }
         const imageTrigger = event.target?.closest?.('.file-browser-image-preview .media-expand-button, .file-browser-markdown img');
@@ -399,23 +399,23 @@
         event.preventDefault();
         const img = imageTrigger.matches('img') ? imageTrigger : imageTrigger.closest('.file-browser-image-preview')?.querySelector('img');
         if (!img?.src) return;
-        this.openImageLightbox(img.src, img.getAttribute('data-source-path') || img.getAttribute('alt') || this.file?.path || 'Image', 'Drag to pan, wheel or buttons to zoom');
+        this.openImageLightbox(img.src, img.getAttribute('data-source-path') || img.getAttribute('alt') || this.file?.path || 'Image', 'Drag to pan, pinch, wheel or buttons to zoom');
       },
 
       openMermaidLightbox(html, title, meta) {
         html = sanitizeMermaidSVG(html || '');
         if (!html) return;
-        this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        this.imageLightbox = {open: true, kind: 'svg', src: '', html, title: title || 'Mermaid diagram', meta: meta || 'Drag to pan, pinch, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
       },
 
       openImageLightbox(src, title, meta) {
         src = String(src || '').trim();
         if (!src) return;
-        this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image', meta: meta || 'Drag to pan, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        this.imageLightbox = {open: true, kind: 'image', src, html: '', title: title || 'Image', meta: meta || 'Drag to pan, pinch, wheel or buttons to zoom', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
       },
 
       closeImageLightbox() {
-        this.imageLightbox = {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0};
+        this.imageLightbox = {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1};
       },
 
       lightboxTransform() {
@@ -425,11 +425,16 @@
 
       zoomLightbox(delta) {
         const current = Number(this.imageLightbox.zoom || 1);
-        this.imageLightbox.zoom = Math.max(0.25, Math.min(8, current + delta));
+        this.imageLightbox.zoom = this.clampLightboxZoom(current + delta);
+      },
+
+      clampLightboxZoom(value) {
+        const zoom = Number(value || 1);
+        return Math.max(0.25, Math.min(8, zoom));
       },
 
       resetLightboxView() {
-        this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0;
+        this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0; this.imageLightbox.pinchDistance = 0; this.imageLightbox.pinchZoom = 1;
       },
 
       onLightboxWheel(event) {
@@ -440,19 +445,71 @@
 
       startLightboxPan(event) {
         if (!this.imageLightbox.open) return;
+        event.preventDefault();
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+        pointers[event.pointerId] = {x: event.clientX, y: event.clientY};
+        this.imageLightbox.pointers = pointers;
+        const active = Object.values(pointers);
+        if (active.length >= 2) {
+          this.imageLightbox.dragging = false;
+          this.imageLightbox.pinchDistance = this.lightboxPointerDistance(active[0], active[1]);
+          this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+          return;
+        }
         this.imageLightbox.dragging = true;
         this.imageLightbox.dragX = event.clientX - (this.imageLightbox.panX || 0);
         this.imageLightbox.dragY = event.clientY - (this.imageLightbox.panY || 0);
       },
 
       moveLightboxPan(event) {
+        const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+        if (pointers[event.pointerId]) {
+          pointers[event.pointerId] = {x: event.clientX, y: event.clientY};
+          this.imageLightbox.pointers = pointers;
+          const active = Object.values(pointers);
+          if (active.length >= 2) {
+            event.preventDefault();
+            const distance = this.lightboxPointerDistance(active[0], active[1]);
+            const baseDistance = Number(this.imageLightbox.pinchDistance || distance);
+            const baseZoom = Number(this.imageLightbox.pinchZoom || this.imageLightbox.zoom || 1);
+            if (baseDistance > 0) this.imageLightbox.zoom = this.clampLightboxZoom(baseZoom * (distance / baseDistance));
+            return;
+          }
+        }
         if (!this.imageLightbox.dragging) return;
         this.imageLightbox.panX = event.clientX - (this.imageLightbox.dragX || 0);
         this.imageLightbox.panY = event.clientY - (this.imageLightbox.dragY || 0);
       },
 
-      stopLightboxPan() {
+      stopLightboxPan(event) {
+        const pointers = Object.assign({}, this.imageLightbox.pointers || {});
+        if (event?.pointerId !== undefined) delete pointers[event.pointerId];
+        this.imageLightbox.pointers = pointers;
+        const active = Object.values(pointers);
+        if (active.length >= 2) {
+          this.imageLightbox.dragging = false;
+          this.imageLightbox.pinchDistance = this.lightboxPointerDistance(active[0], active[1]);
+          this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+          return;
+        }
+        if (active.length === 1) {
+          this.imageLightbox.dragging = true;
+          this.imageLightbox.dragX = active[0].x - (this.imageLightbox.panX || 0);
+          this.imageLightbox.dragY = active[0].y - (this.imageLightbox.panY || 0);
+          this.imageLightbox.pinchDistance = 0;
+          this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+          return;
+        }
         this.imageLightbox.dragging = false;
+        this.imageLightbox.pinchDistance = 0;
+        this.imageLightbox.pinchZoom = Number(this.imageLightbox.zoom || 1);
+      },
+
+      lightboxPointerDistance(a, b) {
+        const dx = Number(a?.x || 0) - Number(b?.x || 0);
+        const dy = Number(a?.y || 0) - Number(b?.y || 0);
+        return Math.hypot(dx, dy);
       },
 
       renderDiagrams(root) {

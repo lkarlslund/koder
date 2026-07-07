@@ -143,7 +143,7 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeImageLightbox()" title="Close preview"><i class="bi bi-x-lg"></i></button>
           </div>
         </header>
-        <div class="image-lightbox-body" @wheel="onLightboxWheel($event)" @pointerdown="startLightboxPan($event)" @pointermove.window="moveLightboxPan($event)" @pointerup.window="stopLightboxPan()" @pointercancel.window="stopLightboxPan()">
+        <div class="image-lightbox-body" @wheel="onLightboxWheel($event)" @pointerdown="startLightboxPan($event)" @pointermove.window="moveLightboxPan($event)" @pointerup.window="stopLightboxPan($event)" @pointercancel.window="stopLightboxPan($event)">
           <div class="image-lightbox-content" :class="{'is-dragging': imageLightbox.dragging}" :style="{transform: lightboxTransform()}">
             <div x-show="imageLightbox.kind === 'svg'" class="image-lightbox-svg" x-html="imageLightbox.html"></div>
             <img x-show="imageLightbox.kind === 'image'" class="image-lightbox-img" :src="imageLightbox.src" :alt="imageLightbox.title || 'Image'">
