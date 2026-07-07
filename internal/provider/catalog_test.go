@@ -59,6 +59,10 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -90,6 +94,10 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -127,6 +135,8 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case "/slots", "/props", "/v1/slots", "/v1/props":
+			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -148,6 +158,39 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 	}
 	if !result.PromptProgressProbed || !result.PromptProgressSupported {
 		t.Fatalf("expected supported prompt progress probe, got %#v", result)
+	}
+}
+
+func TestProbeDetectsLlamaSlots(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case "/v1/chat/completions":
+			http.NotFound(w, r)
+		case "/slots":
+			if got := r.URL.Query().Get("model"); got != "model-a" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`[{"id":0},{"id":1}]`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "test",
+		Kind:       ProviderKindCompatible,
+		BaseURL:    server.URL + "/v1",
+		Model:      "model-a",
+		Headers:    map[string]string{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LlamaSlots != 2 {
+		t.Fatalf("expected 2 detected llama slots, got %#v", result)
 	}
 }
 

@@ -288,9 +288,14 @@ type modelsResponse struct {
 }
 
 type propsResponse struct {
+	MaxInstances              int `json:"max_instances"`
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
+}
+
+type slotResponse struct {
+	ID int `json:"id"`
 }
 
 type chatChunk struct {
@@ -522,6 +527,67 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 	return c.propsRequest(ctx, path)
 }
 
+func (c *Client) Slots(ctx context.Context, modelID string) ([]slotResponse, error) {
+	path := "/slots"
+	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
+		path += "?model=" + url.QueryEscape(trimmed)
+	}
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get slots: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return nil, &APIError{
+			Operation:  "slots",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
+	}
+	var payload []slotResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode slots: %w", err)
+	}
+	return payload, nil
+}
+
+func DetectLlamaSlots(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
+	if !SupportsContextWindowDetection(cfg) {
+		return 0, nil
+	}
+	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
+		probeCfg := cfg
+		probeCfg.BaseURL = baseURL
+		client, err := New(providerID, probeCfg, recorder)
+		if err != nil {
+			return 0, err
+		}
+		slots, err := client.Slots(ctx, modelID)
+		if err == nil {
+			if len(slots) > 0 {
+				return len(slots), nil
+			}
+		} else if !isOptionalLlamaProbeError(err) {
+			return 0, err
+		}
+		props, err := client.Props(ctx, modelID)
+		if err == nil {
+			if props.MaxInstances > 0 {
+				return props.MaxInstances, nil
+			}
+		} else if !isOptionalLlamaProbeError(err) {
+			return 0, err
+		}
+	}
+	return 0, nil
+}
+
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
 	if !SupportsContextWindowDetection(cfg) {
 		return 32768, nil
@@ -574,6 +640,19 @@ func isOptionalContextWindowProbeError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusMethodNotAllowed
+	}
+	return false
+}
+
+func isOptionalLlamaProbeError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed:
+			return true
+		default:
+			return false
+		}
 	}
 	return false
 }

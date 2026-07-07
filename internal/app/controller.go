@@ -176,6 +176,8 @@ type ProviderConfigItem struct {
 	PromptProgressMode      string `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool   `json:"prompt_progress_probed"`
 	PromptProgressSupported bool   `json:"prompt_progress_supported"`
+	LlamaSlots              int    `json:"llama_slots"`
+	LlamaSlotScope          string `json:"llama_slot_scope"`
 }
 
 // ProviderDraft is the JSON-friendly provider edit shape used by web clients.
@@ -197,6 +199,8 @@ type ProviderDraft struct {
 	PromptProgressMode      string            `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool              `json:"prompt_progress_probed"`
 	PromptProgressSupported bool              `json:"prompt_progress_supported"`
+	LlamaSlots              int               `json:"llama_slots"`
+	LlamaSlotScope          string            `json:"llama_slot_scope"`
 }
 
 // ProviderProbeResult reports a provider test outcome.
@@ -206,6 +210,7 @@ type ProviderProbeResult struct {
 	SelectedModel           string   `json:"selected_model"`
 	PromptProgressProbed    bool     `json:"prompt_progress_probed"`
 	PromptProgressSupported bool     `json:"prompt_progress_supported"`
+	LlamaSlots              int      `json:"llama_slots"`
 }
 
 type ModelConfigPreference struct {

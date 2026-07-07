@@ -58,6 +58,7 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		SelectedModel:           result.SelectedModel,
 		PromptProgressProbed:    result.PromptProgressProbed,
 		PromptProgressSupported: result.PromptProgressSupported,
+		LlamaSlots:              result.LlamaSlots,
 	}, nil
 }
 
@@ -74,8 +75,10 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	catalogDraft.Model = probe.SelectedModel
 	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
 	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
+	catalogDraft.LlamaSlots = probe.LlamaSlots
 	draft.PromptProgressProbed = probe.PromptProgressProbed
 	draft.PromptProgressSupported = probe.PromptProgressSupported
+	draft.LlamaSlots = probe.LlamaSlots
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {
@@ -1140,6 +1143,8 @@ func (c *Controller) providerStateLocked() ProviderState {
 			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
 			PromptProgressProbed:    cfg.PromptProgressProbed,
 			PromptProgressSupported: cfg.PromptProgressSupported,
+			LlamaSlots:              cfg.LlamaSlots,
+			LlamaSlotScope:          providerConfigLlamaSlotScope(cfg),
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
 			drafts[id] = providerDraftFromCatalog(draft)
@@ -1174,6 +1179,8 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
 		PromptProgressProbed:    draft.PromptProgressProbed,
 		PromptProgressSupported: draft.PromptProgressSupported,
+		LlamaSlots:              draft.LlamaSlots,
+		LlamaSlotScope:          catalogDraftLlamaSlotScope(draft),
 	}
 }
 
@@ -1196,6 +1203,8 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
 		PromptProgressProbed:    draft.PromptProgressProbed,
 		PromptProgressSupported: draft.PromptProgressSupported,
+		LlamaSlots:              draft.LlamaSlots,
+		LlamaSlotScope:          draftLlamaSlotScope(draft),
 	}
 }
 
@@ -1244,6 +1253,29 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.PromptProgressMode = config.NormalizePromptProgressMode(draft.PromptProgressMode)
 	next.PromptProgressProbed = draft.PromptProgressProbed
 	next.PromptProgressSupported = draft.PromptProgressSupported
+	next.LlamaSlots = draft.LlamaSlots
+	next.LlamaSlotScope = draftLlamaSlotScope(draft)
+}
+
+func providerConfigLlamaSlotScope(cfg config.Provider) string {
+	if cfg.LlamaSlots <= 0 && strings.TrimSpace(cfg.LlamaSlotScope) == "" {
+		return ""
+	}
+	return config.NormalizeLlamaSlotScope(cfg.LlamaSlotScope)
+}
+
+func draftLlamaSlotScope(draft ProviderDraft) string {
+	if draft.LlamaSlots <= 0 && strings.TrimSpace(draft.LlamaSlotScope) == "" {
+		return ""
+	}
+	return config.NormalizeLlamaSlotScope(draft.LlamaSlotScope)
+}
+
+func catalogDraftLlamaSlotScope(draft provider.ConnectDraft) string {
+	if draft.LlamaSlots <= 0 && strings.TrimSpace(draft.LlamaSlotScope) == "" {
+		return ""
+	}
+	return config.NormalizeLlamaSlotScope(draft.LlamaSlotScope)
 }
 
 func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {
