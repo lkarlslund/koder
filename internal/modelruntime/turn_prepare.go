@@ -23,6 +23,9 @@ func (r *Runtime) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input
 	if err := r.validatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
+	if err := r.validateChatRequirements(chat); err != nil {
+		return nil, err
+	}
 	user, err := r.userMessageForPrompt(session, prompt, drafts, refs)
 	if err != nil {
 		return nil, err
@@ -58,6 +61,9 @@ func (r *Runtime) PrepareContinueTurn(ctx context.Context, rt *chatpkg.Chat, not
 	snapshot := rt.Snapshot()
 	session := snapshot.Session
 	chat := snapshot.Chat
+	if err := r.validateChatRequirements(chat); err != nil {
+		return nil, err
+	}
 	client, err := r.ClientForChat(chat)
 	if err != nil {
 		return nil, err
@@ -105,6 +111,20 @@ func (r *Runtime) validatePromptAttachments(chat domain.Chat, drafts []attachmen
 		}
 	}
 	return nil
+}
+
+func (r *Runtime) validateChatRequirements(chat domain.Chat) error {
+	if !chat.RequiresImages {
+		return nil
+	}
+	supported, err := r.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(r.cfg, chat), chat.ModelID, attachment.KindImage)
+	if err != nil {
+		return err
+	}
+	if supported {
+		return nil
+	}
+	return fmt.Errorf("chat history contains image context, but provider %s model %s does not support image attachments; choose an image-capable model to continue", chat.ProviderID, chat.ModelID)
 }
 
 func (r *Runtime) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {

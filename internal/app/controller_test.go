@@ -1166,6 +1166,45 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props", "/v1/props":
+			http.NotFound(w, r)
+		case "/models", "/v1/models":
+			fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
+		case "/v1/chat/completions":
+			http.Error(w, "image vision unsupported content part", http.StatusBadRequest)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "text-model", ContextWindow: 32768})
+	})
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	_, _, chatRecord, rt, err := ctrl.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+	chatRecord.RequiresImages = true
+	if err := testUpdateChat(ctx, st, chatRecord); err != nil {
+		t.Fatalf("update chat: %v", err)
+	}
+	rt.SetChat(chatRecord)
+
+	err = ctrl.SetModelForSelection(ctx, selection, "test", "text-model")
+	if err == nil || !strings.Contains(err.Error(), "image context") {
+		t.Fatalf("expected image capability error, got %v", err)
+	}
+}
+
 func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

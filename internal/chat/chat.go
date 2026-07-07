@@ -302,6 +302,10 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		if err != nil {
 			return nil, err
 		}
+		chatRecord, err = repairCapabilityRequirementsFromTimeline(ctx, deps.Store, chatRecord, timeline)
+		if err != nil {
+			return nil, err
+		}
 	}
 	approvals, err := pendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
 	if err != nil {
@@ -328,6 +332,19 @@ func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRe
 	}
 	chatRecord.LastKnownContextTokens = anchorTokens
 	chatRecord.ContextTokensKnown = true
+	if st != nil {
+		if err := updateChat(ctx, st, chatRecord); err != nil {
+			return domain.Chat{}, err
+		}
+	}
+	return chatRecord, nil
+}
+
+func repairCapabilityRequirementsFromTimeline(ctx context.Context, st *store.Store, chatRecord domain.Chat, timeline []domain.TimelineItem) (domain.Chat, error) {
+	if chatRecord.RequiresImages || !timelineRequiresImages(timeline) {
+		return chatRecord, nil
+	}
+	chatRecord.RequiresImages = true
 	if st != nil {
 		if err := updateChat(ctx, st, chatRecord); err != nil {
 			return domain.Chat{}, err
@@ -450,6 +467,7 @@ func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.Queue
 	if r.state != nil {
 		seq = int64(len(r.state.Timeline()) + 1)
 	}
+	requiresImages := userMessageRequiresImages(user)
 	item := domain.TimelineItem{
 		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
@@ -461,9 +479,18 @@ func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.Queue
 	}
 	if r.state != nil {
 		r.state.AppendTimelineItem(item)
+		if requiresImages {
+			r.chat.RequiresImages = true
+		}
 		r.state.UpdateChat(func(chat *domain.Chat) {
 			chat.LastMessage = text
+			if requiresImages {
+				chat.RequiresImages = true
+			}
 		})
+	}
+	if requiresImages {
+		r.chat.RequiresImages = true
 	}
 	r.chat.LastMessage = text
 	chatRecord := r.chat
@@ -517,6 +544,12 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 	}
 	if r.state != nil {
 		r.state.UpsertTimelineItem(item)
+		if timelineItemRequiresImages(item) {
+			r.chat.RequiresImages = true
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.RequiresImages = true
+			})
+		}
 		if text := timelineItemSummary(item); text != "" {
 			r.chat.LastMessage = text
 			r.state.UpdateChat(func(chat *domain.Chat) {
@@ -565,6 +598,7 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 	if r.state != nil {
 		seq = int64(len(r.state.Timeline()) + 1)
 	}
+	requiresImages := userMessageRequiresImages(user)
 	item := domain.TimelineItem{
 		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
@@ -576,17 +610,26 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 	}
 	if r.state != nil {
 		r.state.AppendTimelineItem(item)
+		if requiresImages {
+			r.chat.RequiresImages = true
+		}
 		if strings.TrimSpace(user.Text) != "" {
 			r.chat.LastMessage = user.Text
 		}
 		r.state.UpdateChat(func(chat *domain.Chat) {
 			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			if requiresImages {
+				chat.RequiresImages = true
+			}
 			if strings.TrimSpace(user.Text) != "" {
 				chat.LastMessage = user.Text
 			}
 		})
 	} else if strings.TrimSpace(user.Text) != "" {
 		r.chat.LastMessage = user.Text
+	}
+	if requiresImages {
+		r.chat.RequiresImages = true
 	}
 	chatRecord := r.chat
 	chatID := r.chat.ID
@@ -1942,6 +1985,12 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		record.Item.Content = assistant
 		record.Item.UpdatedAt = now
 		item = record.Item
+		if timelineItemRequiresImages(item) {
+			r.chat.RequiresImages = true
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.RequiresImages = true
+			})
+		}
 		if text := timelineItemSummary(item); text != "" {
 			r.chat.LastMessage = text
 			r.state.UpdateChat(func(chat *domain.Chat) {
@@ -3311,6 +3360,7 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	for _, ref := range item.References {
 		user.References = append(user.References, domain.Reference(ref))
 	}
+	requiresImages := userMessageRequiresImages(user)
 	r.mu.Lock()
 	timelineItem := domain.TimelineItem{
 		ID:        NewTimelineID(now),
@@ -3322,11 +3372,85 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 		SealedAt:  now,
 	}
 	r.state.AppendTimelineItem(timelineItem)
+	if requiresImages {
+		r.chat.RequiresImages = true
+	}
 	r.chat.LastMessage = summary
 	r.state.UpdateChat(func(chat *domain.Chat) {
+		if requiresImages {
+			chat.RequiresImages = true
+		}
 		chat.LastMessage = summary
 	})
 	r.mu.Unlock()
+}
+
+func timelineRequiresImages(timeline []domain.TimelineItem) bool {
+	for _, item := range timeline {
+		if timelineItemRequiresImages(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineItemRequiresImages(item domain.TimelineItem) bool {
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		return userMessageRequiresImages(content)
+	case domain.AssistantMessage:
+		for _, call := range content.Tools {
+			if toolCallRequiresImages(call) {
+				return true
+			}
+		}
+	case domain.ToolExecution:
+		return toolExecutionRequiresImages(content)
+	}
+	return false
+}
+
+func userMessageRequiresImages(user domain.UserMessage) bool {
+	for _, item := range user.Attachments {
+		if attachment.ClassifyMIME(item.MIME) == attachment.KindImage {
+			return true
+		}
+	}
+	return false
+}
+
+func toolCallRequiresImages(call domain.ToolCall) bool {
+	if call.Tool != domain.ToolKindViewImage || call.Result == nil || call.Result.Status != domain.ToolResultStatusOK {
+		return false
+	}
+	return toolResultRequiresImages(call.Tool, call.ToolCallID, call.Args, *call.Result)
+}
+
+func toolExecutionRequiresImages(execution domain.ToolExecution) bool {
+	if execution.Tool != domain.ToolKindViewImage || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
+		return false
+	}
+	return toolResultRequiresImages(execution.Tool, execution.ToolCallID, execution.Args, *execution.Result)
+}
+
+func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID, args map[string]string, result domain.ToolResult) bool {
+	part := domain.Part{
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       tool,
+			ToolCallID: string(toolCallID),
+			Args:       args,
+			Status:     result.Status,
+			Text:       result.Text,
+			Diff:       result.Diff,
+			Result:     result.Data,
+		},
+	}
+	stored, ok := tools.ViewImageStoredResultForPart(part)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != ""
 }
 
 func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {

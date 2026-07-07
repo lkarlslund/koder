@@ -298,6 +298,7 @@ type Chat struct {
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
 	TokenUsage             Usage
+	RequiresImages         bool
 	Position               int
 	Archived               bool
 	AutoRestart            bool
@@ -326,6 +327,7 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		LastKnownContextTokens int
 		ContextTokensKnown     bool
 		TokenUsage             Usage
+		RequiresImages         bool
 		Position               int
 		Archived               bool
 		AutoRestart            bool
@@ -362,6 +364,7 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		LastKnownContextTokens: raw.LastKnownContextTokens,
 		ContextTokensKnown:     raw.ContextTokensKnown,
 		TokenUsage:             raw.TokenUsage,
+		RequiresImages:         raw.RequiresImages,
 		Position:               raw.Position,
 		Archived:               raw.Archived,
 		AutoRestart:            raw.AutoRestart,

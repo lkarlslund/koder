@@ -663,6 +663,110 @@ func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatReco
 	return chat
 }
 
+func TestChatMarksImageRequirementForUserAttachment(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	_, err := rt.AppendUserMessageForInput(ctx, domain.QueuedInput{}, domain.UserMessage{
+		Text: "inspect this",
+		Attachments: []domain.Attachment{{
+			Name: "screen.png",
+			MIME: "image/png",
+			Path: "screen.png",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rt.Snapshot().Chat.RequiresImages {
+		t.Fatal("expected live chat to require image-capable model")
+	}
+	stored, err := getChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.RequiresImages {
+		t.Fatal("expected stored chat to require image-capable model")
+	}
+}
+
+func TestChatMarksImageRequirementForViewImageResult(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := appendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_image",
+		Tool:       domain.ToolKindViewImage,
+		Args:       map[string]string{"path": "screen.png"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	_, err := rt.AttachToolResult(ctx, "call_image", domain.ToolResult{
+		Status: domain.ToolResultStatusOK,
+		Text:   "Viewed image screen.png",
+		Data: tools.ViewImageStoredResult{
+			Path:       "screen.png",
+			SourcePath: filepath.Join(t.TempDir(), "screen.png"),
+			MIMEType:   "image/png",
+			Summary:    "Viewed image screen.png",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rt.Snapshot().Chat.RequiresImages {
+		t.Fatal("expected live chat to require image-capable model")
+	}
+	stored, err := getChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.RequiresImages {
+		t.Fatal("expected stored chat to require image-capable model")
+	}
+}
+
+func TestLoadRepairsImageRequirementForExistingChat(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := appendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_image",
+		Tool:       domain.ToolKindViewImage,
+		Args:       map[string]string{"path": "screen.png"},
+		Status:     domain.ToolStatusDone,
+		Result: &domain.ToolResult{
+			Status: domain.ToolResultStatusOK,
+			Text:   "Viewed image screen.png",
+			Data: tools.ViewImageStoredResult{
+				Path:       "screen.png",
+				SourcePath: filepath.Join(t.TempDir(), "screen.png"),
+				MIMEType:   "image/png",
+				Summary:    "Viewed image screen.png",
+			},
+		},
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+	if !rt.Snapshot().Chat.RequiresImages {
+		t.Fatal("expected load repair to mark live chat as image-dependent")
+	}
+	stored, err := getChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.RequiresImages {
+		t.Fatal("expected load repair to persist image requirement")
+	}
+}
+
 func TestBuildTurnRequestIncludesMaterializedTurnInstructions(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

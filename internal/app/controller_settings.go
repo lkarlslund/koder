@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/assets"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -771,6 +772,11 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	if err != nil {
 		return err
 	}
+	if chatRecord.RequiresImages {
+		if err := c.ensureModelSupportsImages(ctx, providerID, modelID); err != nil {
+			return err
+		}
+	}
 	chatRecord, err = owner.SetChatModel(ctx, chatRecord.ID, providerID, modelID)
 	if err != nil {
 		return err
@@ -779,6 +785,25 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	rt.SetChat(chatRecord)
 	rt.SetSession(session)
 	return nil
+}
+
+func (c *Controller) ensureModelSupportsImages(ctx context.Context, providerID, modelID string) error {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
+	providerCfg, ok := cfg.Provider(sourceProviderID)
+	if !ok || providerCfg.Disabled {
+		return fmt.Errorf("provider %q is not configured", sourceProviderID)
+	}
+	supported, err := provider.NewCapabilityStore(cfg.StateDir()).SupportsAttachment(sourceProviderID, providerCfg, sourceModelID, attachment.KindImage)
+	if err != nil {
+		return err
+	}
+	if supported {
+		return nil
+	}
+	return fmt.Errorf("chat history contains image context, but provider %s model %s does not support image attachments; choose an image-capable model to continue", providerID, modelID)
 }
 
 // SetAccessSettingsForSelection updates the selected session sandbox access settings.
