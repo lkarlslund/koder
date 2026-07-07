@@ -645,6 +645,8 @@ func TestControllerModelOptionsPersistsDetectedLlamaSlots(t *testing.T) {
 		cfg.Providers = map[string]config.Provider{
 			"test": {Kind: provider.ProviderKindCompatible, Name: "Local llama.cpp instance", BaseURL: modelServer.URL + "/v1"},
 		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "live-model"
 	})
 
 	if _, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{}); err != nil {
@@ -655,6 +657,40 @@ func TestControllerModelOptionsPersistsDetectedLlamaSlots(t *testing.T) {
 	ctrl.mu.RUnlock()
 	if got.LlamaSlots != 2 || got.LlamaSlotScope != "chat" {
 		t.Fatalf("expected detected llama slots to persist, got %#v", got)
+	}
+}
+
+func TestControllerLoadSessionPreparesDetectedLlamaSlots(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slots":
+			if got := r.URL.Query().Get("model"); got != "live-model" {
+				t.Fatalf("unexpected slot model query %q", got)
+			}
+			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
+		case "/props", "/v1/slots", "/v1/props":
+			http.NotFound(w, r)
+		case "/models", "/v1/models":
+			fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, Name: "Local llama.cpp instance", BaseURL: modelServer.URL + "/v1"},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "live-model"
+	})
+
+	ctrl.mu.RLock()
+	got := ctrl.cfg.Providers["test"]
+	ctrl.mu.RUnlock()
+	if got.LlamaSlots != 2 || got.LlamaSlotScope != "chat" {
+		t.Fatalf("expected session load to detect llama slots, got %#v", got)
 	}
 }
 
@@ -1169,7 +1205,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/props", "/v1/props":
+		case "/slots", "/props", "/v1/slots", "/v1/props":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
@@ -1208,7 +1244,9 @@ func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/props":
+		case "/slots", "/v1/slots":
+			http.NotFound(w, r)
+		case "/props", "/v1/props":
 			if got := r.URL.Query().Get("model"); got != "live-model" {
 				t.Fatalf("unexpected model query: %q", got)
 			}
@@ -1246,7 +1284,7 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/props":
+		case "/slots", "/v1/slots", "/props", "/v1/props":
 			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))

@@ -861,6 +861,12 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	if !providerOK {
 		return
 	}
+	detectedSlots := 0
+	if providerCfg.LlamaSlots <= 0 {
+		if slots, err := provider.DetectLlamaSlots(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && slots > 0 {
+			detectedSlots = slots
+		}
+	}
 	contextWindow := existing.ContextWindow
 	if provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing)) {
 		if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
@@ -875,7 +881,9 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		preset = "auto"
 	}
 	if existingOK && existing.ContextWindow == contextWindow && strings.TrimSpace(existing.ModelPreset) == preset {
-		return
+		if detectedSlots <= 0 {
+			return
+		}
 	}
 	model := existing
 	model.ProviderID = providerID
@@ -883,8 +891,24 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	model.ContextWindow = contextWindow
 	model.ModelPreset = preset
 	c.mu.Lock()
-	c.cfg.SetModelConfig(model)
-	if err := c.cfg.Save(); err == nil && c.agent != nil {
+	changed := false
+	if !existingOK || existing.ContextWindow != contextWindow || strings.TrimSpace(existing.ModelPreset) != preset {
+		c.cfg.SetModelConfig(model)
+		changed = true
+	}
+	if detectedSlots > 0 {
+		if latest, ok := c.cfg.Providers[sourceProviderID]; ok && !latest.Disabled && latest.LlamaSlots <= 0 {
+			latest.LlamaSlots = detectedSlots
+			latest.LlamaSlotScope = config.NormalizeLlamaSlotScope(latest.LlamaSlotScope)
+			c.cfg.Providers[sourceProviderID] = latest
+			changed = true
+		}
+	}
+	if changed && c.cfg.Path() != "" {
+		if err := c.cfg.Save(); err == nil && c.agent != nil {
+			c.agent.UpdateConfig(c.cfg)
+		}
+	} else if changed && c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}
 	c.mu.Unlock()
