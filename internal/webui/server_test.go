@@ -2966,6 +2966,10 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected provider path: %s", r.URL.Path)
 		}
@@ -3093,6 +3097,10 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
 			http.NotFound(w, r)
 			return
 		}

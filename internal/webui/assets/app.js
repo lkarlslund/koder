@@ -3921,9 +3921,29 @@
         refreshModelOptions() {
           this.modelLoading = true; this.modelOptions = [];
           this.rpc('list_models', {})
-            .then(result => { this.modelOptions = result.models || []; })
+            .then(result => {
+              this.modelOptions = result.models || [];
+              this.markModelProvidersHealthy(this.modelOptions);
+            })
             .catch(err => { this.showToast(err.message); })
             .finally(() => { this.modelLoading = false; });
+        },
+        markModelProvidersHealthy(models) {
+          const counts = {};
+          for (const model of models || []) {
+            const providerID = String(model.provider_id || '').trim();
+            if (!providerID) continue;
+            counts[providerID] = (counts[providerID] || 0) + 1;
+          }
+          const checked = new Date().toLocaleTimeString();
+          for (const [providerID, count] of Object.entries(counts)) {
+            this.setProviderHealth(providerID, {
+              status: 'healthy',
+              detail: 'Model list loaded: ' + count + ' model' + (count === 1 ? '' : 's') + '.',
+              checked_at: checked,
+              model_count: count
+            });
+          }
         },
         closeModelDialog() { this.showModels = false; this.modelPickerTarget = null; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
         filteredModels() {
