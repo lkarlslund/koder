@@ -306,7 +306,12 @@ func (c *Controller) ModelOptionsForSelection(ctx context.Context, selection Sel
 		currentProvider = strings.TrimSpace(chatRecord.ProviderID)
 		currentModel = strings.TrimSpace(chatRecord.ModelID)
 	}
-	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+	options, err := modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+	if err != nil {
+		return nil, err
+	}
+	c.refreshDetectedLlamaSlots(ctx, cfg, options)
+	return options, nil
 }
 
 // SynthesizeSpeech renders text with the configured TTS model.
@@ -552,6 +557,62 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		return nil, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
 	}
 	return options, nil
+}
+
+func (c *Controller) refreshDetectedLlamaSlots(ctx context.Context, cfg config.Config, options []ModelOption) {
+	if c == nil || len(options) == 0 {
+		return
+	}
+	modelByProvider := map[string]string{}
+	for _, option := range options {
+		providerID := strings.TrimSpace(option.SourceProviderID)
+		modelID := strings.TrimSpace(option.SourceModelID)
+		if providerID == "" {
+			providerID = strings.TrimSpace(option.ProviderID)
+		}
+		if modelID == "" {
+			modelID = strings.TrimSpace(option.ModelID)
+		}
+		if providerID == "" || modelID == "" {
+			continue
+		}
+		if _, ok := modelByProvider[providerID]; !ok {
+			modelByProvider[providerID] = modelID
+		}
+	}
+	updates := map[string]int{}
+	for providerID, modelID := range modelByProvider {
+		providerCfg, ok := cfg.Provider(providerID)
+		if !ok || providerCfg.Disabled || providerCfg.LlamaSlots > 0 {
+			continue
+		}
+		slots, err := provider.DetectLlamaSlots(ctx, providerID, providerCfg, modelID, nil)
+		if err != nil || slots <= 0 {
+			continue
+		}
+		updates[providerID] = slots
+	}
+	if len(updates) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	changed := false
+	for providerID, slots := range updates {
+		providerCfg, ok := c.cfg.Providers[providerID]
+		if !ok || providerCfg.Disabled || providerCfg.LlamaSlots > 0 {
+			continue
+		}
+		providerCfg.LlamaSlots = slots
+		providerCfg.LlamaSlotScope = config.NormalizeLlamaSlotScope(providerCfg.LlamaSlotScope)
+		c.cfg.Providers[providerID] = providerCfg
+		changed = true
+	}
+	if changed {
+		if err := c.cfg.Save(); err == nil && c.agent != nil {
+			c.agent.UpdateConfig(c.cfg)
+		}
+	}
 }
 
 // SetDefaultModel persists the model used for new sessions.

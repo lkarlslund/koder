@@ -572,6 +572,10 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 
 func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -619,8 +623,47 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 }
 
+func TestControllerModelOptionsPersistsDetectedLlamaSlots(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models", "/models":
+			fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
+		case "/slots":
+			if got := r.URL.Query().Get("model"); got != "live-model" {
+				t.Fatalf("unexpected slot model query %q", got)
+			}
+			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
+		case "/props", "/v1/slots", "/v1/props":
+			http.NotFound(w, r)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, Name: "Local llama.cpp instance", BaseURL: modelServer.URL + "/v1"},
+		}
+	})
+
+	if _, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{}); err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	ctrl.mu.RLock()
+	got := ctrl.cfg.Providers["test"]
+	ctrl.mu.RUnlock()
+	if got.LlamaSlots != 2 || got.LlamaSlotScope != "chat" {
+		t.Fatalf("expected detected llama slots to persist, got %#v", got)
+	}
+}
+
 func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -693,6 +736,10 @@ func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 
 func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -725,6 +772,8 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 			w.Header().Set("Content-Type", "audio/pcm")
 			_, _ = w.Write([]byte{0, 1, 2, 3})
 		case "/v1/chat/completions":
+			http.NotFound(w, r)
+		case "/slots", "/props", "/v1/slots", "/v1/props":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -763,6 +812,10 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 
 func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
