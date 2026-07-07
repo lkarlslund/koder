@@ -1,4 +1,30 @@
-    :root { color-scheme: light dark; }
+    :root {
+      color-scheme: light dark;
+      --koder-secondary-accent: #16437a;
+      --koder-secondary-accent-rgb: 22, 67, 122;
+      --bs-secondary: var(--koder-secondary-accent);
+      --bs-secondary-rgb: var(--koder-secondary-accent-rgb);
+      --bs-secondary-color: var(--koder-secondary-accent);
+      --bs-secondary-color-rgb: var(--koder-secondary-accent-rgb);
+    }
+    [data-bs-theme="light"] {
+      --koder-secondary-accent: #16437a;
+      --koder-secondary-accent-rgb: 22, 67, 122;
+    }
+    [data-bs-theme="dark"] {
+      --koder-secondary-accent: #9ec5fe;
+      --koder-secondary-accent-rgb: 158, 197, 254;
+    }
+    .btn-outline-secondary {
+      --bs-btn-color: var(--koder-secondary-accent);
+      --bs-btn-border-color: rgba(var(--koder-secondary-accent-rgb), .72);
+      --bs-btn-hover-bg: var(--koder-secondary-accent);
+      --bs-btn-hover-border-color: var(--koder-secondary-accent);
+      --bs-btn-active-bg: var(--koder-secondary-accent);
+      --bs-btn-active-border-color: var(--koder-secondary-accent);
+      --bs-btn-disabled-color: rgba(var(--koder-secondary-accent-rgb), .55);
+      --bs-btn-disabled-border-color: rgba(var(--koder-secondary-accent-rgb), .35);
+    }
     html, body { width: 100%; height: 100%; }
     body { overflow: hidden; }
     .app-shell { width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--sidebar-width, 340px); grid-template-rows: auto minmax(0, 1fr) auto; }
