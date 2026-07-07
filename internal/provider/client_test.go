@@ -366,7 +366,7 @@ func TestDetectContextWindowUsesCompatibleModelStatusPreset(t *testing.T) {
 	}
 }
 
-func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
+func TestDetectContextWindowUsesNativePropsFromConfiguredV1Base(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/models":

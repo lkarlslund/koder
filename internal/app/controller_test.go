@@ -572,7 +572,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 
 func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -633,7 +633,7 @@ func TestControllerModelOptionsPersistsDetectedLlamaSlots(t *testing.T) {
 				t.Fatalf("unexpected slot model query %q", got)
 			}
 			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
-		case "/props", "/v1/slots", "/v1/props":
+		case "/props":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -668,7 +668,7 @@ func TestControllerLoadSessionPreparesDetectedLlamaSlots(t *testing.T) {
 				t.Fatalf("unexpected slot model query %q", got)
 			}
 			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
-		case "/props", "/v1/slots", "/v1/props":
+		case "/props":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
@@ -696,7 +696,7 @@ func TestControllerLoadSessionPreparesDetectedLlamaSlots(t *testing.T) {
 
 func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -772,7 +772,7 @@ func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 
 func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -809,7 +809,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 			_, _ = w.Write([]byte{0, 1, 2, 3})
 		case "/v1/chat/completions":
 			http.NotFound(w, r)
-		case "/slots", "/props", "/v1/slots", "/v1/props":
+		case "/slots", "/props":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -848,7 +848,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 
 func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1205,7 +1205,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props", "/v1/slots", "/v1/props":
+		case "/slots", "/props":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
@@ -1244,9 +1244,9 @@ func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/v1/slots":
+		case "/slots":
 			http.NotFound(w, r)
-		case "/props", "/v1/props":
+		case "/props":
 			if got := r.URL.Query().Get("model"); got != "live-model" {
 				t.Fatalf("unexpected model query: %q", got)
 			}
@@ -1284,7 +1284,7 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/v1/slots", "/props", "/v1/props":
+		case "/slots", "/props":
 			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))

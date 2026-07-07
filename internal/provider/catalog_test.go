@@ -59,7 +59,7 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -97,7 +97,7 @@ func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) 
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
 			http.NotFound(w, r)
 			return
 		}
@@ -135,7 +135,7 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
-		case "/slots", "/props", "/v1/slots", "/v1/props":
+		case "/slots", "/props":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)

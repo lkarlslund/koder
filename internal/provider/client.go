@@ -346,6 +346,7 @@ type rawToolCall struct {
 type Client struct {
 	http     *http.Client
 	baseURL  string
+	llamaURL string
 	apiKey   string
 	headers  map[string]string
 	provider string
@@ -387,6 +388,7 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 			Transport: transport,
 		},
 		baseURL:  baseURL,
+		llamaURL: llamaServerBaseURL(baseURL),
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
@@ -524,7 +526,7 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
 		path += "?model=" + url.QueryEscape(trimmed)
 	}
-	return c.propsRequest(ctx, path)
+	return c.propsRequest(ctx, c.llamaURL, path)
 }
 
 func (c *Client) Slots(ctx context.Context, modelID string) ([]slotResponse, error) {
@@ -532,7 +534,7 @@ func (c *Client) Slots(ctx context.Context, modelID string) ([]slotResponse, err
 	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
 		path += "?model=" + url.QueryEscape(trimmed)
 	}
-	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	req, err := c.newRequestAt(ctx, http.MethodGet, c.llamaURL, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -561,29 +563,25 @@ func DetectLlamaSlots(ctx context.Context, providerID string, cfg config.Provide
 	if !SupportsContextWindowDetection(cfg) {
 		return 0, nil
 	}
-	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
-		probeCfg := cfg
-		probeCfg.BaseURL = baseURL
-		client, err := New(providerID, probeCfg, recorder)
-		if err != nil {
-			return 0, err
+	client, err := New(providerID, cfg, recorder)
+	if err != nil {
+		return 0, err
+	}
+	slots, err := client.Slots(ctx, modelID)
+	if err == nil {
+		if len(slots) > 0 {
+			return len(slots), nil
 		}
-		slots, err := client.Slots(ctx, modelID)
-		if err == nil {
-			if len(slots) > 0 {
-				return len(slots), nil
-			}
-		} else if !isOptionalLlamaProbeError(err) {
-			return 0, err
+	} else if !isOptionalLlamaProbeError(err) {
+		return 0, err
+	}
+	props, err := client.Props(ctx, modelID)
+	if err == nil {
+		if props.MaxInstances > 0 {
+			return props.MaxInstances, nil
 		}
-		props, err := client.Props(ctx, modelID)
-		if err == nil {
-			if props.MaxInstances > 0 {
-				return props.MaxInstances, nil
-			}
-		} else if !isOptionalLlamaProbeError(err) {
-			return 0, err
-		}
+	} else if !isOptionalLlamaProbeError(err) {
+		return 0, err
 	}
 	return 0, nil
 }
@@ -592,29 +590,25 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 	if !SupportsContextWindowDetection(cfg) {
 		return 32768, nil
 	}
-	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
-		probeCfg := cfg
-		probeCfg.BaseURL = baseURL
-		client, err := New(providerID, probeCfg, recorder)
-		if err != nil {
-			return 0, err
+	client, err := New(providerID, cfg, recorder)
+	if err != nil {
+		return 0, err
+	}
+	props, err := client.Props(ctx, modelID)
+	if err == nil {
+		if props.DefaultGenerationSettings.NCtx > 0 {
+			return props.DefaultGenerationSettings.NCtx, nil
 		}
-		props, err := client.Props(ctx, modelID)
-		if err == nil {
-			if props.DefaultGenerationSettings.NCtx > 0 {
-				return props.DefaultGenerationSettings.NCtx, nil
-			}
-		} else if !isOptionalContextWindowProbeError(err) {
-			return 0, err
+	} else if !isOptionalContextWindowProbeError(err) {
+		return 0, err
+	}
+	maxModelLen, err := client.DetectModelContextWindow(ctx, modelID)
+	if err == nil {
+		if maxModelLen > 0 {
+			return maxModelLen, nil
 		}
-		maxModelLen, err := client.DetectModelContextWindow(ctx, modelID)
-		if err == nil {
-			if maxModelLen > 0 {
-				return maxModelLen, nil
-			}
-		} else if !isOptionalContextWindowProbeError(err) {
-			return 0, err
-		}
+	} else if !isOptionalContextWindowProbeError(err) {
+		return 0, err
 	}
 	return 32768, nil
 }
@@ -624,16 +618,9 @@ func SupportsContextWindowDetection(cfg config.Provider) bool {
 		strings.TrimSpace(cfg.BaseURL) != ""
 }
 
-func contextWindowProbeBaseURLs(baseURL string) []string {
+func llamaServerBaseURL(baseURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if trimmed == "" {
-		return nil
-	}
-	withoutV1 := strings.TrimSuffix(trimmed, "/v1")
-	if withoutV1 == trimmed {
-		return []string{trimmed}
-	}
-	return []string{withoutV1, trimmed}
+	return strings.TrimSuffix(trimmed, "/v1")
 }
 
 func isOptionalContextWindowProbeError(err error) bool {
@@ -657,8 +644,8 @@ func isOptionalLlamaProbeError(err error) bool {
 	return false
 }
 
-func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+func (c *Client) propsRequest(ctx context.Context, baseURL, path string) (propsResponse, error) {
+	req, err := c.newRequestAt(ctx, http.MethodGet, baseURL, path, nil)
 	if err != nil {
 		return propsResponse{}, err
 	}
@@ -1591,7 +1578,11 @@ func (c *Client) apiPath(path string) string {
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	return c.newRequestAt(ctx, method, c.baseURL, path, body)
+}
+
+func (c *Client) newRequestAt(ctx context.Context, method, baseURL, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
