@@ -266,8 +266,14 @@ func handleFavicon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	data, err := fs.ReadFile(webAssets, "assets/favicon.ico")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/x-icon")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.WriteHeader(http.StatusNoContent)
+	_, _ = w.Write(data)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -1,37 +1,54 @@
-# koder
+# <img src="internal/webui/assets/koder-logo.svg" alt="koder logo" width="36" height="36"> koder
 
-`koder` is a browser-based coding agent for working inside a local checkout with your choice of OpenAI-compatible model provider. It gives the model a real project workspace, structured code tools, persistent chat history, resumable sessions, permissions, skills, MCP integrations, and a web UI built for steering long-running work.
+Local-first coding and computer use agent. It runs as a single local Go process, serves multiple sessions via browser UI, and connects to your choice of OpenAI-compatible model providers.
 
-It is meant for developers who want an agent that stays close to the codebase: inspect files, search with structured results, edit safely, run commands when allowed, split work into milestones and tasks, and keep the whole session inspectable.
+Nice features from being browser based: multiple live sessions, rich chat rendering, visual file browsing, planning boards, model settings, permissions, TTS controls, approvals, debug traces, and repo state all stay visible and inspectable.
 
-## Why use it?
+Author's current setup: Linux, local `llama.cpp`, Qwen 3.6 27B Q8 for 256K-token chat sessions, and a Qwen 3.5 4B summarizer model for compaction.
 
-- **Bring your own model.** Use local or remote OpenAI-compatible `/v1/chat/completions` providers, configure models in the UI, and choose a separate model for compaction when useful.
-- **Work in a real browser UI.** Start `koder`, open the web app, and manage chats, preferences, providers, MCP servers, permissions, and workspace state from one place.
-- **Resume where you left off.** Sessions, chats, tool results, context usage, milestones, tasks, approvals, and compaction summaries are persisted locally.
-- **Use safer code tools.** The model gets typed tools for reading, globbing, grep-style search, code search, targeted edits, explicit full-file writes, shell/exec sessions, image viewing, web fetch/search, skills, and task orchestration.
-- **Avoid accidental rewrites.** Targeted changes should go through `edit`. The `write` tool creates new files by default and refuses to overwrite an existing file unless `force_overwrite=true`.
-- **Scale work with chats.** Use milestones, tasks, and background chats to separate planning, decomposition, and execution work without losing the main thread.
-- **Customize behavior.** User-editable managed assets include prompts and bundled skills; by default they live under `~/.koder`, or under `<data-dir>/assets` when `--data-dir` is used.
-- **Inspect what happened.** Optional local debug APIs expose runtime state, sessions, transcripts, events, and HTTP activity for troubleshooting.
+![Koder chat workspace](docs/screenshots/koder-demo-chat.png)
+
+## Use Cases
+
+- **Software development in real repositories.** Let the agent inspect code, search with structured tools, make targeted edits, run checks, explain failures, and keep a persistent trail of what changed.
+- **Long-running investigations.** Keep multiple chats open for hypotheses, experiments, review, and follow-up while the session preserves tool output, approvals, summaries, and context usage.
+- **Reverse engineering and security research.** Use repo tools, command execution, notes, file browsing, image viewing, and planning boards to work through unfamiliar code, binaries, traces, protocols, and generated artifacts.
+- **Designing generated objects with visual feedback.** Iterate on things like OpenSCAD models, diagrams, generated images, reports, or markdown documents while both user and model can inspect rendered output.
+- **Local-model workflows.** Run against `llama.cpp` or another OpenAI-compatible provider, tune custom model request JSON, use prompt-progress diagnostics, and keep sensitive work on your own machine.
+- **Planning and delegating larger work.** Track milestones and tasks in the UI while an orchestrator chat manages scope and controlled execution chats handle focused pieces.
+
+## Screenshots
+
+![Koder file browser rendering Go source](docs/screenshots/koder-demo-files.png)
+
+![Koder chat rendering a Mermaid architecture diagram](docs/screenshots/koder-demo-chat-mermaid.png)
 
 ## Quick Start
 
-Build or install `koder`, then start the browser server:
+Download the latest Linux x64 or Linux arm64 build from GitHub Releases:
 
 ```bash
-koder serve
+chmod +x koder-rNNNN-linux-amd64
+./koder-rNNNN-linux-amd64 serve
 ```
 
-By default, `koder` binds the web UI on a local ephemeral port and opens your browser. To choose the address or avoid opening a browser:
+Or build from source:
+
+```bash
+git clone https://github.com/lkarlslund/koder.git
+cd koder
+scripts/build-koder
+.bin/koder serve
+```
+
+By default, Koder binds to a local ephemeral port and opens your browser. To choose the address or keep the browser closed:
 
 ```bash
 koder serve --web-bind 127.0.0.1:8080
 koder serve --nobrowser
 ```
 
-To run a separate Koder instance with isolated config, sessions, cache, and
-managed assets, use a separate data directory:
+Use a separate data directory when testing another instance:
 
 ```bash
 koder --data-dir /tmp/koder-test serve --web-bind 127.0.0.1:7980 --nobrowser
@@ -43,11 +60,11 @@ Check configuration and provider connectivity:
 koder doctor
 ```
 
-## Providers
+## Providers And Models
 
-`koder` does not require a specific hosted service. Configure one or more OpenAI-compatible providers in Preferences or in `config.toml`, then pick the default model from the web UI.
+Koder does not require a specific hosted service. Configure providers in Preferences or in `config.toml`, then choose the default model in the UI.
 
-Example local provider:
+Example local `llama.cpp` provider:
 
 ```toml
 [defaults]
@@ -56,9 +73,10 @@ model_id = "qwen3-coder"
 
 [compaction]
 auto_at_percent = 85
-keep_tool_calls = 2
+use_chat_model = true
 
 [providers.local-llama]
+kind = "openai-compatible"
 name = "Local llama.cpp"
 base_url = "http://127.0.0.1:8888/v1"
 stream = true
@@ -70,27 +88,42 @@ model_id = "qwen3-coder"
 context_window = 32768
 ```
 
-Compaction can use the active chat model or a separate configured model. This is useful when your main coding model is expensive, slow, or not ideal for summarizing long histories.
+Detected models are read-only. If a model needs special request settings, create a custom model from it and edit the JSON request options in the model dialog. Koder can use separate models for chat, compaction, thinking helpers, and TTS when that is useful.
 
 ## How It Works
 
-`koder` runs as a local Go process. The browser UI talks to that process; the process talks to your model provider and executes approved local tools against the selected workspace.
+Each session has its own repository root, chats, settings, permissions, transcript, and file watcher. The browser UI talks to the local Koder process over HTTP and WebSocket. The Koder process talks to the selected model provider and executes approved local tools.
 
-The agent sees a structured tool surface instead of guessing at raw terminal workflows:
+The model sees a structured tool surface instead of a vague shell-only environment:
 
-- `read`, `glob`, `grep`, and `code_search` for understanding the repo.
-- `edit` for targeted replacements in existing files.
-- `write` for new files or explicit full-file overwrites.
-- `bash` and `exec_*` for command execution when allowed.
-- milestone, task, and `chat_start` tools for organizing larger work.
-- `skill`, MCP, web, and image tools for extending what the agent can do.
+| Area | Tools and behavior |
+| --- | --- |
+| Repository understanding | `read`, `glob`, `grep`, code search, file tree browsing, image viewing |
+| Editing | targeted `edit`, explicit full-file `write`, post-edit diagnostics where supported |
+| Execution | shell commands, long-running exec sessions, command output capture, exit codes |
+| Planning | milestones, tasks, status updates, planning board, controlled sub-chats |
+| Context | context tracking, compaction, image-capability checks, prompt-progress diagnostics |
+| Extensions | MCP tools, skills, web fetch/search, markdown and Mermaid validation |
 
-Permission profiles control network access, root filesystem mode, workspace mode, additional mounts, and per-tool policy. On Linux, shell sandboxing uses `bwrap` when shell tools are enabled.
+## Feature Highlights
+
+| Feature | What it is for |
+| --- | --- |
+| Browser-native multi-session workspace | Keep several repositories, chats, and investigations open in one local process without pretending everything is one terminal buffer. |
+| Shared human/agent planning board | Milestones and tasks are editable by both the user in the UI and the model through tools, so planning state is not trapped in chat prose. |
+| Controlled background execution chats | Let an orchestrator chat stay in charge while scoped sub-chats execute work, with limits on concurrent non-idle child chats. |
+| Queue, steer, and send-now controls | Add normal queued messages, steer a running turn, promote/demote queued messages, or abort the current turn and send a new instruction immediately. |
+| Visual artifact feedback loop | Browse rendered markdown, Mermaid diagrams, images, and generated files so both user and model can iterate on visual output, not just raw text. |
+| Local model diagnostics | Detect `llama.cpp` context/slot behavior, show prompt-progress/cache signals, and expose provider HTTP traces when cache reuse or streaming looks wrong. |
+| Custom model variants | Create derived models with custom request JSON, defaults, TTS settings, thinking settings, and compaction choices without changing the backing provider. |
+| Session-scoped safety controls | Permissions, sandboxing, network policy, workspace access, mounts, approvals, and model choices belong to the session instead of a hidden global state. |
+| Inspectable persistence and debug API | Local transcripts, tool output, approvals, planning data, events, and HTTP traces remain available for review and troubleshooting after long runs. |
 
 ## Requirements
 
-- Go toolchain for building from source.
-- At least one OpenAI-compatible provider.
+- Linux x64 or Linux arm64 for release binaries.
+- Go toolchain when building from source.
+- At least one OpenAI-compatible model provider.
 - `rg` is optional; search falls back to a Go implementation when ripgrep is unavailable.
 - `bwrap` is currently required for sandboxed shell command execution on Linux.
 - macOS and Windows can run the web UI and non-shell features, but shell sandboxing is currently Linux-oriented.
@@ -114,9 +147,7 @@ koder version
 
 ## Debug API
 
-Koder exposes debug endpoints on the same web server as the UI. If the UI is
-running at `http://127.0.0.1:44323`, the debug API is under
-`http://127.0.0.1:44323/debug`.
+Koder exposes debug endpoints on the same web server as the UI. If the UI is running at `http://127.0.0.1:44323`, the debug API is under `http://127.0.0.1:44323/debug`.
 
 Useful endpoints include:
 
@@ -126,6 +157,8 @@ Useful endpoints include:
 - `/debug/sessions/<id>/events`
 - `/debug/chats`
 - `/debug/http`
+
+See [docs/debug-api.md](docs/debug-api.md) for details.
 
 ## Build
 
@@ -142,4 +175,4 @@ For release-style build metadata in `koder version` and the debug API:
 scripts/build-koder
 ```
 
-That injects version, commit, dirty state, and build time into the binary via Go linker flags.
+That injects version, commit, dirty state, and build time into the binary with Go linker flags.

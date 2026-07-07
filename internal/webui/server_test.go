@@ -2333,8 +2333,18 @@ func TestFaviconDoesNot404(t *testing.T) {
 		t.Fatalf("get favicon: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("expected favicon status 204, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected favicon status 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/x-icon" {
+		t.Fatalf("expected favicon content type image/x-icon, got %q", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read favicon: %v", err)
+	}
+	if len(body) == 0 {
+		t.Fatal("expected favicon body")
 	}
 }
 
@@ -2359,6 +2369,13 @@ func TestVendoredAssetsServe(t *testing.T) {
 		{path: "/assets/vendor/katex/katex.min.js", want: "katex"},
 		{path: "/assets/vendor/katex/fonts/KaTeX_Main-Regular.woff2", want: ""},
 		{path: "/assets/vendor/mermaid/mermaid.min.js", want: "mermaid"},
+		{path: "/assets/koder-logo.svg", want: `aria-label="koder"`},
+		{path: "/assets/site.webmanifest", want: "android-chrome-512x512.png"},
+		{path: "/assets/icons/favicon-16x16.png", want: ""},
+		{path: "/assets/icons/favicon-32x32.png", want: ""},
+		{path: "/assets/icons/apple-touch-icon.png", want: ""},
+		{path: "/assets/icons/android-chrome-192x192.png", want: ""},
+		{path: "/assets/icons/android-chrome-512x512.png", want: ""},
 	} {
 		resp, err := http.Get(srv.URL() + tc.path)
 		if err != nil {
@@ -2371,6 +2388,9 @@ func TestVendoredAssetsServe(t *testing.T) {
 		}
 		if readErr != nil {
 			t.Fatalf("read asset %s: %v", tc.path, readErr)
+		}
+		if len(body) == 0 {
+			t.Fatalf("expected asset %s body", tc.path)
 		}
 		if tc.want != "" && !strings.Contains(string(body), tc.want) {
 			t.Fatalf("expected asset %s body to contain %q", tc.path, tc.want)

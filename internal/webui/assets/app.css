@@ -6,6 +6,7 @@
     .topbar-main, .topbar-actions { min-width: 0; }
     .topbar-main { flex: 1 1 auto; }
     .topbar-actions { flex: 0 0 auto; }
+    .koder-logo { display: inline-block; width: 1.25rem; height: 1.25rem; flex: 0 0 1.25rem; vertical-align: text-bottom; }
     .topbar-workspace { max-width: min(34vw, 34rem); }
     .mobile-sidebar-toggle, .mobile-sidebar-fab, .mobile-sidebar-header, .mobile-sidebar-backdrop { display: none; }
     .mobile-sidebar-fab { position: fixed; left: .75rem; bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); z-index: 1030; width: 2.75rem; height: 2.75rem; padding: 0; border-radius: 999px; }
