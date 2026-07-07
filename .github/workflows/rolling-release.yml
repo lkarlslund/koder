@@ -128,6 +128,8 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           bwrap --version
 
       - name: Run tests
