@@ -1,6 +1,9 @@
 name: Rolling release
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
@@ -13,6 +16,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: rolling-release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -39,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          latest_tag="$(gh release list --limit 100 --json tagName --jq '[.[].tagName | select(test("^r[0-9]{4}$"))][0] // ""')"
+          latest_tag="$(gh release list --limit 100 --json tagName --jq '[.[].tagName | select(test("^r[0-9]{4}$"))] | sort | reverse | .[0] // ""')"
           if [[ -n "$latest_tag" ]]; then
             git fetch --force origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}" || true
           fi
@@ -115,6 +122,14 @@ jobs:
             fi
           } > release-notes.md
 
+      - name: Install test dependencies
+        if: steps.meta.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+
       - name: Run tests
         if: steps.meta.outputs.changed == 'true'
         run: |
@@ -136,7 +151,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           scripts/build-koder "dist/koder-${VERSION}-linux-amd64"
-          sha256sum "dist/koder-${VERSION}-linux-amd64" > "dist/koder-${VERSION}-linux-amd64.sha256"
+          (cd dist && sha256sum "koder-${VERSION}-linux-amd64" > "koder-${VERSION}-linux-amd64.sha256")
 
       - name: Build Linux ARM64 artifact
         if: steps.meta.outputs.changed == 'true'
@@ -153,7 +168,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           scripts/build-koder "dist/koder-${VERSION}-linux-arm64"
-          sha256sum "dist/koder-${VERSION}-linux-arm64" > "dist/koder-${VERSION}-linux-arm64.sha256"
+          (cd dist && sha256sum "koder-${VERSION}-linux-arm64" > "koder-${VERSION}-linux-arm64.sha256")
 
       - name: Publish GitHub release
         if: steps.meta.outputs.changed == 'true'
