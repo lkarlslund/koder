@@ -28,10 +28,31 @@ func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
 		t.Fatalf("build args: %v", err)
 	}
 	joined := strings.Join(args, "\x00")
-	for _, want := range []string{"--unshare-net", "--ro-bind\x00/\x00/", "--bind", "--tmpfs\x00/tmp", "--\x00/bin/bash\x00-lc\x00pwd"} {
+	for _, want := range []string{"--unshare-net", "--ro-bind\x00/\x00/", "--tmpfs\x00/etc/ssh", "--bind", "--tmpfs\x00/tmp", "--\x00/bin/bash\x00-lc\x00pwd"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected args to contain %q, got %#v", want, args)
 		}
+	}
+}
+
+func TestArgsHidesHostSSHConfigWhenRootMounted(t *testing.T) {
+	args, err := Args(Command{
+		Executable: "/bin/bash",
+		Args:       []string{"-lc", "ssh -G example.com"},
+		Workdir:    t.TempDir(),
+		Settings: accesssettings.Settings{
+			Network: true,
+			Root:    accesssettings.ModeReadOnly,
+			Project: accesssettings.ModeReadWrite,
+			Tmp:     accesssettings.TmpEphemeral,
+		},
+	})
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	joined := strings.Join(args, "\x00")
+	if !strings.Contains(joined, "--tmpfs\x00/etc/ssh") {
+		t.Fatalf("expected host /etc/ssh to be hidden, got %#v", args)
 	}
 }
 

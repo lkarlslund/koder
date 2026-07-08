@@ -57,6 +57,9 @@ func Args(cmd Command) ([]string, error) {
 		args = append(args, "--unshare-net")
 	}
 	args = appendBind(args, settings.Root, "/", "/")
+	if settings.Root != accesssettings.ModeNone {
+		args = append(args, "--tmpfs", "/etc/ssh")
+	}
 	args = append(args, "--dev", "/dev", "--proc", "/proc")
 	args = appendTmp(args, settings)
 	if home, err := os.UserHomeDir(); err == nil && home != "" {

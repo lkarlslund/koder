@@ -253,7 +253,9 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		return Snapshot{}, err
 	}
 	cmd := exec.CommandContext(context.Background(), executable, wrappedArgs...)
-	processgroup.Configure(cmd)
+	if !req.TTY {
+		processgroup.Configure(cmd)
+	}
 	cmd.Dir = strings.TrimSpace(req.Workdir)
 	cmd.Env = nil
 	p := &process{

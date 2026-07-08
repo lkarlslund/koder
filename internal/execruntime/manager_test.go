@@ -50,6 +50,27 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 }
 
+func TestManagerStartTTY(t *testing.T) {
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "printf tty-ok; tty",
+		Workdir:   t.TempDir(),
+		TTY:       true,
+		YieldTime: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start tty: %v", err)
+	}
+	if snap.ProcessID == "" {
+		t.Fatal("expected process id")
+	}
+	if !strings.Contains(snap.Output, "tty-ok") {
+		t.Fatalf("expected tty output, got %q", snap.Output)
+	}
+}
+
 func TestManagerWriteStdinEmptyWaitsAndDrainsNewOutput(t *testing.T) {
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{
