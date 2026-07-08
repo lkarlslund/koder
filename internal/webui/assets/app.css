@@ -115,7 +115,7 @@
     .exec-process-action { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; padding: 0; border: 1px solid transparent; border-radius: .25rem; background: transparent; color: var(--bs-danger); line-height: 1; }
     .exec-process-action:hover:not(:disabled), .exec-process-action:focus-visible:not(:disabled) { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
     .exec-process-action:disabled { color: var(--bs-secondary-color); opacity: .35; }
-    .exec-process-tooltip { position: fixed; z-index: 3000; max-height: min(26rem, 60vh); overflow: auto; padding: .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-body-color); pointer-events: none; }
+    .exec-process-tooltip { position: fixed; z-index: 1040; max-height: min(26rem, 60vh); overflow: auto; padding: .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-body-color); pointer-events: none; }
     .exec-process-tooltip-title { color: var(--bs-secondary-color); font-size: .78rem; white-space: pre-wrap; margin-bottom: .4rem; }
     .exec-process-tooltip pre { font-family: var(--bs-font-monospace); font-size: .78rem; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
     @keyframes chat-status-spin { to { transform: rotate(360deg); } }

@@ -513,7 +513,7 @@
     </form>
   </div>
 
-  <div class="exec-process-tooltip shadow" x-show="execHover.open" :style="execHoverStyle()" style="display: none;">
+  <div class="exec-process-tooltip shadow" x-show="execHover.open && !execProcessModal.open" :style="execHoverStyle()" style="display: none;">
     <div class="exec-process-tooltip-title" x-text="execHover.title"></div>
     <pre x-text="execHover.output"></pre>
   </div>
