@@ -114,6 +114,22 @@ type queuedSteerBoundaryRunner struct {
 	step1Timeline []domain.TimelineItem
 }
 
+type compactFakeRunner struct {
+	events []domain.Event
+}
+
+type compactModelFakeRunner struct {
+	runtimeFakeRunner
+	compactFakeRunner
+}
+
+func (f *compactFakeRunner) CompactChat(_ context.Context, _ *Chat, _ string, out chan<- domain.Event) error {
+	for _, evt := range f.events {
+		out <- evt
+	}
+	return nil
+}
+
 func depsForFake(st *store.Store, runner any) Deps {
 	deps := Deps{Store: st}
 	if model, ok := runner.(ModelRuntime); ok {
@@ -3386,6 +3402,97 @@ func TestRuntimeCompactionCompletionClearsKnownContext(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatal("timed out waiting for compaction completion update")
+		}
+	}
+}
+
+func TestRuntimeManualCompactionReturnsToIdle(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	item := domain.TimelineItem{
+		ID:     "019aa000-0000-7000-8000-000000001000",
+		ChatID: chatRecord.ID,
+		Seq:    1,
+		Content: domain.Compaction{
+			Summary:             "summary",
+			Status:              "completed",
+			BeforeContextTokens: 1200,
+			AfterContextTokens:  400,
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		SealedAt:  time.Now().UTC(),
+	}
+	runner := &compactFakeRunner{events: []domain.Event{{
+		Kind: domain.EventKindStatus,
+		Text: "Session compacted",
+		Item: item,
+		Meta: map[string]string{"compaction": "completed", "refresh": "details"},
+	}}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	if err := rt.Compact("manual test"); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	sawCompleted := false
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Meta["compaction"] == "completed" {
+				sawCompleted = true
+				if update.Status == StatusIdle {
+					return
+				}
+			}
+			if sawCompleted && update.Status == StatusIdle {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for idle after compaction; snapshot=%#v", rt.Snapshot())
+		}
+	}
+}
+
+func TestRuntimeManualCompactionRejectsActiveTurn(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &compactModelFakeRunner{
+		runtimeFakeRunner: runtimeFakeRunner{events: []<-chan domain.Event{events}},
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first prompt"})
+
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if err := rt.Compact("during active turn"); err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("expected busy compaction error, got %v", err)
+	}
+
+	close(events)
+	deadline = time.After(2 * time.Second)
+	for {
+		if got := rt.Snapshot().Status; got == StatusIdle {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for idle after active turn; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

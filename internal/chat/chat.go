@@ -178,6 +178,10 @@ type dispatchQueuedCmd struct {
 type interruptCmd struct {
 	reason CancelReason
 }
+type compactCmd struct {
+	instructions string
+	reply        chan error
+}
 type resumePendingToolsCmd struct{}
 type approveCmd struct {
 	toolCallID string
@@ -1002,44 +1006,21 @@ func (r *Chat) DenyTool(toolCallID string) {
 }
 
 func (r *Chat) Compact(instructions string) error {
-	service := r.deps.Compact
-	if service == nil {
-		return fmt.Errorf("compaction service is not configured")
-	}
 	if err := r.EnsureTimeline(context.Background()); err != nil {
 		return err
 	}
-	instructions = strings.TrimSpace(instructions)
-	r.mu.Lock()
-	chatID := r.chat.ID
-	sessionID := r.chat.SessionID
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = WithShouldStop(ctx, func() bool {
-		r.mu.RLock()
-		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling
-	})
-	r.cancel = cancel
-	r.cancelState = CancelStateNone
-	r.running = map[string]struct{}{}
-	r.turnSeq++
-	turn := r.turnSeq
-	r.active = true
-	r.status = StatusWaitingLLM
-	r.statusText = "Compacting session..."
-	r.mu.Unlock()
-	slog.Info("chat compaction requested", "chat_id", chatID, "session_id", sessionID, "instructions_bytes", len(instructions))
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
-
-	out := make(chan domain.Event, 32)
-	go func() {
-		defer close(out)
-		if err := service.CompactChat(ctx, r, instructions, out); err != nil {
-			r.handleTurnError(ctx, out, err)
-		}
-	}()
-	r.forwardTurnEvents(turn, out)
-	return nil
+	reply := make(chan error, 1)
+	select {
+	case r.inbox <- compactCmd{instructions: strings.TrimSpace(instructions), reply: reply}:
+	case <-r.done:
+		return fmt.Errorf("chat is closed")
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-r.done:
+		return fmt.Errorf("chat is closed")
+	}
 }
 
 func (r *Chat) Close() {
@@ -2057,6 +2038,8 @@ func (r *Chat) loop() {
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
 			r.handleInterrupt(typed.reason)
+		case compactCmd:
+			r.handleCompact(typed.instructions, typed.reply)
 		case resumePendingToolsCmd:
 			r.handleResumePendingTools()
 		case approveCmd:
@@ -2397,6 +2380,59 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 	} else {
 		r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 	}
+}
+
+func (r *Chat) handleCompact(instructions string, reply chan<- error) {
+	service := r.deps.Compact
+	if service == nil {
+		reply <- fmt.Errorf("compaction service is not configured")
+		return
+	}
+	r.mu.Lock()
+	switch {
+	case r.closed:
+		r.mu.Unlock()
+		reply <- fmt.Errorf("chat is closed")
+		return
+	case r.chat.Archived:
+		r.mu.Unlock()
+		reply <- fmt.Errorf("cannot compact archived chat")
+		return
+	case r.draining || r.active || r.status == StatusWaitingApproval:
+		r.mu.Unlock()
+		reply <- fmt.Errorf("cannot compact while chat is busy")
+		return
+	}
+	chatID := r.chat.ID
+	sessionID := r.chat.SessionID
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling
+	})
+	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
+	r.turnSeq++
+	turn := r.turnSeq
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Compacting session..."
+	r.mu.Unlock()
+
+	slog.Info("chat compaction requested", "chat_id", chatID, "session_id", sessionID, "instructions_bytes", len(instructions))
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	reply <- nil
+
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		if err := service.CompactChat(ctx, r, instructions, out); err != nil {
+			r.handleTurnError(ctx, out, err)
+		}
+	}()
+	r.forwardTurnEvents(turn, out)
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionOverride) {
