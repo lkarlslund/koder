@@ -159,7 +159,7 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 }
 
 func (writeStdinTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	out, err := normalizeProcessArgs(args, false)
+	out, err := normalizeWriteStdinArgs(args)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +346,9 @@ func (writeStdinTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if strings.TrimSpace(req.Args["process_id"]) == "" {
+		return tools.Result{}, missingWriteStdinProcessIDError(ctx, control, runtime, req)
 	}
 	snap, err := control.WriteStdin(ctx, execruntime.WriteStdinRequest{
 		SessionID:  runtime.SessionID,
@@ -543,6 +546,49 @@ func normalizeProcessArgs(args map[string]string, allowScope bool) (map[string]s
 		out["max_output_bytes"] = maxOutput
 	}
 	return out, nil
+}
+
+func normalizeWriteStdinArgs(args map[string]string) (map[string]string, error) {
+	out := map[string]string{"process_id": strings.TrimSpace(args["process_id"])}
+	maxOutput, err := normalizeOptionalNonNegativeInt(args, "max_output_bytes")
+	if err != nil {
+		return nil, err
+	}
+	if maxOutput != "" {
+		out["max_output_bytes"] = maxOutput
+	}
+	return out, nil
+}
+
+func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Control, runtime tools.Runtime, req tools.Request) error {
+	scope := execruntime.ScopeChat
+	snaps, err := control.List(ctx, execruntime.ListRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		Scope:     scope,
+		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+	})
+	if err != nil {
+		return fmt.Errorf("process_id is empty. exec_write_stdin requires the process_id returned by exec_command. Could not inspect current exec sessions: %w", err)
+	}
+	var running []execruntime.Snapshot
+	for _, snap := range snaps {
+		if snap.State == execruntime.StateRunning {
+			running = append(running, snap)
+		}
+	}
+	if len(running) == 0 {
+		return errors.New("process_id is empty. exec_write_stdin can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat. Do not call exec_write_stdin again. Use the information already available, start a new command with exec_command if more work is needed, or answer the user.")
+	}
+	ids := make([]string, 0, len(running))
+	for _, snap := range running {
+		label := strings.TrimSpace(snap.ProcessID)
+		if command := strings.TrimSpace(snap.Command); command != "" {
+			label += " (" + command + ")"
+		}
+		ids = append(ids, label)
+	}
+	return fmt.Errorf("process_id is empty. exec_write_stdin requires the process_id returned by exec_command. Running exec sessions in this chat: %s. Use exec_list with scope \"chat\" to inspect sessions, then call exec_write_stdin with one of those process_id values, or use exec_status for a non-consuming status snapshot", strings.Join(ids, ", "))
 }
 
 func normalizeScope(args map[string]string) string {

@@ -161,9 +161,59 @@ func TestWriteStdinExecuteDoesNotAllowZeroYield(t *testing.T) {
 	}
 }
 
+func TestWriteStdinMissingProcessIDExplainsNoRunningProcesses(t *testing.T) {
+	control := &recordingExecControl{}
+	_, err := (writeStdinTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, Request: tools.Request{
+		Args: map[string]string{"process_id": "", "chars": ""},
+	}})
+	if err == nil {
+		t.Fatal("expected missing process id error")
+	}
+	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "Do not call exec_write_stdin again", "exec_command"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestWriteStdinMissingProcessIDListsRunningProcesses(t *testing.T) {
+	control := &recordingExecControl{list: []execruntime.Snapshot{{
+		ProcessID: "exec_7",
+		Command:   "sleep 60",
+		State:     execruntime.StateRunning,
+	}, {
+		ProcessID: "exec_8",
+		Command:   "echo done",
+		State:     execruntime.StateCompleted,
+	}}}
+	_, err := (writeStdinTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, Request: tools.Request{
+		Args: map[string]string{"process_id": "", "chars": ""},
+	}})
+	if err == nil {
+		t.Fatal("expected missing process id error")
+	}
+	for _, want := range []string{"process_id is empty", "Running exec sessions", "exec_7 (sleep 60)", "exec_list", "exec_status"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "exec_8") {
+		t.Fatalf("did not expect completed process in running guidance, got %v", err)
+	}
+}
+
 type recordingExecControl struct {
 	start      execruntime.StartRequest
 	writeStdin execruntime.WriteStdinRequest
+	list       []execruntime.Snapshot
 }
 
 func (c *recordingExecControl) Start(_ context.Context, req execruntime.StartRequest) (execruntime.Snapshot, error) {
@@ -186,7 +236,7 @@ func (c *recordingExecControl) Status(context.Context, execruntime.StatusRequest
 }
 
 func (c *recordingExecControl) List(context.Context, execruntime.ListRequest) ([]execruntime.Snapshot, error) {
-	return nil, errors.New("not implemented")
+	return c.list, nil
 }
 
 func (c *recordingExecControl) WriteStdin(_ context.Context, req execruntime.WriteStdinRequest) (execruntime.Snapshot, error) {
