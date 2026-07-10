@@ -65,6 +65,23 @@ func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, Con
 		t.Reset()
 		return ToolLoopAllow, ContinuationPause{}
 	}
+	return t.trackComparable(call, calls[0].Tool.DisplayName(), calls[0].ArgumentsJSON())
+}
+
+func (t *ToolLoopTracker) TrackToolCalls(calls []domain.ToolCall) (ToolLoopAction, ContinuationPause) {
+	if len(calls) != 1 {
+		t.Reset()
+		return ToolLoopAllow, ContinuationPause{}
+	}
+	call, ok := comparableStoredToolCall(calls[0])
+	if !ok {
+		t.Reset()
+		return ToolLoopAllow, ContinuationPause{}
+	}
+	return t.trackComparable(call, calls[0].Tool.DisplayName(), storedToolCallArgumentsJSON(calls[0]))
+}
+
+func (t *ToolLoopTracker) trackComparable(call toolLoopComparableCall, toolName, args string) (ToolLoopAction, ContinuationPause) {
 	if reflect.DeepEqual(call, t.lastCall) {
 		t.repeatCount++
 	} else {
@@ -74,11 +91,9 @@ func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, Con
 	if t.repeatCount < RepeatedToolLoopThreshold {
 		return ToolLoopAllow, ContinuationPause{}
 	}
-	toolName := calls[0].Tool.DisplayName()
-	args := calls[0].ArgumentsJSON()
 	pause := ContinuationPause{
 		Reason:   ContinuationPauseReasonRepeatedTool,
-		Tool:     calls[0].Tool,
+		Tool:     call.Tool,
 		Count:    t.repeatCount,
 		Args:     args,
 		Subtitle: fmt.Sprintf("Repeated identical %s calls", toolName),
@@ -116,10 +131,27 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 }
 
 func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {
-	if req.Tool == domain.ToolKindExecWriteStdin && strings.TrimSpace(req.Args["chars"]) == "" && strings.TrimSpace(req.Args["close_stdin"]) == "" {
+	if req.Tool == domain.ToolKindExecWriteStdin &&
+		strings.TrimSpace(req.Args["chars"]) == "" &&
+		strings.TrimSpace(req.Args["close_stdin"]) == "" &&
+		strings.TrimSpace(req.Args["process_id"]) != "" {
 		return toolLoopComparableCall{}, false
 	}
 	return toolLoopComparableCall{Tool: req.Tool, Args: cloneToolLoopArgs(req.Args)}, true
+}
+
+func comparableStoredToolCall(call domain.ToolCall) (toolLoopComparableCall, bool) {
+	if call.Tool == domain.ToolKindExecWriteStdin &&
+		strings.TrimSpace(call.Args["chars"]) == "" &&
+		strings.TrimSpace(call.Args["close_stdin"]) == "" &&
+		strings.TrimSpace(call.Args["process_id"]) != "" {
+		return toolLoopComparableCall{}, false
+	}
+	return toolLoopComparableCall{Tool: call.Tool, Args: cloneToolLoopArgs(call.Args)}, true
+}
+
+func storedToolCallArgumentsJSON(call domain.ToolCall) string {
+	return (tools.Request{Tool: call.Tool, Args: call.Args}).ArgumentsJSON()
 }
 
 func cloneToolLoopArgs(args map[string]string) map[string]string {

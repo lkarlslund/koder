@@ -128,6 +128,9 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 				return TurnStepResult{Done: true}, nil
 			}
 			if len(calls) == 0 {
+				if result, handled, err := l.handleRepeatedStoredToolCalls(ctx, rt, session.ID, parsed.ToolCalls, out); handled || err != nil {
+					return result, err
+				}
 				return TurnStepResult{Continue: true}, nil
 			}
 			if rt.shouldStopAfterCurrentLLMTurn() {
@@ -307,6 +310,19 @@ func (l *modelTurnLoop) handleRepeatedToolCall(ctx context.Context, rt *Chat, se
 		if action == ToolLoopDeny {
 			return TurnStepResult{Continue: true}, true, nil
 		}
+		l.pauseContinuation(ctx, rt, sessionID, pause, out)
+		return TurnStepResult{Done: true}, true, nil
+	default:
+		return TurnStepResult{}, true, fmt.Errorf("unsupported repeated tool action %d", action)
+	}
+}
+
+func (l *modelTurnLoop) handleRepeatedStoredToolCalls(ctx context.Context, rt *Chat, sessionID id.ID, calls []domain.ToolCall, out chan<- domain.Event) (TurnStepResult, bool, error) {
+	action, pause := l.tracker.TrackToolCalls(calls)
+	switch action {
+	case ToolLoopAllow:
+		return TurnStepResult{}, false, nil
+	case ToolLoopDeny, ToolLoopStop:
 		l.pauseContinuation(ctx, rt, sessionID, pause, out)
 		return TurnStepResult{Done: true}, true, nil
 	default:
