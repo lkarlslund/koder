@@ -333,7 +333,36 @@ func (r *Runtime) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCa
 			body = "Diff:\n" + diff
 		}
 	}
+	body = modelToolResultBody(tool, status, body)
 	return provider.Message{Role: provider.RoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
+}
+
+func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, body string) string {
+	body = strings.TrimSpace(body)
+	failed := status == domain.ToolResultStatusError ||
+		status == domain.ToolResultStatusDenied ||
+		tool.Status == domain.ToolStatusCanceled
+	if !failed {
+		return body
+	}
+	var guidance strings.Builder
+	guidance.WriteString("Tool call did not succeed.\n")
+	guidance.WriteString("Do not retry the same tool call with the same arguments.\n")
+	guidance.WriteString("Read the error, identify what is wrong, and either fix the arguments, use a different tool, ask the user for missing information, or provide a final answer using the information already available.\n")
+	if tool.Tool != "" {
+		guidance.WriteString("Failed tool: ")
+		guidance.WriteString(tool.Tool.String())
+		guidance.WriteString("\n")
+	}
+	if args := strings.TrimSpace((tools.Request{Tool: tool.Tool, Args: tool.Args}).ArgumentsJSON()); args != "" && args != "{}" {
+		guidance.WriteString("Failed arguments: ")
+		guidance.WriteString(args)
+		guidance.WriteString("\n")
+	}
+	if body == "" {
+		return strings.TrimSpace(guidance.String())
+	}
+	return strings.TrimSpace(guidance.String()) + "\n\nTool error:\n" + body
 }
 
 func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {

@@ -65,6 +65,64 @@ func TestBuildPromptEnvelopeCompactionSummaryPreservesRetainedToolTail(t *testin
 	}
 }
 
+func TestConversationMessagesForToolErrorGivesRecoveryGuidance(t *testing.T) {
+	t.Parallel()
+
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1"}
+	item := domain.TimelineItem{
+		ID:     "tool-error-1",
+		ChatID: chat.ID,
+		Seq:    1,
+		Content: domain.AssistantMessage{
+			Tools: []domain.ToolCall{{
+				Tool:       domain.ToolKindExecWriteStdin,
+				ToolCallID: "call-1",
+				Args:       map[string]string{"process_id": ""},
+				Status:     domain.ToolStatusErrored,
+				Error:      &domain.ToolError{Message: "Invalid tool call: process_id is empty"},
+			}},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(messages)
+	for _, want := range []string{
+		"Tool call did not succeed.",
+		"Do not retry the same tool call with the same arguments.",
+		"Failed tool: exec_write_stdin",
+		`"process_id":""`,
+		"Tool error:",
+		"Invalid tool call: process_id is empty",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected model guidance %q in prompt, got %s", want, joined)
+		}
+	}
+}
+
+func TestConversationMessagesForSuccessfulToolDoesNotAddErrorGuidance(t *testing.T) {
+	t.Parallel()
+
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1"}
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, assistantToolItem("ok-tool", "call-1", "echo ok", "ok"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(messages)
+	if strings.Contains(joined, "Do not retry the same tool call") {
+		t.Fatalf("did not expect error guidance for successful tool result, got %s", joined)
+	}
+	if !strings.Contains(joined, "ok") {
+		t.Fatalf("expected successful output, got %s", joined)
+	}
+}
+
 func assistantToolItem(itemID, callID, command, output string) domain.TimelineItem {
 	return domain.TimelineItem{
 		ID:     id.ID(itemID),
