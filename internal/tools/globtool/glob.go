@@ -63,9 +63,17 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 		limit = value
 	}
 	var matches []string
+	var skipped []string
 	walkErr := fs.WalkDir(os.DirFS(rootAbs), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			if path == "." {
+				return err
+			}
+			skipped = append(skipped, filepath.ToSlash(path))
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if path == "." {
 			return nil
@@ -81,15 +89,32 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 		return tools.Result{}, walkErr
 	}
 	sort.Strings(matches)
+	sort.Strings(skipped)
 	if limit > 0 && len(matches) > limit {
 		matches = matches[:limit]
 	}
 	body := strings.Join(matches, "\n")
 	body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
 	storedMatches := append([]string(nil), matches...)
-	footer := ""
+	var footerParts []string
 	if truncated {
-		storedMatches, footer = splitTruncatedLines(body)
+		var truncationFooter string
+		storedMatches, truncationFooter = splitTruncatedLines(body)
+		if truncationFooter != "" {
+			footerParts = append(footerParts, truncationFooter)
+		}
+		body = strings.Join(storedMatches, "\n")
+	}
+	if skippedFooter := skippedPathsFooter(skipped); skippedFooter != "" {
+		footerParts = append(footerParts, skippedFooter)
+	}
+	footer := strings.Join(footerParts, "\n")
+	if footer != "" {
+		if strings.TrimSpace(body) != "" {
+			body = strings.TrimRight(body, "\n") + "\n" + footer
+		} else {
+			body = footer
+		}
 	}
 	return tools.Result{
 		Output: body,
@@ -98,6 +123,7 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 			"base_path": strings.TrimSpace(req.Args["path"]),
 			"limit":     strings.TrimSpace(req.Args["limit"]),
 			"matches":   strconv.Itoa(len(matches)),
+			"skipped":   strconv.Itoa(len(skipped)),
 			"truncated": tools.BoolString(truncated),
 		},
 		Stored: tools.GlobStoredResult{
@@ -108,6 +134,22 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 			Truncated: truncated,
 		},
 	}, nil
+}
+
+func skippedPathsFooter(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	const maxShown = 5
+	shown := paths
+	if len(shown) > maxShown {
+		shown = shown[:maxShown]
+	}
+	footer := "skipped unreadable paths: " + strings.Join(shown, ", ")
+	if remaining := len(paths) - len(shown); remaining > 0 {
+		footer += " (+" + strconv.Itoa(remaining) + " more)"
+	}
+	return footer
 }
 
 func splitTruncatedLines(body string) ([]string, string) {
