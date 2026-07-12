@@ -275,16 +275,32 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(body)
 }
 
+type modelResponseItem struct {
+	ID                  string   `json:"id"`
+	OwnedBy             string   `json:"owned_by"`
+	ContextLength       int      `json:"context_length"`
+	ContextWindow       int      `json:"context_window"`
+	MaxContextLength    int      `json:"max_context_length"`
+	MaxModelLen         int      `json:"max_model_len"`
+	MaxCompletionTokens int      `json:"max_completion_tokens"`
+	Capabilities        []string `json:"capabilities"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Architecture        struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+	TopProvider struct {
+		ContextLength       int `json:"context_length"`
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	} `json:"top_provider"`
+	Status struct {
+		Args   []string `json:"args"`
+		Preset string   `json:"preset"`
+	} `json:"status"`
+}
+
 type modelsResponse struct {
-	Data []struct {
-		ID          string `json:"id"`
-		OwnedBy     string `json:"owned_by"`
-		MaxModelLen int    `json:"max_model_len"`
-		Status      struct {
-			Args   []string `json:"args"`
-			Preset string   `json:"preset"`
-		} `json:"status"`
-	} `json:"data"`
+	Data []modelResponseItem `json:"data"`
 }
 
 type propsResponse struct {
@@ -350,6 +366,7 @@ type Client struct {
 	apiKey   string
 	headers  map[string]string
 	provider string
+	backend  string
 	recorder *debugsrv.Recorder
 }
 
@@ -392,6 +409,7 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
+		backend:  strings.ToLower(strings.Join([]string{id, cfg.TemplateID, cfg.Name, cfg.BaseURL}, " ")),
 		recorder: recorder,
 	}, nil
 }
@@ -434,11 +452,16 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 
 	models := make([]domain.Model, 0, len(payload.Data))
 	for _, item := range payload.Data {
-		models = append(models, domain.Model{
-			ID:            item.ID,
-			OwnedBy:       item.OwnedBy,
-			ContextWindow: listedModelContextWindow(item.MaxModelLen, item.Status.Args, item.Status.Preset),
-		})
+		model := domain.Model{
+			ID:               item.ID,
+			OwnedBy:          item.OwnedBy,
+			ContextWindow:    listedModelContextWindow(item, true),
+			MaxContextWindow: listedModelContextWindow(item, false),
+			MaxOutputTokens:  firstPositive(item.TopProvider.MaxCompletionTokens, item.MaxCompletionTokens),
+			MetadataSource:   "openai-models",
+		}
+		applyListedCapabilities(&model, item)
+		models = append(models, model)
 	}
 	return models, nil
 }
@@ -471,18 +494,63 @@ func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (
 		if strings.TrimSpace(item.ID) != modelID {
 			continue
 		}
-		if n := listedModelContextWindow(item.MaxModelLen, item.Status.Args, item.Status.Preset); n > 0 {
+		if n := listedModelContextWindow(item, true); n > 0 {
 			return n, nil
 		}
 	}
 	return 0, nil
 }
 
-func listedModelContextWindow(maxModelLen int, args []string, preset string) int {
-	if maxModelLen > 0 {
-		return maxModelLen
+func listedModelContextWindow(item modelResponseItem, effective bool) int {
+	if effective {
+		if n := contextWindowFromModelStatus(item.Status.Args, item.Status.Preset); n > 0 {
+			return n
+		}
 	}
-	return contextWindowFromModelStatus(args, preset)
+	return firstPositive(item.TopProvider.ContextLength, item.ContextWindow, item.ContextLength, item.MaxContextLength, item.MaxModelLen)
+}
+
+func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
+	if model == nil {
+		return
+	}
+	for _, modality := range item.Architecture.InputModalities {
+		model.ImagesKnown = true
+		switch strings.ToLower(strings.TrimSpace(modality)) {
+		case "image":
+			model.SupportsImages = true
+		case "file", "pdf":
+			model.SupportsPDFs = true
+		}
+	}
+	for _, capability := range append(slices.Clone(item.Capabilities), item.SupportedParameters...) {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "vision", "image", "images":
+			model.SupportsImages = true
+		case "tools", "tool_use", "tool_choice", "function_calling":
+			model.SupportsTools = true
+		case "structured_outputs", "response_format", "json_schema":
+			model.SupportsJSON = true
+		case "reasoning", "include_reasoning":
+			model.SupportsReasoning = true
+		}
+	}
+	if len(item.Capabilities) > 0 || len(item.SupportedParameters) > 0 {
+		model.ToolsKnown = true
+	}
+	if len(item.Capabilities) > 0 || len(item.SupportedParameters) > 0 || len(item.Architecture.InputModalities) > 0 {
+		model.CapabilitiesKnown = true
+		model.CapabilitySource = "openai-models"
+	}
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func contextWindowFromModelStatus(args []string, preset string) int {
@@ -594,21 +662,12 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 	if err != nil {
 		return 0, err
 	}
-	props, err := client.Props(ctx, modelID)
-	if err == nil {
-		if props.DefaultGenerationSettings.NCtx > 0 {
-			return props.DefaultGenerationSettings.NCtx, nil
-		}
-	} else if !isOptionalContextWindowProbeError(err) {
+	model, err := client.DetectModelMetadata(ctx, modelID)
+	if err != nil {
 		return 0, err
 	}
-	maxModelLen, err := client.DetectModelContextWindow(ctx, modelID)
-	if err == nil {
-		if maxModelLen > 0 {
-			return maxModelLen, nil
-		}
-	} else if !isOptionalContextWindowProbeError(err) {
-		return 0, err
+	if model.ContextWindow > 0 {
+		return model.ContextWindow, nil
 	}
 	return 32768, nil
 }

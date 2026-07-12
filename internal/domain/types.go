@@ -531,10 +531,18 @@ type Model struct {
 	ID                string
 	OwnedBy           string
 	ContextWindow     int
+	MaxContextWindow  int
+	MaxOutputTokens   int
+	MetadataSource    string
 	SupportsChat      bool
 	SupportsTTS       bool
 	SupportsImages    bool
+	ImagesKnown       bool
 	SupportsPDFs      bool
+	SupportsTools     bool
+	ToolsKnown        bool
+	SupportsJSON      bool
+	SupportsReasoning bool
 	CapabilitySource  string
 	CapabilitiesKnown bool
 }

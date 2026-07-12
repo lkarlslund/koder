@@ -26,10 +26,19 @@ type capabilityEntry struct {
 	ProviderID        string    `json:"provider_id"`
 	BaseURL           string    `json:"base_url"`
 	ModelID           string    `json:"model_id"`
+	ContextWindow     int       `json:"context_window,omitempty"`
+	MaxContextWindow  int       `json:"max_context_window,omitempty"`
+	MaxOutputTokens   int       `json:"max_output_tokens,omitempty"`
+	MetadataSource    string    `json:"metadata_source,omitempty"`
 	SupportsChat      bool      `json:"supports_chat"`
 	SupportsTTS       bool      `json:"supports_tts"`
 	SupportsImages    bool      `json:"supports_images"`
+	ImagesKnown       bool      `json:"images_known,omitempty"`
 	SupportsPDFs      bool      `json:"supports_pdfs"`
+	SupportsTools     bool      `json:"supports_tools"`
+	ToolsKnown        bool      `json:"tools_known,omitempty"`
+	SupportsJSON      bool      `json:"supports_json"`
+	SupportsReasoning bool      `json:"supports_reasoning"`
 	CapabilitySource  string    `json:"capability_source"`
 	CapabilitiesKnown bool      `json:"capabilities_known"`
 	DetectedAt        time.Time `json:"detected_at"`
@@ -69,8 +78,23 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
 	current := inferCapabilities(providerID, cfg, model)
 	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
-		if strings.TrimSpace(entry.CapabilitySource) == "probe" {
+		if strings.TrimSpace(entry.CapabilitySource) != "heuristic" {
 			return applyEntry(current, entry), nil
+		}
+	}
+	if !model.CapabilitiesKnown && (looksLikeLMStudio(strings.ToLower(strings.Join([]string{providerID, cfg.TemplateID, cfg.Name, cfg.BaseURL}, " "))) || looksLikeOllama(providerID, cfg.BaseURL)) {
+		if client, clientErr := New(providerID, cfg, nil); clientErr == nil {
+			if detected, detectErr := client.DetectModelMetadata(context.Background(), model.ID); detectErr == nil {
+				mergeDetectedModel(&current, detected)
+				if current.CapabilitiesKnown {
+					entry := capabilityEntryFromModel(providerID, cfg, current)
+					cache.Entries[key] = entry
+					if err := s.save(cache); err != nil {
+						return domain.Model{}, err
+					}
+					return current, nil
+				}
+			}
 		}
 	}
 	if shouldProbeTTS(providerID, cfg, model.ID) {
@@ -153,6 +177,7 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 				SupportsChat:      current.SupportsChat,
 				SupportsTTS:       current.SupportsTTS,
 				SupportsImages:    supported,
+				ImagesKnown:       true,
 				SupportsPDFs:      current.SupportsPDFs,
 				CapabilitySource:  "probe",
 				CapabilitiesKnown: true,
@@ -183,13 +208,10 @@ func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, mod
 }
 
 func inferCapabilities(providerID string, cfg config.Provider, model domain.Model) domain.Model {
-	supportsPDFs := false
 	model.SupportsChat = true
-	model.SupportsTTS = false
-	model.SupportsImages = false
-	model.SupportsPDFs = supportsPDFs
-	model.CapabilitySource = ""
-	model.CapabilitiesKnown = false
+	if model.CapabilitiesKnown && strings.TrimSpace(model.CapabilitySource) == "" {
+		model.CapabilitySource = "model-metadata"
+	}
 	return model
 }
 
@@ -213,16 +235,57 @@ func capabilityKey(providerID, baseURL, modelID string) string {
 }
 
 func applyEntry(model domain.Model, entry capabilityEntry) domain.Model {
+	if entry.ContextWindow > 0 {
+		model.ContextWindow = entry.ContextWindow
+	}
+	if entry.MaxContextWindow > 0 {
+		model.MaxContextWindow = entry.MaxContextWindow
+	}
+	if entry.MaxOutputTokens > 0 {
+		model.MaxOutputTokens = entry.MaxOutputTokens
+	}
+	if strings.TrimSpace(entry.MetadataSource) != "" {
+		model.MetadataSource = entry.MetadataSource
+	}
 	model.SupportsChat = entry.SupportsChat
 	if !entry.SupportsChat && !entry.SupportsTTS {
 		model.SupportsChat = true
 	}
 	model.SupportsTTS = entry.SupportsTTS
 	model.SupportsImages = entry.SupportsImages
+	model.ImagesKnown = entry.ImagesKnown
 	model.SupportsPDFs = entry.SupportsPDFs
+	model.SupportsTools = entry.SupportsTools
+	model.ToolsKnown = entry.ToolsKnown
+	model.SupportsJSON = entry.SupportsJSON
+	model.SupportsReasoning = entry.SupportsReasoning
 	model.CapabilitySource = entry.CapabilitySource
 	model.CapabilitiesKnown = entry.CapabilitiesKnown
 	return model
+}
+
+func capabilityEntryFromModel(providerID string, cfg config.Provider, model domain.Model) capabilityEntry {
+	return capabilityEntry{
+		ProviderID:        providerID,
+		BaseURL:           strings.TrimSpace(cfg.BaseURL),
+		ModelID:           model.ID,
+		ContextWindow:     model.ContextWindow,
+		MaxContextWindow:  model.MaxContextWindow,
+		MaxOutputTokens:   model.MaxOutputTokens,
+		MetadataSource:    model.MetadataSource,
+		SupportsChat:      model.SupportsChat,
+		SupportsTTS:       model.SupportsTTS,
+		SupportsImages:    model.SupportsImages,
+		ImagesKnown:       model.ImagesKnown,
+		SupportsPDFs:      model.SupportsPDFs,
+		SupportsTools:     model.SupportsTools,
+		ToolsKnown:        model.ToolsKnown,
+		SupportsJSON:      model.SupportsJSON,
+		SupportsReasoning: model.SupportsReasoning,
+		CapabilitySource:  model.CapabilitySource,
+		CapabilitiesKnown: model.CapabilitiesKnown,
+		DetectedAt:        time.Now().UTC(),
+	}
 }
 
 func (s *CapabilityStore) load() (capabilityFile, error) {

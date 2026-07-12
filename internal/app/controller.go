@@ -104,6 +104,9 @@ type ModelOption struct {
 	SourceModelID    string `json:"source_model_id,omitempty"`
 	OwnedBy          string `json:"owned_by,omitempty"`
 	ContextWindow    int    `json:"context_window,omitempty"`
+	MaxContextWindow int    `json:"max_context_window,omitempty"`
+	MaxOutputTokens  int    `json:"max_output_tokens,omitempty"`
+	MetadataSource   string `json:"metadata_source,omitempty"`
 	SupportsChat     bool   `json:"supports_chat"`
 	SupportsTTS      bool   `json:"supports_tts"`
 	Detected         bool   `json:"detected"`
@@ -122,6 +125,9 @@ type ModelInfo struct {
 	SourceModelID     string `json:"source_model_id,omitempty"`
 	BackingDetected   bool   `json:"backing_detected"`
 	ContextWindow     int    `json:"context_window"`
+	MaxContextWindow  int    `json:"max_context_window,omitempty"`
+	MaxOutputTokens   int    `json:"max_output_tokens,omitempty"`
+	MetadataSource    string `json:"metadata_source,omitempty"`
 	SupportsChat      bool   `json:"supports_chat"`
 	SupportsTTS       bool   `json:"supports_tts"`
 	SupportsTools     bool   `json:"supports_tools"`
@@ -2114,8 +2120,11 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 		return info
 	}
 	info.SupportsChat = enriched.SupportsChat
+	info.MaxContextWindow = enriched.MaxContextWindow
+	info.MaxOutputTokens = enriched.MaxOutputTokens
+	info.MetadataSource = strings.TrimSpace(enriched.MetadataSource)
 	info.SupportsTTS = enriched.SupportsTTS
-	info.SupportsTools = enriched.SupportsChat
+	info.SupportsTools = enriched.SupportsTools || (!enriched.ToolsKnown && enriched.SupportsChat)
 	info.SupportsImages = enriched.SupportsImages
 	info.SupportsPDFs = enriched.SupportsPDFs
 	info.CapabilitiesKnown = enriched.CapabilitiesKnown
