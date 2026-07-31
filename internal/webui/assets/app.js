@@ -4072,7 +4072,16 @@
             this.showToast('This model supports TTS output, not chat completions.');
             return;
           }
-          this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(() => {
+          this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(result => {
+            const contextWindow = Number(result?.context_window || 0);
+            if (contextWindow > 0) {
+              this.state.context_window = contextWindow;
+              this.state.ContextWindow = contextWindow;
+            }
+            if (result?.model_info) {
+              this.state.model_info = result.model_info;
+              this.state.ModelInfo = result.model_info;
+            }
             this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {current: item.provider_id === model.provider_id && item.model_id === model.model_id}));
             this.loadModelSettings(model.provider_id, model.model_id);
           });

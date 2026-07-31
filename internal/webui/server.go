@@ -1131,7 +1131,15 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SetModelForSelection(ctx, s.appSelection(clientID), in.ProviderID, in.ModelID); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"updated": true}, nil
+		state, err := s.controller.StateForSelection(ctx, s.appSelection(clientID))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"updated":        true,
+			"context_window": state.ContextWindow,
+			"model_info":     state.ModelInfo,
+		}, nil
 	case "provider_state":
 		return s.controller.Providers(), nil
 	case "new_provider_draft":

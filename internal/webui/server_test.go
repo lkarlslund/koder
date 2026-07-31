@@ -2468,7 +2468,9 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Updated bool `json:"updated"`
+			Updated       bool          `json:"updated"`
+			ContextWindow int           `json:"context_window"`
+			ModelInfo     app.ModelInfo `json:"model_info"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -2480,6 +2482,12 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	}
 	if !resp.Result.Updated {
 		t.Fatal("expected set_model acknowledgement")
+	}
+	if resp.Result.ContextWindow <= 0 {
+		t.Fatalf("expected set_model context window, got %d", resp.Result.ContextWindow)
+	}
+	if resp.Result.ModelInfo.ProviderID != "test" || resp.Result.ModelInfo.ModelID != "next-model" {
+		t.Fatalf("expected set_model model info for test/next-model, got %#v", resp.Result.ModelInfo)
 	}
 	state, err := ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
 	if err != nil {
