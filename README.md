@@ -103,7 +103,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 | Execution | shell commands, long-running exec sessions, command output capture, exit codes |
 | Planning | milestones, tasks, status updates, planning board, controlled sub-chats |
 | Context | context tracking, compaction, image-capability checks, prompt-progress diagnostics |
-| Extensions | MCP tools, skills, web fetch/search, markdown and Mermaid validation |
+| Browser and extensions | Native shared Chrome automation, web fetch/search, MCP tools, skills, markdown and Mermaid validation |
 
 ## Feature Highlights
 
@@ -114,6 +114,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 | Controlled background execution chats | Let an orchestrator chat stay in charge while scoped sub-chats execute work, with limits on concurrent non-idle child chats. |
 | Queue, steer, and send-now controls | Add normal queued messages, steer a running turn, promote/demote queued messages, or abort the current turn and send a new instruction immediately. |
 | Visual artifact feedback loop | Browse rendered markdown, Mermaid diagrams, images, and generated files so both user and model can iterate on visual output, not just raw text. |
+| Native shared browser automation | Drive one visible authenticated Chrome profile with chat-owned tabs, snapshots, interactions, screenshots, console and network inspection. Screenshots flow directly into model vision and the UI without Node.js or workspace temp files. |
 | Local model diagnostics | Detect `llama.cpp` context/slot behavior, show prompt-progress/cache signals, and expose provider HTTP traces when cache reuse or streaming looks wrong. |
 | Custom model variants | Create derived models with custom request JSON, defaults, TTS settings, thinking settings, and compaction choices without changing the backing provider. |
 | Session-scoped safety controls | Permissions, sandboxing, network policy, workspace access, mounts, approvals, and model choices belong to the session instead of a hidden global state. |
@@ -126,6 +127,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 - At least one OpenAI-compatible model provider.
 - `rg` is optional; search falls back to a Go implementation when ripgrep is unavailable.
 - `bwrap` is currently required for sandboxed shell command execution on Linux.
+- Chrome or Chromium and `bwrap` are required for native browser automation. Node.js and Playwright are not runtime dependencies.
 - macOS and Windows can run the web UI and non-shell features, but shell sandboxing is currently Linux-oriented.
 
 ## Useful Commands

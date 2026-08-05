@@ -60,7 +60,7 @@ dirty local worktree.
 
 | Product | Persistent sessions | Compaction | Approvals | OS sandbox | Queue / steer | MCP | ACP | Skills / rules | Vision | Web / browser tools |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **Koder** | **Yes** | **Yes** | **Yes** | **Yes** (bubblewrap) | **Yes** (queue, steer, abort-and-send) | **Yes** (HTTP, stdio) | No | **Yes** | **Yes** | Partial (fetch/search, no browser control) |
+| **Koder** | **Yes** | **Yes** | **Yes** | **Yes** (bubblewrap) | **Yes** (queue, steer, abort-and-send) | **Yes** (HTTP, stdio) | No | **Yes** | **Yes** | **Yes** (native shared Chrome plus fetch/search) |
 | Aider | **Yes** | **Yes** | Partial (command confirmation) | No | No | No | No | Partial (conventions) | **Yes** | Partial (URLs/search) |
 | Claude Code snapshot | **Yes** | **Yes** | **Yes** | Partial (permission/sandbox policy) | **Yes** | **Yes** | No native evidence | **Yes** | **Yes** | **Yes** |
 | Cline | **Yes** | **Yes** | **Yes** | No | Partial (interrupt/follow-up) | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** |
@@ -138,7 +138,7 @@ with dependency chains, per-card worktrees, and automatic commits.
 
 | Product | Plugins / hooks | Public SDK / API | Custom request shaping | File/artifact viewer | Rich Markdown / diagrams | Voice / TTS | Debug / traces | Browser automation |
 |---|---|---|---|---|---|---|---|---|
-| **Koder** | Partial (skills and MCP; no hook API) | Partial (headless CLI/internal RPC) | **Yes** (per-model JSON) | **Yes** | **Yes** (Markdown, Mermaid, math, images) | **Yes** (TTS output) | **Yes** (provider/debug traces) | No |
+| **Koder** | Partial (skills and MCP; no hook API) | Partial (headless CLI/internal RPC) | **Yes** (per-model JSON) | **Yes** | **Yes** (Markdown, Mermaid, math, images) | **Yes** (TTS output) | **Yes** (provider/debug traces) | **Yes** (native Go/CDP, shared profile, chat-owned tabs) |
 | Aider | Partial (scripting/conventions) | Partial (CLI) | **Yes** | Partial (terminal/browser chat) | Partial | **Yes** (voice input) | Partial (verbose logs) | No |
 | Claude Code snapshot | **Yes** | **Yes** (agent SDK) | Partial | Partial | Partial | Partial | **Yes** | **Yes** |
 | Cline | **Yes** | **Yes** | **Yes** | **Yes** (IDE) | **Yes** | No | **Yes** | **Yes** |
