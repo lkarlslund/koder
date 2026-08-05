@@ -36,8 +36,12 @@ func scrollExpression(locator browserapi.Locator, x, y int) string {
 	return fmt.Sprintf(`(()=>{%s;resolve(%s,'scroll').scrollBy(%d,%d);return true})()`, semanticResolverJS, mustJSON(locator), x, y)
 }
 
+func boundsExpression(locator browserapi.Locator) string {
+	return fmt.Sprintf(`(()=>{%s;const e=resolve(%s,'capture');e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return {x:r.left+window.scrollX,y:r.top+window.scrollY,width:r.width,height:r.height,scale:1}})()`, semanticResolverJS, mustJSON(locator))
+}
+
 func interactionExpression(locator browserapi.Locator, action, value string) string {
-	return fmt.Sprintf(`(()=>{%s;const e=resolve(%s,%q);const value=%s;switch(%q){case 'select':e.value=value;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));break;case 'check':if(!e.checked)e.click();break;case 'uncheck':if(e.checked)e.click();break;case 'hover':e.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));e.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}));break;}return true})()`, semanticResolverJS, mustJSON(locator), action, mustJSON(value), action)
+	return fmt.Sprintf(`(()=>{%s;const e=resolve(%s,%q);const value=%s;switch(%q){case 'click':e.click();break;case 'fill':{e.focus();const proto=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;const setter=Object.getOwnPropertyDescriptor(proto,'value')?.set;if(setter)setter.call(e,value);else e.value=value;e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:value}));e.dispatchEvent(new Event('change',{bubbles:true}));break;}case 'type':case 'press':e.focus();break;case 'select':e.value=value;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));break;case 'check':if(!e.checked)e.click();break;case 'uncheck':if(e.checked)e.click();break;case 'hover':e.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));e.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}));break;}return true})()`, semanticResolverJS, mustJSON(locator), action, mustJSON(value), action)
 }
 
 func mustJSON(value any) string {

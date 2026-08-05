@@ -18,8 +18,17 @@ func TestChromiumIntegration(t *testing.T) {
 		t.Skip("set KODER_BROWSER_TEST=1 to run Chromium integration")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/history-one" || r.URL.Path == "/history-two" {
-			_, _ = w.Write([]byte(`<!doctype html><title>` + strings.TrimPrefix(r.URL.Path, "/") + `</title><p>` + r.URL.Path + `</p>`))
+		if r.URL.Path == "/history-one" {
+			_, _ = w.Write([]byte(`<!doctype html><title>history-one</title>
+<label>History value: <input id="history-value"></label>
+<button onclick="document.querySelector('output').textContent='history-clicked'">History action</button>
+<input type="file" aria-label="History upload">
+<img alt="History image" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='blue'/%3E%3C/svg%3E">
+<output>waiting</output>`))
+			return
+		}
+		if r.URL.Path == "/history-two" {
+			_, _ = w.Write([]byte(`<!doctype html><title>history-two</title><p>/history-two</p>`))
 			return
 		}
 		if r.URL.Path == "/data" {
@@ -261,6 +270,30 @@ func TestChromiumIntegration(t *testing.T) {
 	back, err := m.History(t.Context(), chat, "back")
 	if err != nil || back.URL != server.URL+"/history-one" || time.Since(started) > 5*time.Second {
 		t.Fatalf("unexpected browser back result: %#v, %v", back, err)
+	}
+	if err := m.Interact(t.Context(), chat, "fill", browserapi.Locator{Target: "History value"}, "restored"); err != nil {
+		t.Fatalf("fill after browser back: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#history-value').value`); err != nil || value != `"restored"` {
+		t.Fatalf("fill after browser back did not update value: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "type", browserapi.Locator{Target: "History value"}, " value"); err != nil {
+		t.Fatalf("type after browser back: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "History action"}, ""); err != nil {
+		t.Fatalf("click after browser back: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"history-clicked"` {
+		t.Fatalf("click after browser back did not run handler: %s, %v", value, err)
+	}
+	if _, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Target: "History image"}, false, "png", 90); err != nil {
+		t.Fatalf("element screenshot after browser back: %v", err)
+	}
+	if err := m.Upload(t.Context(), chat, browserapi.Locator{Target: "History upload"}, []string{uploadPath}); err != nil {
+		t.Fatalf("upload after browser back: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('input[type=file]').files.length`); err != nil || value != "1" {
+		t.Fatalf("upload after browser back did not select file: %s, %v", value, err)
 	}
 	forward, err := m.History(t.Context(), chat, "forward")
 	if err != nil || forward.URL != server.URL+"/history-two" {

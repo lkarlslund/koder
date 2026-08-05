@@ -23,6 +23,7 @@ import (
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -673,14 +674,16 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
 	var task chromedp.Action
-	expression := locatorExpression(locator, action)
 	switch action {
 	case "click":
-		task = chromedp.Click(expression, chromedp.ByJSPath)
+		task = chromedp.Evaluate(interactionExpression(locator, action, value), nil)
 	case "fill":
-		task = chromedp.SetValue(expression, value, chromedp.ByJSPath)
+		task = chromedp.Evaluate(interactionExpression(locator, action, value), nil)
 	case "type":
-		task = chromedp.SendKeys(expression, value, chromedp.ByJSPath)
+		task = chromedp.Tasks{
+			chromedp.Evaluate(interactionExpression(locator, "type", ""), nil),
+			chromedp.KeyEvent(value),
+		}
 	case "press":
 		key, modifiers := browserKeyChord(value)
 		options := []chromedp.KeyOption(nil)
@@ -691,7 +694,7 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 			task = chromedp.KeyEvent(key, options...)
 		} else {
 			task = chromedp.Tasks{
-				chromedp.Focus(expression, chromedp.ByJSPath),
+				chromedp.Evaluate(interactionExpression(locator, "press", ""), nil),
 				chromedp.KeyEvent(key, options...),
 			}
 		}
@@ -702,11 +705,6 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if action == "click" || action == "fill" || action == "type" || (action == "press" && !locator.Empty()) {
-		if err := validateLocator(opCtx, locator, action); err != nil {
-			return fmt.Errorf("browser %s: %w", action, err)
-		}
-	}
 	if err := chromedp.Run(opCtx, task); err != nil {
 		return fmt.Errorf("browser %s: %w", action, err)
 	}
@@ -780,10 +778,19 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, locator brow
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if err := validateLocator(opCtx, locator, "upload"); err != nil {
-		return fmt.Errorf("resolve browser upload target: %w", err)
-	}
-	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(locatorExpression(locator, "upload"), browserPaths, chromedp.ByJSPath)); err != nil {
+	if err := chromedp.Run(opCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		object, exception, err := cdpruntime.Evaluate(locatorExpression(locator, "upload")).Do(ctx)
+		if err != nil {
+			return err
+		}
+		if exception != nil {
+			return exception
+		}
+		if object == nil || object.ObjectID == "" {
+			return errors.New("browser upload target did not resolve to an element")
+		}
+		return dom.SetFileInputFiles(browserPaths).WithObjectID(object.ObjectID).Do(ctx)
+	})); err != nil {
 		return fmt.Errorf("upload browser files: %w", err)
 	}
 	tab.dataMu.Lock()
@@ -831,12 +838,26 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	}
 	var action chromedp.Action
 	if !locator.Empty() {
-		action = chromedp.QueryAfter(locatorExpression(locator, "capture"), func(ctx context.Context, _ cdpruntime.ExecutionContextID, nodes ...*cdp.Node) error {
-			if len(nodes) == 0 {
-				return errors.New("browser screenshot target was not found in the current DOM")
-			}
-			return chromedp.ScreenshotNodes(nodes[:1], 1, &data).Do(ctx)
-		}, chromedp.ByJSPath)
+		var bounds page.Viewport
+		action = chromedp.Tasks{
+			chromedp.Evaluate(boundsExpression(locator), &bounds),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				if bounds.Width <= 0 || bounds.Height <= 0 {
+					return errors.New("browser screenshot target has no drawable area")
+				}
+				params := page.CaptureScreenshot().
+					WithClip(&bounds).
+					WithCaptureBeyondViewport(true)
+				if strings.EqualFold(format, "jpeg") {
+					params = params.WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(int64(quality))
+				} else {
+					params = params.WithFormat(page.CaptureScreenshotFormatPng)
+				}
+				var err error
+				data, err = params.Do(ctx)
+				return err
+			}),
+		}
 	} else if fullPage {
 		action = chromedp.FullScreenshot(&data, quality)
 	} else {
@@ -844,11 +865,6 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if !locator.Empty() {
-		if err := validateLocator(opCtx, locator, "capture"); err != nil {
-			return browserapi.Binary{}, fmt.Errorf("resolve browser screenshot target: %w", err)
-		}
-	}
 	if err := chromedp.Run(opCtx, action); err != nil {
 		return browserapi.Binary{}, fmt.Errorf("capture browser screenshot: %w", err)
 	}
