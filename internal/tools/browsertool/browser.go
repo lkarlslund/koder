@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -30,7 +32,7 @@ var specs = []tool{
 	{tools.BrowserTabClaim, "Claim browser tab", "Atomically claim an unowned manual browser tab.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
 	{tools.BrowserTabSelect, "Select browser tab", "Select one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
 	{tools.BrowserTabClose, "Close browser tab", "Close one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
-	{tools.BrowserNavigate, "Navigate browser", "Navigate the selected tab to an HTTP or HTTPS URL.", required(object(`"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}`), "url")},
+	{tools.BrowserNavigate, "Navigate browser", "Navigate the selected tab to an HTTP, HTTPS, or permitted local file URL.", required(object(`"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}`), "url")},
 	{tools.BrowserBack, "Browser back", "Navigate the selected tab back.", object(``)},
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
 	{tools.BrowserReload, "Reload browser", "Reload the selected tab.", object(``)},
@@ -90,8 +92,8 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew {
 		if raw := out["url"]; raw != "" {
 			parsed, err := url.Parse(raw)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "about") {
-				return nil, errors.New("url must use http, https, or about")
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "about" && parsed.Scheme != "file") {
+				return nil, errors.New("url must use http, https, about, or file")
 			}
 		}
 	}
@@ -120,9 +122,18 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	}
 	chat := browserapi.Chat{SessionID: opts.Runtime.SessionID, ChatID: opts.Runtime.ChatID}
 	args := opts.Request.Args
+	var err error
+	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew {
+		if args["url"] != "" {
+			args = maps.Clone(args)
+			args["url"], err = permittedBrowserURL(opts.Runtime, args["url"])
+			if err != nil {
+				return tools.Result{}, err
+			}
+		}
+	}
 	result := tools.BrowserStoredResult{Kind: t.id.String()}
 	var value any
-	var err error
 	switch t.id {
 	case tools.BrowserStatus:
 		value = service.Status(ctx, chat)
@@ -376,4 +387,29 @@ func boolArg(args map[string]string, key string) bool {
 func jsonString(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)
+}
+
+func permittedBrowserURL(runtime tools.Runtime, raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "file" {
+		return raw, err
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return "", errors.New("file URL host must be empty or localhost")
+	}
+	abs, _, err := tools.ReadablePath(runtime.Workdir, parsed.Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve browser file URL: %w", err)
+	}
+	if err := runtime.CheckPathAccess(accesssettings.AccessRead, abs); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("open browser file URL: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("browser file URL must reference a regular file")
+	}
+	return (&url.URL{Scheme: "file", Path: abs, Fragment: parsed.Fragment}).String(), nil
 }

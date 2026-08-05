@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,8 +26,27 @@ func TestBrowserToolSchemasAndRequiredArguments(t *testing.T) {
 	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{}); err == nil {
 		t.Fatal("browser_click should require ref")
 	}
-	if _, err := (tool{id: tools.BrowserNavigate}).NormalizeArgs(map[string]string{"url": "file:///etc/passwd"}); err == nil {
-		t.Fatal("browser_navigate should reject file URLs")
+	if _, err := (tool{id: tools.BrowserNavigate}).NormalizeArgs(map[string]string{"url": "ftp://example.com"}); err == nil {
+		t.Fatal("browser_navigate should reject unsupported URL schemes")
+	}
+}
+
+func TestPermittedBrowserURLHonorsReadAccess(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "page.html")
+	if err := os.WriteFile(path, []byte("<title>local</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{Workdir: root, AccessSettings: accesssettings.AllowAll()}
+	want := (&url.URL{Scheme: "file", Path: path}).String()
+	got, err := permittedBrowserURL(runtime, want)
+	if err != nil || got != want {
+		t.Fatalf("permittedBrowserURL() = %q, %v", got, err)
+	}
+	locked := runtime
+	locked.AccessSettings.Project = accesssettings.ModeNone
+	if _, err := permittedBrowserURL(locked, want); err == nil {
+		t.Fatal("expected file URL read access rejection")
 	}
 }
 
