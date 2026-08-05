@@ -36,9 +36,9 @@ var specs = []tool{
 	{tools.BrowserBack, "Browser back", "Navigate the selected tab back.", object(``)},
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
 	{tools.BrowserReload, "Reload browser", "Reload the selected tab.", object(``)},
-	{tools.BrowserSnapshot, "Browser snapshot", "Return a compact visible DOM snapshot with ephemeral element refs.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserSnapshot, "Browser snapshot", "Return a compact visible DOM snapshot with element refs that remain valid while their elements remain in the selected tab.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
 	{tools.BrowserFind, "Find in browser", "Find visible page elements by text and return a fresh referenced snapshot.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
-	{tools.BrowserClick, "Click browser element", "Click an element ref from the latest snapshot.", refSchema(false)},
+	{tools.BrowserClick, "Click browser element", "Click an element ref from a browser snapshot.", refSchema(false)},
 	{tools.BrowserFill, "Fill browser element", "Replace an input's value.", refValueSchema()},
 	{tools.BrowserType, "Type in browser element", "Type text into an element.", refValueSchema()},
 	{tools.BrowserPress, "Press browser key", "Send a key to an element.", refValueSchema()},
@@ -181,7 +181,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		}
 		deadline := time.Now().Add(wait)
 		for {
-			value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`document.body?.innerText.includes(%s) === true`, jsonString(args["text"])))
+			value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`(document.body?.innerText || '').toLowerCase().includes(%s)`, jsonString(strings.ToLower(args["text"]))))
 			if err == nil && value == "true" {
 				value = map[string]string{"found": args["text"]}
 				break

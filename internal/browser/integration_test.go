@@ -74,7 +74,7 @@ func TestChromiumIntegration(t *testing.T) {
 	if start <= 0 || end < start {
 		t.Fatalf("snapshot has no ref: %s", snapshot.Text)
 	}
-	if _, err := m.Find(t.Context(), chat, "Download", "link", 8*1024); err != nil {
+	if _, err := m.Find(t.Context(), chat, "Run", "button", 8*1024); err != nil {
 		t.Fatalf("find before using earlier reference: %v", err)
 	}
 	if err := m.Interact(t.Context(), chat, "click", snapshot.Text[start:end], ""); err != nil {
