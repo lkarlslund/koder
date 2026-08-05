@@ -18,6 +18,10 @@ func TestChromiumIntegration(t *testing.T) {
 		t.Skip("set KODER_BROWSER_TEST=1 to run Chromium integration")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/history-one" || r.URL.Path == "/history-two" {
+			_, _ = w.Write([]byte(`<!doctype html><title>` + strings.TrimPrefix(r.URL.Path, "/") + `</title><p>` + r.URL.Path + `</p>`))
+			return
+		}
 		if r.URL.Path == "/data" {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("network-body"))
@@ -141,6 +145,25 @@ func TestChromiumIntegration(t *testing.T) {
 	elementShot, err := m.Screenshot(t.Context(), chat, imageRef, false, "png", 90)
 	if err != nil || len(elementShot.Data) == 0 || elementShot.MIME != "image/png" {
 		t.Fatalf("unexpected direct element screenshot: %d bytes %s, %v", len(elementShot.Data), elementShot.MIME, err)
+	}
+	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-one", "load"); err != nil {
+		t.Fatalf("navigate first history page: %v", err)
+	}
+	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-two", "load"); err != nil {
+		t.Fatalf("navigate second history page: %v", err)
+	}
+	started := time.Now()
+	back, err := m.History(t.Context(), chat, "back")
+	if err != nil || back.URL != server.URL+"/history-one" || time.Since(started) > 5*time.Second {
+		t.Fatalf("unexpected browser back result: %#v, %v", back, err)
+	}
+	forward, err := m.History(t.Context(), chat, "forward")
+	if err != nil || forward.URL != server.URL+"/history-two" {
+		t.Fatalf("unexpected browser forward result: %#v, %v", forward, err)
+	}
+	reloaded, err := m.History(t.Context(), chat, "reload")
+	if err != nil || reloaded.URL != server.URL+"/history-two" {
+		t.Fatalf("unexpected browser reload result: %#v, %v", reloaded, err)
 	}
 	second, err := m.NewTab(t.Context(), chat, server.URL)
 	if err != nil {

@@ -567,23 +567,47 @@ func (m *Manager) History(ctx context.Context, chat browserapi.Chat, direction s
 	}
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
-	var action chromedp.Action
-	switch direction {
-	case "back":
-		action = chromedp.NavigateBack()
-	case "forward":
-		action = chromedp.NavigateForward()
-	case "reload":
-		action = chromedp.Reload()
-	default:
-		return browserapi.Tab{}, fmt.Errorf("unsupported history action %q", direction)
-	}
+	var entry *page.NavigationEntry
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if err := chromedp.Run(opCtx, action); err != nil {
-		return browserapi.Tab{}, err
+	if err := chromedp.Run(opCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		current, entries, err := page.GetNavigationHistory().Do(ctx)
+		if err != nil {
+			return err
+		}
+		switch direction {
+		case "back":
+			if current <= 0 || current >= int64(len(entries)) {
+				return errors.New("no previous navigation entry")
+			}
+			entry = entries[current-1]
+			return page.NavigateToHistoryEntry(entry.ID).Do(ctx)
+		case "forward":
+			if current < 0 || current >= int64(len(entries)-1) {
+				return errors.New("no next navigation entry")
+			}
+			entry = entries[current+1]
+			return page.NavigateToHistoryEntry(entry.ID).Do(ctx)
+		case "reload":
+			if current >= 0 && current < int64(len(entries)) {
+				entry = entries[current]
+			}
+			return page.Reload().Do(ctx)
+		default:
+			return fmt.Errorf("unsupported history action %q", direction)
+		}
+	})); err != nil {
+		return browserapi.Tab{}, fmt.Errorf("browser %s: %w", direction, err)
 	}
-	return m.tabInfo(ctx, chat, tab)
+	m.mu.Lock()
+	selected := m.selected[chat.ChatID] == tab.id
+	m.mu.Unlock()
+	result := browserapi.Tab{ID: tab.id, Owned: true, Selected: selected}
+	if entry != nil {
+		result.Title = entry.Title
+		result.URL = entry.URL
+	}
+	return result, nil
 }
 
 func (m *Manager) Snapshot(ctx context.Context, chat browserapi.Chat, query string, depth, maxChars int) (browserapi.Snapshot, error) {
