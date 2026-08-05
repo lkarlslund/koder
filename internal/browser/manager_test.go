@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp/kb"
 
 	"github.com/lkarlslund/koder/internal/browserapi"
@@ -78,10 +79,14 @@ func TestLocatorExpressionContainsSemanticInputs(t *testing.T) {
 }
 
 func TestBrowserKeyNames(t *testing.T) {
-	for input, want := range map[string]string{"Enter": kb.Enter, "Esc": kb.Escape, "ArrowDown": kb.ArrowDown, "Space": " ", "x": "x"} {
+	for input, want := range map[string]string{"Enter": kb.Enter, "Esc": kb.Escape, "ArrowDown": kb.ArrowDown, "Space": " ", "F11": kb.F11, "x": "x"} {
 		if got := browserKey(input); got != want {
 			t.Fatalf("browserKey(%q) = %q, want %q", input, got, want)
 		}
+	}
+	key, modifiers := browserKeyChord("Control+Shift+a")
+	if key != "a" || len(modifiers) != 2 || modifiers[0] != input.ModifierCtrl || modifiers[1] != input.ModifierShift {
+		t.Fatalf("browserKeyChord() = %q, %#v", key, modifiers)
 	}
 }
 

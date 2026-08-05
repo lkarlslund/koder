@@ -27,14 +27,31 @@ func TestBrowserToolSchemasAndRequiredArguments(t *testing.T) {
 			t.Errorf("%s still exposes element refs: %s", spec.id, spec.parameters)
 		}
 	}
-	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("browser_click should require target or selector")
+	var selectSchema string
+	for _, spec := range specs {
+		if spec.id == tools.BrowserSelect {
+			selectSchema = spec.parameters
+			break
+		}
 	}
-	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{"target": "Submit", "selector": "#submit"}); err == nil {
-		t.Fatal("browser_click should reject target with selector")
+	for _, forbidden := range []string{`"selector"`, `"anyOf"`, `"allOf"`} {
+		if strings.Contains(selectSchema, forbidden) {
+			t.Fatalf("browser_select exposes llama.cpp-incompatible schema keyword %s: %s", forbidden, selectSchema)
+		}
+	}
+	if !strings.Contains(selectSchema, `"required":["value","target"]`) {
+		t.Fatalf("browser_select does not directly require value and target: %s", selectSchema)
+	}
+	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{}); err == nil {
+		t.Fatal("browser_click should require target")
 	}
 	if args, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{"target": " Submit "}); err != nil || args["target"] != "Submit" {
 		t.Fatalf("browser_click semantic target normalization failed: %#v, %v", args, err)
+	}
+	for _, target := range []string{"css=#submit", "xpath=//button[@type='submit']"} {
+		if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{"target": target}); err != nil {
+			t.Fatalf("browser_click rejected advanced target %q: %v", target, err)
+		}
 	}
 	if _, err := (tool{id: tools.BrowserNavigate}).NormalizeArgs(map[string]string{"url": "ftp://example.com"}); err == nil {
 		t.Fatal("browser_navigate should reject unsupported URL schemes")
@@ -218,7 +235,7 @@ func TestIntArgAcceptsIntegralFloatEncoding(t *testing.T) {
 
 func TestSemanticLocatorArguments(t *testing.T) {
 	locator, err := locatorFromArgs(map[string]string{
-		"target": "Submit order", "role": "button", "within": "Checkout", "occurrence": "2.00000",
+		"target": "Submit order", "role": "button", "within": "Checkout", "exact": "true", "occurrence": "2.00000",
 	}, "", true)
 	if err != nil {
 		t.Fatal(err)
@@ -227,9 +244,17 @@ func TestSemanticLocatorArguments(t *testing.T) {
 	if locator != want {
 		t.Fatalf("locatorFromArgs() = %#v, want %#v", locator, want)
 	}
-	partial, err := locatorFromArgs(map[string]string{"target": "Submit", "exact": "false"}, "", true)
+	partial, err := locatorFromArgs(map[string]string{"target": "Submit"}, "", true)
 	if err != nil || partial.Exact {
-		t.Fatalf("partial locator = %#v, %v", partial, err)
+		t.Fatalf("default partial locator = %#v, %v", partial, err)
+	}
+	css, err := locatorFromArgs(map[string]string{"target": "css=#submit"}, "", true)
+	if err != nil || css.Target != "" || css.Selector != "#submit" {
+		t.Fatalf("CSS locator = %#v, %v", css, err)
+	}
+	xpath, err := locatorFromArgs(map[string]string{"target": "xpath=//button"}, "", true)
+	if err != nil || xpath.Target != "" || xpath.Selector != "xpath=//button" {
+		t.Fatalf("XPath locator = %#v, %v", xpath, err)
 	}
 	if _, err := (tool{id: tools.BrowserPress}).NormalizeArgs(map[string]string{"key": "Enter"}); err != nil {
 		t.Fatalf("browser_press should allow the focused element: %v", err)

@@ -23,6 +23,7 @@ import (
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
@@ -681,7 +682,19 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	case "type":
 		task = chromedp.SendKeys(expression, value, chromedp.ByJSPath)
 	case "press":
-		task = chromedp.SendKeys(expression, browserKey(value), chromedp.ByJSPath)
+		key, modifiers := browserKeyChord(value)
+		options := []chromedp.KeyOption(nil)
+		if len(modifiers) > 0 {
+			options = append(options, chromedp.KeyModifiers(modifiers...))
+		}
+		if locator.Empty() {
+			task = chromedp.KeyEvent(key, options...)
+		} else {
+			task = chromedp.Tasks{
+				chromedp.Focus(expression, chromedp.ByJSPath),
+				chromedp.KeyEvent(key, options...),
+			}
+		}
 	case "select", "check", "uncheck", "hover":
 		task = chromedp.Evaluate(interactionExpression(locator, action, value), nil)
 	default:
@@ -689,7 +702,7 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if action == "click" || action == "fill" || action == "type" || action == "press" {
+	if action == "click" || action == "fill" || action == "type" || (action == "press" && !locator.Empty()) {
 		if err := validateLocator(opCtx, locator, action); err != nil {
 			return fmt.Errorf("browser %s: %w", action, err)
 		}
@@ -1521,9 +1534,56 @@ func browserKey(value string) string {
 		return kb.PageDown
 	case "space":
 		return " "
+	case "f1":
+		return kb.F1
+	case "f2":
+		return kb.F2
+	case "f3":
+		return kb.F3
+	case "f4":
+		return kb.F4
+	case "f5":
+		return kb.F5
+	case "f6":
+		return kb.F6
+	case "f7":
+		return kb.F7
+	case "f8":
+		return kb.F8
+	case "f9":
+		return kb.F9
+	case "f10":
+		return kb.F10
+	case "f11":
+		return kb.F11
+	case "f12":
+		return kb.F12
 	default:
 		return value
 	}
+}
+
+func browserKeyChord(value string) (string, []input.Modifier) {
+	parts := strings.Split(value, "+")
+	if len(parts) == 1 {
+		return browserKey(value), nil
+	}
+	modifiers := make([]input.Modifier, 0, len(parts)-1)
+	for _, part := range parts[:len(parts)-1] {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "alt", "option":
+			modifiers = append(modifiers, input.ModifierAlt)
+		case "control", "ctrl":
+			modifiers = append(modifiers, input.ModifierCtrl)
+		case "meta", "command", "cmd", "super":
+			modifiers = append(modifiers, input.ModifierMeta)
+		case "shift":
+			modifiers = append(modifiers, input.ModifierShift)
+		default:
+			return browserKey(value), nil
+		}
+	}
+	return browserKey(parts[len(parts)-1]), modifiers
 }
 
 func browserURLsEqual(left, right string) bool {

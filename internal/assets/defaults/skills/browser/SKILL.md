@@ -27,8 +27,9 @@ or an MCP browser server.
 4. Interact with current elements by accessible name, associated label, or
    visible text, for example `target="Submit order"` with `role="button"`.
 5. Refine ambiguous targets with `role`, `within`, or one-based `occurrence`.
-   Set `exact=false` only when partial matching is intentional. Use a CSS
-   `selector` or `xpath=` expression only as an advanced fallback.
+   Matching is partial by default and fails when ambiguous. Set `exact=true`
+   only when strict matching is useful. Use `target="css=..."` or
+   `target="xpath=..."` only as an advanced fallback.
 6. Use focused tools such as `browser_click`, `browser_fill`, `browser_select`,
    and `browser_upload`. Every call resolves its target against the current DOM;
    it never depends on a prior snapshot or retained element handle.

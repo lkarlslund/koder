@@ -42,7 +42,7 @@ var specs = []tool{
 	{tools.BrowserClick, "Click browser element", "Find a current visible element by accessible name, label, or text and click it.", locatorObject("", true)},
 	{tools.BrowserFill, "Fill browser element", "Find a current editable control and replace its value.", locatorObject(`"value":{"type":"string"}`, true, "value")},
 	{tools.BrowserType, "Type in browser element", "Find a current editable control and type text into it.", locatorObject(`"value":{"type":"string"}`, true, "value")},
-	{tools.BrowserPress, "Press browser key", "Send a key to a current semantic target, or to the focused element when target and selector are omitted.", locatorObject(`"key":{"type":"string"}`, false, "key")},
+	{tools.BrowserPress, "Press browser key", "Send a key or key chord to a current semantic target, or to the focused element when target is omitted.", locatorObject(`"key":{"type":"string","description":"Key or chord such as Enter, Tab, Control+a, or Shift+Tab."}`, false, "key")},
 	{tools.BrowserSelect, "Select browser option", "Find a current select control and set its value.", locatorObject(`"value":{"type":"string"}`, true, "value")},
 	{tools.BrowserCheck, "Check browser element", "Find and check a current checkbox, radio button, or switch.", locatorObject("", true)},
 	{tools.BrowserUncheck, "Uncheck browser element", "Find and uncheck a current checkbox or switch.", locatorObject("", true)},
@@ -122,7 +122,7 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 
 func (t tool) Preview(req tools.Request) string {
-	for _, key := range []string{"url", "query", "target", "selector", "source", "source_selector", "tab_id", "expression", "request_id", "download_id"} {
+	for _, key := range []string{"url", "query", "target", "source", "tab_id", "expression", "request_id", "download_id"} {
 		if value := strings.TrimSpace(req.Args[key]); value != "" {
 			return value
 		}
@@ -364,18 +364,19 @@ func locatorObject(extra string, locatorRequired bool, requiredExtra ...string) 
 		properties += "," + extra
 	}
 	schema := object(properties)
-	if len(requiredExtra) > 0 {
-		schema = required(schema, requiredExtra...)
+	requiredNames := append([]string(nil), requiredExtra...)
+	if locatorRequired {
+		requiredNames = append(requiredNames, "target")
 	}
-	if !locatorRequired {
-		return schema
+	if len(requiredNames) > 0 {
+		schema = required(schema, requiredNames...)
 	}
-	return strings.TrimSuffix(schema, "}") + `,"anyOf":[{"required":["target"]},{"required":["selector"]}]}`
+	return schema
 }
 
 func dragLocatorObject() string {
 	properties := locatorProperties("") + "," + locatorProperties("source")
-	return strings.TrimSuffix(object(properties), "}") + `,"allOf":[{"anyOf":[{"required":["source"]},{"required":["source_selector"]}]},{"anyOf":[{"required":["target"]},{"required":["selector"]}]}]}`
+	return required(object(properties), "source", "target")
 }
 
 func locatorProperties(prefix string) string {
@@ -388,7 +389,7 @@ func locatorProperties(prefix string) string {
 		}
 		return prefix + "_" + field
 	}
-	return fmt.Sprintf(`%q:{"type":"string","description":"Accessible name, associated label, or visible text."},%q:{"type":"string","description":"Optional semantic role such as button, textbox, link, checkbox, or image."},%q:{"type":"string","description":"Optional ancestor text used to scope an otherwise ambiguous target."},%q:{"type":"boolean","description":"Use exact name matching. Defaults to true; set false for partial matching."},%q:{"type":"integer","minimum":1,"description":"One-based occurrence used only to disambiguate multiple matches."},%q:{"type":"string","description":"Advanced CSS selector or xpath= expression. Mutually exclusive with the semantic target."}`, name("target"), name("role"), name("within"), name("exact"), name("occurrence"), name("selector"))
+	return fmt.Sprintf(`%q:{"type":"string","description":"Accessible name, associated label, or visible text. For advanced targeting, use css= followed by a CSS selector or xpath= followed by an XPath expression."},%q:{"type":"string","description":"Optional semantic role such as button, textbox, link, checkbox, or image."},%q:{"type":"string","description":"Optional ancestor text used to scope an otherwise ambiguous target."},%q:{"type":"boolean","description":"Require an exact semantic name match. Defaults to false; ambiguous partial matches fail safely."},%q:{"type":"integer","minimum":1,"description":"One-based occurrence used only to disambiguate multiple matches."}`, name("target"), name("role"), name("within"), name("exact"), name("occurrence"))
 }
 
 func usesLocator(kind tools.ID) bool {
@@ -416,18 +417,28 @@ func locatorFromArgs(args map[string]string, prefix string, required bool) (brow
 		Target:     strings.TrimSpace(args[name("target")]),
 		Role:       strings.TrimSpace(args[name("role")]),
 		Within:     strings.TrimSpace(args[name("within")]),
-		Exact:      boolArgDefault(args, name("exact"), true),
+		Exact:      boolArgDefault(args, name("exact"), false),
 		Occurrence: intArg(args, name("occurrence"), 0),
-		Selector:   strings.TrimSpace(args[name("selector")]),
 	}
-	if locator.Target != "" && locator.Selector != "" {
-		return browserapi.Locator{}, errors.New("target and selector are mutually exclusive")
+	switch {
+	case strings.HasPrefix(locator.Target, "css="):
+		locator.Selector = strings.TrimSpace(strings.TrimPrefix(locator.Target, "css="))
+		locator.Target = ""
+		if locator.Selector == "" {
+			return browserapi.Locator{}, errors.New("css target requires a selector")
+		}
+	case strings.HasPrefix(locator.Target, "xpath="):
+		if strings.TrimSpace(strings.TrimPrefix(locator.Target, "xpath=")) == "" {
+			return browserapi.Locator{}, errors.New("xpath target requires an expression")
+		}
+		locator.Selector = locator.Target
+		locator.Target = ""
 	}
 	if required && locator.Empty() {
-		return browserapi.Locator{}, errors.New("target or selector is required")
+		return browserapi.Locator{}, errors.New("target is required")
 	}
-	if locator.Target == "" && locator.Selector == "" && (locator.Role != "" || locator.Within != "" || locator.Occurrence > 0) {
-		return browserapi.Locator{}, errors.New("role, within, and occurrence require target or selector")
+	if locator.Empty() && (locator.Role != "" || locator.Within != "" || locator.Occurrence > 0) {
+		return browserapi.Locator{}, errors.New("role, within, and occurrence require target")
 	}
 	if locator.Occurrence < 0 {
 		return browserapi.Locator{}, errors.New("occurrence must be one or greater")

@@ -35,9 +35,9 @@ func TestChromiumIntegration(t *testing.T) {
 		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title>
 <button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button>
 <a href="/download">Download</a>
-<label>Customer name <input id="name" onkeydown="if(event.key==='Enter')document.querySelector('output').textContent='entered'"></label>
+<label>Customer name <input id="name" onkeydown="if(event.key==='Enter')document.querySelector('output').textContent='entered';if(event.key==='a'&&event.ctrlKey)document.querySelector('output').textContent='control-a'"></label>
 <label><input id="terms" type="checkbox"> Accept terms</label>
-<label>Pizza size <select id="size"><option>Small</option><option>Large</option></select></label>
+<label>Pizza size: <select id="size"><option>Small</option><option>Large</option></select></label>
 <button id="hover" onmouseover="document.querySelector('output').textContent='hovered'">Details</button>
 <section aria-label="Alpha panel"><button onclick="document.querySelector('output').textContent='alpha'">Delete</button></section>
 <section aria-label="Beta panel"><button onclick="document.querySelector('output').textContent='beta'">Delete</button></section>
@@ -45,7 +45,7 @@ func TestChromiumIntegration(t *testing.T) {
 <div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
 <input type="file" aria-label="Upload file">
 <img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E">
-<output>waiting</output>`))
+<output>waiting</output><script>document.addEventListener('keydown',event=>{if(event.key==='F11')document.querySelector('output').textContent='global-f11'})</script>`))
 	}))
 	defer server.Close()
 
@@ -123,7 +123,19 @@ func TestChromiumIntegration(t *testing.T) {
 	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"entered"` {
 		t.Fatalf("semantic key press did not dispatch Enter: %s, %v", value, err)
 	}
-	if err := m.Interact(t.Context(), chat, "select", browserapi.Locator{Target: "Pizza size", Exact: true}, "Large"); err != nil {
+	if err := m.Interact(t.Context(), chat, "press", browserapi.Locator{Target: "Customer name"}, "Control+a"); err != nil {
+		t.Fatalf("press semantic key chord: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"control-a"` {
+		t.Fatalf("semantic key chord was not dispatched: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "press", browserapi.Locator{}, "F11"); err != nil {
+		t.Fatalf("global key press: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"global-f11"` {
+		t.Fatalf("global key press was not dispatched: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "select", browserapi.Locator{Target: "Pizza size"}, "Large"); err != nil {
 		t.Fatalf("select semantic control: %v", err)
 	}
 	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#size').value`); err != nil || value != `"Large"` {
