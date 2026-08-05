@@ -42,6 +42,7 @@
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
+		<button class="btn btn-sm" :class="browserStatusClass()" :title="browserStatusTitle()" @click="openSettingsDialog('browser')"><i class="bi bi-globe2"></i><span class="visually-hidden">Browser status</span></button>
         <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
@@ -1072,7 +1073,29 @@
                 </div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'compaction'">
+			  <div class="row g-3" x-show="settingsTab === 'browser'">
+				<div class="col-12 d-flex align-items-center justify-content-between gap-3">
+				  <div><div class="fw-semibold">Managed browser</div><div class="small text-secondary" x-text="browserStatusDescription(browserStatus)"></div></div>
+				  <span class="badge" :class="browserStatusBadgeClass(browserStatus)" x-text="browserStatus?.state || 'unknown'"></span>
+				</div>
+				<div class="col-12 settings-toggles">
+				  <label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Browser tools enabled</span></label>
+				  <label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.headed"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Visible browser window</span></label>
+				</div>
+				<div class="col-md-8"><label class="form-label small text-secondary">Chrome/Chromium executable</label><input class="form-control font-monospace" x-model="settings.browser.executable" placeholder="auto-detect"></div>
+				<div class="col-md-4"><label class="form-label small text-secondary">Operation timeout (seconds)</label><input class="form-control" type="number" min="1" max="120" x-model.number="settings.browser.operation_timeout_seconds"></div>
+				<div class="col-md-4"><label class="form-label small text-secondary">Tabs per chat</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div>
+				<div class="col-md-4"><label class="form-label small text-secondary">Global owned tabs</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div>
+				<div class="col-12 d-flex flex-wrap gap-2">
+				  <button class="btn btn-outline-primary" type="button" @click="browserAction('start')"><i class="bi bi-play-fill me-1"></i>Start</button>
+				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('show')"><i class="bi bi-window me-1"></i>Show</button>
+				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button>
+				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button>
+				  <button class="btn btn-outline-danger ms-auto" type="button" @click="resetBrowserProfile()"><i class="bi bi-trash me-1"></i>Reset profile</button>
+				</div>
+			  </div>
+
+			  <div class="row g-3" x-show="settingsTab === 'compaction'">
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Auto compact at percent</label>
                   <input class="form-control" type="number" min="1" x-model.number="settings.compaction.auto_compact_at">

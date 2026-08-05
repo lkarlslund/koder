@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -244,18 +245,29 @@ type ModelConfigPreference struct {
 
 // PreferencesState is the complete settings payload exposed to browser clients.
 type PreferencesState struct {
-	General      GeneralPreferences      `json:"general"`
-	UI           BrowserPreferences      `json:"ui"`
-	Compaction   CompactionPreferences   `json:"compaction"`
-	Thinking     ThinkingPreferences     `json:"thinking"`
-	Prompts      []PromptPreference      `json:"prompts"`
-	Providers    ProviderState           `json:"providers"`
-	Models       []ModelOption           `json:"models"`
-	ModelConfigs []ModelConfigPreference `json:"model_configs"`
-	MCPServers   []MCPServerPreference   `json:"mcp_servers"`
-	Access       AccessPreferences       `json:"access"`
-	ToolDefaults []ToolDefaultPreference `json:"tool_defaults"`
-	RestartKeys  []string                `json:"restart_keys,omitempty"`
+	General      GeneralPreferences       `json:"general"`
+	UI           BrowserPreferences       `json:"ui"`
+	Compaction   CompactionPreferences    `json:"compaction"`
+	Thinking     ThinkingPreferences      `json:"thinking"`
+	Prompts      []PromptPreference       `json:"prompts"`
+	Providers    ProviderState            `json:"providers"`
+	Models       []ModelOption            `json:"models"`
+	ModelConfigs []ModelConfigPreference  `json:"model_configs"`
+	MCPServers   []MCPServerPreference    `json:"mcp_servers"`
+	Access       AccessPreferences        `json:"access"`
+	ToolDefaults []ToolDefaultPreference  `json:"tool_defaults"`
+	Browser      NativeBrowserPreferences `json:"browser"`
+	RestartKeys  []string                 `json:"restart_keys,omitempty"`
+}
+
+type NativeBrowserPreferences struct {
+	Enabled          bool              `json:"enabled"`
+	Executable       string            `json:"executable"`
+	Headed           bool              `json:"headed"`
+	OperationTimeout int               `json:"operation_timeout_seconds"`
+	MaxTabsPerChat   int               `json:"max_tabs_per_chat"`
+	MaxTabsGlobal    int               `json:"max_tabs_global"`
+	Status           browserapi.Status `json:"status"`
 }
 
 // GeneralPreferences contains global non-provider settings.
@@ -452,6 +464,13 @@ func (c *Controller) SessionByID(ctx context.Context, sessionID id.ID) (domain.S
 		return domain.Session{}, err
 	}
 	return session, nil
+}
+
+func (c *Controller) BrowserAction(ctx context.Context, selection Selection, action string) (browserapi.Status, error) {
+	if c == nil || c.agent == nil {
+		return browserapi.Status{}, fmt.Errorf("browser service is unavailable")
+	}
+	return c.agent.BrowserAction(ctx, action, browserapi.Chat{SessionID: selection.SessionID, ChatID: selection.ChatID})
 }
 
 func (c *Controller) stateForSelection(ctx context.Context, selection Selection) (State, error) {

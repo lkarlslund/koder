@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -204,6 +206,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		return PreferencesState{}, err
 	}
 	if err := applyBrowserPreferences(&next, prefs.UI); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyNativeBrowserPreferences(&next, prefs.Browser); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
@@ -1105,9 +1111,32 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
 		Access:       accessPreferencesFromConfig(c.cfg.Access),
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
+		Browser:      nativeBrowserPreferencesFromConfig(c.cfg.Browser, c.agent),
 	}
 	repairPreferencesDefaultModel(&state, liveModels)
 	return state, nil
+}
+
+func nativeBrowserPreferencesFromConfig(cfg config.Browser, engine *agent.Engine) NativeBrowserPreferences {
+	status := browserapi.Status{State: "unavailable"}
+	if engine != nil {
+		status = engine.BrowserStatus(browserapi.Chat{})
+	}
+	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, Status: status}
+}
+
+func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPreferences) error {
+	if prefs.OperationTimeout == 0 && prefs.MaxTabsPerChat == 0 && prefs.MaxTabsGlobal == 0 && strings.TrimSpace(prefs.Executable) == "" && !prefs.Enabled && !prefs.Headed {
+		return nil
+	}
+	if prefs.OperationTimeout < 1 || prefs.OperationTimeout > 120 {
+		return fmt.Errorf("browser operation timeout must be between 1 and 120 seconds")
+	}
+	if prefs.MaxTabsPerChat < 1 || prefs.MaxTabsGlobal < prefs.MaxTabsPerChat {
+		return fmt.Errorf("browser global tab limit must be at least the per-chat limit")
+	}
+	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal}
+	return nil
 }
 
 func repairPreferencesDefaultModel(state *PreferencesState, liveModels []ModelOption) {

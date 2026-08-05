@@ -978,6 +978,7 @@
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
+		browserStatus: {state: 'unknown', owned_tabs: 0},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -1459,6 +1460,7 @@
           }
           this.clientID = (hello && hello.client_id) || this.clientID || '';
           this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true});
+		  this.refreshBrowserStatus();
           this.focusComposerAfterInitialLoad();
           this.reportClientStateSoon();
           if (window.performance && performance.mark) {
@@ -4574,6 +4576,9 @@
           this.settings = state || {};
           if (!this.settings.ui) this.settings.ui = {};
           if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
+		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32};
+		  this.browserStatus = this.settings.browser.status || this.browserStatus;
+		  delete this.settings.browser.status;
           this.applyTTSSettings(this.settings.ui.tts);
           this.providerState = this.settings.providers || this.providerState;
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
@@ -4596,14 +4601,43 @@
             this.settingsStatus = err.message; this.settingsStatusKind = 'danger';
           }).finally(() => { this.settingsLoading = false; });
         },
-        settingsTabs() { return ['general', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
+        settingsTabs() { return ['general', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
+		browserStatusBadgeClass(status) {
+		  const state = String(status?.state || 'unknown');
+		  return state === 'running' ? 'text-bg-success' : state === 'error' ? 'text-bg-danger' : state === 'starting' ? 'text-bg-warning' : 'text-bg-secondary';
+		},
+		browserStatusClass() {
+		  const state = String(this.browserStatus?.state || 'unknown');
+		  return state === 'running' ? 'btn-outline-success' : state === 'error' ? 'btn-outline-danger' : 'btn-outline-secondary';
+		},
+		browserStatusDescription(status) {
+		  status = status || this.browserStatus || {};
+		  const details = [status.executable, status.version, status.owned_tabs ? status.owned_tabs + ' tab(s) owned by this chat' : ''].filter(Boolean);
+		  return status.error || details.join(' · ') || 'Chrome/Chromium is auto-detected when needed.';
+		},
+		browserStatusTitle() { return 'Browser: ' + String(this.browserStatus?.state || 'unknown') + (this.browserStatus?.owned_tabs ? '\n' + this.browserStatus.owned_tabs + ' owned tab(s)' : ''); },
+		refreshBrowserStatus() {
+		  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		  this.rpc('browser_action', {action: 'status'}).then(status => { this.browserStatus = status || this.browserStatus; }).catch(() => {});
+		},
+		browserAction(action) {
+		  this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
+		  this.rpc('browser_action', {action}).then(status => {
+			this.browserStatus = status || this.browserStatus;
+			this.settingsStatus = 'Browser ' + action + ' complete'; this.settingsStatusKind = 'success';
+		  }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; this.refreshBrowserStatus(); });
+		},
+		resetBrowserProfile() {
+		  if (!confirm('Reset the managed browser profile? This permanently removes browser logins, cookies, history, and site data.')) return;
+		  this.browserAction('reset_profile');
+		},
         ttsModelOptions() {
           const models = this.settings?.models || [];
           const current = this.ttsModelValue();

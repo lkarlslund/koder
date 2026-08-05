@@ -1089,6 +1089,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.CompleteComposerForSelection(ctx, selection, in.Text, in.Cursor)
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
+	case "browser_action":
+		var in struct {
+			Action string `json:"action"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.BrowserAction(ctx, s.appSelection(clientID), strings.TrimSpace(in.Action))
 	case "save_preferences":
 		var in app.PreferencesState
 		if err := decodeParams(params, &in); err != nil {

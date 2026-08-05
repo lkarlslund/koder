@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browser"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
@@ -152,6 +153,37 @@ func (e *Engine) ListMCPServers() []mcp.ServerState {
 		return nil
 	}
 	return e.mcp.ListServers()
+}
+
+func (e *Engine) BrowserStatus(chat browserapi.Chat) browserapi.Status {
+	if e == nil || e.browser == nil {
+		return browserapi.Status{State: "unavailable"}
+	}
+	return e.browser.Status(context.Background(), chat)
+}
+
+func (e *Engine) BrowserAction(ctx context.Context, action string, chat browserapi.Chat) (browserapi.Status, error) {
+	if e == nil || e.browser == nil {
+		return browserapi.Status{}, fmt.Errorf("browser service is unavailable")
+	}
+	var err error
+	switch action {
+	case "status":
+		// Status is side-effect free.
+	case "start":
+		err = e.browser.Start(ctx)
+	case "show":
+		err = e.browser.Show(ctx, chat)
+	case "stop":
+		err = e.browser.Stop(ctx)
+	case "restart":
+		err = e.browser.Restart(ctx)
+	case "reset_profile":
+		err = e.browser.ResetProfile(ctx)
+	default:
+		err = fmt.Errorf("unknown browser action %q", action)
+	}
+	return e.browser.Status(ctx, chat), err
 }
 
 func (e *Engine) ReloadMCP(ctx context.Context) error {

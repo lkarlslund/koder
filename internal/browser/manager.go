@@ -101,11 +101,17 @@ func (m *Manager) Status(_ context.Context, chat browserapi.Chat) browserapi.Sta
 	defer m.mu.Unlock()
 	owned := 0
 	for _, tab := range m.tabs {
-		if tab.owner.ChatID == chat.ChatID {
+		if chat.ChatID != "" && tab.owner.ChatID == chat.ChatID {
 			owned++
 		}
 	}
-	return browserapi.Status{State: m.state, Executable: m.executable, Version: m.version, Error: m.lastErr, OwnedTabs: owned}
+	executable, version := m.executable, m.version
+	if executable == "" {
+		if detected, err := detectExecutable(m.cfg.Executable); err == nil {
+			executable, version = detected, browserVersion(context.Background(), detected)
+		}
+	}
+	return browserapi.Status{State: m.state, Executable: executable, Version: version, Error: m.lastErr, OwnedTabs: owned}
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -972,6 +978,18 @@ func sandboxCommand(cmd *exec.Cmd, profileDir, runtimeDir string) {
 	args := []string{"bwrap", "--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/tmp", "--dir", "/tmp/koder", "--proc", "/proc", "--dev", "/dev", "--share-net", "--bind", profileDir, "/tmp/koder/profile", "--bind", runtimeDir, "/tmp/koder/run", "--setenv", "HOME", "/tmp/koder", "--setenv", "XDG_RUNTIME_DIR", "/tmp/koder/run", "--setenv", "TMPDIR", "/tmp/koder/run"}
 	if _, err := os.Stat("/tmp/.X11-unix"); err == nil {
 		args = append(args, "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix")
+	}
+	if waylandDisplay := strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")); waylandDisplay != "" {
+		hostRuntime := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
+		if hostRuntime != "" {
+			socket := filepath.Join(hostRuntime, waylandDisplay)
+			if _, err := os.Stat(socket); err == nil {
+				args = append(args, "--ro-bind", socket, filepath.Join("/tmp/koder/run", waylandDisplay))
+			}
+		}
+	}
+	if _, err := os.Stat("/dev/dri"); err == nil {
+		args = append(args, "--dev-bind-try", "/dev/dri", "/dev/dri")
 	}
 	args = append(args, "--", chromePath)
 	args = append(args, chromeArgs...)
