@@ -37,6 +37,7 @@ const (
 	stateStarting = "starting"
 	stateRunning  = "running"
 	stateError    = "error"
+	maxBinarySize = 25 * 1024 * 1024
 )
 
 type ownedTab struct {
@@ -50,6 +51,7 @@ type ownedTab struct {
 	console  []browserapi.ConsoleRecord
 	requests map[string]*requestState
 	order    []string
+	uploads  []string
 }
 
 type requestState struct {
@@ -60,6 +62,7 @@ type requestState struct {
 type downloadState struct {
 	record browserapi.DownloadRecord
 	owner  browserapi.Chat
+	tabID  string
 	guid   string
 	path   string
 }
@@ -173,6 +176,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 	runtimeDir := filepath.Join(m.stateDir, "run")
+	if err := os.RemoveAll(runtimeDir); err != nil {
+		err = fmt.Errorf("clear browser runtime: %w", err)
+		m.setError(err)
+		return err
+	}
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		err = fmt.Errorf("create browser runtime: %w", err)
 		m.setError(err)
@@ -215,6 +223,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.refs = map[id.ID]refState{}
 	m.downloads = map[string]*downloadState{}
 	m.mu.Unlock()
+	go m.watchBrowser(browserCtx)
 	if err := m.configureDownloads(browserCtx, runtimeDir); err != nil {
 		_ = m.Stop(ctx)
 		m.setError(err)
@@ -241,6 +250,7 @@ func (m *Manager) Stop(_ context.Context) error {
 	if allocStop != nil {
 		allocStop()
 	}
+	_ = os.RemoveAll(filepath.Join(m.stateDir, "run"))
 	return nil
 }
 
@@ -278,16 +288,12 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 	m.mu.Lock()
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	infos, err := target.GetTargets().Do(browserCtx)
-	if err != nil {
-		var listed []*target.Info
-		err = chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			var listErr error
-			listed, listErr = target.GetTargets().Do(ctx)
-			return listErr
-		}))
-		infos = listed
-	}
+	var infos []*target.Info
+	err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var listErr error
+		infos, listErr = target.GetTargets().Do(ctx)
+		return listErr
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("list browser tabs: %w", err)
 	}
@@ -372,6 +378,17 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 		return browserapi.Tab{}, err
 	}
 	tab.owner = chat
+	tab.dataMu.Lock()
+	tab.console = nil
+	tab.requests = map[string]*requestState{}
+	tab.order = nil
+	tab.dataMu.Unlock()
+	for downloadID, download := range m.downloads {
+		if download.tabID == tab.id {
+			delete(m.downloads, downloadID)
+			_ = os.Remove(download.path)
+		}
+	}
 	m.selected[chat.ChatID] = tab.id
 	return browserapi.Tab{ID: tab.id, Owned: true, Selected: true}, nil
 }
@@ -414,12 +431,23 @@ func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wa
 	}
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
+	tab.dataMu.Lock()
+	requestStart := len(tab.order)
+	tab.dataMu.Unlock()
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
 	if err := chromedp.Run(opCtx, chromedp.Navigate(strings.TrimSpace(rawURL))); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("navigate browser: %w", err)
 	}
-	_ = wait
+	switch strings.ToLower(strings.TrimSpace(wait)) {
+	case "", "load", "domcontentloaded":
+	case "networkidle":
+		if err := waitForNetworkIdle(opCtx, tab, requestStart, 500*time.Millisecond); err != nil {
+			return browserapi.Tab{}, fmt.Errorf("wait for browser network idle: %w", err)
+		}
+	default:
+		return browserapi.Tab{}, fmt.Errorf("unsupported browser wait condition %q", wait)
+	}
 	return m.tabInfo(ctx, chat, tab)
 }
 
@@ -450,6 +478,10 @@ func (m *Manager) History(ctx context.Context, chat browserapi.Chat, direction s
 }
 
 func (m *Manager) Snapshot(ctx context.Context, chat browserapi.Chat, query string, depth, maxChars int) (browserapi.Snapshot, error) {
+	return m.snapshot(ctx, chat, query, "", depth, maxChars)
+}
+
+func (m *Manager) snapshot(ctx context.Context, chat browserapi.Chat, query, role string, depth, maxChars int) (browserapi.Snapshot, error) {
 	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
 		return browserapi.Snapshot{}, err
@@ -469,7 +501,7 @@ func (m *Manager) Snapshot(ctx context.Context, chat browserapi.Chat, query stri
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
 	var text string
-	script := snapshotScript(state.generation, query, depth)
+	script := snapshotScript(state.generation, query, role, depth)
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
 	if err := chromedp.Run(opCtx, chromedp.Evaluate(script, &text)); err != nil {
@@ -482,8 +514,8 @@ func (m *Manager) Snapshot(ctx context.Context, chat browserapi.Chat, query stri
 	return browserapi.Snapshot{TabID: tab.id, Generation: state.generation, Text: text, Truncated: truncated}, nil
 }
 
-func (m *Manager) Find(ctx context.Context, chat browserapi.Chat, query, _ string, maxChars int) (browserapi.Snapshot, error) {
-	return m.Snapshot(ctx, chat, query, 0, maxChars)
+func (m *Manager) Find(ctx context.Context, chat browserapi.Chat, query, role string, maxChars int) (browserapi.Snapshot, error) {
+	return m.snapshot(ctx, chat, query, role, 0, maxChars)
 }
 
 func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action, ref, value string) error {
@@ -531,14 +563,14 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action, re
 }
 
 func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, paths []string) error {
-	_, tabCtx, err := m.ownedSelected(ctx, chat)
+	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	state := m.refs[chat.ChatID]
 	m.mu.Unlock()
-	if !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
+	if state.tabID != tab.id || !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
 		return errors.New("stale element reference; run browser_snapshot again")
 	}
 	selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
@@ -546,7 +578,12 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, 
 	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
 		return fmt.Errorf("create browser upload staging: %w", err)
 	}
-	defer os.RemoveAll(stagingDir)
+	keepStaging := false
+	defer func() {
+		if !keepStaging {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
 	browserPaths := make([]string, 0, len(paths))
 	for _, source := range paths {
 		input, err := os.Open(source)
@@ -576,6 +613,10 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, 
 	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(selector, browserPaths, chromedp.ByQuery)); err != nil {
 		return fmt.Errorf("upload browser files: %w", err)
 	}
+	tab.dataMu.Lock()
+	tab.uploads = append(tab.uploads, stagingDir)
+	tab.dataMu.Unlock()
+	keepStaging = true
 	return nil
 }
 
@@ -634,7 +675,7 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 	if err := chromedp.Run(opCtx, action); err != nil {
 		return browserapi.Binary{}, fmt.Errorf("capture browser screenshot: %w", err)
 	}
-	if len(data) > 25*1024*1024 {
+	if len(data) > maxBinarySize {
 		return browserapi.Binary{}, errors.New("browser screenshot exceeds 25 MiB")
 	}
 	detected := http.DetectContentType(data)
@@ -660,6 +701,9 @@ func (m *Manager) PDF(ctx context.Context, chat browserapi.Chat) (browserapi.Bin
 		return err
 	})); err != nil {
 		return browserapi.Binary{}, fmt.Errorf("print browser PDF: %w", err)
+	}
+	if len(data) > maxBinarySize {
+		return browserapi.Binary{}, errors.New("browser PDF exceeds 25 MiB")
 	}
 	return browserapi.Binary{Name: "browser-page.pdf", MIME: "application/pdf", Data: data}, nil
 }
@@ -726,6 +770,9 @@ func (m *Manager) ResponseBody(ctx context.Context, chat browserapi.Chat, reques
 	})); err != nil {
 		return browserapi.Binary{}, fmt.Errorf("read browser response: %w", err)
 	}
+	if len(body) > maxBinarySize {
+		return browserapi.Binary{}, errors.New("browser response body exceeds 25 MiB")
+	}
 	mime := request.record.MIME
 	if mime == "" {
 		mime = "application/octet-stream"
@@ -758,12 +805,23 @@ func (m *Manager) Download(_ context.Context, chat browserapi.Chat, downloadID s
 		return browserapi.Binary{}, fmt.Errorf("browser download is %s", download.record.State)
 	}
 	path, name := download.path, download.record.Name
-	delete(m.downloads, download.record.ID)
 	m.mu.Unlock()
+	info, err := os.Stat(path)
+	if err != nil {
+		return browserapi.Binary{}, fmt.Errorf("inspect browser download: %w", err)
+	}
+	if info.Size() > maxBinarySize {
+		return browserapi.Binary{}, errors.New("browser download exceeds 25 MiB")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return browserapi.Binary{}, fmt.Errorf("read browser download: %w", err)
 	}
+	m.mu.Lock()
+	if m.downloads[download.record.ID] == download {
+		delete(m.downloads, download.record.ID)
+	}
+	m.mu.Unlock()
 	_ = os.Remove(path)
 	mime := http.DetectContentType(data)
 	if byExt := mimepkg.TypeByExtension(strings.ToLower(filepath.Ext(name))); byExt != "" && mime == "application/octet-stream" {
@@ -850,13 +908,10 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 			m.selected[owner.ChatID] = tab.id
 		}
 	}
-	for id, tab := range m.tabs {
+	for _, tab := range m.tabs {
 		if !seen[tab.targetID] {
 			tab.cancel()
-			delete(m.tabs, id)
-			if m.selected[tab.owner.ChatID] == id {
-				delete(m.selected, tab.owner.ChatID)
-			}
+			m.removeTabLocked(tab)
 		}
 	}
 }
@@ -912,6 +967,7 @@ func (m *Manager) monitorTab(tab *ownedTab) {
 			m.downloads[id] = &downloadState{
 				record: browserapi.DownloadRecord{ID: id, Name: event.SuggestedFilename, URL: event.URL, State: "inProgress"},
 				owner:  tab.owner,
+				tabID:  tab.id,
 				guid:   event.GUID,
 				path:   filepath.Join(m.stateDir, "run", "downloads", event.GUID),
 			}
@@ -965,6 +1021,37 @@ func (t *ownedTab) requestByCDPIDLocked(requestID network.RequestID) *requestSta
 		}
 	}
 	return nil
+}
+
+func waitForNetworkIdle(ctx context.Context, tab *ownedTab, requestStart int, quiet time.Duration) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	idleSince := time.Time{}
+	for {
+		tab.dataMu.Lock()
+		pending := 0
+		requestStart = min(requestStart, len(tab.order))
+		for _, requestID := range tab.order[requestStart:] {
+			if request := tab.requests[requestID]; request != nil && !request.record.Finished {
+				pending++
+			}
+		}
+		tab.dataMu.Unlock()
+		if pending == 0 {
+			if idleSince.IsZero() {
+				idleSince = time.Now()
+			} else if time.Since(idleSince) >= quiet {
+				return nil
+			}
+		} else {
+			idleSince = time.Time{}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func appendBounded[T any](values []T, value T, limit int) []T {
@@ -1033,8 +1120,25 @@ func (m *Manager) checkTabCapsLocked(chat browserapi.Chat) error {
 func (m *Manager) removeTab(tab *ownedTab) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.removeTabLocked(tab)
+}
+
+func (m *Manager) removeTabLocked(tab *ownedTab) {
 	delete(m.tabs, tab.id)
 	delete(m.refs, tab.owner.ChatID)
+	for downloadID, download := range m.downloads {
+		if download.tabID == tab.id {
+			delete(m.downloads, downloadID)
+			_ = os.Remove(download.path)
+		}
+	}
+	tab.dataMu.Lock()
+	uploads := append([]string(nil), tab.uploads...)
+	tab.uploads = nil
+	tab.dataMu.Unlock()
+	for _, uploadDir := range uploads {
+		_ = os.RemoveAll(uploadDir)
+	}
 	if m.selected[tab.owner.ChatID] == tab.id {
 		delete(m.selected, tab.owner.ChatID)
 		for _, candidate := range m.tabs {
@@ -1044,6 +1148,29 @@ func (m *Manager) removeTab(tab *ownedTab) {
 			}
 		}
 	}
+}
+
+func (m *Manager) watchBrowser(browserCtx context.Context) {
+	<-browserCtx.Done()
+	m.mu.Lock()
+	if m.browserCtx != browserCtx {
+		m.mu.Unlock()
+		return
+	}
+	allocStop := m.allocStop
+	m.browserCtx, m.allocCtx = nil, nil
+	m.stop, m.allocStop = nil, nil
+	m.tabs = map[string]*ownedTab{}
+	m.selected = map[id.ID]string{}
+	m.refs = map[id.ID]refState{}
+	m.downloads = map[string]*downloadState{}
+	m.state = stateError
+	m.lastErr = "Chrome exited unexpectedly"
+	m.mu.Unlock()
+	if allocStop != nil {
+		allocStop()
+	}
+	_ = os.RemoveAll(filepath.Join(m.stateDir, "run"))
 }
 
 func (m *Manager) browserContext() context.Context {
@@ -1150,8 +1277,8 @@ func newOpaqueID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(buf[:])
 }
 
-func snapshotScript(generation uint64, query string, depth int) string {
-	return fmt.Sprintf(`(()=>{const q=%s.toLowerCase();const maxDepth=%d;let n=0;const out=[];const walk=(el,d)=>{if(!el||d>(maxDepth||99))return;const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;const role=el.getAttribute('role')||({A:'link',BUTTON:'button',INPUT:'input',TEXTAREA:'textbox',SELECT:'select',IMG:'image'}[el.tagName]||'');const name=(el.getAttribute('aria-label')||el.alt||el.innerText||el.value||'').trim().replace(/\s+/g,' ');const interactive=role||el.tabIndex>=0;if((!q||name.toLowerCase().includes(q))&&(name||interactive)){const ref='%d-e'+(++n);el.setAttribute('data-koder-ref',ref);out.push('  '.repeat(d)+(interactive?'['+ref+'] ':'')+(role||el.tagName.toLowerCase())+(name?' "'+name.slice(0,300)+'"':''));}for(const child of el.children)walk(child,d+1)};walk(document.body,0);return out.join('\n')})()`, jsString(strings.TrimSpace(query)), depth, generation)
+func snapshotScript(generation uint64, query, wantedRole string, depth int) string {
+	return fmt.Sprintf(`(()=>{const q=%s.toLowerCase();const wantedRole=%s.toLowerCase();const maxDepth=%d;let n=0;const out=[];const walk=(el,d)=>{if(!el||d>(maxDepth||99))return;const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;const role=el.getAttribute('role')||({A:'link',BUTTON:'button',INPUT:'input',TEXTAREA:'textbox',SELECT:'select',IMG:'image'}[el.tagName]||'');const name=(el.getAttribute('aria-label')||el.alt||el.innerText||el.value||'').trim().replace(/\s+/g,' ');const interactive=role||el.tabIndex>=0;if((!q||name.toLowerCase().includes(q))&&(!wantedRole||role.toLowerCase()===wantedRole)&&(name||interactive)){const ref='%d-e'+(++n);el.setAttribute('data-koder-ref',ref);out.push('  '.repeat(d)+(interactive?'['+ref+'] ':'')+(role||el.tagName.toLowerCase())+(name?' "'+name.slice(0,300)+'"':''));}for(const child of el.children)walk(child,d+1)};walk(document.body,0);return out.join('\n')})()`, jsString(strings.TrimSpace(query)), jsString(strings.TrimSpace(wantedRole)), depth, generation)
 }
 
 func jsString(value string) string {

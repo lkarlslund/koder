@@ -28,7 +28,7 @@ func TestChromiumIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("download-body"))
 			return
 		}
-		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><output>waiting</output>`))
+		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><input type="file" aria-label="Upload file"><output>waiting</output>`))
 	}))
 	defer server.Close()
 
@@ -38,7 +38,6 @@ func TestChromiumIntegration(t *testing.T) {
 	if err := m.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	t.Logf("browser context error after start: %v", m.browserCtx.Err())
 	tab, err := m.NewTab(t.Context(), chat, server.URL)
 	if err != nil {
 		t.Fatalf("new tab: %v", err)
@@ -84,7 +83,7 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || len(console) == 0 || !strings.Contains(console[len(console)-1].Text, "browser-test-console") {
 		t.Fatalf("unexpected console records: %#v, %v", console, err)
 	}
-	downloadSnapshot, err := m.Find(t.Context(), chat, "Download", "", 8*1024)
+	downloadSnapshot, err := m.Find(t.Context(), chat, "Download", "link", 8*1024)
 	if err != nil {
 		t.Fatalf("find download: %v", err)
 	}
@@ -106,6 +105,21 @@ func TestChromiumIntegration(t *testing.T) {
 	download, err := m.Download(t.Context(), chat, downloads[0].ID)
 	if err != nil || string(download.Data) != "download-body" || download.Name != "browser-test.txt" {
 		t.Fatalf("unexpected download: %#v, %v", download, err)
+	}
+	uploadSnapshot, err := m.Find(t.Context(), chat, "Upload file", "input", 8*1024)
+	if err != nil {
+		t.Fatalf("find upload: %v", err)
+	}
+	uploadPath := t.TempDir() + "/upload.txt"
+	if err := os.WriteFile(uploadPath, []byte("upload-body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Upload(t.Context(), chat, snapshotRef(t, uploadSnapshot.Text), []string{uploadPath}); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	uploadSize, err := m.Evaluate(t.Context(), chat, `document.querySelector('input[type=file]').files[0].size`)
+	if err != nil || uploadSize != "11" {
+		t.Fatalf("unexpected upload size: %s, %v", uploadSize, err)
 	}
 	shot, err := m.Screenshot(t.Context(), chat, "", false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {

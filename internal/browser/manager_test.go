@@ -16,7 +16,13 @@ func TestTabOwnershipAndCaps(t *testing.T) {
 	first := browserapi.Chat{SessionID: id.ID("s1"), ChatID: id.ID("c1")}
 	second := browserapi.Chat{SessionID: id.ID("s1"), ChatID: id.ID("c2")}
 	m.tabs["owned"] = &ownedTab{id: "owned", owner: first}
-	m.tabs["manual"] = &ownedTab{id: "manual"}
+	m.tabs["manual"] = &ownedTab{
+		id:       "manual",
+		console:  []browserapi.ConsoleRecord{{Text: "before claim"}},
+		requests: map[string]*requestState{"request": {}},
+		order:    []string{"request"},
+	}
+	m.downloads["download"] = &downloadState{tabID: "manual"}
 	if err := m.checkTabCapsLocked(first); err == nil || !strings.Contains(err.Error(), "chat browser tab limit") {
 		t.Fatalf("expected per-chat cap, got %v", err)
 	}
@@ -27,14 +33,17 @@ func TestTabOwnershipAndCaps(t *testing.T) {
 	if !claimed.Owned || m.tabs["manual"].owner.ChatID != second.ChatID {
 		t.Fatalf("tab was not assigned to second chat: %#v", claimed)
 	}
+	if len(m.tabs["manual"].console) != 0 || len(m.tabs["manual"].requests) != 0 || len(m.downloads) != 0 {
+		t.Fatal("claim retained diagnostics collected before ownership")
+	}
 	if _, err := m.ClaimTab(t.Context(), first, "manual"); err == nil {
 		t.Fatal("expected a second claim to fail")
 	}
 }
 
 func TestSnapshotScriptUsesGenerationAndQuery(t *testing.T) {
-	script := snapshotScript(7, "Submit", 3)
-	for _, want := range []string{"7-e", `"Submit"`, "maxDepth=3", "data-koder-ref"} {
+	script := snapshotScript(7, "Submit", "button", 3)
+	for _, want := range []string{"7-e", `"Submit"`, `"button"`, "maxDepth=3", "data-koder-ref"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("snapshot script missing %q", want)
 		}
