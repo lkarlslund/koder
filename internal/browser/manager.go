@@ -679,9 +679,10 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 		return browserapi.Binary{}, errors.New("browser screenshot exceeds 25 MiB")
 	}
 	detected := http.DetectContentType(data)
-	if detected == "image/png" {
+	switch detected {
+	case "image/png":
 		mime, name = "image/png", "browser-screenshot.png"
-	} else if detected == "image/jpeg" {
+	case "image/jpeg":
 		mime, name = "image/jpeg", "browser-screenshot.jpg"
 	}
 	return browserapi.Binary{Name: name, MIME: mime, Data: data}, nil
@@ -1165,7 +1166,7 @@ func (m *Manager) watchBrowser(browserCtx context.Context) {
 	m.refs = map[id.ID]refState{}
 	m.downloads = map[string]*downloadState{}
 	m.state = stateError
-	m.lastErr = "Chrome exited unexpectedly"
+	m.lastErr = "chrome exited unexpectedly"
 	m.mu.Unlock()
 	if allocStop != nil {
 		allocStop()
@@ -1227,7 +1228,7 @@ func detectExecutable(configured string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", errors.New("Chrome or Chromium was not found; configure browser.executable")
+	return "", errors.New("browser executable was not found; configure browser.executable")
 }
 
 func browserVersion(ctx context.Context, executable string) string {
