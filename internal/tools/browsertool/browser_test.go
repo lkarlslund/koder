@@ -50,7 +50,7 @@ func TestBrowserSnapshotSavesExtractedResult(t *testing.T) {
 	workdir := t.TempDir()
 	result, err := (tool{id: tools.BrowserSnapshot, title: "Browser snapshot"}).Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
-		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"path": "captures/page.json"}},
+		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"save_to_file": "captures/page.json"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestBrowserScreenshotSavesBinaryAndAttachment(t *testing.T) {
 	attachments := attachment.NewManager(t.TempDir())
 	result, err := (tool{id: tools.BrowserScreenshot}).Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, Attachments: attachments, SessionID: "session-1", ChatID: "chat-1"},
-		Request: tools.Request{Tool: tools.BrowserScreenshot, Args: map[string]string{"path": "captures/page.png"}},
+		Request: tools.Request{Tool: tools.BrowserScreenshot, Args: map[string]string{"save_to_file": "captures/page.png"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestBrowserBinaryCanSaveWithoutAttachmentStorage(t *testing.T) {
 	workdir := t.TempDir()
 	result, err := (tool{id: tools.BrowserResponseBody}).Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
-		Request: tools.Request{Tool: tools.BrowserResponseBody, Args: map[string]string{"request_id": "request-1", "path": "captures/body.bin"}},
+		Request: tools.Request{Tool: tools.BrowserResponseBody, Args: map[string]string{"request_id": "request-1", "save_to_file": "captures/body.bin"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestBrowserExtractionPathRequiresWriteAccess(t *testing.T) {
 	settings.Project = accesssettings.ModeReadOnly
 	_, err := tools.Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Workdir: t.TempDir(), Browser: savingBrowser{}, AccessSettings: settings},
-		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"path": "capture.json"}},
+		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"save_to_file": "capture.json"}},
 	})
 	if err == nil || !tools.IsDenied(err) || !strings.Contains(err.Error(), "write access") {
 		t.Fatalf("expected write access denial, got %v", err)

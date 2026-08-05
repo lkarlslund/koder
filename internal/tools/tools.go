@@ -303,10 +303,10 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 		if err := runtime.CheckNetworkAccess(); err != nil {
 			return err
 		}
-		if strings.TrimSpace(req.Args["path"]) == "" {
+		if strings.TrimSpace(req.Args["save_to_file"]) == "" {
 			return nil
 		}
-		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
+		return checkRequestOutputPath(runtime, req.Args["save_to_file"])
 	case BrowserUpload:
 		if err := runtime.CheckNetworkAccess(); err != nil {
 			return err
@@ -319,6 +319,14 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 	default:
 		return nil
 	}
+}
+
+func checkRequestOutputPath(runtime Runtime, path string) error {
+	abs, _, err := WritablePath(runtime, path)
+	if err != nil {
+		return err
+	}
+	return runtime.CheckPathAccess(accesssettings.AccessWrite, abs)
 }
 
 func checkBrowserUploadPaths(runtime Runtime, req Request) error {
