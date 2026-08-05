@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -40,6 +44,104 @@ func TestBrowserToolsRequireNetworkAccess(t *testing.T) {
 	if err == nil || !tools.IsDenied(err) {
 		t.Fatalf("expected network access denial, got %v", err)
 	}
+}
+
+func TestBrowserSnapshotSavesExtractedResult(t *testing.T) {
+	workdir := t.TempDir()
+	result, err := (tool{id: tools.BrowserSnapshot, title: "Browser snapshot"}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"path": "captures/page.json"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(workdir, "captures", "page.json")
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "extracted page text" {
+		t.Fatalf("unexpected saved snapshot: %s", data)
+	}
+	if result.Meta["path"] != "captures/page.json" || !strings.Contains(result.Output, "Saved to captures/page.json") {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	stored, ok := result.Stored.(tools.BrowserStoredResult)
+	if !ok || stored.Path != "captures/page.json" {
+		t.Fatalf("unexpected stored result: %#v", result.Stored)
+	}
+}
+
+func TestBrowserScreenshotSavesBinaryAndAttachment(t *testing.T) {
+	workdir := t.TempDir()
+	attachments := attachment.NewManager(t.TempDir())
+	result, err := (tool{id: tools.BrowserScreenshot}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, Attachments: attachments, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserScreenshot, Args: map[string]string{"path": "captures/page.png"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(workdir, "captures", "page.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(savedPNG) {
+		t.Fatalf("saved screenshot differs: %q", data)
+	}
+	if result.Meta["path"] != "captures/page.png" || result.Meta["attachment_id"] == "" {
+		t.Fatalf("unexpected result metadata: %#v", result.Meta)
+	}
+	stored, ok := result.Stored.(tools.BrowserStoredResult)
+	if !ok || stored.Path != "captures/page.png" || stored.Attachment == nil {
+		t.Fatalf("unexpected stored result: %#v", result.Stored)
+	}
+}
+
+func TestBrowserBinaryCanSaveWithoutAttachmentStorage(t *testing.T) {
+	workdir := t.TempDir()
+	result, err := (tool{id: tools.BrowserResponseBody}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workdir, Browser: savingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserResponseBody, Args: map[string]string{"request_id": "request-1", "path": "captures/body.bin"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(workdir, "captures", "body.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "raw response bytes" || result.Meta["path"] != "captures/body.bin" || result.Meta["attachment_id"] != "" {
+		t.Fatalf("unexpected saved response: data=%q meta=%#v", data, result.Meta)
+	}
+}
+
+func TestBrowserExtractionPathRequiresWriteAccess(t *testing.T) {
+	settings := accesssettings.Default()
+	settings.Project = accesssettings.ModeReadOnly
+	_, err := tools.Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: t.TempDir(), Browser: savingBrowser{}, AccessSettings: settings},
+		Request: tools.Request{Tool: tools.BrowserSnapshot, Args: map[string]string{"path": "capture.json"}},
+	})
+	if err == nil || !tools.IsDenied(err) || !strings.Contains(err.Error(), "write access") {
+		t.Fatalf("expected write access denial, got %v", err)
+	}
+}
+
+var savedPNG = []byte("\x89PNG\r\n\x1a\nimage")
+
+type savingBrowser struct{ fakeBrowser }
+
+func (savingBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int) (browserapi.Snapshot, error) {
+	return browserapi.Snapshot{TabID: "tab-1", Generation: 1, Text: "extracted page text"}, nil
+}
+
+func (savingBrowser) Screenshot(context.Context, browserapi.Chat, string, bool, string, int) (browserapi.Binary, error) {
+	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
+}
+
+func (savingBrowser) ResponseBody(context.Context, browserapi.Chat, string) (browserapi.Binary, error) {
+	return browserapi.Binary{Name: "response.bin", MIME: "application/octet-stream", Data: []byte("raw response bytes")}, nil
 }
 
 type fakeBrowser struct{}

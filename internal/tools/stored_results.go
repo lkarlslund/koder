@@ -296,6 +296,7 @@ type ShowImageStoredResult struct {
 type BrowserStoredResult struct {
 	Kind       string               `json:"kind"`
 	SessionID  string               `json:"session_id,omitempty"`
+	Path       string               `json:"path,omitempty"`
 	Summary    string               `json:"summary,omitempty"`
 	Text       string               `json:"text,omitempty"`
 	Attachment *attachment.Metadata `json:"attachment,omitempty"`

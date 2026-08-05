@@ -292,13 +292,21 @@ func checkToolEnabled(runtime Runtime, kind ID) error {
 func checkRuntimeAccess(runtime Runtime, req Request) error {
 	switch req.Tool {
 	case WebFetch, WebSearch, MCP,
-		BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
-		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
+		BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
-		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserEvaluate, BrowserScreenshot,
-		BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest, BrowserResponseBody,
-		BrowserDownloads, BrowserDownload:
+		BrowserHover, BrowserDrag, BrowserScroll:
 		return runtime.CheckNetworkAccess()
+	case BrowserStatus, BrowserTabList, BrowserSnapshot, BrowserFind, BrowserWait, BrowserEvaluate, BrowserScreenshot, BrowserImage,
+		BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest, BrowserResponseBody, BrowserDownloads,
+		BrowserDownload:
+		if err := runtime.CheckNetworkAccess(); err != nil {
+			return err
+		}
+		if strings.TrimSpace(req.Args["path"]) == "" {
+			return nil
+		}
+		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
 	case BrowserUpload:
 		if err := runtime.CheckNetworkAccess(); err != nil {
 			return err

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -269,6 +268,10 @@ func BoolString(value bool) string {
 }
 
 func WriteTextFile(abs string, content string, mode fs.FileMode) error {
+	return WriteFile(abs, []byte(content), mode)
+}
+
+func WriteFile(abs string, data []byte, mode fs.FileMode) error {
 	if mode == 0 {
 		mode = 0o644
 	}
@@ -289,7 +292,7 @@ func WriteTextFile(abs string, content string, mode fs.FileMode) error {
 	closeTemp := func() {
 		_ = tmp.Close()
 	}
-	if _, err := io.WriteString(tmp, content); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		closeTemp()
 		return err
 	}
