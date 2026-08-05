@@ -326,6 +326,7 @@ func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string)
 	watcher, err := workspacepkg.Watch(ctx, projectRoot)
 	if err != nil {
 		cancel()
+		slog.Warn("workspace watcher disabled", "session_id", s.session.ID, "project_root", projectRoot, "error", err)
 		return
 	}
 	s.mu.Lock()

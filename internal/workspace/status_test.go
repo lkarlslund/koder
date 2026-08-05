@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,6 +133,62 @@ func TestWatcherReportsFileChanges(t *testing.T) {
 	case <-watcher.Events():
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected file watcher event")
+	}
+}
+
+func TestWatcherSkipsGitDirectories(t *testing.T) {
+	if !shouldSkipWatchDir(filepath.Join("repo", ".git"), ".git") {
+		t.Fatal("expected watcher to skip .git directories")
+	}
+	if !shouldSkipWatchDir(filepath.Join("repo", ".git", "objects"), "objects") {
+		t.Fatal("expected watcher to skip .git objects directories")
+	}
+}
+
+func TestWatcherReturnsTooLargeWhenDirectoryLimitExceeded(t *testing.T) {
+	root := t.TempDir()
+	for idx := range 3 {
+		if err := os.Mkdir(filepath.Join(root, string(rune('a'+idx))), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	watcher, err := watchWithLimits(context.Background(), root, watchLimits{MaxDirs: 2, MaxEntries: 100})
+	if watcher != nil {
+		_ = watcher.Close()
+	}
+	if !errors.Is(err, ErrWatchTreeTooLarge) {
+		t.Fatalf("expected too-large watcher error, got %v", err)
+	}
+}
+
+func TestWatcherReturnsTooLargeWhenEntryLimitExceeded(t *testing.T) {
+	root := t.TempDir()
+	for idx := range 3 {
+		if err := os.WriteFile(filepath.Join(root, string(rune('a'+idx))+".txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	watcher, err := watchWithLimits(context.Background(), root, watchLimits{MaxDirs: 10, MaxEntries: 2})
+	if watcher != nil {
+		_ = watcher.Close()
+	}
+	if !errors.Is(err, ErrWatchTreeTooLarge) {
+		t.Fatalf("expected too-large watcher error, got %v", err)
+	}
+}
+
+func TestWatcherRejectsBroadRoots(t *testing.T) {
+	if !isBroadWatchRoot(string(filepath.Separator)) {
+		t.Fatal("expected filesystem root to be too broad for watching")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	if !isBroadWatchRoot(home) {
+		t.Fatal("expected user home directory to be too broad for watching")
 	}
 }
 

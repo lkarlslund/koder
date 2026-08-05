@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,13 +15,30 @@ import (
 
 type Watcher struct {
 	root   string
+	limits watchLimits
 	watch  *fsnotify.Watcher
 	events chan struct{}
 	done   chan struct{}
 	once   sync.Once
 }
 
+var ErrWatchTreeTooLarge = errors.New("workspace tree too large to watch")
+
+type watchLimits struct {
+	MaxDirs    int
+	MaxEntries int
+}
+
+var defaultWatchLimits = watchLimits{
+	MaxDirs:    256,
+	MaxEntries: 10000,
+}
+
 func Watch(ctx context.Context, root string) (*Watcher, error) {
+	return watchWithLimits(ctx, root, defaultWatchLimits)
+}
+
+func watchWithLimits(ctx context.Context, root string, limits watchLimits) (*Watcher, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, errors.New("workspace root is required")
@@ -28,6 +46,9 @@ func Watch(ctx context.Context, root string) (*Watcher, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
+	}
+	if isBroadWatchRoot(abs) {
+		return nil, ErrWatchTreeTooLarge
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
@@ -42,6 +63,7 @@ func Watch(ctx context.Context, root string) (*Watcher, error) {
 	}
 	out := &Watcher{
 		root:   abs,
+		limits: limits,
 		watch:  w,
 		events: make(chan struct{}, 1),
 		done:   make(chan struct{}),
@@ -52,6 +74,18 @@ func Watch(ctx context.Context, root string) (*Watcher, error) {
 	}
 	go out.run(ctx)
 	return out, nil
+}
+
+func isBroadWatchRoot(root string) bool {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == string(filepath.Separator) {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && filepath.Clean(home) == root {
+		return true
+	}
+	return false
 }
 
 func (w *Watcher) Events() <-chan struct{} {
@@ -103,7 +137,7 @@ func (w *Watcher) handle(event fsnotify.Event) {
 	}
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-			_ = w.addDirTree(event.Name)
+			_ = w.addDirTree(event.Name, &watchCounts{})
 		}
 	}
 	w.emit()
@@ -117,13 +151,26 @@ func (w *Watcher) emit() {
 }
 
 func (w *Watcher) addExistingDirs() error {
-	return w.addDirTree(w.root)
+	var counts watchCounts
+	return w.addDirTree(w.root, &counts)
 }
 
-func (w *Watcher) addDirTree(root string) error {
+type watchCounts struct {
+	Dirs    int
+	Entries int
+}
+
+func (w *Watcher) addDirTree(root string, counts *watchCounts) error {
+	if counts == nil {
+		counts = &watchCounts{}
+	}
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
+		}
+		counts.Entries++
+		if w.limits.MaxEntries > 0 && counts.Entries > w.limits.MaxEntries {
+			return ErrWatchTreeTooLarge
 		}
 		if !entry.IsDir() {
 			return nil
@@ -131,8 +178,12 @@ func (w *Watcher) addDirTree(root string) error {
 		if shouldSkipWatchDir(path, entry.Name()) {
 			return filepath.SkipDir
 		}
+		counts.Dirs++
+		if w.limits.MaxDirs > 0 && counts.Dirs > w.limits.MaxDirs {
+			return ErrWatchTreeTooLarge
+		}
 		if err := w.watch.Add(path); err != nil && !errors.Is(err, fsnotify.ErrClosed) {
-			return nil
+			return fmt.Errorf("watch %s: %w", path, err)
 		}
 		return nil
 	})
@@ -140,7 +191,7 @@ func (w *Watcher) addDirTree(root string) error {
 
 func shouldSkipWatchDir(path string, name string) bool {
 	switch name {
-	case "node_modules", ".cache", ".direnv":
+	case ".git", "node_modules", ".cache", ".direnv":
 		return true
 	case "objects", "logs", "modules":
 		return strings.Contains(filepath.ToSlash(path), "/.git/")
