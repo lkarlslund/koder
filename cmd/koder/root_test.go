@@ -152,12 +152,12 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, markers := range map[string][]string{
-		"playwright": {
-			"name: playwright",
-			"Never use Playwright's unnamed `default` session",
-			"Never use `close-all` or `kill-all`",
-			"response-body <request-number> --filename=artifacts/browser-images/example.webp",
-			"Use `currentSrc`, not",
+		"browser": {
+			"name: browser",
+			"Use Koder's `browser_*` tools",
+			"Tabs and their snapshots",
+			"browser_response_body",
+			"without a workspace file",
 		},
 		"skill-creator": {"name: skill-creator"},
 	} {

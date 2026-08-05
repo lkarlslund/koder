@@ -78,6 +78,7 @@ func Sync(ctx context.Context, root string, items []Asset) ([]Result, error) {
 	}
 	results := make([]Result, 0, len(items))
 	changed := false
+	wanted := make(map[string]bool, len(items))
 	for _, item := range items {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -88,6 +89,30 @@ func Sync(ctx context.Context, root string, items []Asset) ([]Result, error) {
 		}
 		changed = changed || itemChanged
 		results = append(results, result)
+		wanted[result.Target] = true
+	}
+	for rel, entry := range m.Files {
+		if wanted[rel] {
+			continue
+		}
+		path, _, err := resolveTarget(root, rel)
+		if err != nil {
+			return nil, err
+		}
+		current, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			delete(m.Files, rel)
+			changed = true
+			continue
+		}
+		if err != nil || contentHash(current) != entry.SHA256 {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("remove retired managed asset %s: %w", path, err)
+		}
+		delete(m.Files, rel)
+		changed = true
 	}
 	if changed {
 		if err := writeManifest(root, m); err != nil {

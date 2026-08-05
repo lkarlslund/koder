@@ -3,6 +3,7 @@ package assets
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,36 @@ func TestSyncSkipsExistingUnmanagedFile(t *testing.T) {
 	}
 	assertResult(t, results, StatusUnmanaged)
 	assertFile(t, target, "preexisting\n")
+}
+
+func TestSyncRemovesRetiredUnmodifiedAsset(t *testing.T) {
+	root := t.TempDir()
+	item := Asset{ID: "old", Target: "skills/old/SKILL.md", Content: []byte("old\n")}
+	if _, err := Sync(t.Context(), root, []Asset{item}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Sync(t.Context(), root, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, item.Target)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retired managed asset still exists: %v", err)
+	}
+}
+
+func TestSyncPreservesRetiredModifiedAsset(t *testing.T) {
+	root := t.TempDir()
+	item := Asset{ID: "old", Target: "skills/old/SKILL.md", Content: []byte("old\n")}
+	if _, err := Sync(t.Context(), root, []Asset{item}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, item.Target)
+	if err := os.WriteFile(path, []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Sync(t.Context(), root, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertFile(t, path, "user edit\n")
 }
 
 func TestSyncReinstallsMissingManifestFile(t *testing.T) {
