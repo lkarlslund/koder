@@ -28,6 +28,7 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
@@ -680,7 +681,7 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	case "type":
 		task = chromedp.SendKeys(expression, value, chromedp.ByJSPath)
 	case "press":
-		task = chromedp.SendKeys(expression, value, chromedp.ByJSPath)
+		task = chromedp.SendKeys(expression, browserKey(value), chromedp.ByJSPath)
 	case "select", "check", "uncheck", "hover":
 		task = chromedp.Evaluate(interactionExpression(locator, action, value), nil)
 	default:
@@ -688,6 +689,11 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
+	if action == "click" || action == "fill" || action == "type" || action == "press" {
+		if err := validateLocator(opCtx, locator, action); err != nil {
+			return fmt.Errorf("browser %s: %w", action, err)
+		}
+	}
 	if err := chromedp.Run(opCtx, task); err != nil {
 		return fmt.Errorf("browser %s: %w", action, err)
 	}
@@ -761,6 +767,9 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, locator brow
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
+	if err := validateLocator(opCtx, locator, "upload"); err != nil {
+		return fmt.Errorf("resolve browser upload target: %w", err)
+	}
 	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(locatorExpression(locator, "upload"), browserPaths, chromedp.ByJSPath)); err != nil {
 		return fmt.Errorf("upload browser files: %w", err)
 	}
@@ -822,6 +831,11 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
+	if !locator.Empty() {
+		if err := validateLocator(opCtx, locator, "capture"); err != nil {
+			return browserapi.Binary{}, fmt.Errorf("resolve browser screenshot target: %w", err)
+		}
+	}
 	if err := chromedp.Run(opCtx, action); err != nil {
 		return browserapi.Binary{}, fmt.Errorf("capture browser screenshot: %w", err)
 	}
@@ -1475,6 +1489,41 @@ func truncateSnapshot(text string, maxChars int) (string, bool) {
 func jsString(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)
+}
+
+func browserKey(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "enter", "return":
+		return kb.Enter
+	case "tab":
+		return kb.Tab
+	case "escape", "esc":
+		return kb.Escape
+	case "backspace":
+		return kb.Backspace
+	case "delete", "del":
+		return kb.Delete
+	case "arrowup", "up":
+		return kb.ArrowUp
+	case "arrowdown", "down":
+		return kb.ArrowDown
+	case "arrowleft", "left":
+		return kb.ArrowLeft
+	case "arrowright", "right":
+		return kb.ArrowRight
+	case "home":
+		return kb.Home
+	case "end":
+		return kb.End
+	case "pageup":
+		return kb.PageUp
+	case "pagedown":
+		return kb.PageDown
+	case "space":
+		return " "
+	default:
+		return value
+	}
 }
 
 func browserURLsEqual(left, right string) bool {

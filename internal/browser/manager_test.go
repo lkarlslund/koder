@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/chromedp/kb"
+
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/id"
@@ -71,6 +73,14 @@ func TestLocatorExpressionContainsSemanticInputs(t *testing.T) {
 	for _, want := range []string{"Submit order", "button", "Checkout", `"occurrence":2`, "ambiguous"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("locator expression missing %q", want)
+		}
+	}
+}
+
+func TestBrowserKeyNames(t *testing.T) {
+	for input, want := range map[string]string{"Enter": kb.Enter, "Esc": kb.Escape, "ArrowDown": kb.ArrowDown, "Space": " ", "x": "x"} {
+		if got := browserKey(input); got != want {
+			t.Fatalf("browserKey(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

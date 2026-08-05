@@ -216,6 +216,29 @@ func TestIntArgAcceptsIntegralFloatEncoding(t *testing.T) {
 	}
 }
 
+func TestSemanticLocatorArguments(t *testing.T) {
+	locator, err := locatorFromArgs(map[string]string{
+		"target": "Submit order", "role": "button", "within": "Checkout", "occurrence": "2.00000",
+	}, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := browserapi.Locator{Target: "Submit order", Role: "button", Within: "Checkout", Exact: true, Occurrence: 2}
+	if locator != want {
+		t.Fatalf("locatorFromArgs() = %#v, want %#v", locator, want)
+	}
+	partial, err := locatorFromArgs(map[string]string{"target": "Submit", "exact": "false"}, "", true)
+	if err != nil || partial.Exact {
+		t.Fatalf("partial locator = %#v, %v", partial, err)
+	}
+	if _, err := (tool{id: tools.BrowserPress}).NormalizeArgs(map[string]string{"key": "Enter"}); err != nil {
+		t.Fatalf("browser_press should allow the focused element: %v", err)
+	}
+	if _, err := (tool{id: tools.BrowserDrag}).NormalizeArgs(map[string]string{"source": "Card", "target": "Column"}); err != nil {
+		t.Fatalf("browser_drag semantic locators rejected: %v", err)
+	}
+}
+
 var savedPNG = []byte("\x89PNG\r\n\x1a\nimage")
 
 type savingBrowser struct{ fakeBrowser }

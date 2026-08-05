@@ -32,7 +32,20 @@ func TestChromiumIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("download-body"))
 			return
 		}
-		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><input type="file" aria-label="Upload file"><img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E"><output>waiting</output>`))
+		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title>
+<button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button>
+<a href="/download">Download</a>
+<label>Customer name <input id="name" onkeydown="if(event.key==='Enter')document.querySelector('output').textContent='entered'"></label>
+<label><input id="terms" type="checkbox"> Accept terms</label>
+<label>Pizza size <select id="size"><option>Small</option><option>Large</option></select></label>
+<button id="hover" onmouseover="document.querySelector('output').textContent='hovered'">Details</button>
+<section aria-label="Alpha panel"><button onclick="document.querySelector('output').textContent='alpha'">Delete</button></section>
+<section aria-label="Beta panel"><button onclick="document.querySelector('output').textContent='beta'">Delete</button></section>
+<div aria-label="Drag source" draggable="true">Move me</div><div aria-label="Drop target" ondragover="event.preventDefault()" ondrop="document.querySelector('output').textContent='dropped'">Drop here</div>
+<div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
+<input type="file" aria-label="Upload file">
+<img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E">
+<output>waiting</output>`))
 	}))
 	defer server.Close()
 
@@ -78,6 +91,78 @@ func TestChromiumIntegration(t *testing.T) {
 	value, err := m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`)
 	if err != nil || value != `"clicked"` {
 		t.Fatalf("unexpected output: %s, %v", value, err)
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('#button').outerHTML='<button id="button" onclick="document.querySelector(\'output\').textContent=\'rerendered\'">Run</button>'`); err != nil {
+		t.Fatalf("replace semantic target: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Run", Role: "button", Exact: true}, ""); err != nil {
+		t.Fatalf("click rerendered semantic target: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"rerendered"` {
+		t.Fatalf("semantic locator retained DOM state: %s, %v", value, err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelectorAll('[data-koder-ref]').length`); err != nil || value != "0" {
+		t.Fatalf("browser snapshot mutated DOM: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "fill", browserapi.Locator{Target: "Customer name", Exact: true}, "Ada"); err != nil {
+		t.Fatalf("fill semantic textbox: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "type", browserapi.Locator{Target: "Customer name", Exact: true}, " Lovelace"); err != nil {
+		t.Fatalf("type semantic textbox: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#name').value`); err != nil || value != `"Ada Lovelace"` {
+		t.Fatalf("unexpected semantic textbox value: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "press", browserapi.Locator{Target: "Customer name", Exact: true}, "Enter"); err != nil {
+		t.Fatalf("press semantic textbox: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"entered"` {
+		t.Fatalf("semantic key press did not dispatch Enter: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "select", browserapi.Locator{Target: "Pizza size", Exact: true}, "Large"); err != nil {
+		t.Fatalf("select semantic control: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#size').value`); err != nil || value != `"Large"` {
+		t.Fatalf("semantic select did not change value: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "check", browserapi.Locator{Target: "Accept terms", Exact: true}, ""); err != nil {
+		t.Fatalf("check semantic control: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "uncheck", browserapi.Locator{Target: "Accept terms", Exact: true}, ""); err != nil {
+		t.Fatalf("uncheck semantic control: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#terms').checked`); err != nil || value != "false" {
+		t.Fatalf("semantic uncheck did not clear control: %s, %v", value, err)
+	}
+	if err := m.Interact(t.Context(), chat, "hover", browserapi.Locator{Target: "Details", Role: "button", Exact: true}, ""); err != nil {
+		t.Fatalf("hover semantic target: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Exact: true}, ""); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous semantic target error = %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Within: "Alpha panel", Exact: true}, ""); err != nil {
+		t.Fatalf("click scoped semantic target: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Exact: true, Occurrence: 2}, ""); err != nil {
+		t.Fatalf("click semantic occurrence: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "xpath=//button[@id='button']"}, ""); err != nil {
+		t.Fatalf("click XPath selector: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "#button"}, ""); err != nil {
+		t.Fatalf("click CSS selector: %v", err)
+	}
+	if err := m.Drag(t.Context(), chat, browserapi.Locator{Target: "Drag source", Exact: true}, browserapi.Locator{Target: "Drop target", Exact: true}); err != nil {
+		t.Fatalf("drag semantic targets: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"dropped"` {
+		t.Fatalf("semantic drag did not dispatch drop: %s, %v", value, err)
+	}
+	if err := m.Scroll(t.Context(), chat, browserapi.Locator{Target: "Scroll area", Exact: true}, 0, 40); err != nil {
+		t.Fatalf("scroll semantic target: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('[aria-label="Scroll area"]').scrollTop`); err != nil || value == "0" {
+		t.Fatalf("semantic scroll did not move target: %s, %v", value, err)
 	}
 	_, err = m.Evaluate(t.Context(), chat, `(()=>{console.warn('browser-test-console');return fetch('/data').then(r=>r.text())})()`)
 	if err != nil {

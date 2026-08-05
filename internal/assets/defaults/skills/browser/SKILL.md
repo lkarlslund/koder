@@ -12,8 +12,7 @@ or an MCP browser server.
 ## Ownership
 
 - The browser profile, cookies, site storage, and logins are shared.
-- Tabs and their snapshots, refs, console records, requests, and downloads are
-  owned by one chat.
+- Tabs and their console records, requests, and downloads are owned by one chat.
 - `browser_tab_list` shows this chat's tabs and unowned tabs opened manually by
   the user. It never shows tabs owned by another chat.
 - Use `browser_tab_claim` to atomically claim a manual tab.
@@ -23,12 +22,17 @@ or an MCP browser server.
 
 1. Use `browser_tab_list`, then create, claim, or select a tab.
 2. Navigate with `browser_navigate`.
-3. Use `browser_snapshot` or `browser_find` to obtain current element refs.
-4. Interact with focused tools such as `browser_click`, `browser_fill`,
-   `browser_select`, and `browser_upload`.
-5. Take a new snapshot after navigation or meaningful DOM changes. Old refs are
-   intentionally rejected.
-6. Use `browser_screenshot` when visual state matters. Its image bytes are sent
+3. Use `browser_snapshot` or `browser_find` when an informational view of the
+   current page structure would help. They are not required for interaction.
+4. Interact with current elements by accessible name, associated label, or
+   visible text, for example `target="Submit order"` with `role="button"`.
+5. Refine ambiguous targets with `role`, `within`, or one-based `occurrence`.
+   Set `exact=false` only when partial matching is intentional. Use a CSS
+   `selector` or `xpath=` expression only as an advanced fallback.
+6. Use focused tools such as `browser_click`, `browser_fill`, `browser_select`,
+   and `browser_upload`. Every call resolves its target against the current DOM;
+   it never depends on a prior snapshot or retained element handle.
+7. Use `browser_screenshot` when visual state matters. Its image bytes are sent
    directly to model vision and the Koder UI without a workspace file.
 
 Use `browser_evaluate` for targeted DOM inspection or behavior that focused

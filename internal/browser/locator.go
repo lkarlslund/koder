@@ -1,13 +1,24 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/chromedp/chromedp"
 
 	"github.com/lkarlslund/koder/internal/browserapi"
 )
 
+func validateLocator(ctx context.Context, locator browserapi.Locator, action string) error {
+	var found bool
+	return chromedp.Run(ctx, chromedp.Evaluate(`Boolean(`+locatorExpression(locator, action)+`)`, &found))
+}
+
 func locatorExpression(locator browserapi.Locator, action string) string {
+	if locator.Empty() && action == "press" {
+		return `(document.activeElement||document.body)`
+	}
 	config, _ := json.Marshal(locator)
 	return fmt.Sprintf(`(()=>{const cfg=%s;%s;return resolve(cfg,%q)})()`, config, semanticResolverJS, action)
 }
@@ -62,7 +73,8 @@ const resolve=(cfg,action)=>{
   };
   const role=el=>lower(el.getAttribute('role')||implicitRole(el));
   const labelledBy=el=>norm((el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||'').join(' '));
-  const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(item=>item.innerText||item.textContent||'').join(' '):'');
+	const labelText=item=>{const clone=item.cloneNode(true);for(const control of clone.querySelectorAll('input,select,textarea,button'))control.remove();return clone.textContent||''};
+	const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(labelText).join(' '):'');
   const name=el=>norm(labelledBy(el)||el.getAttribute('aria-label')||label(el)||el.alt||el.title||el.placeholder||el.innerText||el.value||el.textContent||'');
   const collect=root=>{
     const out=[];
@@ -78,7 +90,8 @@ const resolve=(cfg,action)=>{
     const r=role(el);
     switch(action){
       case 'click':return ['button','link','checkbox','radio','menuitem','option','tab','switch'].includes(r)||el.onclick||el.tabIndex>=0;
-      case 'fill':case 'type':return tag==='TEXTAREA'||el.isContentEditable||(tag==='INPUT'&&!['button','submit','reset','checkbox','radio','file','hidden'].includes(type));
+		case 'fill':case 'type':return tag==='TEXTAREA'||el.isContentEditable||(tag==='INPUT'&&!['button','submit','reset','checkbox','radio','file','hidden'].includes(type));
+		case 'press':return ['INPUT','TEXTAREA','SELECT','BUTTON','A'].includes(tag)||el.isContentEditable||el.tabIndex>=0;
       case 'select':return tag==='SELECT'||r==='listbox'||r==='combobox';
       case 'check':case 'uncheck':return type==='checkbox'||type==='radio'||r==='checkbox'||r==='radio'||r==='switch';
       case 'upload':return tag==='INPUT'&&type==='file';
