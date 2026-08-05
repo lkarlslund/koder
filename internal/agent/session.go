@@ -81,7 +81,13 @@ func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 }
 
 func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
-	if e == nil || e.registry == nil {
+	if e == nil {
+		return nil
+	}
+	if e.browser != nil {
+		_ = e.browser.Stop(ctx)
+	}
+	if e.registry == nil {
 		return nil
 	}
 	return e.registry.Shutdown(ctx, reason)

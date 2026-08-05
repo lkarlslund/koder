@@ -5,7 +5,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/id"
 )
+
+func TestImportSessionData(t *testing.T) {
+	m := NewManager(t.TempDir())
+	meta, err := m.ImportSessionData(id.ID("session-1"), []byte("hello"), "result.txt", "text/plain", SourceBrowser)
+	if err != nil {
+		t.Fatalf("import session data: %v", err)
+	}
+	if meta.Source != SourceBrowser || meta.Size != 5 || filepath.Base(meta.Path) == "result.txt" {
+		t.Fatalf("unexpected metadata: %#v", meta)
+	}
+	got, err := os.ReadFile(meta.Path)
+	if err != nil || string(got) != "hello" {
+		t.Fatalf("read imported attachment: %q, %v", got, err)
+	}
+}
 
 func TestImportClipboardImageAndAdoptDraft(t *testing.T) {
 	manager := NewManager(t.TempDir())

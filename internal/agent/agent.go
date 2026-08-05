@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/browser"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
@@ -50,6 +51,7 @@ type Engine struct {
 	settings     *settings.Store
 	modelRuntime *modelruntime.Runtime
 	toolsRuntime *toolruntime.Runtime
+	browser      *browser.Manager
 	envMu        sync.Mutex
 	envPrompts   map[id.ID]string
 	registry     *sessionpkg.Registry
@@ -74,6 +76,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		settings:   settingsStore,
 		retryPause: modelruntime.DefaultRetryPause,
 	}
+	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
 	e.modelRuntime = modelruntime.New(modelruntime.Config{
 		Config:   cfg,
 		Store:    st,
@@ -100,6 +103,8 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Sessions:         e.registry,
 		Exec:             execRuntime,
 		MCP:              e.mcp,
+		Browser:          e.browser,
+		Attachments:      e.files,
 		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
@@ -122,6 +127,9 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	}
 	if e.toolsRuntime != nil {
 		e.toolsRuntime.UpdateSettings(e.settings)
+	}
+	if e.browser != nil {
+		e.browser.UpdateConfig(cfg.Browser)
 	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)

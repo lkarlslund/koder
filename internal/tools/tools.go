@@ -13,6 +13,8 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -147,6 +149,8 @@ type Runtime struct {
 	ManagedSkillsDir      string
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
+	Browser               browserapi.Service
+	Attachments           *attachment.Manager
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
 }

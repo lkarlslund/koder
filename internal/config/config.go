@@ -61,6 +61,15 @@ type Tools struct {
 	Enabled ToolDefaults `toml:"enabled"`
 }
 
+type Browser struct {
+	Enabled          bool          `toml:"enabled"`
+	Executable       string        `toml:"executable"`
+	Headed           bool          `toml:"headed"`
+	OperationTimeout time.Duration `toml:"operation_timeout"`
+	MaxTabsPerChat   int           `toml:"max_tabs_per_chat"`
+	MaxTabsGlobal    int           `toml:"max_tabs_global"`
+}
+
 type Provider struct {
 	TemplateID              string            `toml:"template_id"`
 	Kind                    string            `toml:"kind"`
@@ -130,6 +139,7 @@ type Config struct {
 	Store            Store                   `toml:"store"`
 	UI               UI                      `toml:"ui"`
 	Thinking         Thinking                `toml:"thinking"`
+	Browser          Browser                 `toml:"browser"`
 	path             string
 	configDir        string
 	stateDir         string
@@ -164,6 +174,9 @@ const defaultMaxChildChats = 1
 const defaultAutoCompactAt = 80
 const defaultCompactionKeepToolCalls = 2
 const defaultCavemanParallelism = 1
+const defaultBrowserTimeout = 30 * time.Second
+const defaultBrowserTabsPerChat = 8
+const defaultBrowserTabsGlobal = 32
 const DefaultCavemanMinTokens = 64
 const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
@@ -232,6 +245,9 @@ func LoadWithOptions(opts LoadOptions) (Config, error) {
 	if !strings.Contains(string(data), "auto_continue") {
 		cfg.UI.AutoContinue = true
 	}
+	if !strings.Contains(string(data), "[browser]") {
+		cfg.Browser = Default().Browser
+	}
 	cfg.configDir = paths.configDir
 	cfg.stateDir = paths.stateDir
 	cfg.cacheDir = paths.cacheDir
@@ -255,7 +271,14 @@ func Default() Config {
 			AutoAtPercent: defaultAutoCompactAt,
 			KeepToolCalls: defaultCompactionKeepToolCalls,
 		},
-		Tools:      Tools{Enabled: toolDefaults},
+		Tools: Tools{Enabled: toolDefaults},
+		Browser: Browser{
+			Enabled:          true,
+			Headed:           true,
+			OperationTimeout: defaultBrowserTimeout,
+			MaxTabsPerChat:   defaultBrowserTabsPerChat,
+			MaxTabsGlobal:    defaultBrowserTabsGlobal,
+		},
 		Providers:  map[string]Provider{},
 		Models:     []ModelConfig{},
 		MCPServers: map[string]MCPServer{},
@@ -311,6 +334,22 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxChildChats <= 0 {
 		c.MaxChildChats = def.MaxChildChats
+	}
+	c.Browser.Executable = strings.TrimSpace(c.Browser.Executable)
+	if c.Browser.OperationTimeout <= 0 {
+		c.Browser.OperationTimeout = def.Browser.OperationTimeout
+	}
+	if c.Browser.OperationTimeout > 120*time.Second {
+		c.Browser.OperationTimeout = 120 * time.Second
+	}
+	if c.Browser.MaxTabsPerChat <= 0 {
+		c.Browser.MaxTabsPerChat = def.Browser.MaxTabsPerChat
+	}
+	if c.Browser.MaxTabsGlobal <= 0 {
+		c.Browser.MaxTabsGlobal = def.Browser.MaxTabsGlobal
+	}
+	if c.Browser.MaxTabsGlobal < c.Browser.MaxTabsPerChat {
+		c.Browser.MaxTabsGlobal = c.Browser.MaxTabsPerChat
 	}
 	if c.Compaction.AutoAtPercent <= 0 {
 		c.Compaction.AutoAtPercent = def.Compaction.AutoAtPercent

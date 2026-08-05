@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -29,6 +31,8 @@ type Runtime struct {
 	sessions         *sessionpkg.Registry
 	exec             *execruntime.Manager
 	mcp              *mcp.Manager
+	browser          browserapi.Service
+	attachments      *attachment.Manager
 	managedSkillsDir string
 }
 
@@ -38,6 +42,8 @@ type Config struct {
 	Sessions         *sessionpkg.Registry
 	Exec             *execruntime.Manager
 	MCP              *mcp.Manager
+	Browser          browserapi.Service
+	Attachments      *attachment.Manager
 	ManagedSkillsDir string
 }
 
@@ -52,6 +58,8 @@ func New(cfg Config) *Runtime {
 		sessions:         cfg.Sessions,
 		exec:             exec,
 		mcp:              cfg.MCP,
+		browser:          cfg.Browser,
+		attachments:      cfg.Attachments,
 		managedSkillsDir: strings.TrimSpace(cfg.ManagedSkillsDir),
 	}
 }
@@ -107,6 +115,8 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		AssignedTaskRef:       chat.AssignedTaskRef,
 		Exec:                  r.exec,
 		MCP:                   r.mcp,
+		Browser:               r.browser,
+		Attachments:           r.attachments,
 		AllowedTools:          r.toolStates(session),
 		ManagedSkillsDir:      r.managedSkillsDir,
 		FileTracker:           codeIntelFileTracker{root: projectRoot},

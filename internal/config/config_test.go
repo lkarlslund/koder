@@ -95,6 +95,16 @@ func TestLoadWithDataDirUsesSingleRoot(t *testing.T) {
 	}
 }
 
+func TestDefaultBrowserConfiguration(t *testing.T) {
+	cfg := Default()
+	if !cfg.Browser.Enabled || !cfg.Browser.Headed {
+		t.Fatalf("browser should default to enabled and headed: %#v", cfg.Browser)
+	}
+	if cfg.Browser.OperationTimeout != 30*time.Second || cfg.Browser.MaxTabsPerChat != 8 || cfg.Browser.MaxTabsGlobal != 32 {
+		t.Fatalf("unexpected browser defaults: %#v", cfg.Browser)
+	}
+}
+
 func TestLoadUsesKoderDataDirEnv(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("KODER_DATA_DIR", dataDir)
