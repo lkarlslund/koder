@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agents"
 )
+
+const maxUntrackedLineCountBytes int64 = 4 << 20
 
 type FileStatus struct {
 	Code      string `json:"code"`
@@ -153,10 +157,18 @@ func untrackedFileStats(ctx context.Context, root string) map[string]FileStatus 
 		if path == "" {
 			continue
 		}
+		if isNestedGitInternalPath(path) {
+			continue
+		}
 		additions := countFileLines(filepath.Join(root, filepath.FromSlash(path)))
 		stats[path] = FileStatus{Path: path, Additions: additions, Files: 1}
 	}
 	return stats
+}
+
+func isNestedGitInternalPath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	return path == ".git" || strings.HasPrefix(path, ".git/") || strings.Contains(path, "/.git/")
 }
 
 func untrackedStatForPath(path string, stats map[string]FileStatus) (FileStatus, bool) {
@@ -181,15 +193,43 @@ func untrackedStatForPath(path string, stats map[string]FileStatus) (FileStatus,
 
 func countFileLines(path string) int {
 	info, err := os.Lstat(path)
-	if err != nil || info.IsDir() {
+	if err != nil || info.IsDir() || info.Size() > maxUntrackedLineCountBytes {
 		return 0
 	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
+	file, err := os.Open(path)
+	if err != nil {
 		return 0
 	}
-	lines := bytes.Count(data, []byte{'\n'})
-	if data[len(data)-1] != '\n' {
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	lines := 0
+	readAny := false
+	lastByte := byte('\n')
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(chunk) > 0 {
+			readAny = true
+			if bytes.IndexByte(chunk, 0) >= 0 {
+				return 0
+			}
+			lastByte = chunk[len(chunk)-1]
+			if lastByte == '\n' {
+				lines++
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err == io.EOF {
+			break
+		}
+		return 0
+	}
+	if readAny && lastByte != '\n' {
 		lines++
 	}
 	return lines

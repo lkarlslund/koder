@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -61,6 +62,59 @@ func TestParseStatusExpandsUntrackedDirectoryStats(t *testing.T) {
 	}
 }
 
+func TestUntrackedFileStatsSkipsNestedGitInternals(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	runGit(t, root, "config", "user.email", "test@example.invalid")
+	runGit(t, root, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "tracked.txt")
+	runGit(t, root, "commit", "-m", "init")
+
+	nestedPack := filepath.Join(root, "nested", ".git", "objects", "pack", "pack-test.pack")
+	if err := os.MkdirAll(filepath.Dir(nestedPack), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nestedPack, []byte("not text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	visible := filepath.Join(root, "nested", "visible.txt")
+	if err := os.WriteFile(visible, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := untrackedFileStats(context.Background(), root)
+	if _, ok := stats["nested/.git/objects/pack/pack-test.pack"]; ok {
+		t.Fatalf("expected nested git internal path to be skipped, got %#v", stats)
+	}
+	if got := stats["nested/visible.txt"].Additions; got != 2 {
+		t.Fatalf("expected visible file line count, got %#v", stats["nested/visible.txt"])
+	}
+}
+
+func TestCountFileLinesDoesNotReadHugeFiles(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "huge.txt")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Seek(maxUntrackedLineCountBytes, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := countFileLines(path); got != 0 {
+		t.Fatalf("expected huge file line count to be skipped, got %d", got)
+	}
+}
+
 func TestWatcherReportsFileChanges(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,5 +132,14 @@ func TestWatcherReportsFileChanges(t *testing.T) {
 	case <-watcher.Events():
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected file watcher event")
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
 	}
 }
