@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
@@ -143,16 +144,45 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		err = service.Interact(ctx, chat, action, args["ref"], args["value"])
 		value = map[string]string{"action": action, "ref": args["ref"]}
 	case tools.BrowserDrag:
-		expression := fmt.Sprintf(`(()=>{const a=document.querySelector('[data-koder-ref=%s]'),b=document.querySelector('[data-koder-ref=%s]');if(!a||!b)throw new Error('stale element reference');for(const t of ['dragstart','dragenter','dragover','drop','dragend'])(t==='dragstart'||t==='dragend'?a:b).dispatchEvent(new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:new DataTransfer()}));return true})()`, args["source_ref"], args["target_ref"])
+		sourceSelector := fmt.Sprintf(`[data-koder-ref=%q]`, args["source_ref"])
+		targetSelector := fmt.Sprintf(`[data-koder-ref=%q]`, args["target_ref"])
+		expression := fmt.Sprintf(`(()=>{const a=document.querySelector(%s),b=document.querySelector(%s);if(!a||!b)throw new Error('stale element reference');const d=new DataTransfer();a.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:d}));for(const t of ['dragenter','dragover','drop'])b.dispatchEvent(new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:d}));a.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:d}));return true})()`, jsonString(sourceSelector), jsonString(targetSelector))
 		value, err = service.Evaluate(ctx, chat, expression)
 	case tools.BrowserScroll:
 		target := "window"
 		if args["ref"] != "" {
-			target = fmt.Sprintf(`document.querySelector('[data-koder-ref=%s]')`, args["ref"])
+			target = fmt.Sprintf(`document.querySelector(%s)`, jsonString(fmt.Sprintf(`[data-koder-ref=%q]`, args["ref"])))
 		}
 		value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`(()=>{const e=%s;if(!e)throw new Error('stale element reference');e.scrollBy(%d,%d);return true})()`, target, intArg(args, "x", 0), intArg(args, "y", 600)))
 	case tools.BrowserWait:
-		value, err = service.Find(ctx, chat, args["text"], "", 8*1024)
+		wait := time.Duration(intArg(args, "timeout_ms", 30000)) * time.Millisecond
+		if wait < time.Millisecond {
+			wait = time.Millisecond
+		}
+		if wait > 120*time.Second {
+			wait = 120 * time.Second
+		}
+		deadline := time.Now().Add(wait)
+		for {
+			value, err = service.Find(ctx, chat, args["text"], "", 8*1024)
+			if err == nil && strings.TrimSpace(value.(browserapi.Snapshot).Text) != "" {
+				break
+			}
+			if err != nil || time.Now().After(deadline) {
+				if err == nil {
+					err = fmt.Errorf("timed out waiting for %q", args["text"])
+				}
+				break
+			}
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+			if err != nil {
+				break
+			}
+		}
 	case tools.BrowserUpload:
 		var paths []string
 		_ = json.Unmarshal([]byte(args["paths"]), &paths)
@@ -193,8 +223,11 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	case tools.BrowserResponseBody:
 		binary, binaryErr := service.ResponseBody(ctx, chat, args["request_id"])
 		return binaryResult(opts, t.id.String(), binary, binaryErr)
-	case tools.BrowserDownloads, tools.BrowserDownload:
-		err = errors.New("managed browser downloads are not available yet")
+	case tools.BrowserDownloads:
+		value, err = service.Downloads(ctx, chat)
+	case tools.BrowserDownload:
+		binary, binaryErr := service.Download(ctx, chat, args["download_id"])
+		return binaryResult(opts, t.id.String(), binary, binaryErr)
 	}
 	if err != nil {
 		return tools.Result{}, err
@@ -278,4 +311,9 @@ func intArg(args map[string]string, key string, fallback int) int {
 func boolArg(args map[string]string, key string) bool {
 	value, _ := strconv.ParseBool(args[key])
 	return value
+}
+
+func jsonString(value string) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }

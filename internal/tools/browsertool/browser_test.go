@@ -95,5 +95,11 @@ func (fakeBrowser) Requests(context.Context, browserapi.Chat, int) ([]browserapi
 func (fakeBrowser) ResponseBody(context.Context, browserapi.Chat, string) (browserapi.Binary, error) {
 	return browserapi.Binary{}, nil
 }
+func (fakeBrowser) Downloads(context.Context, browserapi.Chat) ([]browserapi.DownloadRecord, error) {
+	return nil, nil
+}
+func (fakeBrowser) Download(context.Context, browserapi.Chat, string) (browserapi.Binary, error) {
+	return browserapi.Binary{}, nil
+}
 func (fakeBrowser) CleanupChat(context.Context, id.ID)    {}
 func (fakeBrowser) CleanupSession(context.Context, id.ID) {}

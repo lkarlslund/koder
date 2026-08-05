@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	mimepkg "mime"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
@@ -53,6 +57,13 @@ type requestState struct {
 	cdpID  network.RequestID
 }
 
+type downloadState struct {
+	record browserapi.DownloadRecord
+	owner  browserapi.Chat
+	guid   string
+	path   string
+}
+
 type refState struct {
 	generation uint64
 	tabID      string
@@ -76,6 +87,7 @@ type Manager struct {
 	tabs       map[string]*ownedTab
 	selected   map[id.ID]string
 	refs       map[id.ID]refState
+	downloads  map[string]*downloadState
 }
 
 func NewManager(cfg config.Browser, stateDir string) *Manager {
@@ -87,6 +99,7 @@ func NewManager(cfg config.Browser, stateDir string) *Manager {
 		tabs:       map[string]*ownedTab{},
 		selected:   map[id.ID]string{},
 		refs:       map[id.ID]refState{},
+		downloads:  map[string]*downloadState{},
 	}
 }
 
@@ -200,7 +213,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.refs = map[id.ID]refState{}
+	m.downloads = map[string]*downloadState{}
 	m.mu.Unlock()
+	if err := m.configureDownloads(browserCtx, runtimeDir); err != nil {
+		_ = m.Stop(ctx)
+		m.setError(err)
+		return err
+	}
 	_, _ = m.Tabs(ctx, browserapi.Chat{})
 	return nil
 }
@@ -213,6 +232,7 @@ func (m *Manager) Stop(_ context.Context) error {
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.refs = map[id.ID]refState{}
+	m.downloads = map[string]*downloadState{}
 	m.state, m.lastErr = stateStopped, ""
 	m.mu.Unlock()
 	if stop != nil {
@@ -522,9 +542,38 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, 
 		return errors.New("stale element reference; run browser_snapshot again")
 	}
 	selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
+	stagingDir := filepath.Join(m.stateDir, "run", "uploads", newOpaqueID("upload"))
+	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
+		return fmt.Errorf("create browser upload staging: %w", err)
+	}
+	defer os.RemoveAll(stagingDir)
+	browserPaths := make([]string, 0, len(paths))
+	for _, source := range paths {
+		input, err := os.Open(source)
+		if err != nil {
+			return fmt.Errorf("open browser upload: %w", err)
+		}
+		name := newOpaqueID("file") + filepath.Ext(source)
+		destination := filepath.Join(stagingDir, name)
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			_ = input.Close()
+			return fmt.Errorf("create browser upload staging: %w", err)
+		}
+		_, err = io.Copy(output, input)
+		closeErr := output.Close()
+		_ = input.Close()
+		if err != nil {
+			return fmt.Errorf("stage browser upload: %w", err)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close browser upload: %w", closeErr)
+		}
+		browserPaths = append(browserPaths, filepath.Join("/tmp/koder/run/uploads", filepath.Base(stagingDir), name))
+	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
-	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(selector, paths, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(selector, browserPaths, chromedp.ByQuery)); err != nil {
 		return fmt.Errorf("upload browser files: %w", err)
 	}
 	return nil
@@ -564,6 +613,14 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 	if quality <= 0 || quality > 100 {
 		quality = 90
 	}
+	if strings.TrimSpace(ref) != "" {
+		m.mu.Lock()
+		state := m.refs[chat.ChatID]
+		m.mu.Unlock()
+		if !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
+			return browserapi.Binary{}, errors.New("stale element reference; run browser_snapshot again")
+		}
+	}
 	var action chromedp.Action
 	if strings.TrimSpace(ref) != "" {
 		action = chromedp.Screenshot(fmt.Sprintf(`[data-koder-ref=%q]`, ref), &data, chromedp.ByQuery)
@@ -579,6 +636,12 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 	}
 	if len(data) > 25*1024*1024 {
 		return browserapi.Binary{}, errors.New("browser screenshot exceeds 25 MiB")
+	}
+	detected := http.DetectContentType(data)
+	if detected == "image/png" {
+		mime, name = "image/png", "browser-screenshot.png"
+	} else if detected == "image/jpeg" {
+		mime, name = "image/jpeg", "browser-screenshot.jpg"
 	}
 	return browserapi.Binary{Name: name, MIME: mime, Data: data}, nil
 }
@@ -668,6 +731,45 @@ func (m *Manager) ResponseBody(ctx context.Context, chat browserapi.Chat, reques
 		mime = "application/octet-stream"
 	}
 	return browserapi.Binary{Name: "browser-response", MIME: mime, Data: body}, nil
+}
+
+func (m *Manager) Downloads(_ context.Context, chat browserapi.Chat) ([]browserapi.DownloadRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]browserapi.DownloadRecord, 0)
+	for _, download := range m.downloads {
+		if chat.ChatID != "" && download.owner.ChatID == chat.ChatID {
+			result = append(result, download.record)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+func (m *Manager) Download(_ context.Context, chat browserapi.Chat, downloadID string) (browserapi.Binary, error) {
+	m.mu.Lock()
+	download := m.downloads[strings.TrimSpace(downloadID)]
+	if download == nil || chat.ChatID == "" || download.owner.ChatID != chat.ChatID {
+		m.mu.Unlock()
+		return browserapi.Binary{}, errors.New("browser download not found or is owned by another chat")
+	}
+	if download.record.State != cdpbrowser.DownloadProgressStateCompleted.String() {
+		m.mu.Unlock()
+		return browserapi.Binary{}, fmt.Errorf("browser download is %s", download.record.State)
+	}
+	path, name := download.path, download.record.Name
+	delete(m.downloads, download.record.ID)
+	m.mu.Unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return browserapi.Binary{}, fmt.Errorf("read browser download: %w", err)
+	}
+	_ = os.Remove(path)
+	mime := http.DetectContentType(data)
+	if byExt := mimepkg.TypeByExtension(strings.ToLower(filepath.Ext(name))); byExt != "" && mime == "application/octet-stream" {
+		mime = byExt
+	}
+	return browserapi.Binary{Name: name, MIME: mime, Data: data}, nil
 }
 
 func (m *Manager) CleanupChat(ctx context.Context, chatID id.ID) {
@@ -804,13 +906,56 @@ func (m *Manager) monitorTab(tab *ownedTab) {
 				request.record.Finished = true
 			}
 			tab.dataMu.Unlock()
+		case *cdpbrowser.EventDownloadWillBegin:
+			m.mu.Lock()
+			id := newOpaqueID("download")
+			m.downloads[id] = &downloadState{
+				record: browserapi.DownloadRecord{ID: id, Name: event.SuggestedFilename, URL: event.URL, State: "inProgress"},
+				owner:  tab.owner,
+				guid:   event.GUID,
+				path:   filepath.Join(m.stateDir, "run", "downloads", event.GUID),
+			}
+			m.mu.Unlock()
+		case *cdpbrowser.EventDownloadProgress:
+			m.mu.Lock()
+			for _, download := range m.downloads {
+				if download.guid == event.GUID && download.owner.ChatID == tab.owner.ChatID {
+					download.record.State = event.State.String()
+					download.record.Received = int64(event.ReceivedBytes)
+					download.record.Total = int64(event.TotalBytes)
+					if event.FilePath != "" {
+						download.path = filepath.Join(m.stateDir, "run", "downloads", filepath.Base(event.FilePath))
+					}
+					break
+				}
+			}
+			m.mu.Unlock()
 		}
 	})
 	go func() {
 		ctx, cancel := context.WithTimeout(tab.ctx, m.timeout())
 		defer cancel()
-		_ = chromedp.Run(ctx, network.Enable(), cdpruntime.Enable())
+		_ = chromedp.Run(ctx,
+			network.Enable(),
+			cdpruntime.Enable(),
+			cdpbrowser.SetDownloadBehavior(cdpbrowser.SetDownloadBehaviorBehaviorAllowAndName).
+				WithDownloadPath("/tmp/koder/run/downloads").
+				WithEventsEnabled(true),
+		)
 	}()
+}
+
+func (m *Manager) configureDownloads(browserCtx context.Context, runtimeDir string) error {
+	downloadDir := filepath.Join(runtimeDir, "downloads")
+	if err := os.MkdirAll(downloadDir, 0o700); err != nil {
+		return fmt.Errorf("create browser download staging: %w", err)
+	}
+	return chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return cdpbrowser.SetDownloadBehavior(cdpbrowser.SetDownloadBehaviorBehaviorAllowAndName).
+			WithDownloadPath("/tmp/koder/run/downloads").
+			WithEventsEnabled(true).
+			Do(ctx)
+	}))
 }
 
 func (t *ownedTab) requestByCDPIDLocked(requestID network.RequestID) *requestState {

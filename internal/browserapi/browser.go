@@ -58,6 +58,15 @@ type ConsoleRecord struct {
 	Time  time.Time `json:"time"`
 }
 
+type DownloadRecord struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	State    string `json:"state"`
+	Received int64  `json:"received_bytes"`
+	Total    int64  `json:"total_bytes,omitempty"`
+}
+
 type Service interface {
 	Status(context.Context, Chat) Status
 	Start(context.Context) error
@@ -82,6 +91,8 @@ type Service interface {
 	Console(context.Context, Chat, string, int) ([]ConsoleRecord, error)
 	Requests(context.Context, Chat, int) ([]RequestRecord, error)
 	ResponseBody(context.Context, Chat, string) (Binary, error)
+	Downloads(context.Context, Chat) ([]DownloadRecord, error)
+	Download(context.Context, Chat, string) (Binary, error)
 	CleanupChat(context.Context, id.ID)
 	CleanupSession(context.Context, id.ID)
 }

@@ -23,7 +23,12 @@ func TestChromiumIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("network-body"))
 			return
 		}
-		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><output>waiting</output>`))
+		if r.URL.Path == "/download" {
+			w.Header().Set("Content-Disposition", `attachment; filename="browser-test.txt"`)
+			_, _ = w.Write([]byte("download-body"))
+			return
+		}
+		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><output>waiting</output>`))
 	}))
 	defer server.Close()
 
@@ -79,8 +84,41 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || len(console) == 0 || !strings.Contains(console[len(console)-1].Text, "browser-test-console") {
 		t.Fatalf("unexpected console records: %#v, %v", console, err)
 	}
+	downloadSnapshot, err := m.Find(t.Context(), chat, "Download", "", 8*1024)
+	if err != nil {
+		t.Fatalf("find download: %v", err)
+	}
+	downloadRef := snapshotRef(t, downloadSnapshot.Text)
+	if err := m.Interact(t.Context(), chat, "click", downloadRef, ""); err != nil {
+		t.Fatalf("start download: %v", err)
+	}
+	var downloads []browserapi.DownloadRecord
+	for range 40 {
+		downloads, err = m.Downloads(t.Context(), chat)
+		if err == nil && len(downloads) == 1 && downloads[0].State == "completed" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if len(downloads) != 1 || downloads[0].State != "completed" {
+		t.Fatalf("unexpected downloads: %#v, %v", downloads, err)
+	}
+	download, err := m.Download(t.Context(), chat, downloads[0].ID)
+	if err != nil || string(download.Data) != "download-body" || download.Name != "browser-test.txt" {
+		t.Fatalf("unexpected download: %#v, %v", download, err)
+	}
 	shot, err := m.Screenshot(t.Context(), chat, "", false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
 	}
+}
+
+func snapshotRef(t *testing.T, snapshot string) string {
+	t.Helper()
+	start := strings.Index(snapshot, "[") + 1
+	end := strings.Index(snapshot[start:], "]") + start
+	if start <= 0 || end < start {
+		t.Fatalf("snapshot has no ref: %s", snapshot)
+	}
+	return snapshot[start:end]
 }
