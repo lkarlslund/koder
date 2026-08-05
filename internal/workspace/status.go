@@ -16,7 +16,10 @@ import (
 	"github.com/lkarlslund/koder/internal/agents"
 )
 
-const maxUntrackedLineCountBytes int64 = 4 << 20
+const (
+	maxUntrackedLineCountBytes int64 = 4 << 20
+	maxStatusFiles                   = 2000
+)
 
 type FileStatus struct {
 	Code      string `json:"code"`
@@ -37,6 +40,8 @@ type Status struct {
 	Upstream       string       `json:"upstream"`
 	Summary        string       `json:"summary"`
 	Files          []FileStatus `json:"files"`
+	FilesTruncated bool         `json:"files_truncated,omitempty"`
+	FileLimit      int          `json:"file_limit,omitempty"`
 	Added          int          `json:"added"`
 	Modified       int          `json:"modified"`
 	Deleted        int          `json:"deleted"`
@@ -94,7 +99,7 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 			expanded := untrackedFilesForPath(file.Path, untrackedStats)
 			if len(expanded) > 0 {
 				for _, item := range expanded {
-					status.Files = append(status.Files, item)
+					appendStatusFile(&status, item)
 					status.Untracked++
 				}
 				continue
@@ -110,7 +115,7 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 				file.Files = stat.Files
 			}
 		}
-		status.Files = append(status.Files, file)
+		appendStatusFile(&status, file)
 		switch {
 		case file.Code == "??":
 			status.Untracked++
@@ -123,6 +128,18 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 		}
 	}
 	return status
+}
+
+func appendStatusFile(status *Status, file FileStatus) {
+	if status == nil {
+		return
+	}
+	if len(status.Files) < maxStatusFiles {
+		status.Files = append(status.Files, file)
+		return
+	}
+	status.FilesTruncated = true
+	status.FileLimit = maxStatusFiles
 }
 
 func untrackedFilesForPath(path string, stats map[string]FileStatus) []FileStatus {

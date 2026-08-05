@@ -3,9 +3,11 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,6 +62,28 @@ func TestParseStatusExpandsUntrackedDirectoryStats(t *testing.T) {
 	}
 	if got.Untracked != 2 {
 		t.Fatalf("expected untracked file count, got %#v", got)
+	}
+}
+
+func TestParseStatusCapsDetailedFileList(t *testing.T) {
+	var raw strings.Builder
+	raw.WriteString("## main\n")
+	stats := make(map[string]FileStatus, maxStatusFiles+5)
+	for i := range maxStatusFiles + 5 {
+		path := fmt.Sprintf("pkg/e2e/file-%04d.go", i)
+		stats[path] = FileStatus{Path: path, Additions: 1, Files: 1}
+	}
+	raw.WriteString("?? pkg/e2e/\n")
+
+	got := parseStatus(raw.String(), "", stats)
+	if got.Untracked != maxStatusFiles+5 {
+		t.Fatalf("expected aggregate untracked count to include all files, got %#v", got)
+	}
+	if len(got.Files) != maxStatusFiles {
+		t.Fatalf("expected capped file list, got %d", len(got.Files))
+	}
+	if !got.FilesTruncated || got.FileLimit != maxStatusFiles {
+		t.Fatalf("expected truncation metadata, got %#v", got)
 	}
 }
 
