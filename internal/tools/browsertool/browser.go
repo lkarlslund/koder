@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/url"
 	"os"
 	"strconv"
@@ -179,22 +180,24 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		if wait > 120*time.Second {
 			wait = 120 * time.Second
 		}
-		deadline := time.Now().Add(wait)
+		waitCtx, cancel := context.WithTimeout(ctx, wait)
+		defer cancel()
 		for {
-			value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`(document.body?.innerText || '').toLowerCase().includes(%s)`, jsonString(strings.ToLower(args["text"]))))
+			value, err = service.Evaluate(waitCtx, chat, fmt.Sprintf(`(document.body?.innerText || '').toLowerCase().includes(%s)`, jsonString(strings.ToLower(args["text"]))))
 			if err == nil && value == "true" {
 				value = map[string]string{"found": args["text"]}
 				break
 			}
-			if err != nil || time.Now().After(deadline) {
-				if err == nil {
-					err = fmt.Errorf("timed out waiting for %q", args["text"])
-				}
+			if waitCtx.Err() != nil {
+				err = fmt.Errorf("timed out waiting for %q after %s", args["text"], wait)
+				break
+			}
+			if err != nil {
 				break
 			}
 			select {
-			case <-ctx.Done():
-				err = ctx.Err()
+			case <-waitCtx.Done():
+				err = fmt.Errorf("timed out waiting for %q after %s", args["text"], wait)
 			case <-time.After(100 * time.Millisecond):
 			}
 			if err != nil {
@@ -372,11 +375,15 @@ func requiredArgs(kind tools.ID) []string {
 }
 
 func intArg(args map[string]string, key string, fallback int) int {
-	value, err := strconv.Atoi(args[key])
-	if err != nil {
+	value := strings.TrimSpace(args[key])
+	if parsed, err := strconv.Atoi(value); err == nil {
+		return parsed
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed != math.Trunc(parsed) || parsed < math.MinInt || parsed > math.MaxInt {
 		return fallback
 	}
-	return value
+	return int(parsed)
 }
 
 func boolArg(args map[string]string, key string) bool {

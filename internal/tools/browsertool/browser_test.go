@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -183,6 +184,29 @@ func TestBrowserWaitDoesNotInvalidateSnapshotReferences(t *testing.T) {
 	}
 }
 
+func TestBrowserWaitBoundsBlockedEvaluation(t *testing.T) {
+	started := time.Now()
+	_, err := (tool{id: tools.BrowserWait, title: "Browser wait"}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Browser: blockingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserWait, Args: map[string]string{"text": "missing", "timeout_ms": "20.00000"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `timed out waiting for "missing" after 20ms`) {
+		t.Fatalf("unexpected wait error: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("browser wait exceeded deadline: %s", elapsed)
+	}
+}
+
+func TestIntArgAcceptsIntegralFloatEncoding(t *testing.T) {
+	if got := intArg(map[string]string{"value": "2000.00000"}, "value", 30_000); got != 2000 {
+		t.Fatalf("intArg() = %d, want 2000", got)
+	}
+	if got := intArg(map[string]string{"value": "2.5"}, "value", 30_000); got != 30_000 {
+		t.Fatalf("intArg() = %d for fractional value, want fallback", got)
+	}
+}
+
 var savedPNG = []byte("\x89PNG\r\n\x1a\nimage")
 
 type savingBrowser struct{ fakeBrowser }
@@ -191,6 +215,13 @@ type waitBrowser struct {
 	fakeBrowser
 	findCalls     int
 	evaluateCalls int
+}
+
+type blockingBrowser struct{ fakeBrowser }
+
+func (blockingBrowser) Evaluate(ctx context.Context, _ browserapi.Chat, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 func (b *waitBrowser) Find(context.Context, browserapi.Chat, string, string, int) (browserapi.Snapshot, error) {
