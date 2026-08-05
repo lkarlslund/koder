@@ -10,6 +10,7 @@ import (
 	"io"
 	mimepkg "mime"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
@@ -272,20 +274,19 @@ func (m *Manager) ResetProfile(ctx context.Context) error {
 }
 
 func (m *Manager) Show(ctx context.Context, chat browserapi.Chat) error {
-	tab, tabCtx, err := m.ownedSelected(ctx, chat)
+	tab, _, err := m.ownedSelected(ctx, chat)
 	if err != nil {
 		return err
 	}
-	return chromedp.Run(tabCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		return target.ActivateTarget(tab.targetID).Do(ctx)
-	}))
+	return m.activateTab(ctx, tab)
 }
 
 func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.Tab, error) {
-	if err := m.Start(ctx); err != nil {
-		return nil, err
-	}
 	m.mu.Lock()
+	if m.state != stateRunning || m.browserCtx == nil {
+		m.mu.Unlock()
+		return []browserapi.Tab{}, nil
+	}
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
 	var infos []*target.Info
@@ -324,8 +325,53 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	if chat.ChatID == "" {
 		return browserapi.Tab{}, errors.New("chat is required")
 	}
+	m.mu.Lock()
+	wasRunning := m.state == stateRunning
+	m.mu.Unlock()
 	if err := m.Start(ctx); err != nil {
 		return browserapi.Tab{}, err
+	}
+	url := strings.TrimSpace(rawURL)
+	if url == "" {
+		url = "about:blank"
+	}
+	if !wasRunning {
+		if url != "about:blank" {
+			bootstrapCtx, cancel := m.operationContext(ctx, m.browserContext())
+			err := chromedp.Run(bootstrapCtx, chromedp.Navigate(url), page.BringToFront())
+			cancel()
+			if err != nil {
+				return browserapi.Tab{}, fmt.Errorf("navigate initial browser tab: %w", err)
+			}
+		}
+		listed, err := m.Tabs(ctx, chat)
+		if err != nil {
+			return browserapi.Tab{}, err
+		}
+		preferredID := m.bootstrapTabID()
+		sort.SliceStable(listed, func(i, j int) bool {
+			return listed[i].ID == preferredID && listed[j].ID != preferredID
+		})
+		for _, wantedURL := range []string{url, "about:blank"} {
+			for _, candidate := range listed {
+				if !candidate.Unowned || !browserURLsEqual(candidate.URL, wantedURL) {
+					continue
+				}
+				claimed, claimErr := m.ClaimTab(ctx, chat, candidate.ID)
+				if claimErr != nil {
+					continue
+				}
+				result := claimed
+				if !browserURLsEqual(candidate.URL, url) {
+					result, err = m.Navigate(ctx, chat, url, "load")
+					if err != nil {
+						return browserapi.Tab{}, err
+					}
+				}
+				m.cleanupStartupTabs(ctx, chat, result.ID, result.URL)
+				return result, nil
+			}
+		}
 	}
 	m.mu.Lock()
 	if err := m.checkTabCapsLocked(chat); err != nil {
@@ -334,10 +380,6 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	}
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	url := strings.TrimSpace(rawURL)
-	if url == "" {
-		url = "about:blank"
-	}
 	createCtx, createCancel := context.WithTimeout(browserCtx, m.timeout())
 	var targetID target.ID
 	err := chromedp.Run(createCtx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -361,20 +403,25 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	m.tabs[tab.id] = tab
 	m.selected[chat.ChatID] = tab.id
 	m.mu.Unlock()
+	if err := m.activateTab(ctx, tab); err != nil {
+		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
+	}
 	return m.tabInfo(ctx, chat, tab)
 }
 
 func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID string) (browserapi.Tab, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	tab := m.tabs[strings.TrimSpace(tabID)]
 	if tab == nil {
+		m.mu.Unlock()
 		return browserapi.Tab{}, errors.New("browser tab not found")
 	}
 	if tab.owner.ChatID != "" {
+		m.mu.Unlock()
 		return browserapi.Tab{}, errors.New("browser tab has already been claimed")
 	}
 	if err := m.checkTabCapsLocked(chat); err != nil {
+		m.mu.Unlock()
 		return browserapi.Tab{}, err
 	}
 	tab.owner = chat
@@ -390,7 +437,14 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 		}
 	}
 	m.selected[chat.ChatID] = tab.id
-	return browserapi.Tab{ID: tab.id, Owned: true, Selected: true}, nil
+	m.mu.Unlock()
+	if tab.targetID == "" {
+		return browserapi.Tab{ID: tab.id, Owned: true, Selected: true}, nil
+	}
+	if err := m.activateTab(ctx, tab); err != nil {
+		return browserapi.Tab{}, fmt.Errorf("activate claimed browser tab: %w", err)
+	}
+	return m.tabInfo(ctx, chat, tab)
 }
 
 func (m *Manager) SelectTab(ctx context.Context, chat browserapi.Chat, tabID string) (browserapi.Tab, error) {
@@ -401,6 +455,9 @@ func (m *Manager) SelectTab(ctx context.Context, chat browserapi.Chat, tabID str
 	m.mu.Lock()
 	m.selected[chat.ChatID] = tab.id
 	m.mu.Unlock()
+	if err := m.activateTab(ctx, tab); err != nil {
+		return browserapi.Tab{}, fmt.Errorf("activate selected browser tab: %w", err)
+	}
 	return m.tabInfo(ctx, chat, tab)
 }
 
@@ -422,6 +479,58 @@ func (m *Manager) CloseTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	tab.cancel()
 	m.removeTab(tab)
 	return nil
+}
+
+func (m *Manager) cleanupStartupTabs(ctx context.Context, chat browserapi.Chat, keepID, keepURL string) {
+	deadline := time.Now().Add(time.Second)
+	quietSince := time.Now()
+	for {
+		tabs, err := m.Tabs(ctx, chat)
+		if err != nil {
+			return
+		}
+		removed := false
+		for _, candidate := range tabs {
+			if candidate.ID == keepID || (candidate.URL != "about:blank" && candidate.URL != keepURL) {
+				continue
+			}
+			m.discardTab(candidate.ID)
+			removed = true
+		}
+		if removed {
+			quietSince = time.Now()
+		}
+		if time.Since(quietSince) >= 200*time.Millisecond || time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func (m *Manager) discardTab(tabID string) {
+	m.mu.Lock()
+	tab := m.tabs[tabID]
+	browserCtx := m.browserCtx
+	m.mu.Unlock()
+	if tab == nil || browserCtx == nil {
+		return
+	}
+	chromedpContext := chromedp.FromContext(browserCtx)
+	if chromedpContext == nil || chromedpContext.Browser == nil {
+		return
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	browserExecutor := cdp.WithExecutor(closeCtx, chromedpContext.Browser)
+	if err := target.CloseTarget(tab.targetID).Do(browserExecutor); err != nil {
+		return
+	}
+	tab.cancel()
+	m.removeTab(tab)
 }
 
 func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wait string) (browserapi.Tab, error) {
@@ -901,7 +1010,12 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 		if opener := m.tabByTargetLocked(info.OpenerID); opener != nil {
 			owner = opener.owner
 		}
-		ctx, cancel := chromedp.NewContext(m.browserCtx, chromedp.WithTargetID(info.TargetID))
+		ctx := m.browserCtx
+		cancel := func() {}
+		chromedpContext := chromedp.FromContext(m.browserCtx)
+		if chromedpContext == nil || chromedpContext.Target == nil || chromedpContext.Target.TargetID != info.TargetID {
+			ctx, cancel = chromedp.NewContext(m.browserCtx, chromedp.WithTargetID(info.TargetID))
+		}
 		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
 		m.monitorTab(tab)
 		m.tabs[tab.id] = tab
@@ -1086,6 +1200,19 @@ func (m *Manager) tabByTargetLocked(targetID target.ID) *ownedTab {
 	return nil
 }
 
+func (m *Manager) bootstrapTabID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	chromedpContext := chromedp.FromContext(m.browserCtx)
+	if chromedpContext == nil || chromedpContext.Target == nil {
+		return ""
+	}
+	if tab := m.tabByTargetLocked(chromedpContext.Target.TargetID); tab != nil {
+		return tab.id
+	}
+	return ""
+}
+
 func (m *Manager) tabInfo(ctx context.Context, chat browserapi.Chat, tab *ownedTab) (browserapi.Tab, error) {
 	var title, rawURL string
 	opCtx, cancel := m.operationContext(ctx, tab.ctx)
@@ -1097,6 +1224,17 @@ func (m *Manager) tabInfo(ctx context.Context, chat browserapi.Chat, tab *ownedT
 	selected := m.selected[chat.ChatID] == tab.id
 	m.mu.Unlock()
 	return browserapi.Tab{ID: tab.id, Title: title, URL: rawURL, Owned: true, Selected: selected}, nil
+}
+
+func (m *Manager) activateTab(ctx context.Context, tab *ownedTab) error {
+	tab.mu.Lock()
+	defer tab.mu.Unlock()
+	opCtx, cancel := m.operationContext(ctx, tab.ctx)
+	defer cancel()
+	if err := chromedp.Run(opCtx, page.BringToFront()); err != nil {
+		return fmt.Errorf("bring browser tab to front: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) checkTabCapsLocked(chat browserapi.Chat) error {
@@ -1285,4 +1423,22 @@ func snapshotScript(generation uint64, query, wantedRole string, depth int) stri
 func jsString(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)
+}
+
+func browserURLsEqual(left, right string) bool {
+	if left == right {
+		return true
+	}
+	leftURL, leftErr := urlpkg.Parse(left)
+	rightURL, rightErr := urlpkg.Parse(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	if leftURL.Path == "" {
+		leftURL.Path = "/"
+	}
+	if rightURL.Path == "" {
+		rightURL.Path = "/"
+	}
+	return leftURL.String() == rightURL.String()
 }

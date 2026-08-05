@@ -24,7 +24,7 @@ type tool struct {
 
 var specs = []tool{
 	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(``)},
-	{tools.BrowserTabList, "List browser tabs", "List this chat's tabs and unowned manual tabs. Tabs owned by other chats are hidden.", object(``)},
+	{tools.BrowserTabList, "List browser tabs", "List this chat's tabs and unowned manual tabs without starting Chrome. Tabs owned by other chats are hidden.", object(``)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
 	{tools.BrowserTabClaim, "Claim browser tab", "Atomically claim an unowned manual browser tab.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
 	{tools.BrowserTabSelect, "Select browser tab", "Select one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},

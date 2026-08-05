@@ -41,6 +41,17 @@ func TestTabOwnershipAndCaps(t *testing.T) {
 	}
 }
 
+func TestListingTabsDoesNotStartBrowser(t *testing.T) {
+	m := NewManager(config.Browser{Enabled: true}, t.TempDir())
+	tabs, err := m.Tabs(t.Context(), browserapi.Chat{SessionID: "session", ChatID: "chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tabs) != 0 || m.state != stateStopped || m.browserCtx != nil {
+		t.Fatalf("tab listing started browser: tabs=%#v state=%s", tabs, m.state)
+	}
+}
+
 func TestSnapshotScriptUsesGenerationAndQuery(t *testing.T) {
 	script := snapshotScript(7, "Submit", "button", 3)
 	for _, want := range []string{"7-e", `"Submit"`, `"button"`, "maxDepth=3", "data-koder-ref"} {

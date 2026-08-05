@@ -1087,10 +1087,9 @@
 				<div class="col-md-4"><label class="form-label small text-secondary">Tabs per chat</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div>
 				<div class="col-md-4"><label class="form-label small text-secondary">Global owned tabs</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div>
 				<div class="col-12 d-flex flex-wrap gap-2">
-				  <button class="btn btn-outline-primary" type="button" @click="browserAction('start')"><i class="bi bi-play-fill me-1"></i>Start</button>
 				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('show')"><i class="bi bi-window me-1"></i>Show</button>
-				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button>
-				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button>
+				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button>
+				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button>
 				  <button class="btn btn-outline-danger ms-auto" type="button" @click="resetBrowserProfile()"><i class="bi bi-trash me-1"></i>Reset profile</button>
 				</div>
 			  </div>

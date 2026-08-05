@@ -35,15 +35,20 @@ func TestChromiumIntegration(t *testing.T) {
 	m := NewManager(config.Browser{Enabled: true, Headed: false, OperationTimeout: 15 * time.Second, MaxTabsPerChat: 4, MaxTabsGlobal: 8}, t.TempDir())
 	t.Cleanup(func() { _ = m.Stop(t.Context()) })
 	chat := browserapi.Chat{SessionID: id.ID("session"), ChatID: id.ID("chat")}
-	if err := m.Start(t.Context()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
 	tab, err := m.NewTab(t.Context(), chat, server.URL)
 	if err != nil {
 		t.Fatalf("new tab: %v", err)
 	}
 	if tab.URL != server.URL+"/" {
 		t.Fatalf("unexpected tab URL: %s", tab.URL)
+	}
+	tabs, err := m.Tabs(t.Context(), chat)
+	if err != nil || len(tabs) != 1 || !tabs[0].Owned || !tabs[0].Selected {
+		t.Fatalf("initial blank tab was not reused: %#v, %v", tabs, err)
+	}
+	visibility, err := m.Evaluate(t.Context(), chat, `document.visibilityState`)
+	if err != nil || visibility != `"visible"` {
+		t.Fatalf("new tab is not active: %s, %v", visibility, err)
 	}
 	snapshot, err := m.Snapshot(t.Context(), chat, "Run", 4, 32*1024)
 	if err != nil {
@@ -124,6 +129,21 @@ func TestChromiumIntegration(t *testing.T) {
 	shot, err := m.Screenshot(t.Context(), chat, "", false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
+	}
+	second, err := m.NewTab(t.Context(), chat, server.URL)
+	if err != nil {
+		t.Fatalf("new second tab: %v", err)
+	}
+	visibility, err = m.Evaluate(t.Context(), chat, `document.visibilityState`)
+	if err != nil || visibility != `"visible"` {
+		t.Fatalf("second tab is not active: %s, %v", visibility, err)
+	}
+	if _, err := m.SelectTab(t.Context(), chat, tab.ID); err != nil {
+		t.Fatalf("select first tab: %v", err)
+	}
+	visibility, err = m.Evaluate(t.Context(), chat, `document.visibilityState`)
+	if err != nil || visibility != `"visible"` {
+		t.Fatalf("selected tab is not active after %s: %s, %v", second.ID, visibility, err)
 	}
 }
 
