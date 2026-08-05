@@ -151,13 +151,24 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 	if err := syncManagedUserAssets(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(cfg.ManagedAssetsDir(), "skills", "skill-creator", "SKILL.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "name: skill-creator") {
-		t.Fatalf("expected skill creator default, got %q", string(data))
+	for name, markers := range map[string][]string{
+		"playwright": {
+			"name: playwright",
+			"Never use Playwright's unnamed `default` session",
+			"Never use `close-all` or `kill-all`",
+		},
+		"skill-creator": {"name: skill-creator"},
+	} {
+		path := filepath.Join(cfg.ManagedAssetsDir(), "skills", name, "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read bundled %s skill: %v", name, err)
+		}
+		for _, marker := range markers {
+			if !strings.Contains(string(data), marker) {
+				t.Fatalf("expected bundled %s skill marker %q, got %q", name, marker, string(data))
+			}
+		}
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ManagedAssetsDir(), "managed-assets.json")); err != nil {
 		t.Fatalf("expected managed asset manifest: %v", err)
