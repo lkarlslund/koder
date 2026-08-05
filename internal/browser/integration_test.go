@@ -85,6 +85,10 @@ func TestChromiumIntegration(t *testing.T) {
 	if _, err := m.Find(t.Context(), chat, "Run", "button", 8*1024); err != nil {
 		t.Fatalf("find informational button: %v", err)
 	}
+	textbox, err := m.Find(t.Context(), chat, "Customer name", "textbox", 8*1024)
+	if err != nil || !strings.Contains(textbox.Text, `textbox "Customer name"`) {
+		t.Fatalf("informational snapshot omitted accessible label: %q, %v", textbox.Text, err)
+	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Run", Role: "button", Exact: true}, ""); err != nil {
 		t.Fatalf("click semantic target: %v", err)
 	}
