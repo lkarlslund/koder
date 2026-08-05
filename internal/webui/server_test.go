@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -2447,6 +2448,93 @@ func TestAssetHashIncludesVendoredAssets(t *testing.T) {
 	}
 }
 
+func TestWebSocketHelloPushesGitDiffSeparately(t *testing.T) {
+	workdir := t.TempDir()
+	runGit(t, workdir, "init")
+	runGit(t, workdir, "config", "user.email", "test@example.invalid")
+	runGit(t, workdir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workdir, "add", "tracked.txt")
+	runGit(t, workdir, "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := newTestControllerWithWorkdir(t, workdir)
+	state := selectedTestState(t, ctrl)
+	if _, err := ctrl.RefreshWorkspaceForSelection(context.Background(), app.Selection{SessionID: state.Session.ID}); err != nil {
+		t.Fatalf("refresh workspace: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(state.Session.ID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	writeRPC(t, ctx, conn, 1, "hello", `{}`)
+
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			State struct {
+				Workspace map[string]any `json:"workspace_status"`
+			} `json:"state"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode hello: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected hello ok, got %s", resp.Error)
+	}
+	if _, ok := resp.Result.State.Workspace["files"]; ok {
+		t.Fatalf("workspace_status should not include diff files: %#v", resp.Result.State.Workspace)
+	}
+
+	deadline, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	for {
+		_, data, err := conn.Read(deadline)
+		if err != nil {
+			t.Fatalf("expected git_delta: %v", err)
+		}
+		var push struct {
+			Type    string `json:"type"`
+			Payload struct {
+				SessionID id.ID `json:"session_id"`
+				GitDiff   struct {
+					Files []struct {
+						Path string `json:"path"`
+					} `json:"files"`
+				} `json:"git_diff"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(data, &push); err != nil {
+			t.Fatalf("decode push: %v", err)
+		}
+		if push.Type != "git_delta" {
+			continue
+		}
+		if push.Payload.SessionID != state.Session.ID {
+			t.Fatalf("unexpected git_delta session: %#v", push.Payload)
+		}
+		if len(push.Payload.GitDiff.Files) != 1 || push.Payload.GitDiff.Files[0].Path != "tracked.txt" {
+			t.Fatalf("unexpected git diff payload: %#v", push.Payload.GitDiff)
+		}
+		return
+	}
+}
+
 func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	ctrl := newTestController(t)
 	sessionID := selectedTestState(t, ctrl).Session.ID
@@ -3529,6 +3617,15 @@ func writeRPC(t *testing.T, ctx context.Context, conn *websocket.Conn, rpcID int
 	payload := fmt.Sprintf(`{"id":%d,"method":"%s","params":%s}`, rpcID, method, params)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
 		t.Fatalf("write %s: %v", method, err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
 	}
 }
 

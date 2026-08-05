@@ -455,8 +455,8 @@
                 </div>
               </template>
             </div>
-            <div class="small text-secondary mt-2" x-show="gitStatus().files_truncated || gitStatus().FilesTruncated">
-              Showing first <span x-text="gitStatus().file_limit || gitStatus().FileLimit || gitFiles().length"></span> changed files.
+            <div class="small text-secondary mt-2" x-show="gitDiff().files_truncated || gitDiff().FilesTruncated">
+              Showing first <span x-text="gitDiff().file_limit || gitDiff().FileLimit || gitFiles().length"></span> changed files; more changed paths were capped on the server.
             </div>
           </div>
         </template>

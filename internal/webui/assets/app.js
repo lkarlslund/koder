@@ -1473,6 +1473,7 @@
           if (msg.type === 'session_delta') this.applySessionDelta(msg.payload);
           if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
+          if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
           if (msg.type === 'tts') this.applyTTSSettings(msg.payload);
         },
@@ -1576,6 +1577,16 @@
           if (status === undefined) return;
           this.state.workspace_status = status;
           this.state.Workspace = status;
+          this.reportClientStateSoon();
+        },
+        applyGitDelta(delta) {
+          if (!delta) return;
+          const sessionID = String(delta.session_id || delta.SessionID || '').trim();
+          if (sessionID && sessionID !== this.currentSessionID()) return;
+          const diff = delta.git_diff || delta.GitDiff || delta.diff || delta.Diff;
+          if (diff === undefined) return;
+          this.state.git_diff = diff;
+          this.state.GitDiff = diff;
           this.reportClientStateSoon();
         },
         applyChatDelta(delta) {
@@ -3152,7 +3163,8 @@
           return 'bi-circle';
         },
         gitStatus() { return this.state.workspace_status || this.state.Workspace || {}; },
-        gitFiles() { return this.gitStatus().files || this.gitStatus().Files || []; },
+        gitDiff() { return this.state.git_diff || this.state.GitDiff || {}; },
+        gitFiles() { return this.gitDiff().files || this.gitDiff().Files || []; },
         gitTreeRows() {
           const root = {kind: 'dir', name: '', path: '', children: new Map(), file: {additions: 0, deletions: 0, files: 0}};
           for (const file of this.gitFiles()) {
@@ -3235,6 +3247,8 @@
           this.rpc('refresh_workspace', {}).then(result => {
             const status = result?.workspace_status || result?.WorkspaceStatus || result?.workspace || result?.Workspace;
             if (status !== undefined) this.applyWorkspaceDelta({workspace_status: status});
+            const diff = result?.git_diff || result?.GitDiff || result?.diff || result?.Diff;
+            if (diff !== undefined) this.applyGitDelta({git_diff: diff});
           }).catch(err => this.showToast(err.message || 'refresh workspace failed'));
           this.closeMobileSidebar();
         },

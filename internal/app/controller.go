@@ -371,7 +371,7 @@ type Controller struct {
 	shutdownMu                  sync.Mutex
 	mu                          sync.RWMutex
 	projectRoot                 string
-	workspaceSnapshot           func(context.Context, string) (workspacepkg.Status, error)
+	workspaceSnapshot           func(context.Context, string) (workspacepkg.SnapshotResult, error)
 	workspaceRefreshMinInterval time.Duration
 	theme                       string
 	lastErr                     string
@@ -1448,25 +1448,43 @@ const (
 )
 
 // RefreshWorkspaceForSelection requests a workspace scan for the selected session.
-func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) (workspacepkg.Status, error) {
+func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection Selection) (workspacepkg.SnapshotResult, error) {
 	if selection.SessionID == "" {
-		return workspacepkg.Status{}, fmt.Errorf("session id is required")
+		return workspacepkg.SnapshotResult{}, fmt.Errorf("session id is required")
 	}
 	if c.agent == nil {
-		return workspacepkg.Status{}, fmt.Errorf("no chat agent")
+		return workspacepkg.SnapshotResult{}, fmt.Errorf("no chat agent")
 	}
 	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
 	if err != nil {
-		return workspacepkg.Status{}, err
+		return workspacepkg.SnapshotResult{}, err
 	}
 	session := owner.Snapshot().Session
 	if !c.sessionInWorkspace(session) {
-		return workspacepkg.Status{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+		return workspacepkg.SnapshotResult{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
 	}
 	if err := c.refreshSessionWorkspace(ctx, owner, workspaceRefreshUser); err != nil {
-		return workspacepkg.Status{}, err
+		return workspacepkg.SnapshotResult{}, err
 	}
-	return owner.WorkspaceStatus(), nil
+	return workspacepkg.SnapshotResult{Status: owner.WorkspaceStatus(), Diff: owner.WorkspaceDiff()}, nil
+}
+
+func (c *Controller) WorkspaceDiffForSelection(ctx context.Context, selection Selection) (workspacepkg.Diff, error) {
+	if selection.SessionID == "" {
+		return workspacepkg.Diff{}, fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return workspacepkg.Diff{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return workspacepkg.Diff{}, err
+	}
+	session := owner.Snapshot().Session
+	if !c.sessionInWorkspace(session) {
+		return workspacepkg.Diff{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+	}
+	return owner.WorkspaceDiff(), nil
 }
 
 // EnsureSessionWorkspace starts workspace monitoring for a selected session.
@@ -1503,8 +1521,8 @@ func (c *Controller) refreshSessionWorkspace(ctx context.Context, owner *session
 		snapshot = workspacepkg.Snapshot
 	}
 	force := trigger == workspaceRefreshInitial || trigger == workspaceRefreshUser || trigger == workspaceRefreshTimer
-	return owner.RefreshWorkspace(ctx, snapshot, minInterval, force, func(status workspacepkg.Status) {
-		c.broadcastWorkspace(sessionID, status)
+	return owner.RefreshWorkspace(ctx, snapshot, minInterval, force, func(result workspacepkg.SnapshotResult) {
+		c.broadcastWorkspace(sessionID, result)
 	})
 }
 
@@ -1524,8 +1542,12 @@ func (c *Controller) ensureSessionWorkspace(owner *sessionpkg.Session) {
 	}
 }
 
-func (c *Controller) broadcastWorkspace(sessionID id.ID, status workspacepkg.Status) {
-	c.broadcast("workspace_delta", map[string]any{"session_id": sessionID, "workspace_status": status})
+func (c *Controller) broadcastWorkspace(sessionID id.ID, result workspacepkg.SnapshotResult) {
+	c.broadcast("workspace_delta", map[string]any{"session_id": sessionID, "workspace_status": result.Status})
+	if result.Status.Stale {
+		return
+	}
+	c.broadcast("git_delta", map[string]any{"session_id": sessionID, "git_diff": result.Diff})
 }
 
 func (c *Controller) replaceWorkspaceWatcher(owner *sessionpkg.Session) {
@@ -1541,8 +1563,8 @@ func (c *Controller) replaceWorkspaceWatcher(owner *sessionpkg.Session) {
 	if snapshot == nil {
 		snapshot = workspacepkg.Snapshot
 	}
-	owner.ReplaceWorkspaceWatcher(snapshot, minInterval, func(status workspacepkg.Status) {
-		c.broadcastWorkspace(sessionID, status)
+	owner.ReplaceWorkspaceWatcher(snapshot, minInterval, func(result workspacepkg.SnapshotResult) {
+		c.broadcastWorkspace(sessionID, result)
 	})
 }
 

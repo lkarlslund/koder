@@ -1884,14 +1884,14 @@ func TestControllerStartDoesNotWaitForWorkspaceSnapshot(t *testing.T) {
 
 	snapshotStarted := make(chan struct{})
 	releaseSnapshot := make(chan struct{})
-	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.SnapshotResult, error) {
 		select {
 		case <-snapshotStarted:
 		default:
 			close(snapshotStarted)
 		}
 		<-releaseSnapshot
-		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+		return workspacepkg.SnapshotResult{Status: workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}}, nil
 	}
 
 	startDone := make(chan error, 1)
@@ -1937,13 +1937,13 @@ func TestControllerStateForSelectionDoesNotStartWorkspaceSnapshot(t *testing.T) 
 	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
 	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	snapshotStarted := make(chan struct{})
-	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.SnapshotResult, error) {
 		select {
 		case <-snapshotStarted:
 		default:
 			close(snapshotStarted)
 		}
-		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+		return workspacepkg.SnapshotResult{Status: workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}}, nil
 	}
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
@@ -2047,9 +2047,9 @@ func TestControllerWorkspaceWatcherThrottlesRefreshes(t *testing.T) {
 	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
 	ctrl.workspaceRefreshMinInterval = time.Hour
 	var snapshots atomic.Int32
-	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.Status, error) {
+	ctrl.workspaceSnapshot = func(_ context.Context, projectRoot string) (workspacepkg.SnapshotResult, error) {
 		snapshots.Add(1)
-		return workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}, nil
+		return workspacepkg.SnapshotResult{Status: workspacepkg.Status{Available: true, ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}}, nil
 	}
 	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)

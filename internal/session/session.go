@@ -64,6 +64,7 @@ type Session struct {
 	tasksByKey  map[string][]planning.Task
 	legacyTasks []planning.LegacyTask
 	workspace   workspacepkg.Status
+	gitDiff     workspacepkg.Diff
 	config      RegistryConfig
 
 	workspaceRefreshTimer   *time.Timer
@@ -228,8 +229,23 @@ func (s *Session) WorkspaceStatus() workspacepkg.Status {
 	return status
 }
 
+// WorkspaceDiff returns the latest capped git diff preview known for this session.
+func (s *Session) WorkspaceDiff() workspacepkg.Diff {
+	if s == nil {
+		return workspacepkg.Diff{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	diff := s.gitDiff
+	if diff.ProjectRoot == "" {
+		diff.ProjectRoot = s.session.ProjectRoot
+	}
+	diff.Files = slices.Clone(diff.Files)
+	return diff
+}
+
 // RefreshWorkspace refreshes workspace metadata owned by this session.
-func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Context, string) (workspacepkg.Status, error), minInterval time.Duration, force bool, onChange func(workspacepkg.Status)) error {
+func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Context, string) (workspacepkg.SnapshotResult, error), minInterval time.Duration, force bool, onChange func(workspacepkg.SnapshotResult)) error {
 	if s == nil {
 		return fmt.Errorf("session is required")
 	}
@@ -243,7 +259,7 @@ func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Co
 		minInterval = 10 * time.Second
 	}
 	now := time.Now()
-	var staleStatus workspacepkg.Status
+	var staleResult workspacepkg.SnapshotResult
 	var broadcastStale bool
 	var delay time.Duration
 
@@ -260,7 +276,7 @@ func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Co
 	if !due {
 		if !s.workspace.Stale {
 			s.workspace.Stale = true
-			staleStatus = s.workspace
+			staleResult = workspacepkg.SnapshotResult{Status: s.workspace, Diff: s.gitDiff}
 			broadcastStale = true
 		}
 		delay = minInterval - now.Sub(s.lastWorkspaceRefresh)
@@ -275,7 +291,7 @@ func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Co
 		}
 		s.mu.Unlock()
 		if broadcastStale && onChange != nil {
-			onChange(staleStatus)
+			onChange(staleResult)
 		}
 		return nil
 	}
@@ -287,27 +303,30 @@ func (s *Session) RefreshWorkspace(ctx context.Context, snapshot func(context.Co
 	s.lastWorkspaceRefresh = now
 	s.mu.Unlock()
 
-	status, err := snapshot(ctx, projectRoot)
+	result, err := snapshot(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
+	status := result.Status
 	status.Stale = false
+	result.Status = status
 
 	s.mu.Lock()
-	changed := workspaceSignature(s.workspace) != workspaceSignature(status)
+	changed := workspaceSignature(s.workspace, s.gitDiff) != workspaceSignature(result.Status, result.Diff)
 	s.workspace = status
+	s.gitDiff = result.Diff
 	if !status.RefreshedAt.IsZero() {
 		s.lastWorkspaceRefresh = status.RefreshedAt
 	}
 	s.mu.Unlock()
 	if changed && onChange != nil {
-		onChange(status)
+		onChange(result)
 	}
 	return nil
 }
 
 // ReplaceWorkspaceWatcher starts file watching for this session's workspace.
-func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string) (workspacepkg.Status, error), minInterval time.Duration, onChange func(workspacepkg.Status)) {
+func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string) (workspacepkg.SnapshotResult, error), minInterval time.Duration, onChange func(workspacepkg.SnapshotResult)) {
 	if s == nil {
 		return
 	}
@@ -341,7 +360,7 @@ func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string)
 	}()
 }
 
-func workspaceSignature(status workspacepkg.Status) string {
+func workspaceSignature(status workspacepkg.Status, diff workspacepkg.Diff) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
 		status.Available,
@@ -356,7 +375,7 @@ func workspaceSignature(status workspacepkg.Status) string {
 		status.Deleted,
 		status.Untracked,
 	))
-	for _, file := range status.Files {
+	for _, file := range diff.Files {
 		b.WriteString(file.Code)
 		b.WriteByte('\t')
 		b.WriteString(file.Path)

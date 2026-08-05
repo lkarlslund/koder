@@ -591,6 +591,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			baselineEstablished = true
 			baselineMu.Unlock()
 			syncSelectedSubscription()
+			s.sendSelectedGitDiff(ctx, conn, &writeMu, clientID)
 		}
 		select {
 		case <-done:
@@ -612,6 +613,33 @@ func (s *Server) recordWebSocketWrite(clientID string, eventType string, size in
 		patch.LastStateDeltaBytes = size
 	}
 	s.debug.PatchClient(clientID, patch)
+}
+
+func (s *Server) sendSelectedGitDiff(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, clientID string) {
+	selection := s.clientSelection(clientID)
+	if selection.SessionID == "" {
+		return
+	}
+	diff, err := s.controller.WorkspaceDiffForSelection(ctx, app.Selection{SessionID: selection.SessionID, ChatID: selection.ChatID})
+	if err != nil {
+		slog.Debug("load selected git diff", "client", clientID, "session", selection.SessionID, "error", err)
+		return
+	}
+	if diff.RefreshedAt.IsZero() && len(diff.Files) == 0 && !diff.FilesTruncated {
+		return
+	}
+	size, err := writeJSON(ctx, conn, writeMu, app.Event{
+		Type: "git_delta",
+		Payload: map[string]any{
+			"session_id": selection.SessionID,
+			"git_diff":   diff,
+		},
+	})
+	if err != nil {
+		slog.Debug("send selected git diff", "client", clientID, "session", selection.SessionID, "error", err)
+		return
+	}
+	s.recordWebSocketWrite(clientID, "git_delta", size)
 }
 
 func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
@@ -777,11 +805,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return map[string]bool{"started": true}, s.controller.CompactForSelection(ctx, s.appSelection(clientID), in.Instructions)
 	case "refresh_workspace":
-		status, err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID))
+		result, err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID))
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"workspace_status": status}, nil
+		return map[string]any{"workspace_status": result.Status, "git_diff": result.Diff}, nil
 	case "load_timeline":
 		var in struct {
 			ChatID id.ID `json:"chat_id"`
@@ -1634,7 +1662,7 @@ func rpcEstablishesSnapshotBaseline(method string, result any) bool {
 
 func websocketUsesGlobalControllerEvent(typ string) bool {
 	switch typ {
-	case "chat_delta", "chats_delta", "planning_delta", "tasks_delta", "session_delta", "selection_delta", "workspace_delta", "snapshot":
+	case "chat_delta", "chats_delta", "planning_delta", "tasks_delta", "session_delta", "selection_delta", "workspace_delta", "git_delta", "snapshot":
 		return false
 	case "tts":
 		return true

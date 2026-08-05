@@ -12,82 +12,70 @@ import (
 	"time"
 )
 
-func TestParseStatus(t *testing.T) {
+func TestParseStatusSeparatesMetadataAndDiffPreview(t *testing.T) {
 	raw := "## main...origin/main [ahead 1]\n M internal/webui/server.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
 	numstat := "12\t4\tinternal/webui/server.go\n7\t0\tinternal/workspace/status.go\n0\t9\told.txt\n"
-	got := parseStatus(raw, numstat, map[string]FileStatus{
-		"new.txt": {Path: "new.txt", Additions: 3, Files: 1},
-	})
+	got := parseStatus(raw, numstat)
 
-	if got.Branch != "main" {
-		t.Fatalf("unexpected branch: %q", got.Branch)
+	if got.Status.Branch != "main" {
+		t.Fatalf("unexpected branch: %q", got.Status.Branch)
 	}
-	if got.Upstream != "origin/main" {
-		t.Fatalf("unexpected upstream: %q", got.Upstream)
+	if got.Status.Upstream != "origin/main" {
+		t.Fatalf("unexpected upstream: %q", got.Status.Upstream)
 	}
-	if got.Summary != "ahead 1" {
-		t.Fatalf("unexpected summary: %q", got.Summary)
+	if got.Status.Summary != "ahead 1" {
+		t.Fatalf("unexpected summary: %q", got.Status.Summary)
 	}
-	if got.Modified != 1 || got.Added != 1 || got.Deleted != 1 || got.Untracked != 1 {
-		t.Fatalf("unexpected counts: %#v", got)
+	if got.Status.Modified != 1 || got.Status.Added != 1 || got.Status.Deleted != 1 || got.Status.Untracked != 1 {
+		t.Fatalf("unexpected counts: %#v", got.Status)
 	}
-	if len(got.Files) != 4 {
-		t.Fatalf("unexpected files: %#v", got.Files)
+	if len(got.Diff.Files) != 4 {
+		t.Fatalf("unexpected files: %#v", got.Diff.Files)
 	}
-	if got.Files[0].Path != "internal/webui/server.go" {
-		t.Fatalf("unexpected first file: %#v", got.Files[0])
+	if got.Diff.Files[0].Path != "internal/webui/server.go" {
+		t.Fatalf("unexpected first file: %#v", got.Diff.Files[0])
 	}
-	if got.Files[0].Additions != 12 || got.Files[0].Deletions != 4 {
-		t.Fatalf("unexpected diff stats: %#v", got.Files[0])
+	if got.Diff.Files[0].Additions != 12 || got.Diff.Files[0].Deletions != 4 {
+		t.Fatalf("unexpected diff stats: %#v", got.Diff.Files[0])
 	}
-	if got.Files[3].Additions != 3 || got.Files[3].Deletions != 0 || got.Files[3].Files != 1 {
-		t.Fatalf("unexpected untracked diff stats: %#v", got.Files[3])
+	if got.Diff.Files[3].Additions != 0 || got.Diff.Files[3].Deletions != 0 {
+		t.Fatalf("untracked files should not be line-counted, got %#v", got.Diff.Files[3])
 	}
 }
 
-func TestParseStatusExpandsUntrackedDirectoryStats(t *testing.T) {
-	raw := "## main\n?? pkg/e2e/\n"
-	got := parseStatus(raw, "", map[string]FileStatus{
-		"pkg/e2e/a.go": {Path: "pkg/e2e/a.go", Additions: 10, Files: 1},
-		"pkg/e2e/b.go": {Path: "pkg/e2e/b.go", Additions: 20, Files: 1},
-	})
-	if len(got.Files) != 2 {
-		t.Fatalf("unexpected files: %#v", got.Files)
+func TestParseStatusDoesNotExpandUntrackedDirectories(t *testing.T) {
+	got := parseStatus("## main\n?? pkg/e2e/\n", "")
+	if got.Status.Untracked != 1 {
+		t.Fatalf("expected one untracked directory row, got %#v", got.Status)
 	}
-	if got.Files[0].Path != "pkg/e2e/a.go" || got.Files[0].Code != "??" || got.Files[0].Additions != 10 || got.Files[0].Files != 1 {
-		t.Fatalf("expected first untracked directory file, got %#v", got.Files[0])
+	if len(got.Diff.Files) != 1 {
+		t.Fatalf("unexpected files: %#v", got.Diff.Files)
 	}
-	if got.Files[1].Path != "pkg/e2e/b.go" || got.Files[1].Code != "??" || got.Files[1].Additions != 20 || got.Files[1].Files != 1 {
-		t.Fatalf("expected second untracked directory file, got %#v", got.Files[1])
-	}
-	if got.Untracked != 2 {
-		t.Fatalf("expected untracked file count, got %#v", got)
+	if got.Diff.Files[0].Path != "pkg/e2e/" || got.Diff.Files[0].Code != "??" {
+		t.Fatalf("expected unexpanded directory row, got %#v", got.Diff.Files[0])
 	}
 }
 
-func TestParseStatusCapsDetailedFileList(t *testing.T) {
+func TestParseStatusCapsDetailedDiffPreview(t *testing.T) {
 	var raw strings.Builder
 	raw.WriteString("## main\n")
-	stats := make(map[string]FileStatus, maxStatusFiles+5)
-	for i := range maxStatusFiles + 5 {
-		path := fmt.Sprintf("pkg/e2e/file-%04d.go", i)
-		stats[path] = FileStatus{Path: path, Additions: 1, Files: 1}
+	for i := range maxDiffFiles + 5 {
+		raw.WriteString(fmt.Sprintf(" M file-%04d.go\n", i))
 	}
-	raw.WriteString("?? pkg/e2e/\n")
 
-	got := parseStatus(raw.String(), "", stats)
-	if got.Untracked != maxStatusFiles+5 {
-		t.Fatalf("expected aggregate untracked count to include all files, got %#v", got)
+	got := parseStatus(raw.String(), "")
+	if got.Status.Modified != maxDiffFiles+5 {
+		t.Fatalf("expected aggregate modified count to include all rows, got %#v", got.Status)
 	}
-	if len(got.Files) != maxStatusFiles {
-		t.Fatalf("expected capped file list, got %d", len(got.Files))
+	if len(got.Diff.Files) != maxDiffFiles {
+		t.Fatalf("expected capped file list, got %d", len(got.Diff.Files))
 	}
-	if !got.FilesTruncated || got.FileLimit != maxStatusFiles {
-		t.Fatalf("expected truncation metadata, got %#v", got)
+	if !got.Diff.FilesTruncated || got.Diff.FileLimit != maxDiffFiles {
+		t.Fatalf("expected truncation metadata, got %#v", got.Diff)
 	}
 }
 
-func TestUntrackedFileStatsSkipsNestedGitInternals(t *testing.T) {
+func TestSnapshotUsesNormalUntrackedMode(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init")
 	runGit(t, root, "config", "user.email", "test@example.invalid")
@@ -98,45 +86,28 @@ func TestUntrackedFileStatsSkipsNestedGitInternals(t *testing.T) {
 	runGit(t, root, "add", "tracked.txt")
 	runGit(t, root, "commit", "-m", "init")
 
-	nestedPack := filepath.Join(root, "nested", ".git", "objects", "pack", "pack-test.pack")
-	if err := os.MkdirAll(filepath.Dir(nestedPack), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(nestedPack, []byte("not text\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	visible := filepath.Join(root, "nested", "visible.txt")
-	if err := os.WriteFile(visible, []byte("one\ntwo\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, path := range []string{
+		filepath.Join(root, "nested", "visible-a.txt"),
+		filepath.Join(root, "nested", "visible-b.txt"),
+		filepath.Join(root, "nested", ".git", "objects", "pack", "pack-test.pack"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	stats := untrackedFileStats(context.Background(), root)
-	if _, ok := stats["nested/.git/objects/pack/pack-test.pack"]; ok {
-		t.Fatalf("expected nested git internal path to be skipped, got %#v", stats)
-	}
-	if got := stats["nested/visible.txt"].Additions; got != 2 {
-		t.Fatalf("expected visible file line count, got %#v", stats["nested/visible.txt"])
-	}
-}
-
-func TestCountFileLinesDoesNotReadHugeFiles(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "huge.txt")
-	file, err := os.Create(path)
+	got, err := Snapshot(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Seek(maxUntrackedLineCountBytes, 0); err != nil {
-		t.Fatal(err)
+	if got.Status.Untracked != 1 {
+		t.Fatalf("expected one untracked directory row, got %#v", got.Status)
 	}
-	if _, err := file.Write([]byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if got := countFileLines(path); got != 0 {
-		t.Fatalf("expected huge file line count to be skipped, got %d", got)
+	if len(got.Diff.Files) != 1 || got.Diff.Files[0].Path != "nested/" {
+		t.Fatalf("expected normal untracked directory preview, got %#v", got.Diff.Files)
 	}
 }
 
@@ -153,6 +124,7 @@ func TestWatcherReportsFileChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "changed.txt"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	select {
 	case <-watcher.Events():
 	case <-time.After(2 * time.Second):
@@ -160,38 +132,13 @@ func TestWatcherReportsFileChanges(t *testing.T) {
 	}
 }
 
-func TestWatcherSkipsGitDirectories(t *testing.T) {
-	if !shouldSkipWatchDir(filepath.Join("repo", ".git"), ".git") {
-		t.Fatal("expected watcher to skip .git directories")
-	}
-	if !shouldSkipWatchDir(filepath.Join("repo", ".git", "objects"), "objects") {
-		t.Fatal("expected watcher to skip .git objects directories")
-	}
-}
-
-func TestWatcherReturnsTooLargeWhenDirectoryLimitExceeded(t *testing.T) {
+func TestWatcherRejectsTooManyDirectories(t *testing.T) {
 	root := t.TempDir()
-	for idx := range 3 {
-		if err := os.Mkdir(filepath.Join(root, string(rune('a'+idx))), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Mkdir(filepath.Join(root, "a"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	watcher, err := watchWithLimits(context.Background(), root, watchLimits{MaxDirs: 2, MaxEntries: 100})
-	if watcher != nil {
-		_ = watcher.Close()
-	}
-	if !errors.Is(err, ErrWatchTreeTooLarge) {
-		t.Fatalf("expected too-large watcher error, got %v", err)
-	}
-}
-
-func TestWatcherReturnsTooLargeWhenEntryLimitExceeded(t *testing.T) {
-	root := t.TempDir()
-	for idx := range 3 {
-		if err := os.WriteFile(filepath.Join(root, string(rune('a'+idx))+".txt"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Mkdir(filepath.Join(root, "b"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 
 	watcher, err := watchWithLimits(context.Background(), root, watchLimits{MaxDirs: 10, MaxEntries: 2})

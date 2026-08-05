@@ -1,69 +1,75 @@
 package workspace
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
 )
 
-const (
-	maxUntrackedLineCountBytes int64 = 4 << 20
-	maxStatusFiles                   = 2000
-)
+const maxDiffFiles = 100
 
 type FileStatus struct {
 	Code      string `json:"code"`
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
-	Files     int    `json:"files,omitempty"`
 }
 
 type Status struct {
-	Available      bool         `json:"available"`
+	Available      bool      `json:"available"`
+	ProjectRoot    string    `json:"project_root"`
+	AgentsChecksum string    `json:"agents_checksum"`
+	AgentsFiles    int       `json:"agents_files"`
+	Stale          bool      `json:"stale,omitempty"`
+	RefreshedAt    time.Time `json:"refreshed_at,omitempty"`
+	Branch         string    `json:"branch"`
+	Upstream       string    `json:"upstream"`
+	Summary        string    `json:"summary"`
+	Added          int       `json:"added"`
+	Modified       int       `json:"modified"`
+	Deleted        int       `json:"deleted"`
+	Untracked      int       `json:"untracked"`
+}
+
+type Diff struct {
 	ProjectRoot    string       `json:"project_root"`
-	AgentsChecksum string       `json:"agents_checksum"`
-	AgentsFiles    int          `json:"agents_files"`
-	Stale          bool         `json:"stale,omitempty"`
 	RefreshedAt    time.Time    `json:"refreshed_at,omitempty"`
-	Branch         string       `json:"branch"`
-	Upstream       string       `json:"upstream"`
-	Summary        string       `json:"summary"`
 	Files          []FileStatus `json:"files"`
 	FilesTruncated bool         `json:"files_truncated,omitempty"`
 	FileLimit      int          `json:"file_limit,omitempty"`
-	Added          int          `json:"added"`
-	Modified       int          `json:"modified"`
-	Deleted        int          `json:"deleted"`
-	Untracked      int          `json:"untracked"`
 }
 
-func Snapshot(ctx context.Context, dir string) (Status, error) {
+type SnapshotResult struct {
+	Status Status
+	Diff   Diff
+}
+
+func Snapshot(ctx context.Context, dir string) (SnapshotResult, error) {
 	projectRoot := agents.FindProjectRoot(dir)
-	status := Status{ProjectRoot: projectRoot, RefreshedAt: time.Now().UTC()}
+	refreshedAt := time.Now().UTC()
+	result := SnapshotResult{
+		Status: Status{ProjectRoot: projectRoot, RefreshedAt: refreshedAt},
+		Diff:   Diff{ProjectRoot: projectRoot, RefreshedAt: refreshedAt},
+	}
 	snapshot, discoverErr := agents.NewManager("", "").Discover(ctx, dir)
 	if discoverErr == nil {
 		if snapshot.ProjectRoot != "" {
-			status.ProjectRoot = snapshot.ProjectRoot
+			result.Status.ProjectRoot = snapshot.ProjectRoot
+			result.Diff.ProjectRoot = snapshot.ProjectRoot
+			projectRoot = snapshot.ProjectRoot
 		}
-		status.AgentsChecksum = snapshot.Checksum
-		status.AgentsFiles = len(snapshot.Files)
+		result.Status.AgentsChecksum = snapshot.Checksum
+		result.Status.AgentsFiles = len(snapshot.Files)
 	}
-	statusCmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch")
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch", "--untracked-files=normal")
 	statusCmd.Dir = projectRoot
 	statusOutput, err := statusCmd.Output()
 	if err != nil {
-		return status, nil
+		return result, nil
 	}
 
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "--find-renames", "HEAD")
@@ -73,17 +79,18 @@ func Snapshot(ctx context.Context, dir string) (Status, error) {
 		numstatOutput = nil
 	}
 
-	untrackedStats := untrackedFileStats(ctx, projectRoot)
-	parsed := parseStatus(string(statusOutput), string(numstatOutput), untrackedStats)
-	parsed.ProjectRoot = status.ProjectRoot
-	parsed.AgentsChecksum = status.AgentsChecksum
-	parsed.AgentsFiles = status.AgentsFiles
-	parsed.RefreshedAt = status.RefreshedAt
+	parsed := parseStatus(string(statusOutput), string(numstatOutput))
+	parsed.Status.ProjectRoot = result.Status.ProjectRoot
+	parsed.Status.AgentsChecksum = result.Status.AgentsChecksum
+	parsed.Status.AgentsFiles = result.Status.AgentsFiles
+	parsed.Status.RefreshedAt = result.Status.RefreshedAt
+	parsed.Diff.ProjectRoot = result.Diff.ProjectRoot
+	parsed.Diff.RefreshedAt = result.Diff.RefreshedAt
 	return parsed, nil
 }
 
-func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileStatus) Status {
-	status := Status{Available: true}
+func parseStatus(raw string, numstatRaw string) SnapshotResult {
+	result := SnapshotResult{Status: Status{Available: true}}
 	numstats := parseNumstat(numstatRaw)
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -91,165 +98,39 @@ func parseStatus(raw string, numstatRaw string, untrackedStats map[string]FileSt
 			continue
 		}
 		if strings.HasPrefix(line, "## ") {
-			status.Branch, status.Upstream, status.Summary = parseBranchLine(strings.TrimPrefix(line, "## "))
+			result.Status.Branch, result.Status.Upstream, result.Status.Summary = parseBranchLine(strings.TrimPrefix(line, "## "))
 			continue
 		}
 		file := parseFileLine(line)
-		if file.Code == "??" && strings.HasSuffix(strings.TrimSpace(file.Path), "/") {
-			expanded := untrackedFilesForPath(file.Path, untrackedStats)
-			if len(expanded) > 0 {
-				for _, item := range expanded {
-					appendStatusFile(&status, item)
-					status.Untracked++
-				}
-				continue
-			}
-		}
 		if stat, ok := numstats[file.Path]; ok {
 			file.Additions = stat.Additions
 			file.Deletions = stat.Deletions
 		}
-		if file.Code == "??" {
-			if stat, ok := untrackedStatForPath(file.Path, untrackedStats); ok {
-				file.Additions = stat.Additions
-				file.Files = stat.Files
-			}
-		}
-		appendStatusFile(&status, file)
+		appendDiffFile(&result.Diff, file)
 		switch {
 		case file.Code == "??":
-			status.Untracked++
+			result.Status.Untracked++
 		case strings.Contains(file.Code, "A"):
-			status.Added++
+			result.Status.Added++
 		case strings.Contains(file.Code, "D"):
-			status.Deleted++
+			result.Status.Deleted++
 		case strings.Contains(file.Code, "M"), strings.Contains(file.Code, "R"), strings.Contains(file.Code, "C"):
-			status.Modified++
+			result.Status.Modified++
 		}
 	}
-	return status
+	return result
 }
 
-func appendStatusFile(status *Status, file FileStatus) {
-	if status == nil {
+func appendDiffFile(diff *Diff, file FileStatus) {
+	if diff == nil {
 		return
 	}
-	if len(status.Files) < maxStatusFiles {
-		status.Files = append(status.Files, file)
+	if len(diff.Files) < maxDiffFiles {
+		diff.Files = append(diff.Files, file)
 		return
 	}
-	status.FilesTruncated = true
-	status.FileLimit = maxStatusFiles
-}
-
-func untrackedFilesForPath(path string, stats map[string]FileStatus) []FileStatus {
-	if len(stats) == 0 {
-		return nil
-	}
-	prefix := strings.TrimSuffix(strings.TrimSpace(path), "/") + "/"
-	out := make([]FileStatus, 0)
-	for _, stat := range stats {
-		if strings.HasPrefix(stat.Path, prefix) {
-			stat.Code = "??"
-			stat.Files = 1
-			out = append(out, stat)
-		}
-	}
-	slices.SortFunc(out, func(a, b FileStatus) int {
-		return strings.Compare(a.Path, b.Path)
-	})
-	return out
-}
-
-func untrackedFileStats(ctx context.Context, root string) map[string]FileStatus {
-	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "-z")
-	cmd.Dir = root
-	output, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	stats := make(map[string]FileStatus)
-	for _, raw := range bytes.Split(output, []byte{0}) {
-		path := strings.TrimSpace(string(raw))
-		if path == "" {
-			continue
-		}
-		if isNestedGitInternalPath(path) {
-			continue
-		}
-		additions := countFileLines(filepath.Join(root, filepath.FromSlash(path)))
-		stats[path] = FileStatus{Path: path, Additions: additions, Files: 1}
-	}
-	return stats
-}
-
-func isNestedGitInternalPath(path string) bool {
-	path = filepath.ToSlash(strings.TrimSpace(path))
-	return path == ".git" || strings.HasPrefix(path, ".git/") || strings.Contains(path, "/.git/")
-}
-
-func untrackedStatForPath(path string, stats map[string]FileStatus) (FileStatus, bool) {
-	if len(stats) == 0 {
-		return FileStatus{}, false
-	}
-	path = strings.TrimSpace(path)
-	if stat, ok := stats[path]; ok {
-		return stat, true
-	}
-	prefix := strings.TrimSuffix(path, "/") + "/"
-	var out FileStatus
-	for _, stat := range stats {
-		if strings.HasPrefix(stat.Path, prefix) {
-			out.Path = path
-			out.Additions += stat.Additions
-			out.Files += stat.Files
-		}
-	}
-	return out, out.Files > 0
-}
-
-func countFileLines(path string) int {
-	info, err := os.Lstat(path)
-	if err != nil || info.IsDir() || info.Size() > maxUntrackedLineCountBytes {
-		return 0
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	reader := bufio.NewReader(file)
-	lines := 0
-	readAny := false
-	lastByte := byte('\n')
-	for {
-		chunk, err := reader.ReadSlice('\n')
-		if len(chunk) > 0 {
-			readAny = true
-			if bytes.IndexByte(chunk, 0) >= 0 {
-				return 0
-			}
-			lastByte = chunk[len(chunk)-1]
-			if lastByte == '\n' {
-				lines++
-			}
-		}
-		if err == nil {
-			continue
-		}
-		if err == bufio.ErrBufferFull {
-			continue
-		}
-		if err == io.EOF {
-			break
-		}
-		return 0
-	}
-	if readAny && lastByte != '\n' {
-		lines++
-	}
-	return lines
+	diff.FilesTruncated = true
+	diff.FileLimit = maxDiffFiles
 }
 
 func parseNumstat(raw string) map[string]FileStatus {
