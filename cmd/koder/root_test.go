@@ -155,7 +155,7 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 		"browser": {
 			"name: browser",
 			"Use Koder's `browser_*` tools",
-			"Tabs and their snapshots",
+			"resolves its target against the current DOM",
 			"browser_response_body",
 			"without a workspace file",
 		},
