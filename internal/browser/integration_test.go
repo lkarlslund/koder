@@ -66,19 +66,14 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if !strings.Contains(snapshot.Text, "Run") || !strings.Contains(snapshot.Text, "[") {
+	if !strings.Contains(snapshot.Text, "Run") || strings.Contains(snapshot.Text, "data-koder-ref") {
 		t.Fatalf("unexpected snapshot: %s", snapshot.Text)
 	}
-	start := strings.Index(snapshot.Text, "[") + 1
-	end := strings.Index(snapshot.Text[start:], "]") + start
-	if start <= 0 || end < start {
-		t.Fatalf("snapshot has no ref: %s", snapshot.Text)
-	}
 	if _, err := m.Find(t.Context(), chat, "Run", "button", 8*1024); err != nil {
-		t.Fatalf("find before using earlier reference: %v", err)
+		t.Fatalf("find informational button: %v", err)
 	}
-	if err := m.Interact(t.Context(), chat, "click", snapshot.Text[start:end], ""); err != nil {
-		t.Fatalf("click reference from earlier snapshot: %v", err)
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Run", Role: "button", Exact: true}, ""); err != nil {
+		t.Fatalf("click semantic target: %v", err)
 	}
 	value, err := m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`)
 	if err != nil || value != `"clicked"` {
@@ -103,12 +98,11 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || len(console) == 0 || !strings.Contains(console[len(console)-1].Text, "browser-test-console") {
 		t.Fatalf("unexpected console records: %#v, %v", console, err)
 	}
-	downloadSnapshot, err := m.Find(t.Context(), chat, "Download", "link", 8*1024)
+	_, err = m.Find(t.Context(), chat, "Download", "link", 8*1024)
 	if err != nil {
 		t.Fatalf("find download: %v", err)
 	}
-	downloadRef := snapshotRef(t, downloadSnapshot.Text)
-	if err := m.Interact(t.Context(), chat, "click", downloadRef, ""); err != nil {
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Download", Role: "link", Exact: true}, ""); err != nil {
 		t.Fatalf("start download: %v", err)
 	}
 	var downloads []browserapi.DownloadRecord
@@ -126,7 +120,7 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || string(download.Data) != "download-body" || download.Name != "browser-test.txt" {
 		t.Fatalf("unexpected download: %#v, %v", download, err)
 	}
-	uploadSnapshot, err := m.Find(t.Context(), chat, "Upload file", "input", 8*1024)
+	_, err = m.Find(t.Context(), chat, "Upload file", "input", 8*1024)
 	if err != nil {
 		t.Fatalf("find upload: %v", err)
 	}
@@ -134,26 +128,25 @@ func TestChromiumIntegration(t *testing.T) {
 	if err := os.WriteFile(uploadPath, []byte("upload-body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Upload(t.Context(), chat, snapshotRef(t, uploadSnapshot.Text), []string{uploadPath}); err != nil {
+	if err := m.Upload(t.Context(), chat, browserapi.Locator{Target: "Upload file", Exact: true}, []string{uploadPath}); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	uploadSize, err := m.Evaluate(t.Context(), chat, `document.querySelector('input[type=file]').files[0].size`)
 	if err != nil || uploadSize != "11" {
 		t.Fatalf("unexpected upload size: %s, %v", uploadSize, err)
 	}
-	shot, err := m.Screenshot(t.Context(), chat, "", false, "png", 90)
+	shot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
 	}
-	imageSnapshot, err := m.Find(t.Context(), chat, "Photo", "image", 8*1024)
+	_, err = m.Find(t.Context(), chat, "Photo", "image", 8*1024)
 	if err != nil {
 		t.Fatalf("find image: %v", err)
 	}
-	imageRef := snapshotRef(t, imageSnapshot.Text)
 	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('img').style.visibility='hidden'`); err != nil {
 		t.Fatalf("hide referenced image: %v", err)
 	}
-	elementShot, err := m.Screenshot(t.Context(), chat, imageRef, false, "png", 90)
+	elementShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Target: "Photo", Role: "image", Exact: true}, false, "png", 90)
 	if err != nil || len(elementShot.Data) == 0 || elementShot.MIME != "image/png" {
 		t.Fatalf("unexpected direct element screenshot: %d bytes %s, %v", len(elementShot.Data), elementShot.MIME, err)
 	}
@@ -212,14 +205,4 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || len(tabs) != 1 || tabs[0].ID != tab.ID {
 		t.Fatalf("closed tab remains listed: %#v, %v", tabs, err)
 	}
-}
-
-func snapshotRef(t *testing.T, snapshot string) string {
-	t.Helper()
-	start := strings.Index(snapshot, "[") + 1
-	end := strings.Index(snapshot[start:], "]") + start
-	if start <= 0 || end < start {
-		t.Fatalf("snapshot has no ref: %s", snapshot)
-	}
-	return snapshot[start:end]
 }

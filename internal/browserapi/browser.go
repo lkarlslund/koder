@@ -30,10 +30,22 @@ type Tab struct {
 }
 
 type Snapshot struct {
-	TabID      string `json:"tab_id"`
-	Generation uint64 `json:"generation"`
-	Text       string `json:"text"`
-	Truncated  bool   `json:"truncated"`
+	TabID     string `json:"tab_id"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+}
+
+type Locator struct {
+	Target     string `json:"target,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Within     string `json:"within,omitempty"`
+	Exact      bool   `json:"exact"`
+	Occurrence int    `json:"occurrence,omitempty"`
+	Selector   string `json:"selector,omitempty"`
+}
+
+func (l Locator) Empty() bool {
+	return l.Target == "" && l.Selector == ""
 }
 
 type Binary struct {
@@ -83,10 +95,12 @@ type Service interface {
 	History(context.Context, Chat, string) (Tab, error)
 	Snapshot(context.Context, Chat, string, int, int) (Snapshot, error)
 	Find(context.Context, Chat, string, string, int) (Snapshot, error)
-	Interact(context.Context, Chat, string, string, string) error
-	Upload(context.Context, Chat, string, []string) error
+	Interact(context.Context, Chat, string, Locator, string) error
+	Drag(context.Context, Chat, Locator, Locator) error
+	Scroll(context.Context, Chat, Locator, int, int) error
+	Upload(context.Context, Chat, Locator, []string) error
 	Evaluate(context.Context, Chat, string) (string, error)
-	Screenshot(context.Context, Chat, string, bool, string, int) (Binary, error)
+	Screenshot(context.Context, Chat, Locator, bool, string, int) (Binary, error)
 	PDF(context.Context, Chat) (Binary, error)
 	Console(context.Context, Chat, string, int) ([]ConsoleRecord, error)
 	Requests(context.Context, Chat, int) ([]RequestRecord, error)

@@ -52,23 +52,25 @@ func TestListingTabsDoesNotStartBrowser(t *testing.T) {
 	}
 }
 
-func TestSnapshotScriptUsesGenerationAndQuery(t *testing.T) {
-	script := snapshotScript(7, "Submit", "button", 3)
-	for _, want := range []string{"7-e", `"Submit"`, `"button"`, "maxDepth=3", "data-koder-ref"} {
+func TestSnapshotScriptIsInformational(t *testing.T) {
+	script := snapshotScript("Submit", "button", 3)
+	for _, want := range []string{`"Submit"`, `"button"`, "maxDepth=3"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("snapshot script missing %q", want)
 		}
 	}
+	for _, unwanted := range []string{"data-koder-ref", "generation"} {
+		if strings.Contains(script, unwanted) {
+			t.Fatalf("snapshot script contains interaction state %q", unwanted)
+		}
+	}
 }
 
-func TestElementSelectorAcceptsEarlierGeneration(t *testing.T) {
-	selector, err := elementSelector("14-e3")
-	if err != nil || selector != `[data-koder-ref="14-e3"]` {
-		t.Fatalf("elementSelector() = %q, %v", selector, err)
-	}
-	for _, ref := range []string{"", "e1", "1-e", "x-e1", "1-ex"} {
-		if _, err := elementSelector(ref); err == nil {
-			t.Fatalf("elementSelector(%q) unexpectedly succeeded", ref)
+func TestLocatorExpressionContainsSemanticInputs(t *testing.T) {
+	script := locatorExpression(browserapi.Locator{Target: "Submit order", Role: "button", Within: "Checkout", Exact: true, Occurrence: 2}, "click")
+	for _, want := range []string{"Submit order", "button", "Checkout", `"occurrence":2`, "ambiguous"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("locator expression missing %q", want)
 		}
 	}
 }

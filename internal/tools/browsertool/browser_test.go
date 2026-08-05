@@ -23,9 +23,18 @@ func TestBrowserToolSchemasAndRequiredArguments(t *testing.T) {
 		if !json.Valid([]byte(spec.parameters)) {
 			t.Errorf("%s has invalid schema: %s", spec.id, spec.parameters)
 		}
+		if strings.Contains(spec.parameters, `"ref"`) || strings.Contains(spec.parameters, `"source_ref"`) {
+			t.Errorf("%s still exposes element refs: %s", spec.id, spec.parameters)
+		}
 	}
 	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("browser_click should require ref")
+		t.Fatal("browser_click should require target or selector")
+	}
+	if _, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{"target": "Submit", "selector": "#submit"}); err == nil {
+		t.Fatal("browser_click should reject target with selector")
+	}
+	if args, err := (tool{id: tools.BrowserClick}).NormalizeArgs(map[string]string{"target": " Submit "}); err != nil || args["target"] != "Submit" {
+		t.Fatalf("browser_click semantic target normalization failed: %#v, %v", args, err)
 	}
 	if _, err := (tool{id: tools.BrowserNavigate}).NormalizeArgs(map[string]string{"url": "ftp://example.com"}); err == nil {
 		t.Fatal("browser_navigate should reject unsupported URL schemes")
@@ -167,7 +176,7 @@ func TestBrowserExtractionPathRequiresWriteAccess(t *testing.T) {
 	}
 }
 
-func TestBrowserWaitDoesNotInvalidateSnapshotReferences(t *testing.T) {
+func TestBrowserWaitUsesDirectEvaluation(t *testing.T) {
 	browser := &waitBrowser{}
 	result, err := (tool{id: tools.BrowserWait, title: "Browser wait"}).Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Browser: browser, SessionID: "session-1", ChatID: "chat-1"},
@@ -235,10 +244,10 @@ func (b *waitBrowser) Evaluate(context.Context, browserapi.Chat, string) (string
 }
 
 func (savingBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int) (browserapi.Snapshot, error) {
-	return browserapi.Snapshot{TabID: "tab-1", Generation: 1, Text: "extracted page text"}, nil
+	return browserapi.Snapshot{TabID: "tab-1", Text: "extracted page text"}, nil
 }
 
-func (savingBrowser) Screenshot(context.Context, browserapi.Chat, string, bool, string, int) (browserapi.Binary, error) {
+func (savingBrowser) Screenshot(context.Context, browserapi.Chat, browserapi.Locator, bool, string, int) (browserapi.Binary, error) {
 	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
 }
 
@@ -279,12 +288,20 @@ func (fakeBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int) 
 func (fakeBrowser) Find(context.Context, browserapi.Chat, string, string, int) (browserapi.Snapshot, error) {
 	return browserapi.Snapshot{}, nil
 }
-func (fakeBrowser) Interact(context.Context, browserapi.Chat, string, string, string) error {
+func (fakeBrowser) Interact(context.Context, browserapi.Chat, string, browserapi.Locator, string) error {
 	return nil
 }
-func (fakeBrowser) Upload(context.Context, browserapi.Chat, string, []string) error   { return nil }
+func (fakeBrowser) Drag(context.Context, browserapi.Chat, browserapi.Locator, browserapi.Locator) error {
+	return nil
+}
+func (fakeBrowser) Scroll(context.Context, browserapi.Chat, browserapi.Locator, int, int) error {
+	return nil
+}
+func (fakeBrowser) Upload(context.Context, browserapi.Chat, browserapi.Locator, []string) error {
+	return nil
+}
 func (fakeBrowser) Evaluate(context.Context, browserapi.Chat, string) (string, error) { return "", nil }
-func (fakeBrowser) Screenshot(context.Context, browserapi.Chat, string, bool, string, int) (browserapi.Binary, error) {
+func (fakeBrowser) Screenshot(context.Context, browserapi.Chat, browserapi.Locator, bool, string, int) (browserapi.Binary, error) {
 	return browserapi.Binary{}, errors.New("unused")
 }
 func (fakeBrowser) PDF(context.Context, browserapi.Chat) (browserapi.Binary, error) {

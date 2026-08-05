@@ -37,23 +37,23 @@ var specs = []tool{
 	{tools.BrowserBack, "Browser back", "Navigate the selected tab back.", object(``)},
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
 	{tools.BrowserReload, "Reload browser", "Reload the selected tab.", object(``)},
-	{tools.BrowserSnapshot, "Browser snapshot", "Return a compact visible DOM snapshot with element refs that remain valid while their elements remain in the selected tab.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
-	{tools.BrowserFind, "Find in browser", "Find visible page elements by text and return a fresh referenced snapshot.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
-	{tools.BrowserClick, "Click browser element", "Click an element ref from a browser snapshot.", refSchema(false)},
-	{tools.BrowserFill, "Fill browser element", "Replace an input's value.", refValueSchema()},
-	{tools.BrowserType, "Type in browser element", "Type text into an element.", refValueSchema()},
-	{tools.BrowserPress, "Press browser key", "Send a key to an element.", refValueSchema()},
-	{tools.BrowserSelect, "Select browser option", "Set a select element's value.", refValueSchema()},
-	{tools.BrowserCheck, "Check browser element", "Check a checkbox or radio element.", refSchema(false)},
-	{tools.BrowserUncheck, "Uncheck browser element", "Uncheck a checkbox element.", refSchema(false)},
-	{tools.BrowserHover, "Hover browser element", "Hover an element.", refSchema(false)},
-	{tools.BrowserDrag, "Drag browser element", "Drag one referenced element onto another.", required(object(`"source_ref":{"type":"string"},"target_ref":{"type":"string"}`), "source_ref", "target_ref")},
-	{tools.BrowserScroll, "Scroll browser", "Scroll the selected page or a referenced element.", object(`"ref":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"}`)},
+	{tools.BrowserSnapshot, "Browser snapshot", "Return an informational compact view of the current visible DOM. Interactions resolve their own targets and do not depend on snapshots.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserFind, "Find in browser", "Return an informational filtered view of current visible page elements. Interactions do not depend on this result.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
+	{tools.BrowserClick, "Click browser element", "Find a current visible element by accessible name, label, or text and click it.", locatorObject("", true)},
+	{tools.BrowserFill, "Fill browser element", "Find a current editable control and replace its value.", locatorObject(`"value":{"type":"string"}`, true, "value")},
+	{tools.BrowserType, "Type in browser element", "Find a current editable control and type text into it.", locatorObject(`"value":{"type":"string"}`, true, "value")},
+	{tools.BrowserPress, "Press browser key", "Send a key to a current semantic target, or to the focused element when target and selector are omitted.", locatorObject(`"key":{"type":"string"}`, false, "key")},
+	{tools.BrowserSelect, "Select browser option", "Find a current select control and set its value.", locatorObject(`"value":{"type":"string"}`, true, "value")},
+	{tools.BrowserCheck, "Check browser element", "Find and check a current checkbox, radio button, or switch.", locatorObject("", true)},
+	{tools.BrowserUncheck, "Uncheck browser element", "Find and uncheck a current checkbox or switch.", locatorObject("", true)},
+	{tools.BrowserHover, "Hover browser element", "Find a current visible element and hover it.", locatorObject("", true)},
+	{tools.BrowserDrag, "Drag browser element", "Find current source and destination elements and drag the source onto the destination.", dragLocatorObject()},
+	{tools.BrowserScroll, "Scroll browser", "Scroll the page, or find and scroll a current element when a semantic target or selector is provided.", locatorObject(`"x":{"type":"integer"},"y":{"type":"integer"}`, false)},
 	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer"},`+saveToFileProperty), "text")},
-	{tools.BrowserUpload, "Upload browser files", "Upload workspace files through a referenced file input.", required(object(`"ref":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}`), "ref", "paths")},
+	{tools.BrowserUpload, "Upload browser files", "Find a current file input and upload authorized workspace files through it.", locatorObject(`"paths":{"type":"array","items":{"type":"string"}}`, true, "paths")},
 	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},`+saveToFileProperty), "expression")},
-	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a referenced element. Return it as a session attachment unless save_to_file persists it to disk instead.", object(`"ref":{"type":"string"},"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},` + saveToFileProperty)},
-	{tools.BrowserImage, "Capture browser image", "Capture a referenced image or canvas. Return it as a session attachment unless save_to_file persists it to disk instead.", required(object(`"ref":{"type":"string"},`+saveToFileProperty), "ref")},
+	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a current semantic target. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(`"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},`+saveToFileProperty, false)},
+	{tools.BrowserImage, "Capture browser image", "Find and capture a current image, canvas, or visual element. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(saveToFileProperty, true)},
 	{tools.BrowserPDF, "Save browser PDF", "Print the selected page as a PDF. Return it as a session attachment unless save_to_file persists it to disk instead.", object(saveToFileProperty)},
 	{tools.BrowserConsole, "Browser console", "Read bounded console records for the selected tab.", object(`"level":{"type":"string"},"limit":{"type":"integer"},` + saveToFileProperty)},
 	{tools.BrowserRequests, "Browser requests", "List bounded network records for the selected tab.", object(`"limit":{"type":"integer"},` + saveToFileProperty)},
@@ -90,6 +90,20 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 			return nil, fmt.Errorf("%s is required", key)
 		}
 	}
+	if usesLocator(t.id) {
+		required := t.id != tools.BrowserPress && t.id != tools.BrowserScroll && t.id != tools.BrowserScreenshot
+		if _, err := locatorFromArgs(out, "", required); err != nil {
+			return nil, err
+		}
+	}
+	if t.id == tools.BrowserDrag {
+		if _, err := locatorFromArgs(out, "source", true); err != nil {
+			return nil, fmt.Errorf("source: %w", err)
+		}
+		if _, err := locatorFromArgs(out, "", true); err != nil {
+			return nil, fmt.Errorf("target: %w", err)
+		}
+	}
 	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew {
 		if raw := out["url"]; raw != "" {
 			parsed, err := url.Parse(raw)
@@ -108,7 +122,7 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 
 func (t tool) Preview(req tools.Request) string {
-	for _, key := range []string{"url", "query", "ref", "tab_id", "expression", "request_id", "download_id"} {
+	for _, key := range []string{"url", "query", "target", "selector", "source", "source_selector", "tab_id", "expression", "request_id", "download_id"} {
 		if value := strings.TrimSpace(req.Args[key]); value != "" {
 			return value
 		}
@@ -159,19 +173,22 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		value, err = service.Find(ctx, chat, args["query"], args["role"], intArg(args, "max_chars", 32*1024))
 	case tools.BrowserClick, tools.BrowserFill, tools.BrowserType, tools.BrowserPress, tools.BrowserSelect, tools.BrowserCheck, tools.BrowserUncheck, tools.BrowserHover:
 		action := strings.TrimPrefix(t.id.String(), "browser_")
-		err = service.Interact(ctx, chat, action, args["ref"], args["value"])
-		value = map[string]string{"action": action, "ref": args["ref"]}
-	case tools.BrowserDrag:
-		sourceSelector := fmt.Sprintf(`[data-koder-ref=%q]`, args["source_ref"])
-		targetSelector := fmt.Sprintf(`[data-koder-ref=%q]`, args["target_ref"])
-		expression := fmt.Sprintf(`(()=>{const a=document.querySelector(%s),b=document.querySelector(%s);if(!a||!b)throw new Error('stale element reference');const d=new DataTransfer();a.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:d}));for(const t of ['dragenter','dragover','drop'])b.dispatchEvent(new DragEvent(t,{bubbles:true,cancelable:true,dataTransfer:d}));a.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:d}));return true})()`, jsonString(sourceSelector), jsonString(targetSelector))
-		value, err = service.Evaluate(ctx, chat, expression)
-	case tools.BrowserScroll:
-		target := "window"
-		if args["ref"] != "" {
-			target = fmt.Sprintf(`document.querySelector(%s)`, jsonString(fmt.Sprintf(`[data-koder-ref=%q]`, args["ref"])))
+		input := args["value"]
+		if t.id == tools.BrowserPress {
+			input = args["key"]
 		}
-		value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`(()=>{const e=%s;if(!e)throw new Error('stale element reference');e.scrollBy(%d,%d);return true})()`, target, intArg(args, "x", 0), intArg(args, "y", 600)))
+		locator, _ := locatorFromArgs(args, "", false)
+		err = service.Interact(ctx, chat, action, locator, input)
+		value = map[string]any{"action": action, "locator": locator}
+	case tools.BrowserDrag:
+		source, _ := locatorFromArgs(args, "source", true)
+		target, _ := locatorFromArgs(args, "", true)
+		err = service.Drag(ctx, chat, source, target)
+		value = map[string]browserapi.Locator{"source": source, "target": target}
+	case tools.BrowserScroll:
+		locator, _ := locatorFromArgs(args, "", false)
+		err = service.Scroll(ctx, chat, locator, intArg(args, "x", 0), intArg(args, "y", 600))
+		value = map[string]any{"locator": locator, "x": intArg(args, "x", 0), "y": intArg(args, "y", 600)}
 	case tools.BrowserWait:
 		wait := time.Duration(intArg(args, "timeout_ms", 30000)) * time.Millisecond
 		if wait < time.Millisecond {
@@ -214,13 +231,14 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 			}
 			paths[index] = abs
 		}
-		err = service.Upload(ctx, chat, args["ref"], paths)
+		locator, _ := locatorFromArgs(args, "", true)
+		err = service.Upload(ctx, chat, locator, paths)
 		value = map[string]any{"uploaded": len(paths)}
 	case tools.BrowserEvaluate:
 		value, err = service.Evaluate(ctx, chat, args["expression"])
 	case tools.BrowserScreenshot, tools.BrowserImage:
-		ref := args["ref"]
-		binary, binaryErr := service.Screenshot(ctx, chat, ref, boolArg(args, "full_page"), args["format"], intArg(args, "quality", 90))
+		locator, _ := locatorFromArgs(args, "", t.id == tools.BrowserImage)
+		binary, binaryErr := service.Screenshot(ctx, chat, locator, boolArg(args, "full_page"), args["format"], intArg(args, "quality", 90))
 		return binaryResult(opts, t.id.String(), args["save_to_file"], binary, binaryErr)
 	case tools.BrowserPDF:
 		binary, binaryErr := service.PDF(ctx, chat)
@@ -340,9 +358,81 @@ func required(schema string, names ...string) string {
 	return strings.TrimSuffix(schema, "}") + `,"required":` + string(suffix) + `}`
 }
 
-func refSchema(_ bool) string { return required(object(`"ref":{"type":"string"}`), "ref") }
-func refValueSchema() string {
-	return required(object(`"ref":{"type":"string"},"value":{"type":"string"}`), "ref", "value")
+func locatorObject(extra string, locatorRequired bool, requiredExtra ...string) string {
+	properties := locatorProperties("")
+	if extra = strings.Trim(extra, ","); extra != "" {
+		properties += "," + extra
+	}
+	schema := object(properties)
+	if len(requiredExtra) > 0 {
+		schema = required(schema, requiredExtra...)
+	}
+	if !locatorRequired {
+		return schema
+	}
+	return strings.TrimSuffix(schema, "}") + `,"anyOf":[{"required":["target"]},{"required":["selector"]}]}`
+}
+
+func dragLocatorObject() string {
+	properties := locatorProperties("") + "," + locatorProperties("source")
+	return strings.TrimSuffix(object(properties), "}") + `,"allOf":[{"anyOf":[{"required":["source"]},{"required":["source_selector"]}]},{"anyOf":[{"required":["target"]},{"required":["selector"]}]}]}`
+}
+
+func locatorProperties(prefix string) string {
+	name := func(field string) string {
+		if prefix == "" {
+			return field
+		}
+		if field == "target" {
+			return prefix
+		}
+		return prefix + "_" + field
+	}
+	return fmt.Sprintf(`%q:{"type":"string","description":"Accessible name, associated label, or visible text."},%q:{"type":"string","description":"Optional semantic role such as button, textbox, link, checkbox, or image."},%q:{"type":"string","description":"Optional ancestor text used to scope an otherwise ambiguous target."},%q:{"type":"boolean","description":"Use exact name matching. Defaults to true; set false for partial matching."},%q:{"type":"integer","minimum":1,"description":"One-based occurrence used only to disambiguate multiple matches."},%q:{"type":"string","description":"Advanced CSS selector or xpath= expression. Mutually exclusive with the semantic target."}`, name("target"), name("role"), name("within"), name("exact"), name("occurrence"), name("selector"))
+}
+
+func usesLocator(kind tools.ID) bool {
+	switch kind {
+	case tools.BrowserClick, tools.BrowserFill, tools.BrowserType, tools.BrowserPress, tools.BrowserSelect,
+		tools.BrowserCheck, tools.BrowserUncheck, tools.BrowserHover, tools.BrowserScroll,
+		tools.BrowserUpload, tools.BrowserScreenshot, tools.BrowserImage:
+		return true
+	default:
+		return false
+	}
+}
+
+func locatorFromArgs(args map[string]string, prefix string, required bool) (browserapi.Locator, error) {
+	name := func(field string) string {
+		if prefix == "" {
+			return field
+		}
+		if field == "target" {
+			return prefix
+		}
+		return prefix + "_" + field
+	}
+	locator := browserapi.Locator{
+		Target:     strings.TrimSpace(args[name("target")]),
+		Role:       strings.TrimSpace(args[name("role")]),
+		Within:     strings.TrimSpace(args[name("within")]),
+		Exact:      boolArgDefault(args, name("exact"), true),
+		Occurrence: intArg(args, name("occurrence"), 0),
+		Selector:   strings.TrimSpace(args[name("selector")]),
+	}
+	if locator.Target != "" && locator.Selector != "" {
+		return browserapi.Locator{}, errors.New("target and selector are mutually exclusive")
+	}
+	if required && locator.Empty() {
+		return browserapi.Locator{}, errors.New("target or selector is required")
+	}
+	if locator.Target == "" && locator.Selector == "" && (locator.Role != "" || locator.Within != "" || locator.Occurrence > 0) {
+		return browserapi.Locator{}, errors.New("role, within, and occurrence require target or selector")
+	}
+	if locator.Occurrence < 0 {
+		return browserapi.Locator{}, errors.New("occurrence must be one or greater")
+	}
+	return locator, nil
 }
 
 func requiredArgs(kind tools.ID) []string {
@@ -353,16 +443,14 @@ func requiredArgs(kind tools.ID) []string {
 		return []string{"url"}
 	case tools.BrowserFind:
 		return []string{"query"}
-	case tools.BrowserClick, tools.BrowserCheck, tools.BrowserUncheck, tools.BrowserHover, tools.BrowserImage:
-		return []string{"ref"}
-	case tools.BrowserFill, tools.BrowserType, tools.BrowserPress, tools.BrowserSelect:
-		return []string{"ref", "value"}
-	case tools.BrowserDrag:
-		return []string{"source_ref", "target_ref"}
+	case tools.BrowserFill, tools.BrowserType, tools.BrowserSelect:
+		return []string{"value"}
+	case tools.BrowserPress:
+		return []string{"key"}
 	case tools.BrowserWait:
 		return []string{"text"}
 	case tools.BrowserUpload:
-		return []string{"ref", "paths"}
+		return []string{"paths"}
 	case tools.BrowserEvaluate:
 		return []string{"expression"}
 	case tools.BrowserRequest, tools.BrowserResponseBody:
@@ -389,6 +477,18 @@ func intArg(args map[string]string, key string, fallback int) int {
 func boolArg(args map[string]string, key string) bool {
 	value, _ := strconv.ParseBool(args[key])
 	return value
+}
+
+func boolArgDefault(args map[string]string, key string, fallback bool) bool {
+	value := strings.TrimSpace(args[key])
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func jsonString(value string) string {
