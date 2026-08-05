@@ -21,6 +21,7 @@ type RegistryConfig struct {
 	PermissionProfile string
 	AccessSettings    accesssettings.Settings
 	MaxChildChats     int
+	OnChatArchived    func(context.Context, id.ID)
 }
 
 type Registry struct {

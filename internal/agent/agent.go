@@ -96,7 +96,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	})
 	chatSource := chatpkg.NewSource(e.ChatDeps)
 	planSource := planning.NewSource(st)
-	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, sessionRegistryConfig(settingsStore.NewSessionDefaults()))
+	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, e.sessionRegistryConfig(settingsStore.NewSessionDefaults()))
 	e.modelRuntime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings:         settingsStore,
@@ -124,7 +124,7 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 		e.modelRuntime.UpdateConfig(cfg)
 	}
 	if e.registry != nil {
-		e.registry.UpdateConfig(sessionRegistryConfig(e.settings.NewSessionDefaults()))
+		e.registry.UpdateConfig(e.sessionRegistryConfig(e.settings.NewSessionDefaults()))
 	}
 	if e.toolsRuntime != nil {
 		e.toolsRuntime.UpdateSettings(e.settings)

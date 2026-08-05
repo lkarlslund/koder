@@ -38,6 +38,36 @@ func testLoadSession(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Sou
 	return Load(ctx, st, chatsSrc, planSrc, sessionID)
 }
 
+func TestUpdateChatCallsArchiveLifecycleHook(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := owner.NewChat(ctx, owner.Snapshot().Chats[0].ID, "archive me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived id.ID
+	owner.UpdateConfig(RegistryConfig{OnChatArchived: func(_ context.Context, chatID id.ID) { archived = chatID }})
+	value := true
+	if _, _, err := owner.UpdateChat(ctx, child.Snapshot().Chat.ID, chattool.UpdateRequest{Archived: &value}); err != nil {
+		t.Fatal(err)
+	}
+	if archived != child.Snapshot().Chat.ID {
+		t.Fatalf("archive hook got %q, want %q", archived, child.Snapshot().Chat.ID)
+	}
+}
+
 func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	existing, err := planSrc.ListTasks(ctx, sessionID, milestoneKey)
 	if err != nil {

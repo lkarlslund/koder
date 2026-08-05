@@ -11,14 +11,18 @@ import (
 	"github.com/lkarlslund/koder/internal/settings"
 )
 
-func sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
-	return sessionpkg.RegistryConfig{
+func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
+	cfg := sessionpkg.RegistryConfig{
 		DefaultProvider:   defaults.ProviderID,
 		DefaultModel:      defaults.ModelID,
 		PermissionProfile: defaults.PermissionProfile,
 		AccessSettings:    defaults.Access,
 		MaxChildChats:     defaults.MaxChildChats,
 	}
+	if e != nil && e.browser != nil {
+		cfg.OnChatArchived = e.browser.CleanupChat
+	}
+	return cfg
 }
 
 // LoadSession returns the live owner for a persisted session, hydrating it on demand.
@@ -76,6 +80,9 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, c
 func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if e == nil || e.registry == nil {
 		return fmt.Errorf("session registry is required")
+	}
+	if e.browser != nil {
+		e.browser.CleanupSession(ctx, sessionID)
 	}
 	return e.registry.Delete(ctx, sessionID)
 }

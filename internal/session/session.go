@@ -779,6 +779,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 		snapshot.Chat = target
 		snapshot.StatusText = statusText
 	}
+	onChatArchived := s.config.OnChatArchived
 	s.mu.Unlock()
 	status.ID = target.ID
 	status.Title = target.Title
@@ -792,6 +793,9 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 		kind = EventChatArchived
 	}
 	s.emit(Event{Kind: kind, SessionID: target.SessionID, Chat: target, Snapshot: snapshot, NextChatID: nextChatID})
+	if archivingVisibleChat && onChatArchived != nil {
+		onChatArchived(ctx, target.ID)
+	}
 	return status, nextChatID, nil
 }
 
