@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -246,8 +247,16 @@ func TestChromiumIntegration(t *testing.T) {
 		t.Fatalf("unexpected upload size: %s, %v", uploadSize, err)
 	}
 	shot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, false, "png", 90)
-	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {
+	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" || !bytes.HasPrefix(shot.Data, []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
+	}
+	jpegShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, false, "jpeg", 80)
+	if err != nil || len(jpegShot.Data) < 100 || jpegShot.MIME != "image/jpeg" || !bytes.HasPrefix(jpegShot.Data, []byte("\xff\xd8\xff")) {
+		t.Fatalf("unexpected JPEG screenshot: %d bytes %s, %v", len(jpegShot.Data), jpegShot.MIME, err)
+	}
+	fullShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, true, "png", 80)
+	if err != nil || len(fullShot.Data) < 100 || fullShot.MIME != "image/png" || !bytes.HasPrefix(fullShot.Data, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("unexpected full-page screenshot: %d bytes %s, %v", len(fullShot.Data), fullShot.MIME, err)
 	}
 	_, err = m.Find(t.Context(), chat, "Photo", "image", 8*1024)
 	if err != nil {

@@ -836,6 +836,12 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	if quality <= 0 || quality > 100 {
 		quality = 90
 	}
+	params := page.CaptureScreenshot().WithFromSurface(true)
+	if strings.EqualFold(format, "jpeg") {
+		params = params.WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(int64(quality))
+	} else {
+		params = params.WithFormat(page.CaptureScreenshotFormatPng)
+	}
 	var action chromedp.Action
 	if !locator.Empty() {
 		var bounds page.Viewport
@@ -845,23 +851,17 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 				if bounds.Width <= 0 || bounds.Height <= 0 {
 					return errors.New("browser screenshot target has no drawable area")
 				}
-				params := page.CaptureScreenshot().
-					WithClip(&bounds).
-					WithCaptureBeyondViewport(true)
-				if strings.EqualFold(format, "jpeg") {
-					params = params.WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(int64(quality))
-				} else {
-					params = params.WithFormat(page.CaptureScreenshotFormatPng)
-				}
 				var err error
-				data, err = params.Do(ctx)
+				data, err = params.WithClip(&bounds).WithCaptureBeyondViewport(true).Do(ctx)
 				return err
 			}),
 		}
-	} else if fullPage {
-		action = chromedp.FullScreenshot(&data, quality)
 	} else {
-		action = chromedp.CaptureScreenshot(&data)
+		action = chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			data, err = params.WithCaptureBeyondViewport(fullPage).Do(ctx)
+			return err
+		})
 	}
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
