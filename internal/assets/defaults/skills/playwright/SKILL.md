@@ -99,6 +99,61 @@ playwright-cli -s=<session> close
 Use `playwright-cli --help` or `playwright-cli --help <command>` when an option
 is uncertain. Do not guess command syntax.
 
+## Saving Images from a Page
+
+Save files under a deliberate workspace-relative directory with sanitized,
+descriptive names. Never embed image bytes or long `data:` URLs in model output.
+Create the destination first, for example `mkdir -p artifacts/browser-images`.
+
+First identify the image the browser actually selected. Use `currentSrc`, not
+only `src`, because responsive `<picture>` and `srcset` markup may select a
+different resource:
+
+```bash
+playwright-cli -s=<session> --raw eval "() => JSON.stringify([...document.images].map((img, index) => ({ index, alt: img.alt, url: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight })))"
+```
+
+For a specific element, pass its snapshot ref or a unique selector to `eval`:
+
+```bash
+playwright-cli -s=<session> --raw eval "img => ({ alt: img.alt, url: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight })" e12
+```
+
+Prefer the following save methods in order:
+
+1. **Original loaded bytes:** run `requests`, find the matching image request,
+   then save its body. This preserves the file the authenticated browser
+   received without copying cookies or signed URLs into another program.
+
+   ```bash
+   playwright-cli -s=<session> requests
+   playwright-cli -s=<session> response-body <request-number> --filename=artifacts/browser-images/example.webp
+   ```
+
+   Repeat `response-body` for multiple images. If a lazy-loaded image is absent,
+   scroll it into view and inspect `requests` again.
+
+2. **Public ordinary URL:** when no authentication or secret query string is
+   involved, download the discovered `http:` or `https:` URL with a normal HTTP
+   client such as `curl --fail --location --output <path> <url>`.
+
+3. **Rendered pixels:** for `blob:`, `data:`, canvas, inline SVG, CSS background,
+   transformed, or otherwise browser-generated images, save the element as it
+   appears instead of sending base64 through chat:
+
+   ```bash
+   playwright-cli -s=<session> screenshot e12 --filename=artifacts/browser-images/example.png
+   playwright-cli -s=<session> screenshot "canvas" --filename=artifacts/browser-images/canvas.png
+   ```
+
+For CSS images, inspect a targeted element with
+`el => getComputedStyle(el).backgroundImage`; avoid scanning the entire DOM
+unless necessary. Validate every saved file with `file`, inspect important
+results with `view_image`, and report the resulting local paths. Do not save
+tracking pixels, unrelated icons, or every image on a page unless requested.
+Treat signed image URLs, request headers, and image metadata as potentially
+sensitive and do not print them unnecessarily.
+
 ## Authentication and Human Handoff
 
 For a login that requires user interaction:

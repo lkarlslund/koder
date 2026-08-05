@@ -156,6 +156,8 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 			"name: playwright",
 			"Never use Playwright's unnamed `default` session",
 			"Never use `close-all` or `kill-all`",
+			"response-body <request-number> --filename=artifacts/browser-images/example.webp",
+			"Use `currentSrc`, not",
 		},
 		"skill-creator": {"name: skill-creator"},
 	} {
