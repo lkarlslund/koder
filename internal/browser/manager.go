@@ -751,10 +751,12 @@ func (m *Manager) Evaluate(ctx context.Context, chat browserapi.Chat, expression
 }
 
 func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref string, fullPage bool, format string, quality int) (browserapi.Binary, error) {
-	_, tabCtx, err := m.ownedSelected(ctx, chat)
+	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
 		return browserapi.Binary{}, err
 	}
+	tab.mu.Lock()
+	defer tab.mu.Unlock()
 	var data []byte
 	mime, name := "image/png", "browser-screenshot.png"
 	if strings.EqualFold(format, "jpeg") {
@@ -767,13 +769,19 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 		m.mu.Lock()
 		state := m.refs[chat.ChatID]
 		m.mu.Unlock()
-		if !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
+		if state.tabID != tab.id || !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
 			return browserapi.Binary{}, errors.New("stale element reference; run browser_snapshot again")
 		}
 	}
 	var action chromedp.Action
 	if strings.TrimSpace(ref) != "" {
-		action = chromedp.Screenshot(fmt.Sprintf(`[data-koder-ref=%q]`, ref), &data, chromedp.ByQuery)
+		selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
+		action = chromedp.QueryAfter(selector, func(ctx context.Context, _ cdpruntime.ExecutionContextID, nodes ...*cdp.Node) error {
+			if len(nodes) == 0 {
+				return fmt.Errorf("element reference %q no longer exists", ref)
+			}
+			return chromedp.ScreenshotNodes(nodes[:1], 1, &data).Do(ctx)
+		}, chromedp.ByQuery)
 	} else if fullPage {
 		action = chromedp.FullScreenshot(&data, quality)
 	} else {

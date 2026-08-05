@@ -28,7 +28,7 @@ func TestChromiumIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("download-body"))
 			return
 		}
-		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><input type="file" aria-label="Upload file"><output>waiting</output>`))
+		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title><button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button><a href="/download">Download</a><input type="file" aria-label="Upload file"><img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E"><output>waiting</output>`))
 	}))
 	defer server.Close()
 
@@ -129,6 +129,18 @@ func TestChromiumIntegration(t *testing.T) {
 	shot, err := m.Screenshot(t.Context(), chat, "", false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
+	}
+	imageSnapshot, err := m.Find(t.Context(), chat, "Photo", "image", 8*1024)
+	if err != nil {
+		t.Fatalf("find image: %v", err)
+	}
+	imageRef := snapshotRef(t, imageSnapshot.Text)
+	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('img').style.visibility='hidden'`); err != nil {
+		t.Fatalf("hide referenced image: %v", err)
+	}
+	elementShot, err := m.Screenshot(t.Context(), chat, imageRef, false, "png", 90)
+	if err != nil || len(elementShot.Data) == 0 || elementShot.MIME != "image/png" {
+		t.Fatalf("unexpected direct element screenshot: %d bytes %s, %v", len(elementShot.Data), elementShot.MIME, err)
 	}
 	second, err := m.NewTab(t.Context(), chat, server.URL)
 	if err != nil {
