@@ -119,17 +119,25 @@ const resolve=(cfg,action)=>{
     }else{
       try{candidates=[...document.querySelectorAll(cfg.selector)]}catch(error){throw new Error('Invalid browser selector: '+error.message)}
     }
-  }else{
-    const wanted=lower(cfg.target);
+	  }else{
+	    const wanted=lower(cfg.target);
     const wantedRole=lower(cfg.role);
     candidates=collect(document).filter(el=>{
       if(!allowed(el)||!inScope(el))return false;
       if(action!=='capture'&&action!=='upload'&&!visible(el))return false;
       if(wantedRole&&role(el)!==wantedRole)return false;
       const candidate=lower(name(el));
-      return cfg.exact?candidate===wanted:candidate.includes(wanted);
-    });
-  }
+	      return cfg.exact?candidate===wanted:candidate.includes(wanted);
+	    });
+	    if(!cfg.exact&&candidates.length>1){
+	      const exactMatches=candidates.filter(el=>lower(name(el))===wanted);
+	      if(exactMatches.length)candidates=exactMatches;
+	      else{
+	        const semanticMatches=candidates.filter(el=>role(el)!=='');
+	        if(semanticMatches.length)candidates=semanticMatches;
+	      }
+	    }
+	  }
   candidates=candidates.filter(allowed).filter(inScope);
   if(action!=='capture'&&action!=='upload')candidates=candidates.filter(visible);
   const occurrence=Number(cfg.occurrence||0);

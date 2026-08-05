@@ -159,7 +159,7 @@ func TestChromiumIntegration(t *testing.T) {
 	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('#terms').checked`); err != nil || value != "false" {
 		t.Fatalf("semantic uncheck did not clear control: %s, %v", value, err)
 	}
-	if err := m.Interact(t.Context(), chat, "hover", browserapi.Locator{Target: "Details", Role: "button", Exact: true}, ""); err != nil {
+	if err := m.Interact(t.Context(), chat, "hover", browserapi.Locator{Target: "Details"}, ""); err != nil {
 		t.Fatalf("hover semantic target: %v", err)
 	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Exact: true}, ""); err == nil || !strings.Contains(err.Error(), "ambiguous") {
