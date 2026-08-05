@@ -24,8 +24,8 @@ type tool struct {
 }
 
 var specs = []tool{
-	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(`"save_to_file":{"type":"string","description":"Optional file path for the extracted status"}`)},
-	{tools.BrowserTabList, "List browser tabs", "List this chat's tabs and unowned manual tabs without starting Chrome. Tabs owned by other chats are hidden.", object(`"save_to_file":{"type":"string","description":"Optional file path for the extracted tab list"}`)},
+	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(saveToFileProperty)},
+	{tools.BrowserTabList, "List browser tabs", "List this chat's tabs and unowned manual tabs without starting Chrome. Tabs owned by other chats are hidden.", object(saveToFileProperty)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
 	{tools.BrowserTabClaim, "Claim browser tab", "Atomically claim an unowned manual browser tab.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
 	{tools.BrowserTabSelect, "Select browser tab", "Select one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
@@ -34,8 +34,8 @@ var specs = []tool{
 	{tools.BrowserBack, "Browser back", "Navigate the selected tab back.", object(``)},
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
 	{tools.BrowserReload, "Reload browser", "Reload the selected tab.", object(``)},
-	{tools.BrowserSnapshot, "Browser snapshot", "Return a compact visible DOM snapshot with ephemeral element refs.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the extracted result"}`)},
-	{tools.BrowserFind, "Find in browser", "Find visible page elements by text and return a fresh referenced snapshot.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the extracted result"}`), "query")},
+	{tools.BrowserSnapshot, "Browser snapshot", "Return a compact visible DOM snapshot with ephemeral element refs.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserFind, "Find in browser", "Find visible page elements by text and return a fresh referenced snapshot.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
 	{tools.BrowserClick, "Click browser element", "Click an element ref from the latest snapshot.", refSchema(false)},
 	{tools.BrowserFill, "Fill browser element", "Replace an input's value.", refValueSchema()},
 	{tools.BrowserType, "Type in browser element", "Type text into an element.", refValueSchema()},
@@ -46,19 +46,21 @@ var specs = []tool{
 	{tools.BrowserHover, "Hover browser element", "Hover an element.", refSchema(false)},
 	{tools.BrowserDrag, "Drag browser element", "Drag one referenced element onto another.", required(object(`"source_ref":{"type":"string"},"target_ref":{"type":"string"}`), "source_ref", "target_ref")},
 	{tools.BrowserScroll, "Scroll browser", "Scroll the selected page or a referenced element.", object(`"ref":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"}`)},
-	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the matched result"}`), "text")},
+	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer"},`+saveToFileProperty), "text")},
 	{tools.BrowserUpload, "Upload browser files", "Upload workspace files through a referenced file input.", required(object(`"ref":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}`), "ref", "paths")},
-	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},"save_to_file":{"type":"string","description":"Optional file path for the evaluation result"}`), "expression")},
-	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a referenced element directly into session attachments and optionally save it to a file.", object(`"ref":{"type":"string"},"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the captured image"}`)},
-	{tools.BrowserImage, "Capture browser image", "Capture a referenced image or canvas directly into session attachments and optionally save it to a file.", required(object(`"ref":{"type":"string"},"save_to_file":{"type":"string","description":"Optional file path for the captured image"}`), "ref")},
-	{tools.BrowserPDF, "Save browser PDF", "Print the selected page directly into session attachments and optionally save it to a file.", object(`"save_to_file":{"type":"string","description":"Optional file path for the PDF"}`)},
-	{tools.BrowserConsole, "Browser console", "Read bounded console records for the selected tab.", object(`"level":{"type":"string"},"limit":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the extracted records"}`)},
-	{tools.BrowserRequests, "Browser requests", "List bounded network records for the selected tab.", object(`"limit":{"type":"integer"},"save_to_file":{"type":"string","description":"Optional file path for the extracted records"}`)},
-	{tools.BrowserRequest, "Browser request", "Inspect one opaque browser request record.", required(object(`"request_id":{"type":"string"},"save_to_file":{"type":"string","description":"Optional file path for the extracted record"}`), "request_id")},
-	{tools.BrowserResponseBody, "Browser response body", "Read a response body by opaque request ID.", required(object(`"request_id":{"type":"string"},"save_to_file":{"type":"string","description":"Optional file path for the response body"}`), "request_id")},
-	{tools.BrowserDownloads, "Browser downloads", "List downloads owned by this chat.", object(`"save_to_file":{"type":"string","description":"Optional file path for the extracted records"}`)},
-	{tools.BrowserDownload, "Browser download", "Import a completed browser download as a session attachment and optionally save it to a file.", required(object(`"download_id":{"type":"string"},"save_to_file":{"type":"string","description":"Optional destination file path"}`), "download_id")},
+	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},`+saveToFileProperty), "expression")},
+	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a referenced element. Return it as a session attachment unless save_to_file persists it to disk instead.", object(`"ref":{"type":"string"},"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserImage, "Capture browser image", "Capture a referenced image or canvas. Return it as a session attachment unless save_to_file persists it to disk instead.", required(object(`"ref":{"type":"string"},`+saveToFileProperty), "ref")},
+	{tools.BrowserPDF, "Save browser PDF", "Print the selected page as a PDF. Return it as a session attachment unless save_to_file persists it to disk instead.", object(saveToFileProperty)},
+	{tools.BrowserConsole, "Browser console", "Read bounded console records for the selected tab.", object(`"level":{"type":"string"},"limit":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserRequests, "Browser requests", "List bounded network records for the selected tab.", object(`"limit":{"type":"integer"},` + saveToFileProperty)},
+	{tools.BrowserRequest, "Browser request", "Inspect one opaque browser request record.", required(object(`"request_id":{"type":"string"},`+saveToFileProperty), "request_id")},
+	{tools.BrowserResponseBody, "Browser response body", "Read a response body by opaque request ID.", required(object(`"request_id":{"type":"string"},`+saveToFileProperty), "request_id")},
+	{tools.BrowserDownloads, "Browser downloads", "List downloads owned by this chat.", object(saveToFileProperty)},
+	{tools.BrowserDownload, "Browser download", "Read a completed browser download. Return it as a session attachment unless save_to_file persists it to disk instead.", required(object(`"download_id":{"type":"string"},`+saveToFileProperty), "download_id")},
 }
+
+const saveToFileProperty = `"save_to_file":{"type":"string","description":"Optional destination file. Omit to return the extracted data to the model; set to persist it to disk instead."}`
 
 func init() {
 	for _, spec := range specs {
@@ -251,7 +253,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		}
 		result.Path = saved
 		result.Summary = fmt.Sprintf("%s saved to %s", t.title, saved)
-		output = fmt.Sprintf("Saved to %s\n%s", saved, output)
+		output = fmt.Sprintf("Saved to %s", saved)
 		result.Text = output
 		meta["path"] = saved
 	}
@@ -269,36 +271,20 @@ func binaryResult(opts tools.Options, kind, path string, binary browserapi.Binar
 		if saveErr != nil {
 			return tools.Result{}, saveErr
 		}
+		summary := fmt.Sprintf("Saved %s to %s (%s, %d bytes)", binary.Name, saved, binary.MIME, len(binary.Data))
+		stored := tools.BrowserStoredResult{Kind: kind, SessionID: string(opts.Runtime.SessionID), Path: saved, Summary: summary, Text: summary}
+		return tools.Result{Output: summary, Meta: map[string]string{"mime_type": binary.MIME, "path": saved}, Stored: stored}, nil
 	}
-	resultMeta := map[string]string{"mime_type": binary.MIME}
-	stored := tools.BrowserStoredResult{Kind: kind, SessionID: string(opts.Runtime.SessionID), Path: saved}
-	if saved != "" {
-		resultMeta["path"] = saved
-	}
-	var imported *attachment.Metadata
-	if opts.Runtime.Attachments != nil {
-		meta, importErr := opts.Runtime.Attachments.ImportSessionData(opts.Runtime.SessionID, binary.Data, binary.Name, binary.MIME, attachment.SourceBrowser)
-		if importErr == nil {
-			imported = &meta
-			stored.Attachment = imported
-			resultMeta["attachment_id"] = meta.ID
-			resultMeta["mime_type"] = meta.MIME
-		} else if saved == "" {
-			return tools.Result{}, importErr
-		}
-	} else if saved == "" {
+	if opts.Runtime.Attachments == nil {
 		return tools.Result{}, errors.New("attachment storage is unavailable")
 	}
-	summary := fmt.Sprintf("Captured %s (%s, %d bytes)", binary.Name, binary.MIME, len(binary.Data))
-	if saved != "" {
-		summary = fmt.Sprintf("Saved %s to %s (%s, %d bytes)", binary.Name, saved, binary.MIME, len(binary.Data))
-		if imported != nil {
-			summary += " and captured it as a session attachment"
-		}
+	meta, err := opts.Runtime.Attachments.ImportSessionData(opts.Runtime.SessionID, binary.Data, binary.Name, binary.MIME, attachment.SourceBrowser)
+	if err != nil {
+		return tools.Result{}, err
 	}
-	stored.Summary = summary
-	stored.Text = summary
-	return tools.Result{Output: summary, Meta: resultMeta, Stored: stored}, nil
+	summary := fmt.Sprintf("Captured %s (%s, %d bytes)", binary.Name, binary.MIME, len(binary.Data))
+	stored := tools.BrowserStoredResult{Kind: kind, SessionID: string(opts.Runtime.SessionID), Summary: summary, Text: summary, Attachment: &meta}
+	return tools.Result{Output: summary, Meta: map[string]string{"attachment_id": meta.ID, "mime_type": meta.MIME}, Stored: stored}, nil
 }
 
 func extractedData(kind tools.ID, value any, fallback []byte) []byte {

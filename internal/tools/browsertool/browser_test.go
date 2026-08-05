@@ -66,13 +66,16 @@ func TestBrowserSnapshotSavesExtractedResult(t *testing.T) {
 	if result.Meta["path"] != "captures/page.json" || !strings.Contains(result.Output, "Saved to captures/page.json") {
 		t.Fatalf("unexpected result: %#v", result)
 	}
+	if strings.Contains(result.Output, "extracted page text") {
+		t.Fatalf("saved result should not repeat extracted data to the model: %q", result.Output)
+	}
 	stored, ok := result.Stored.(tools.BrowserStoredResult)
 	if !ok || stored.Path != "captures/page.json" {
 		t.Fatalf("unexpected stored result: %#v", result.Stored)
 	}
 }
 
-func TestBrowserScreenshotSavesBinaryAndAttachment(t *testing.T) {
+func TestBrowserScreenshotSavesBinaryInsteadOfAttachment(t *testing.T) {
 	workdir := t.TempDir()
 	attachments := attachment.NewManager(t.TempDir())
 	result, err := (tool{id: tools.BrowserScreenshot}).Call(t.Context(), tools.Options{
@@ -89,11 +92,26 @@ func TestBrowserScreenshotSavesBinaryAndAttachment(t *testing.T) {
 	if string(data) != string(savedPNG) {
 		t.Fatalf("saved screenshot differs: %q", data)
 	}
-	if result.Meta["path"] != "captures/page.png" || result.Meta["attachment_id"] == "" {
+	if result.Meta["path"] != "captures/page.png" || result.Meta["attachment_id"] != "" {
 		t.Fatalf("unexpected result metadata: %#v", result.Meta)
 	}
 	stored, ok := result.Stored.(tools.BrowserStoredResult)
-	if !ok || stored.Path != "captures/page.png" || stored.Attachment == nil {
+	if !ok || stored.Path != "captures/page.png" || stored.Attachment != nil {
+		t.Fatalf("unexpected stored result: %#v", result.Stored)
+	}
+}
+
+func TestBrowserScreenshotWithoutFileReturnsAttachment(t *testing.T) {
+	attachments := attachment.NewManager(t.TempDir())
+	result, err := (tool{id: tools.BrowserScreenshot}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: t.TempDir(), Browser: savingBrowser{}, Attachments: attachments, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserScreenshot, Args: map[string]string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := result.Stored.(tools.BrowserStoredResult)
+	if !ok || stored.Path != "" || stored.Attachment == nil || result.Meta["attachment_id"] == "" {
 		t.Fatalf("unexpected stored result: %#v", result.Stored)
 	}
 }
