@@ -61,6 +61,27 @@ func TestSnapshotScriptUsesGenerationAndQuery(t *testing.T) {
 	}
 }
 
+func TestElementSelectorAcceptsEarlierGeneration(t *testing.T) {
+	selector, err := elementSelector("14-e3")
+	if err != nil || selector != `[data-koder-ref="14-e3"]` {
+		t.Fatalf("elementSelector() = %q, %v", selector, err)
+	}
+	for _, ref := range []string{"", "e1", "1-e", "x-e1", "1-ex"} {
+		if _, err := elementSelector(ref); err == nil {
+			t.Fatalf("elementSelector(%q) unexpectedly succeeded", ref)
+		}
+	}
+}
+
+func TestTruncateSnapshotHonorsCharacterLimit(t *testing.T) {
+	for _, limit := range []int{1, 20, 50} {
+		got, truncated := truncateSnapshot(strings.Repeat("x", 100), limit)
+		if !truncated || len([]rune(got)) != limit {
+			t.Fatalf("truncateSnapshot(_, %d) returned %d chars, truncated=%v", limit, len([]rune(got)), truncated)
+		}
+	}
+}
+
 func TestSandboxCommandHidesHomeAndUsesPrivateProfile(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap unavailable")

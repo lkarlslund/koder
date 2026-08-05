@@ -71,7 +71,6 @@ type downloadState struct {
 
 type refState struct {
 	generation uint64
-	tabID      string
 }
 
 type Manager struct {
@@ -628,7 +627,6 @@ func (m *Manager) snapshot(ctx context.Context, chat browserapi.Chat, query, rol
 	m.mu.Lock()
 	state := m.refs[chat.ChatID]
 	state.generation++
-	state.tabID = tab.id
 	m.refs[chat.ChatID] = state
 	m.mu.Unlock()
 	tab.mu.Lock()
@@ -640,15 +638,12 @@ func (m *Manager) snapshot(ctx context.Context, chat browserapi.Chat, query, rol
 	if err := chromedp.Run(opCtx, chromedp.Evaluate(script, &text)); err != nil {
 		return browserapi.Snapshot{}, fmt.Errorf("capture browser snapshot: %w", err)
 	}
-	truncated := len(text) > maxChars
-	if truncated {
-		text = text[:maxChars] + "\n... snapshot truncated ..."
-	}
+	text, truncated := truncateSnapshot(text, maxChars)
 	return browserapi.Snapshot{TabID: tab.id, Generation: state.generation, Text: text, Truncated: truncated}, nil
 }
 
 func (m *Manager) Find(ctx context.Context, chat browserapi.Chat, query, role string, maxChars int) (browserapi.Snapshot, error) {
-	return m.snapshot(ctx, chat, query, role, 0, maxChars)
+	return m.snapshot(ctx, chat, query, role, -1, maxChars)
 }
 
 func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action, ref, value string) error {
@@ -656,14 +651,10 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action, re
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	state := m.refs[chat.ChatID]
-	m.mu.Unlock()
-	prefix := fmt.Sprintf("%d-e", state.generation)
-	if state.tabID != tab.id || !strings.HasPrefix(ref, prefix) {
-		return errors.New("stale element reference; run browser_snapshot again")
+	selector, err := elementSelector(ref)
+	if err != nil {
+		return err
 	}
-	selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
 	var task chromedp.Action
@@ -700,13 +691,10 @@ func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, 
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	state := m.refs[chat.ChatID]
-	m.mu.Unlock()
-	if state.tabID != tab.id || !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
-		return errors.New("stale element reference; run browser_snapshot again")
+	selector, err := elementSelector(ref)
+	if err != nil {
+		return err
 	}
-	selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
 	stagingDir := filepath.Join(m.stateDir, "run", "uploads", newOpaqueID("upload"))
 	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
 		return fmt.Errorf("create browser upload staging: %w", err)
@@ -790,11 +778,8 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, ref stri
 		quality = 90
 	}
 	if strings.TrimSpace(ref) != "" {
-		m.mu.Lock()
-		state := m.refs[chat.ChatID]
-		m.mu.Unlock()
-		if state.tabID != tab.id || !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
-			return browserapi.Binary{}, errors.New("stale element reference; run browser_snapshot again")
+		if _, err := elementSelector(ref); err != nil {
+			return browserapi.Binary{}, err
 		}
 	}
 	var action chromedp.Action
@@ -1296,7 +1281,6 @@ func (m *Manager) removeTab(tab *ownedTab) {
 
 func (m *Manager) removeTabLocked(tab *ownedTab) {
 	delete(m.tabs, tab.id)
-	delete(m.refs, tab.owner.ChatID)
 	for downloadID, download := range m.downloads {
 		if download.tabID == tab.id {
 			delete(m.downloads, downloadID)
@@ -1318,6 +1302,9 @@ func (m *Manager) removeTabLocked(tab *ownedTab) {
 				break
 			}
 		}
+	}
+	if m.selected[tab.owner.ChatID] == "" {
+		delete(m.refs, tab.owner.ChatID)
 	}
 }
 
@@ -1449,7 +1436,35 @@ func newOpaqueID(prefix string) string {
 }
 
 func snapshotScript(generation uint64, query, wantedRole string, depth int) string {
-	return fmt.Sprintf(`(()=>{const q=%s.toLowerCase();const wantedRole=%s.toLowerCase();const maxDepth=%d;let n=0;const out=[];const walk=(el,d)=>{if(!el||d>(maxDepth||99))return;const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;const role=el.getAttribute('role')||({A:'link',BUTTON:'button',INPUT:'input',TEXTAREA:'textbox',SELECT:'select',IMG:'image'}[el.tagName]||'');const name=(el.getAttribute('aria-label')||el.alt||el.innerText||el.value||'').trim().replace(/\s+/g,' ');const interactive=role||el.tabIndex>=0;if((!q||name.toLowerCase().includes(q))&&(!wantedRole||role.toLowerCase()===wantedRole)&&(name||interactive)){const ref='%d-e'+(++n);el.setAttribute('data-koder-ref',ref);out.push('  '.repeat(d)+(interactive?'['+ref+'] ':'')+(role||el.tagName.toLowerCase())+(name?' "'+name.slice(0,300)+'"':''));}for(const child of el.children)walk(child,d+1)};walk(document.body,0);return out.join('\n')})()`, jsString(strings.TrimSpace(query)), jsString(strings.TrimSpace(wantedRole)), depth, generation)
+	return fmt.Sprintf(`(()=>{const q=%s.toLowerCase();const wantedRole=%s.toLowerCase();const maxDepth=%d;let n=0;const out=[];const walk=(el,d)=>{if(!el||(maxDepth>=0&&d>maxDepth))return;const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')return;const role=el.getAttribute('role')||({A:'link',BUTTON:'button',INPUT:'input',TEXTAREA:'textbox',SELECT:'select',IMG:'image'}[el.tagName]||'');const name=(el.getAttribute('aria-label')||el.alt||el.innerText||el.value||'').trim().replace(/\s+/g,' ');const interactive=role||el.tabIndex>=0;if((!q||name.toLowerCase().includes(q))&&(!wantedRole||role.toLowerCase()===wantedRole)&&(name||interactive)){const ref='%d-e'+(++n);el.setAttribute('data-koder-ref',ref);out.push('  '.repeat(d)+(interactive?'['+ref+'] ':'')+(role||el.tagName.toLowerCase())+(name?' "'+name.slice(0,300)+'"':''));}for(const child of el.children)walk(child,d+1)};walk(document.body,0);return out.join('\n')})()`, jsString(strings.TrimSpace(query)), jsString(strings.TrimSpace(wantedRole)), depth, generation)
+}
+
+func elementSelector(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	generation, element, ok := strings.Cut(ref, "-e")
+	if !ok || generation == "" || element == "" {
+		return "", errors.New("invalid element reference; run browser_snapshot again")
+	}
+	if _, err := strconv.ParseUint(generation, 10, 64); err != nil {
+		return "", errors.New("invalid element reference; run browser_snapshot again")
+	}
+	if _, err := strconv.ParseUint(element, 10, 64); err != nil {
+		return "", errors.New("invalid element reference; run browser_snapshot again")
+	}
+	return fmt.Sprintf(`[data-koder-ref=%q]`, ref), nil
+}
+
+func truncateSnapshot(text string, maxChars int) (string, bool) {
+	characters := []rune(text)
+	if len(characters) <= maxChars {
+		return text, false
+	}
+	const marker = "\n... snapshot truncated ..."
+	markerCharacters := []rune(marker)
+	if maxChars <= len(markerCharacters) {
+		return string(characters[:maxChars]), true
+	}
+	return string(characters[:maxChars-len(markerCharacters)]) + marker, true
 }
 
 func jsString(value string) string {

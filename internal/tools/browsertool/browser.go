@@ -142,7 +142,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	case tools.BrowserBack, tools.BrowserForward, tools.BrowserReload:
 		value, err = service.History(ctx, chat, strings.TrimPrefix(t.id.String(), "browser_"))
 	case tools.BrowserSnapshot:
-		value, err = service.Snapshot(ctx, chat, "", intArg(args, "depth", 0), intArg(args, "max_chars", 32*1024))
+		value, err = service.Snapshot(ctx, chat, "", intArg(args, "depth", -1), intArg(args, "max_chars", 32*1024))
 	case tools.BrowserFind:
 		value, err = service.Find(ctx, chat, args["query"], args["role"], intArg(args, "max_chars", 32*1024))
 	case tools.BrowserClick, tools.BrowserFill, tools.BrowserType, tools.BrowserPress, tools.BrowserSelect, tools.BrowserCheck, tools.BrowserUncheck, tools.BrowserHover:
@@ -170,8 +170,9 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		}
 		deadline := time.Now().Add(wait)
 		for {
-			value, err = service.Find(ctx, chat, args["text"], "", 8*1024)
-			if err == nil && strings.TrimSpace(value.(browserapi.Snapshot).Text) != "" {
+			value, err = service.Evaluate(ctx, chat, fmt.Sprintf(`document.body?.innerText.includes(%s) === true`, jsonString(args["text"])))
+			if err == nil && value == "true" {
+				value = map[string]string{"found": args["text"]}
 				break
 			}
 			if err != nil || time.Now().After(deadline) {

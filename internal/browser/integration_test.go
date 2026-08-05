@@ -46,6 +46,14 @@ func TestChromiumIntegration(t *testing.T) {
 	if tab.URL != server.URL+"/" {
 		t.Fatalf("unexpected tab URL: %s", tab.URL)
 	}
+	bounded, err := m.Snapshot(t.Context(), chat, "", -1, 50)
+	if err != nil || !bounded.Truncated || len([]rune(bounded.Text)) > 50 {
+		t.Fatalf("snapshot max_chars not enforced: %d chars, truncated=%v, %v", len([]rune(bounded.Text)), bounded.Truncated, err)
+	}
+	shallow, err := m.Snapshot(t.Context(), chat, "", 0, 32*1024)
+	if err != nil || strings.Contains(shallow.Text, "\n") {
+		t.Fatalf("snapshot depth=0 traversed descendants: %q, %v", shallow.Text, err)
+	}
 	tabs, err := m.Tabs(t.Context(), chat)
 	if err != nil || len(tabs) != 1 || !tabs[0].Owned || !tabs[0].Selected {
 		t.Fatalf("initial blank tab was not reused: %#v, %v", tabs, err)
@@ -66,8 +74,11 @@ func TestChromiumIntegration(t *testing.T) {
 	if start <= 0 || end < start {
 		t.Fatalf("snapshot has no ref: %s", snapshot.Text)
 	}
+	if _, err := m.Find(t.Context(), chat, "Download", "link", 8*1024); err != nil {
+		t.Fatalf("find before using earlier reference: %v", err)
+	}
 	if err := m.Interact(t.Context(), chat, "click", snapshot.Text[start:end], ""); err != nil {
-		t.Fatalf("click: %v", err)
+		t.Fatalf("click reference from earlier snapshot: %v", err)
 	}
 	value, err := m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`)
 	if err != nil || value != `"clicked"` {

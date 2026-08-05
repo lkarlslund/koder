@@ -146,9 +146,42 @@ func TestBrowserExtractionPathRequiresWriteAccess(t *testing.T) {
 	}
 }
 
+func TestBrowserWaitDoesNotInvalidateSnapshotReferences(t *testing.T) {
+	browser := &waitBrowser{}
+	result, err := (tool{id: tools.BrowserWait, title: "Browser wait"}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Browser: browser, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserWait, Args: map[string]string{"text": "ready", "timeout_ms": "100"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if browser.findCalls != 0 || browser.evaluateCalls != 1 {
+		t.Fatalf("wait used find %d times and evaluate %d times", browser.findCalls, browser.evaluateCalls)
+	}
+	if !strings.Contains(result.Output, `"found": "ready"`) {
+		t.Fatalf("unexpected wait output: %s", result.Output)
+	}
+}
+
 var savedPNG = []byte("\x89PNG\r\n\x1a\nimage")
 
 type savingBrowser struct{ fakeBrowser }
+
+type waitBrowser struct {
+	fakeBrowser
+	findCalls     int
+	evaluateCalls int
+}
+
+func (b *waitBrowser) Find(context.Context, browserapi.Chat, string, string, int) (browserapi.Snapshot, error) {
+	b.findCalls++
+	return browserapi.Snapshot{}, nil
+}
+
+func (b *waitBrowser) Evaluate(context.Context, browserapi.Chat, string) (string, error) {
+	b.evaluateCalls++
+	return "true", nil
+}
 
 func (savingBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int) (browserapi.Snapshot, error) {
 	return browserapi.Snapshot{TabID: "tab-1", Generation: 1, Text: "extracted page text"}, nil
