@@ -10,13 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
@@ -39,6 +42,15 @@ type ownedTab struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	mu       sync.Mutex
+	dataMu   sync.Mutex
+	console  []browserapi.ConsoleRecord
+	requests map[string]*requestState
+	order    []string
+}
+
+type requestState struct {
+	record browserapi.RequestRecord
+	cdpID  network.RequestID
 }
 
 type refState struct {
@@ -151,7 +163,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	base := context.Background()
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(executable),
-		chromedp.UserDataDir("/koder/profile"),
+		chromedp.UserDataDir("/tmp/koder/profile"),
 		chromedp.Flag("headless", !m.cfg.Headed),
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
@@ -162,9 +174,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	)
 	allocCtx, allocStop := chromedp.NewExecAllocator(base, opts...)
 	browserCtx, stop := chromedp.NewContext(allocCtx)
-	startCtx, cancel := context.WithTimeout(browserCtx, m.timeout())
-	err = chromedp.Run(startCtx)
-	cancel()
+	err = chromedp.Run(browserCtx)
 	if err != nil {
 		stop()
 		allocStop()
@@ -244,6 +254,15 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 	m.mu.Unlock()
 	infos, err := target.GetTargets().Do(browserCtx)
 	if err != nil {
+		var listed []*target.Info
+		err = chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			var listErr error
+			listed, listErr = target.GetTargets().Do(ctx)
+			return listErr
+		}))
+		infos = listed
+	}
+	if err != nil {
 		return nil, fmt.Errorf("list browser tabs: %w", err)
 	}
 	m.syncTargets(infos)
@@ -283,24 +302,29 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	}
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	tabCtx, cancel := chromedp.NewContext(browserCtx)
 	url := strings.TrimSpace(rawURL)
 	if url == "" {
 		url = "about:blank"
 	}
-	opCtx, opCancel := context.WithTimeout(tabCtx, m.timeout())
-	err := chromedp.Run(opCtx, chromedp.Navigate(url))
-	opCancel()
+	createCtx, createCancel := context.WithTimeout(browserCtx, m.timeout())
+	var targetID target.ID
+	err := chromedp.Run(createCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var createErr error
+		targetID, createErr = target.CreateTarget(url).Do(ctx)
+		return createErr
+	}))
+	createCancel()
 	if err != nil {
-		cancel()
 		return browserapi.Tab{}, fmt.Errorf("open browser tab: %w", err)
 	}
-	cdpCtx := chromedp.FromContext(tabCtx)
-	if cdpCtx == nil || cdpCtx.Target == nil {
+	tabCtx, cancel := chromedp.NewContext(browserCtx, chromedp.WithTargetID(targetID))
+	err = chromedp.Run(tabCtx)
+	if err != nil {
 		cancel()
-		return browserapi.Tab{}, errors.New("browser did not create a target")
+		return browserapi.Tab{}, fmt.Errorf("attach browser tab: %w", err)
 	}
-	tab := &ownedTab{id: newOpaqueID("tab"), targetID: cdpCtx.Target.TargetID, owner: chat, ctx: tabCtx, cancel: cancel}
+	tab := &ownedTab{id: newOpaqueID("tab"), targetID: targetID, owner: chat, ctx: tabCtx, cancel: cancel, requests: map[string]*requestState{}}
+	m.monitorTab(tab)
 	m.mu.Lock()
 	m.tabs[tab.id] = tab
 	m.selected[chat.ChatID] = tab.id
@@ -346,7 +370,9 @@ func (m *Manager) CloseTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	defer tab.mu.Unlock()
 	closeCtx, cancel := context.WithTimeout(m.browserContext(), m.timeout())
 	defer cancel()
-	err = target.CloseTarget(tab.targetID).Do(closeCtx)
+	err = chromedp.Run(closeCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return target.CloseTarget(tab.targetID).Do(ctx)
+	}))
 	if err != nil {
 		return fmt.Errorf("close browser tab: %w", err)
 	}
@@ -478,6 +504,26 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action, re
 	return nil
 }
 
+func (m *Manager) Upload(ctx context.Context, chat browserapi.Chat, ref string, paths []string) error {
+	_, tabCtx, err := m.ownedSelected(ctx, chat)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	state := m.refs[chat.ChatID]
+	m.mu.Unlock()
+	if !strings.HasPrefix(ref, fmt.Sprintf("%d-e", state.generation)) {
+		return errors.New("stale element reference; run browser_snapshot again")
+	}
+	selector := fmt.Sprintf(`[data-koder-ref=%q]`, ref)
+	opCtx, cancel := m.operationContext(ctx, tabCtx)
+	defer cancel()
+	if err := chromedp.Run(opCtx, chromedp.SetUploadFiles(selector, paths, chromedp.ByQuery)); err != nil {
+		return fmt.Errorf("upload browser files: %w", err)
+	}
+	return nil
+}
+
 func (m *Manager) Evaluate(ctx context.Context, chat browserapi.Chat, expression string) (string, error) {
 	_, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
@@ -549,16 +595,73 @@ func (m *Manager) PDF(ctx context.Context, chat browserapi.Chat) (browserapi.Bin
 	return browserapi.Binary{Name: "browser-page.pdf", MIME: "application/pdf", Data: data}, nil
 }
 
-func (m *Manager) Console(context.Context, browserapi.Chat, string, int) ([]browserapi.ConsoleRecord, error) {
-	return nil, errors.New("browser console capture is not available yet")
+func (m *Manager) Console(_ context.Context, chat browserapi.Chat, level string, limit int) ([]browserapi.ConsoleRecord, error) {
+	tab, err := m.ownedTab(chat, m.selectedTab(chat.ChatID))
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	tab.dataMu.Lock()
+	defer tab.dataMu.Unlock()
+	result := make([]browserapi.ConsoleRecord, 0, min(limit, len(tab.console)))
+	for index := len(tab.console) - 1; index >= 0 && len(result) < limit; index-- {
+		record := tab.console[index]
+		if level == "" || strings.EqualFold(level, record.Level) {
+			result = append(result, record)
+		}
+	}
+	slices.Reverse(result)
+	return result, nil
 }
 
-func (m *Manager) Requests(context.Context, browserapi.Chat, int) ([]browserapi.RequestRecord, error) {
-	return nil, errors.New("browser request capture is not available yet")
+func (m *Manager) Requests(_ context.Context, chat browserapi.Chat, limit int) ([]browserapi.RequestRecord, error) {
+	tab, err := m.ownedTab(chat, m.selectedTab(chat.ChatID))
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	tab.dataMu.Lock()
+	defer tab.dataMu.Unlock()
+	start := max(0, len(tab.order)-limit)
+	result := make([]browserapi.RequestRecord, 0, len(tab.order)-start)
+	for _, opaqueID := range tab.order[start:] {
+		if request := tab.requests[opaqueID]; request != nil {
+			result = append(result, request.record)
+		}
+	}
+	return result, nil
 }
 
-func (m *Manager) ResponseBody(context.Context, browserapi.Chat, string) (browserapi.Binary, error) {
-	return browserapi.Binary{}, errors.New("browser response capture is not available yet")
+func (m *Manager) ResponseBody(ctx context.Context, chat browserapi.Chat, requestID string) (browserapi.Binary, error) {
+	tab, err := m.ownedTab(chat, m.selectedTab(chat.ChatID))
+	if err != nil {
+		return browserapi.Binary{}, err
+	}
+	tab.dataMu.Lock()
+	request := tab.requests[strings.TrimSpace(requestID)]
+	tab.dataMu.Unlock()
+	if request == nil {
+		return browserapi.Binary{}, errors.New("browser request not found")
+	}
+	var body []byte
+	opCtx, cancel := m.operationContext(ctx, tab.ctx)
+	defer cancel()
+	if err := chromedp.Run(opCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var bodyErr error
+		body, bodyErr = network.GetResponseBody(request.cdpID).Do(ctx)
+		return bodyErr
+	})); err != nil {
+		return browserapi.Binary{}, fmt.Errorf("read browser response: %w", err)
+	}
+	mime := request.record.MIME
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	return browserapi.Binary{Name: "browser-response", MIME: mime, Data: body}, nil
 }
 
 func (m *Manager) CleanupChat(ctx context.Context, chatID id.ID) {
@@ -632,7 +735,8 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 			owner = opener.owner
 		}
 		ctx, cancel := chromedp.NewContext(m.browserCtx, chromedp.WithTargetID(info.TargetID))
-		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, ctx: ctx, cancel: cancel}
+		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
+		m.monitorTab(tab)
 		m.tabs[tab.id] = tab
 		if owner.ChatID != "" && m.selected[owner.ChatID] == "" {
 			m.selected[owner.ChatID] = tab.id
@@ -647,6 +751,91 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 			}
 		}
 	}
+}
+
+func (m *Manager) selectedTab(chatID id.ID) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.selected[chatID]
+}
+
+func (m *Manager) monitorTab(tab *ownedTab) {
+	chromedp.ListenTarget(tab.ctx, func(event any) {
+		switch event := event.(type) {
+		case *cdpruntime.EventConsoleAPICalled:
+			parts := make([]string, 0, len(event.Args))
+			for _, arg := range event.Args {
+				if arg.Value != nil {
+					parts = append(parts, string(arg.Value))
+				} else if arg.Description != "" {
+					parts = append(parts, arg.Description)
+				}
+			}
+			tab.dataMu.Lock()
+			tab.console = appendBounded(tab.console, browserapi.ConsoleRecord{Level: event.Type.String(), Text: strings.Join(parts, " "), Time: time.Now().UTC()}, 500)
+			tab.dataMu.Unlock()
+		case *network.EventRequestWillBeSent:
+			opaqueID := newOpaqueID("req")
+			record := browserapi.RequestRecord{ID: opaqueID, Method: event.Request.Method, URL: event.Request.URL, Headers: redactHeaders(event.Request.Headers)}
+			tab.dataMu.Lock()
+			if len(tab.order) >= 500 {
+				delete(tab.requests, tab.order[0])
+				tab.order = tab.order[1:]
+			}
+			tab.requests[opaqueID] = &requestState{record: record, cdpID: event.RequestID}
+			tab.order = append(tab.order, opaqueID)
+			tab.dataMu.Unlock()
+		case *network.EventResponseReceived:
+			tab.dataMu.Lock()
+			if request := tab.requestByCDPIDLocked(event.RequestID); request != nil {
+				request.record.Status = int64(event.Response.Status)
+				request.record.MIME = event.Response.MimeType
+			}
+			tab.dataMu.Unlock()
+		case *network.EventLoadingFinished:
+			tab.dataMu.Lock()
+			if request := tab.requestByCDPIDLocked(event.RequestID); request != nil {
+				request.record.Finished = true
+			}
+			tab.dataMu.Unlock()
+		}
+	})
+	go func() {
+		ctx, cancel := context.WithTimeout(tab.ctx, m.timeout())
+		defer cancel()
+		_ = chromedp.Run(ctx, network.Enable(), cdpruntime.Enable())
+	}()
+}
+
+func (t *ownedTab) requestByCDPIDLocked(requestID network.RequestID) *requestState {
+	for _, request := range t.requests {
+		if request.cdpID == requestID {
+			return request
+		}
+	}
+	return nil
+}
+
+func appendBounded[T any](values []T, value T, limit int) []T {
+	values = append(values, value)
+	if len(values) > limit {
+		copy(values, values[len(values)-limit:])
+		values = values[:limit]
+	}
+	return values
+}
+
+func redactHeaders(headers network.Headers) map[string]string {
+	result := make(map[string]string, len(headers))
+	for name, value := range headers {
+		lower := strings.ToLower(name)
+		if lower == "authorization" || lower == "cookie" || lower == "set-cookie" {
+			result[name] = "[redacted]"
+			continue
+		}
+		result[name] = fmt.Sprint(value)
+	}
+	return result
 }
 
 func (m *Manager) tabByTargetLocked(targetID target.ID) *ownedTab {
@@ -780,7 +969,7 @@ func sandboxCommand(cmd *exec.Cmd, profileDir, runtimeDir string) {
 	if err != nil {
 		return
 	}
-	args := []string{"bwrap", "--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--share-net", "--dir", "/koder", "--bind", profileDir, "/koder/profile", "--bind", runtimeDir, "/koder/run", "--setenv", "HOME", "/koder", "--setenv", "XDG_RUNTIME_DIR", "/koder/run"}
+	args := []string{"bwrap", "--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/tmp", "--dir", "/tmp/koder", "--proc", "/proc", "--dev", "/dev", "--share-net", "--bind", profileDir, "/tmp/koder/profile", "--bind", runtimeDir, "/tmp/koder/run", "--setenv", "HOME", "/tmp/koder", "--setenv", "XDG_RUNTIME_DIR", "/tmp/koder/run", "--setenv", "TMPDIR", "/tmp/koder/run"}
 	if _, err := os.Stat("/tmp/.X11-unix"); err == nil {
 		args = append(args, "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix")
 	}

@@ -118,6 +118,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/sessions/", s.handleSessionAPI)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
+	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
@@ -138,6 +139,25 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	}()
 	go s.openBrowserIfNeeded(ctx)
 	return s, nil
+}
+
+func (s *Server) handleSessionAttachment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/attachments/session/"), "/")
+	if len(parts) != 2 {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := s.controller.SessionAttachmentPath(id.ID(parts[0]), parts[1])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeFile(w, r, path)
 }
 
 // Addr returns the resolved server bind address.

@@ -539,14 +539,17 @@ func (r *Runtime) resolveReference(session domain.Session, meta reference.Metada
 
 func (r *Runtime) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
 	stored, ok := tools.ViewImageStoredResultForPart(part)
+	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
 	if !ok {
-		return provider.Message{}, false
+		browserResult, browserOK := tools.BrowserStoredResultForPart(part)
+		if !browserOK || browserResult.Attachment == nil || attachment.ClassifyMIME(browserResult.Attachment.MIME) != attachment.KindImage {
+			return provider.Message{}, false
+		}
+		sourcePath, mimeType = browserResult.Attachment.Path, browserResult.Attachment.MIME
 	}
 	if !r.chatSupportsImageAttachments(chat) {
 		return provider.Message{}, false
 	}
-	sourcePath := strings.TrimSpace(stored.SourcePath)
-	mimeType := strings.TrimSpace(stored.MIMEType)
 	if sourcePath == "" || mimeType == "" {
 		return provider.Message{}, false
 	}

@@ -75,6 +75,7 @@ type Service interface {
 	Snapshot(context.Context, Chat, string, int, int) (Snapshot, error)
 	Find(context.Context, Chat, string, string, int) (Snapshot, error)
 	Interact(context.Context, Chat, string, string, string) error
+	Upload(context.Context, Chat, string, []string) error
 	Evaluate(context.Context, Chat, string) (string, error)
 	Screenshot(context.Context, Chat, string, bool, string, int) (Binary, error)
 	PDF(context.Context, Chat) (Binary, error)

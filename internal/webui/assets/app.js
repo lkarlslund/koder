@@ -749,6 +749,13 @@
       return 'tool-diff-context';
     }
     function imageResultSource(data) {
+	  const attachment = firstValue(data, ['attachment', 'Attachment']);
+	  if (attachment) {
+	    const attachmentID = firstValue(attachment, ['id', 'ID']);
+	    const sessionID = firstValue(data, ['session_id', 'SessionID']);
+	    const name = firstValue(attachment, ['name', 'Name']);
+	    if (attachmentID && sessionID) return {path: name, sourcePath: '', src: '/api/attachments/session/' + encodeURIComponent(sessionID) + '/' + encodeURIComponent(attachmentID)};
+	  }
       const path = firstValue(data, ['path', 'Path']);
       const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
       if (!sourcePath) return {path, sourcePath: '', src: ''};
@@ -940,6 +947,8 @@
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
       if (kind === 'show_image') return renderShowImageBlock(data, toolResultText(tool));
+	  if (kind === 'browser_screenshot' || kind === 'browser_image') return renderImagePreviewBlock('Browser image', data, toolResultText(tool), false);
+	  if (kind.startsWith('browser_')) return renderCompactBlock(firstValue(data, ['summary', 'Summary']) || kind.replaceAll('_', ' '), firstValue(data, ['text', 'Text']) || toolResultText(tool), 'tool-result-body-mono');
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
     }
     function renderToolError(tool) {

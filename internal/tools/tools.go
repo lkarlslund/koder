@@ -291,8 +291,19 @@ func checkToolEnabled(runtime Runtime, kind ID) error {
 
 func checkRuntimeAccess(runtime Runtime, req Request) error {
 	switch req.Tool {
-	case WebFetch, WebSearch, MCP:
+	case WebFetch, WebSearch, MCP,
+		BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
+		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
+		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserEvaluate, BrowserScreenshot,
+		BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest, BrowserResponseBody,
+		BrowserDownloads, BrowserDownload:
 		return runtime.CheckNetworkAccess()
+	case BrowserUpload:
+		if err := runtime.CheckNetworkAccess(); err != nil {
+			return err
+		}
+		return checkBrowserUploadPaths(runtime, req)
 	case FileWrite, FileEdit:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
 	case FileRead, ViewImage, ShowImage, FileGlob, FileGrep, CodeSearch, Lint:
@@ -300,6 +311,23 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 	default:
 		return nil
 	}
+}
+
+func checkBrowserUploadPaths(runtime Runtime, req Request) error {
+	var paths []string
+	if err := json.Unmarshal([]byte(req.Args["paths"]), &paths); err != nil {
+		return fmt.Errorf("decode browser upload paths: %w", err)
+	}
+	for _, path := range paths {
+		abs, _, err := ReadablePath(runtime.Workdir, path)
+		if err != nil {
+			return err
+		}
+		if err := runtime.CheckPathAccess(accesssettings.AccessRead, abs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func checkRequestPath(runtime Runtime, req Request, kind accesssettings.AccessKind) error {

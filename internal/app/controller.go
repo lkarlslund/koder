@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -975,6 +976,21 @@ func abortAndSendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
 // ImportClipboardImage stores a pasted image as a draft attachment for the web composer.
 func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType string) (attachment.Draft, error) {
 	return attachment.NewManager(c.cfg.StateDir()).ImportClipboardImageData(data, name, mimeType)
+}
+
+func (c *Controller) SessionAttachmentPath(sessionID id.ID, attachmentID string) (string, error) {
+	if sessionID == "" || len(attachmentID) != 24 {
+		return "", fmt.Errorf("invalid attachment reference")
+	}
+	if _, err := hex.DecodeString(attachmentID); err != nil {
+		return "", fmt.Errorf("invalid attachment reference")
+	}
+	dir := attachment.NewManager(c.cfg.StateDir()).SessionDir(sessionID)
+	matches, err := filepath.Glob(filepath.Join(dir, attachmentID+".*"))
+	if err != nil || len(matches) != 1 {
+		return "", fmt.Errorf("attachment not found")
+	}
+	return matches[0], nil
 }
 
 // ContinueForSelection asks the selected chat to continue.

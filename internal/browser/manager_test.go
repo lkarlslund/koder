@@ -45,10 +45,10 @@ func TestSandboxCommandHidesHomeAndUsesPrivateProfile(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap unavailable")
 	}
-	cmd := exec.Command("/usr/bin/chromium", "--user-data-dir=/koder/profile")
+	cmd := exec.Command("/usr/bin/chromium", "--user-data-dir=/tmp/koder/profile")
 	sandboxCommand(cmd, "/state/profile", "/state/run")
 	joined := strings.Join(cmd.Args, " ")
-	for _, want := range []string{"--tmpfs /home", "--bind /state/profile /koder/profile", "-- /usr/bin/chromium"} {
+	for _, want := range []string{"--tmpfs /home", "--bind /state/profile /tmp/koder/profile", "-- /usr/bin/chromium"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("sandbox command missing %q: %s", want, joined)
 		}

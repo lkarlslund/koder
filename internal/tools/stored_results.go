@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
@@ -292,6 +293,14 @@ type ShowImageStoredResult struct {
 	Summary    string `json:"summary,omitempty"`
 }
 
+type BrowserStoredResult struct {
+	Kind       string               `json:"kind"`
+	SessionID  string               `json:"session_id,omitempty"`
+	Summary    string               `json:"summary,omitempty"`
+	Text       string               `json:"text,omitempty"`
+	Attachment *attachment.Metadata `json:"attachment,omitempty"`
+}
+
 type MCPStoredContentItem struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -336,6 +345,7 @@ func (WebFetchStoredResult) storedResultPayload()      {}
 func (WebSearchStoredResult) storedResultPayload()     {}
 func (ViewImageStoredResult) storedResultPayload()     {}
 func (ShowImageStoredResult) storedResultPayload()     {}
+func (BrowserStoredResult) storedResultPayload()       {}
 func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
 func (ErrorStoredResult) storedResultPayload()         {}
@@ -439,6 +449,13 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
 	case ShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, compactShowImageStoredResult)
+	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
+		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
+		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserUpload, BrowserEvaluate,
+		BrowserScreenshot, BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest,
+		BrowserResponseBody, BrowserDownloads, BrowserDownload:
+		return decodeAndFormat[BrowserStoredResult](env.Payload, formatBrowserStoredResult)
 	case FileEdit, FileWrite, Lint:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
@@ -666,6 +683,18 @@ func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool
 	return result, true
 }
 
+func BrowserStoredResultForPart(part domain.Part) (BrowserStoredResult, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok || env.Status != StoredResultStatusOK {
+		return BrowserStoredResult{}, false
+	}
+	var result BrowserStoredResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil || result.Attachment == nil {
+		return BrowserStoredResult{}, false
+	}
+	return result, true
+}
+
 func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ShowImage {
@@ -827,6 +856,13 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
 	case ShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
+	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
+		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
+		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserUpload, BrowserEvaluate,
+		BrowserScreenshot, BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest,
+		BrowserResponseBody, BrowserDownloads, BrowserDownload:
+		return decodeAndFormat[BrowserStoredResult](env.Payload, formatBrowserStoredResult)
 	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend, MilestoneWrite, MilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename, ChatCleanup:
@@ -836,6 +872,13 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func formatBrowserStoredResult(result BrowserStoredResult) string {
+	if text := strings.TrimSpace(result.Text); text != "" {
+		return text
+	}
+	return strings.TrimSpace(result.Summary)
 }
 
 func formatErrorStoredResult(tool ID, message string) string {

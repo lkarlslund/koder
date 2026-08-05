@@ -3463,7 +3463,7 @@ func toolCallRequiresImages(call domain.ToolCall) bool {
 }
 
 func toolExecutionRequiresImages(execution domain.ToolExecution) bool {
-	if execution.Tool != domain.ToolKindViewImage || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
+	if (execution.Tool != domain.ToolKindViewImage && execution.Tool != domain.ToolKindBrowserScreenshot && execution.Tool != domain.ToolKindBrowserImage) || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
 		return false
 	}
 	return toolResultRequiresImages(execution.Tool, execution.ToolCallID, execution.Args, *execution.Result)
@@ -3483,10 +3483,11 @@ func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID
 		},
 	}
 	stored, ok := tools.ViewImageStoredResultForPart(part)
-	if !ok {
-		return false
+	if ok {
+		return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != ""
 	}
-	return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != ""
+	browserResult, ok := tools.BrowserStoredResultForPart(part)
+	return ok && browserResult.Attachment != nil && attachment.ClassifyMIME(browserResult.Attachment.MIME) == attachment.KindImage
 }
 
 func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
