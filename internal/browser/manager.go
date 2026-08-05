@@ -383,7 +383,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	var targetID target.ID
 	err := chromedp.Run(createCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var createErr error
-		targetID, createErr = target.CreateTarget(url).Do(ctx)
+		targetID, createErr = target.CreateTarget("about:blank").Do(ctx)
 		return createErr
 	}))
 	createCancel()
@@ -404,6 +404,14 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	m.mu.Unlock()
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
+	}
+	if url != "about:blank" {
+		result, err := m.Navigate(ctx, chat, url, "load")
+		if err != nil {
+			_ = m.CloseTab(context.Background(), chat, tab.id)
+			return browserapi.Tab{}, err
+		}
+		return result, nil
 	}
 	return m.tabInfo(ctx, chat, tab)
 }
@@ -467,12 +475,7 @@ func (m *Manager) CloseTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	}
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
-	closeCtx, cancel := context.WithTimeout(m.browserContext(), m.timeout())
-	defer cancel()
-	err = chromedp.Run(closeCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		return target.CloseTarget(tab.targetID).Do(ctx)
-	}))
-	if err != nil {
+	if err := m.closeTarget(ctx, tab.targetID); err != nil {
 		return fmt.Errorf("close browser tab: %w", err)
 	}
 	tab.cancel()
@@ -518,14 +521,7 @@ func (m *Manager) discardTab(tabID string) {
 	if tab == nil || browserCtx == nil {
 		return
 	}
-	chromedpContext := chromedp.FromContext(browserCtx)
-	if chromedpContext == nil || chromedpContext.Browser == nil {
-		return
-	}
-	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	browserExecutor := cdp.WithExecutor(closeCtx, chromedpContext.Browser)
-	if err := target.CloseTarget(tab.targetID).Do(browserExecutor); err != nil {
+	if err := m.closeTarget(context.Background(), tab.targetID); err != nil {
 		return
 	}
 	tab.cancel()
@@ -544,7 +540,18 @@ func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wa
 	tab.dataMu.Unlock()
 	opCtx, cancel := m.operationContext(ctx, tabCtx)
 	defer cancel()
+	var previous *page.NavigationEntry
+	if err := chromedp.Run(opCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		current, entries, err := page.GetNavigationHistory().Do(ctx)
+		if err == nil && current >= 0 && current < int64(len(entries)) {
+			previous = entries[current]
+		}
+		return err
+	})); err != nil {
+		return browserapi.Tab{}, fmt.Errorf("inspect browser navigation history: %w", err)
+	}
 	if err := chromedp.Run(opCtx, chromedp.Navigate(strings.TrimSpace(rawURL))); err != nil {
+		m.restoreNavigation(tabCtx, previous)
 		return browserapi.Tab{}, fmt.Errorf("navigate browser: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(wait)) {
@@ -557,6 +564,29 @@ func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wa
 		return browserapi.Tab{}, fmt.Errorf("unsupported browser wait condition %q", wait)
 	}
 	return m.tabInfo(ctx, chat, tab)
+}
+
+func (m *Manager) closeTarget(ctx context.Context, targetID target.ID) error {
+	m.mu.Lock()
+	browserCtx := m.browserCtx
+	m.mu.Unlock()
+	chromedpContext := chromedp.FromContext(browserCtx)
+	if chromedpContext == nil || chromedpContext.Browser == nil {
+		return errors.New("browser is not running")
+	}
+	closeCtx, cancel := context.WithTimeout(ctx, m.timeout())
+	defer cancel()
+	browserExecutor := cdp.WithExecutor(closeCtx, chromedpContext.Browser)
+	return target.CloseTarget(targetID).Do(browserExecutor)
+}
+
+func (m *Manager) restoreNavigation(tabCtx context.Context, entry *page.NavigationEntry) {
+	if entry == nil {
+		return
+	}
+	restoreCtx, cancel := context.WithTimeout(tabCtx, 3*time.Second)
+	defer cancel()
+	_ = chromedp.Run(restoreCtx, chromedp.Navigate(entry.URL))
 }
 
 func (m *Manager) History(ctx context.Context, chat browserapi.Chat, direction string) (browserapi.Tab, error) {

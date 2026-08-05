@@ -180,6 +180,9 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new second tab: %v", err)
 	}
+	if second.URL != server.URL+"/" {
+		t.Fatalf("new tab returned stale URL: %s", second.URL)
+	}
 	visibility, err = m.Evaluate(t.Context(), chat, `document.visibilityState`)
 	if err != nil || visibility != `"visible"` {
 		t.Fatalf("second tab is not active: %s, %v", visibility, err)
@@ -190,6 +193,24 @@ func TestChromiumIntegration(t *testing.T) {
 	visibility, err = m.Evaluate(t.Context(), chat, `document.visibilityState`)
 	if err != nil || visibility != `"visible"` {
 		t.Fatalf("selected tab is not active after %s: %s, %v", second.ID, visibility, err)
+	}
+	if _, err := m.Navigate(t.Context(), chat, "http://127.0.0.1:1/unreachable", "load"); err == nil {
+		t.Fatal("failed navigation unexpectedly succeeded")
+	}
+	owned, err := m.ownedTab(chat, tab.ID)
+	if err != nil {
+		t.Fatalf("get selected tab after failed navigation: %v", err)
+	}
+	current, err := m.tabInfo(t.Context(), chat, owned)
+	if err != nil || current.URL != server.URL+"/history-two" {
+		t.Fatalf("failed navigation changed tab state: %#v, %v", current, err)
+	}
+	if err := m.CloseTab(t.Context(), chat, second.ID); err != nil {
+		t.Fatalf("close tab: %v", err)
+	}
+	tabs, err = m.Tabs(t.Context(), chat)
+	if err != nil || len(tabs) != 1 || tabs[0].ID != tab.ID {
+		t.Fatalf("closed tab remains listed: %#v, %v", tabs, err)
 	}
 }
 
