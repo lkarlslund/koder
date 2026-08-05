@@ -261,6 +261,8 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 func TestDetectLlamaSlotsUsesSlotsEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models":
+			http.NotFound(w, r)
 		case "/slots":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
@@ -288,6 +290,8 @@ func TestDetectLlamaSlotsUsesSlotsEndpoint(t *testing.T) {
 func TestDetectLlamaSlotsFallsBackToPropsMaxInstances(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models":
+			http.NotFound(w, r)
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":
@@ -340,6 +344,58 @@ func TestDetectContextWindowUsesCompatibleModelStatusArgs(t *testing.T) {
 	}
 }
 
+func TestDetectContextWindowDoesNotLoadUnloadedRouterModel(t *testing.T) {
+	var propsCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"value":"unloaded","args":["llama-server","--ctx-size","262144"]}}]}`))
+		case "/props":
+			propsCalls++
+			http.Error(w, "must not load model", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind: ProviderKindCompatible, BaseURL: server.URL, Timeout: time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 262144 || propsCalls != 0 {
+		t.Fatalf("expected passive context detection, got context=%d props_calls=%d", got, propsCalls)
+	}
+}
+
+func TestDetectLlamaSlotsDoesNotLoadUnloadedRouterModel(t *testing.T) {
+	var activeProbeCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"value":"unloaded","preset":"parallel = 2\n"}}]}`))
+		case "/slots", "/props":
+			activeProbeCalls++
+			http.Error(w, "must not load model", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := DetectLlamaSlots(context.Background(), "openai-compatible", config.Provider{
+		Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 2 || activeProbeCalls != 0 {
+		t.Fatalf("expected passive slot detection, got slots=%d active_probe_calls=%d", got, activeProbeCalls)
+	}
+}
+
 func TestDetectContextWindowUsesCompatibleModelStatusPreset(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -369,7 +425,7 @@ func TestDetectContextWindowUsesCompatibleModelStatusPreset(t *testing.T) {
 func TestDetectContextWindowUsesNativePropsFromConfiguredV1Base(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/models":
+		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":65536}]}`))
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
@@ -398,13 +454,13 @@ func TestDetectContextWindowUsesNativePropsFromConfiguredV1Base(t *testing.T) {
 func TestDetectContextWindowPrefersEffectivePropsOverModelArgs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"args":["llama-server","--ctx-size","131072"]}}]}`))
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
 			}
 			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":65536}}`))
-		case "/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"args":["llama-server","--ctx-size","131072"]}}]}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -427,7 +483,7 @@ func TestDetectContextWindowPrefersEffectivePropsOverModelArgs(t *testing.T) {
 func TestDetectContextWindowFallsBackToPropsWhenModelListLacksContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/models":
+		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {

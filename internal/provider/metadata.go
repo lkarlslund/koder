@@ -45,26 +45,30 @@ type ollamaShowResponse struct {
 func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
 	modelID = strings.TrimSpace(modelID)
 	model := domain.Model{ID: modelID}
-
-	props, propsErr := c.Props(ctx, modelID)
-	if propsErr == nil && props.DefaultGenerationSettings.NCtx > 0 {
-		model.ContextWindow = props.DefaultGenerationSettings.NCtx
-		model.MetadataSource = "llama.cpp-props"
-		return model, nil
-	}
-	if propsErr != nil && !isOptionalContextWindowProbeError(propsErr) {
-		return domain.Model{}, propsErr
-	}
-
-	models, listErr := c.ListModels(ctx)
+	runtimeStatus := ""
+	items, listErr := c.listModelItems(ctx)
 	if listErr == nil {
-		for _, listed := range models {
-			if strings.TrimSpace(listed.ID) == modelID {
-				model = listed
-				break
-			}
+		if item, ok := modelResponseItemByID(items, modelID); ok {
+			model = modelFromResponseItem(item)
+			runtimeStatus = strings.ToLower(strings.TrimSpace(item.Status.Value))
 		}
 	}
+
+	// llama.cpp's router loads an unloaded model to serve /props. Its /models
+	// response already exposes the configured context through status args, so
+	// only ask /props when the model is loaded or no router status is available.
+	if runtimeStatus != "unloaded" {
+		props, propsErr := c.Props(ctx, modelID)
+		if propsErr == nil && props.DefaultGenerationSettings.NCtx > 0 {
+			model.ContextWindow = props.DefaultGenerationSettings.NCtx
+			model.MetadataSource = "llama.cpp-props"
+			return model, nil
+		}
+		if propsErr != nil && !isOptionalContextWindowProbeError(propsErr) {
+			return domain.Model{}, propsErr
+		}
+	}
+
 	if model.ContextWindow > 0 {
 		return model, nil
 	}

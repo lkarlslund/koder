@@ -1244,6 +1244,8 @@ func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":
@@ -1317,6 +1319,8 @@ func TestControllerStartWarmsDefaultModelContextWindow(t *testing.T) {
 	var propsCalls atomic.Int32
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":

@@ -294,6 +294,7 @@ type modelResponseItem struct {
 		MaxCompletionTokens int `json:"max_completion_tokens"`
 	} `json:"top_provider"`
 	Status struct {
+		Value  string   `json:"value"`
 		Args   []string `json:"args"`
 		Preset string   `json:"preset"`
 	} `json:"status"`
@@ -425,6 +426,18 @@ func defaultTransportWithHeaderTimeout(timeout time.Duration) http.RoundTripper 
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
+	items, err := c.listModelItems(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]domain.Model, 0, len(items))
+	for _, item := range items {
+		models = append(models, modelFromResponseItem(item))
+	}
+	return models, nil
+}
+
+func (c *Client) listModelItems(ctx context.Context) ([]modelResponseItem, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, c.apiPath("/models"), nil)
 	if err != nil {
 		return nil, err
@@ -449,21 +462,30 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode model list: %w", err)
 	}
+	return payload.Data, nil
+}
 
-	models := make([]domain.Model, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		model := domain.Model{
-			ID:               item.ID,
-			OwnedBy:          item.OwnedBy,
-			ContextWindow:    listedModelContextWindow(item, true),
-			MaxContextWindow: listedModelContextWindow(item, false),
-			MaxOutputTokens:  firstPositive(item.TopProvider.MaxCompletionTokens, item.MaxCompletionTokens),
-			MetadataSource:   "openai-models",
-		}
-		applyListedCapabilities(&model, item)
-		models = append(models, model)
+func modelFromResponseItem(item modelResponseItem) domain.Model {
+	model := domain.Model{
+		ID:               item.ID,
+		OwnedBy:          item.OwnedBy,
+		ContextWindow:    listedModelContextWindow(item, true),
+		MaxContextWindow: listedModelContextWindow(item, false),
+		MaxOutputTokens:  firstPositive(item.TopProvider.MaxCompletionTokens, item.MaxCompletionTokens),
+		MetadataSource:   "openai-models",
 	}
-	return models, nil
+	applyListedCapabilities(&model, item)
+	return model
+}
+
+func modelResponseItemByID(items []modelResponseItem, modelID string) (modelResponseItem, bool) {
+	modelID = strings.TrimSpace(modelID)
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == modelID {
+			return item, true
+		}
+	}
+	return modelResponseItem{}, false
 }
 
 func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (int, error) {
@@ -581,6 +603,36 @@ func contextWindowFromModelStatus(args []string, preset string) int {
 	return 0
 }
 
+func parallelSlotsFromModelStatus(args []string, preset string) int {
+	for idx, arg := range args {
+		if arg == "--parallel" || arg == "-np" {
+			if idx+1 < len(args) {
+				if n := parsePositiveInt(args[idx+1]); n > 0 {
+					return n
+				}
+			}
+			continue
+		}
+		for _, prefix := range []string{"--parallel=", "-np="} {
+			if value, ok := strings.CutPrefix(arg, prefix); ok {
+				if n := parsePositiveInt(value); n > 0 {
+					return n
+				}
+			}
+		}
+	}
+	for _, line := range strings.Split(preset, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "parallel" {
+			continue
+		}
+		if n := parsePositiveInt(value); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
 func parsePositiveInt(value string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || n <= 0 {
@@ -634,6 +686,11 @@ func DetectLlamaSlots(ctx context.Context, providerID string, cfg config.Provide
 	client, err := New(providerID, cfg, recorder)
 	if err != nil {
 		return 0, err
+	}
+	if items, listErr := client.listModelItems(ctx); listErr == nil {
+		if item, ok := modelResponseItemByID(items, modelID); ok && strings.EqualFold(strings.TrimSpace(item.Status.Value), "unloaded") {
+			return parallelSlotsFromModelStatus(item.Status.Args, item.Status.Preset), nil
+		}
 	}
 	slots, err := client.Slots(ctx, modelID)
 	if err == nil {
