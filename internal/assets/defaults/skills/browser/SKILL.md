@@ -30,6 +30,8 @@ or an MCP browser server.
    Matching is partial by default and fails when ambiguous. Set `exact=true`
    only when strict matching is useful. Use `target="css=..."` or
    `target="xpath=..."` only as an advanced fallback.
+   For responsive images, ambiguity details include rendered dimensions; prefer
+   the visible full-size image instead of relying on generated CSS class names.
 6. Use focused tools such as `browser_click`, `browser_fill`, `browser_select`,
    and `browser_upload`. Every call resolves its target against the current DOM;
    it never depends on a prior snapshot or retained element handle.
@@ -37,18 +39,23 @@ or an MCP browser server.
    directly to model vision and the Koder UI without a workspace file.
 
 Use `browser_evaluate` for targeted DOM inspection or behavior that focused
-tools cannot express. Keep expressions bounded and return concise JSON. Do not
-extract cookies, passwords, authorization tokens, or browser profile data.
+tools cannot express. Keep expressions bounded and return concise JSON. Wrap
+multi-statement expressions in an invoked function such as
+`(()=>{ /* inspect */ return result })()`; top-level `return` is invalid.
+Do not extract cookies, passwords, authorization tokens, or browser profile
+data.
 
 ## Images And Files
 
 - Use `browser_image` to capture an image, canvas, or visual element directly.
+  Set `save_to_file` when the image must be persisted in the workspace; do not
+  export browser cookies and redownload it with a shell command.
 - Use `browser_requests` and `browser_response_body` when original loaded bytes
   matter. Request IDs are opaque and sensitive headers are redacted.
 - Use `browser_downloads` and `browser_download` for completed downloads.
 - `browser_upload` accepts only paths authorized for workspace reading.
-- Browser-generated files become session attachments; do not convert them to
-  base64 or create temporary workspace files.
+- Without `save_to_file`, browser-generated files become session attachments;
+  do not convert them to base64 or create temporary workspace files.
 
 ## Diagnostics
 

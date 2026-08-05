@@ -55,6 +55,10 @@ func TestChromiumIntegration(t *testing.T) {
 <div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
 <input type="file" aria-label="Upload file">
 <img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E">
+<a id="profile-link" href="#profile" onclick="event.preventDefault();document.querySelector('output').textContent='profile-clicked'"><img id="profile-photo" alt="View Michael Christensen’s profile" width="152" height="152" src="profile-displayphoto-shrink_100_100.jpg"></a>
+<a href="#small-profile" onclick="event.preventDefault();document.querySelector('output').textContent='small-profile-clicked'"><img alt="" width="32" height="32" src="profile-displayphoto-small.jpg"></a>
+<img alt="Responsive profile" style="display:none" width="20" height="20" src="responsive-hidden.jpg">
+<img alt="Responsive profile" width="40" height="40" src="responsive-visible.jpg">
 <output>waiting</output><script>document.addEventListener('keydown',event=>{if(event.key==='F11')document.querySelector('output').textContent='global-f11'})</script>`))
 	}))
 	defer server.Close()
@@ -178,6 +182,18 @@ func TestChromiumIntegration(t *testing.T) {
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "#button"}, ""); err != nil {
 		t.Fatalf("click CSS selector: %v", err)
 	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "#profile-photo"}, ""); err != nil {
+		t.Fatalf("click image CSS selector: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "View Michael Christensen's profile", Role: "image", Exact: true}, ""); err != nil {
+		t.Fatalf("click linked image with normalized accessible name: %v", err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Profile photo"}, ""); err != nil {
+		t.Fatalf("click natural image target: %v", err)
+	}
+	if value, err = m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"profile-clicked"` {
+		t.Fatalf("natural image target did not prefer the uniquely largest image: %s, %v", value, err)
+	}
 	if err := m.Drag(t.Context(), chat, browserapi.Locator{Target: "Drag source", Exact: true}, browserapi.Locator{Target: "Drop target", Exact: true}); err != nil {
 		t.Fatalf("drag semantic targets: %v", err)
 	}
@@ -262,12 +278,16 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find image: %v", err)
 	}
-	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('img').style.visibility='hidden'`); err != nil {
-		t.Fatalf("hide referenced image: %v", err)
+	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('img[alt="Photo"]').src='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="20" height="20"%3E%3Crect width="20" height="20" fill="blue"/%3E%3C/svg%3E'`); err != nil {
+		t.Fatalf("replace referenced image source: %v", err)
 	}
 	elementShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Target: "Photo", Role: "image", Exact: true}, false, "png", 90)
 	if err != nil || len(elementShot.Data) == 0 || elementShot.MIME != "image/png" {
 		t.Fatalf("unexpected direct element screenshot: %d bytes %s, %v", len(elementShot.Data), elementShot.MIME, err)
+	}
+	responsiveShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Target: "Responsive profile", Role: "image", Exact: true}, false, "png", 90)
+	if err != nil || len(responsiveShot.Data) == 0 || responsiveShot.MIME != "image/png" {
+		t.Fatalf("visible responsive image did not resolve uniquely: %d bytes %s, %v", len(responsiveShot.Data), responsiveShot.MIME, err)
 	}
 	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-one", "load"); err != nil {
 		t.Fatalf("navigate first history page: %v", err)

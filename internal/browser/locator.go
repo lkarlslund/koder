@@ -51,7 +51,7 @@ func mustJSON(value any) string {
 
 const semanticResolverJS = `
 const resolve=(cfg,action)=>{
-  const norm=value=>(value||'').replace(/\s+/g,' ').trim();
+  const norm=value=>(value||'').replace(/\u00a0/g,' ').replace(/[\u2018\u2019]/g,"'").replace(/[\u2013\u2014]/g,'-').replace(/\s+/g,' ').trim();
   const lower=value=>norm(value).toLocaleLowerCase();
   const visible=el=>{
     const style=getComputedStyle(el);
@@ -79,7 +79,10 @@ const resolve=(cfg,action)=>{
   const labelledBy=el=>norm((el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||'').join(' '));
 	const labelText=item=>{const clone=item.cloneNode(true);for(const control of clone.querySelectorAll('input,select,textarea,button'))control.remove();return clone.textContent||''};
 	const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(labelText).join(' '):'');
-  const name=el=>norm(labelledBy(el)||el.getAttribute('aria-label')||label(el)||el.alt||el.title||el.placeholder||el.innerText||el.value||el.textContent||'');
+  const sourceHint=el=>el.tagName==='IMG'?norm((el.currentSrc||el.src||'').split(/[?#]/,1)[0].replace(/[^a-zA-Z0-9]+/g,' ')):'';
+  const name=el=>norm(labelledBy(el)||el.getAttribute('aria-label')||label(el)||el.alt||el.title||el.placeholder||el.innerText||el.value||el.textContent||sourceHint(el)||'');
+  const searchableName=el=>lower(name(el)+' '+sourceHint(el));
+  const matches=(candidate,wanted,exact)=>exact?lower(name(candidate))===wanted:searchableName(candidate).includes(wanted)||wanted.split(' ').filter(Boolean).every(token=>searchableName(candidate).includes(token));
   const collect=root=>{
     const out=[];
     for(const el of root.querySelectorAll('*')){
@@ -93,7 +96,7 @@ const resolve=(cfg,action)=>{
     const type=(el.type||'').toLowerCase();
     const r=role(el);
     switch(action){
-      case 'click':return ['button','link','checkbox','radio','menuitem','option','tab','switch'].includes(r)||el.onclick||el.tabIndex>=0;
+		case 'click':return ['button','link','checkbox','radio','menuitem','option','tab','switch'].includes(r)||el.onclick||el.tabIndex>=0||(tag==='IMG'&&Boolean(el.closest('a,button,[role="button"],[role="link"]')));
 		case 'fill':case 'type':return tag==='TEXTAREA'||el.isContentEditable||(tag==='INPUT'&&!['button','submit','reset','checkbox','radio','file','hidden'].includes(type));
 		case 'press':return ['INPUT','TEXTAREA','SELECT','BUTTON','A'].includes(tag)||el.isContentEditable||el.tabIndex>=0;
       case 'select':return tag==='SELECT'||r==='listbox'||r==='combobox';
@@ -126,8 +129,7 @@ const resolve=(cfg,action)=>{
       if(!allowed(el)||!inScope(el))return false;
       if(action!=='capture'&&action!=='upload'&&!visible(el))return false;
       if(wantedRole&&role(el)!==wantedRole)return false;
-      const candidate=lower(name(el));
-	      return cfg.exact?candidate===wanted:candidate.includes(wanted);
+	      return matches(el,wanted,Boolean(cfg.exact));
 	    });
 	    if(!cfg.exact&&candidates.length>1){
 	      const exactMatches=candidates.filter(el=>lower(name(el))===wanted);
@@ -137,9 +139,16 @@ const resolve=(cfg,action)=>{
 	        if(semanticMatches.length)candidates=semanticMatches;
 	      }
 	    }
+	    if(!cfg.exact&&candidates.length>1&&['click','capture'].includes(action)&&candidates.every(el=>role(el)==='image')){
+	      const ranked=[...candidates].sort((a,b)=>{const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return br.width*br.height-ar.width*ar.height});
+	      const first=ranked[0].getBoundingClientRect(),second=ranked[1].getBoundingClientRect();
+	      if(first.width*first.height>second.width*second.height)candidates=[ranked[0]];
+	    }
 	  }
-  candidates=candidates.filter(allowed).filter(inScope);
-  if(action!=='capture'&&action!=='upload')candidates=candidates.filter(visible);
+  const selectorNeedsActionType=['fill','type','select','check','uncheck','upload'].includes(action);
+  if(!cfg.selector||selectorNeedsActionType)candidates=candidates.filter(allowed);
+  candidates=candidates.filter(inScope);
+  if(action!=='upload')candidates=candidates.filter(visible);
   const occurrence=Number(cfg.occurrence||0);
   if(occurrence>0){
     if(occurrence>candidates.length)throw new Error('Browser target occurrence '+occurrence+' not found; matched '+candidates.length+' element(s)');
@@ -149,7 +158,9 @@ const resolve=(cfg,action)=>{
   const describe=el=>{
     const r=role(el)||el.tagName.toLowerCase();
     const n=name(el);
-    return r+(n?' "'+n.slice(0,120)+'"':'');
+		const rect=el.getBoundingClientRect();
+		const size=rect.width>0&&rect.height>0?' '+Math.round(rect.width)+'x'+Math.round(rect.height):'';
+    return r+(n?' "'+n.slice(0,120)+'"':'')+size;
   };
   const requested=cfg.selector?'selector "'+cfg.selector+'"':'target "'+cfg.target+'"'+(cfg.role?' with role "'+cfg.role+'"':'');
   if(candidates.length===0)throw new Error('Browser '+requested+' was not found in the current DOM');
