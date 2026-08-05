@@ -5008,6 +5008,12 @@
           const cleanHeaders = {};
           for (const [key, value] of Object.entries(headers)) cleanHeaders[key] = String(value);
           const payload = Object.assign({}, this.mcpDraft, {id, headers: cleanHeaders});
+          if (String(payload.url || '').trim().toLowerCase().startsWith('stdio:')) {
+            payload.headers = {};
+            payload.bearer_token = '';
+            payload.bearer_token_env = '';
+            payload.disable_standalone_sse = false;
+          }
           delete payload.original_id;
           return payload;
         },

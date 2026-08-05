@@ -2,8 +2,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +16,35 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestMCPStdioHelperProcess(t *testing.T) {
+	if os.Getenv("KODER_MCP_STDIO_HELPER") != "1" {
+		return
+	}
+
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "stdio-docs", Version: "v1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "echo",
+		Description: "Echo text",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
+	}, func(_ context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		var args struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "stdio " + args.Text}},
+		}, nil
+	})
+
+	if err := server.Run(context.Background(), &sdkmcp.StdioTransport{}); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
 func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	t.Helper()
@@ -91,6 +124,11 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := manager.DisconnectServer("docs"); err != nil {
+			t.Errorf("disconnect docs server: %v", err)
+		}
+	}()
 	if err := manager.ConnectAll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +175,92 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	}
 	if len(prompt.Messages) != 1 || prompt.Messages[0].Text != "review apis" {
 		t.Fatalf("unexpected prompt result: %#v", prompt)
+	}
+}
+
+func TestManagerConnectsStdioServer(t *testing.T) {
+	ctx := context.Background()
+	values := url.Values{}
+	values.Add("arg", "-test.run=TestMCPStdioHelperProcess")
+	values.Add("env.KODER_MCP_STDIO_HELPER", "1")
+	stdioURL := (&url.URL{Scheme: "stdio", Path: os.Args[0], RawQuery: values.Encode()}).String()
+
+	manager, err := NewManager(map[string]config.MCPServer{
+		"stdio": {
+			Name: "Stdio",
+			URL:  stdioURL,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := manager.DisconnectServer("stdio"); err != nil {
+			t.Errorf("disconnect stdio server: %v", err)
+		}
+	}()
+	if err := manager.ConnectAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	states := manager.ListServers()
+	if len(states) != 1 || states[0].Status != ServerStatusConnected || states[0].ToolCount != 1 {
+		t.Fatalf("unexpected stdio server state: %#v", states)
+	}
+	result, err := manager.ExecuteTool(ctx, "stdio", "echo", map[string]any{"text": "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "stdio hello") {
+		t.Fatalf("unexpected stdio tool output: %q", result.Output)
+	}
+}
+
+func TestParseStdioURL(t *testing.T) {
+	t.Parallel()
+	cfg, err := parseStdioURL("stdio://uvx?arg=mcp-server-git&arg=--repository&arg=/tmp/repo&cwd=/tmp&env.FOO=bar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Command != "uvx" {
+		t.Fatalf("unexpected command: %q", cfg.Command)
+	}
+	if !slices.Equal(cfg.Args, []string{"mcp-server-git", "--repository", "/tmp/repo"}) {
+		t.Fatalf("unexpected args: %#v", cfg.Args)
+	}
+	if cfg.CWD != "/tmp" {
+		t.Fatalf("unexpected cwd: %q", cfg.CWD)
+	}
+	if !slices.Equal(cfg.Env, []string{"FOO=bar"}) {
+		t.Fatalf("unexpected env: %#v", cfg.Env)
+	}
+}
+
+func TestValidateServerConfigAcceptsStdioURL(t *testing.T) {
+	t.Parallel()
+	if err := ValidateServerConfig("git", config.MCPServer{URL: "stdio://uvx?arg=mcp-server-git"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateServerConfigRejectsStdioHTTPOptions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		cfg  config.MCPServer
+	}{
+		{name: "headers", cfg: config.MCPServer{URL: "stdio://uvx", Headers: map[string]string{"X-Test": "yes"}}},
+		{name: "bearer token", cfg: config.MCPServer{URL: "stdio://uvx", BearerToken: "secret"}},
+		{name: "bearer token env", cfg: config.MCPServer{URL: "stdio://uvx", BearerTokenEnv: "SECRET"}},
+		{name: "standalone sse", cfg: config.MCPServer{URL: "stdio://uvx", DisableStandaloneSSE: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateServerConfig("stdio", tt.cfg); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 

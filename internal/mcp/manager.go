@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -238,10 +240,10 @@ func (m *Manager) ConnectServer(ctx context.Context, id string) error {
 		},
 	})
 
-	transport := &sdkmcp.StreamableClientTransport{
-		Endpoint:             cfg.URL,
-		HTTPClient:           newHTTPClient(cfg),
-		DisableStandaloneSSE: cfg.DisableStandaloneSSE,
+	transport, err := newClientTransport(cfg)
+	if err != nil {
+		m.setServerError(id, err)
+		return err
 	}
 	session, err := client.Connect(connectCtx, transport, nil)
 	if err != nil {
@@ -607,13 +609,122 @@ func ValidateServerConfig(id string, cfg config.MCPServer) error {
 	if err != nil {
 		return fmt.Errorf("mcp server %q url: %w", id, err)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("mcp server %q url must use http or https", id)
-	}
 	if strings.TrimSpace(cfg.BearerToken) != "" && strings.TrimSpace(cfg.BearerTokenEnv) != "" {
 		return fmt.Errorf("mcp server %q cannot set both bearer_token and bearer_token_env", id)
 	}
+	switch parsed.Scheme {
+	case "http", "https":
+	case "stdio":
+		if _, err := parseStdioURL(rawURL); err != nil {
+			return fmt.Errorf("mcp server %q url: %w", id, err)
+		}
+		if len(cfg.Headers) > 0 {
+			return fmt.Errorf("mcp server %q stdio transport cannot set HTTP headers", id)
+		}
+		if strings.TrimSpace(cfg.BearerToken) != "" || strings.TrimSpace(cfg.BearerTokenEnv) != "" {
+			return fmt.Errorf("mcp server %q stdio transport cannot set bearer token auth", id)
+		}
+		if cfg.DisableStandaloneSSE {
+			return fmt.Errorf("mcp server %q stdio transport cannot disable standalone SSE", id)
+		}
+	default:
+		return fmt.Errorf("mcp server %q url must use http, https, or stdio", id)
+	}
 	return nil
+}
+
+type stdioCommandConfig struct {
+	Command string
+	Args    []string
+	CWD     string
+	Env     []string
+}
+
+func newClientTransport(cfg config.MCPServer) (sdkmcp.Transport, error) {
+	rawURL := strings.TrimSpace(cfg.URL)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+		return &sdkmcp.StreamableClientTransport{
+			Endpoint:             rawURL,
+			HTTPClient:           newHTTPClient(cfg),
+			DisableStandaloneSSE: cfg.DisableStandaloneSSE,
+		}, nil
+	case "stdio":
+		commandConfig, err := parseStdioURL(rawURL)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.Command(commandConfig.Command, commandConfig.Args...)
+		if commandConfig.CWD != "" {
+			cmd.Dir = commandConfig.CWD
+		}
+		if len(commandConfig.Env) > 0 {
+			cmd.Env = append(os.Environ(), commandConfig.Env...)
+		}
+		return &sdkmcp.CommandTransport{Command: cmd}, nil
+	default:
+		return nil, fmt.Errorf("unsupported MCP transport scheme %q", parsed.Scheme)
+	}
+}
+
+func parseStdioURL(rawURL string) (stdioCommandConfig, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return stdioCommandConfig{}, err
+	}
+	if parsed.Scheme != "stdio" {
+		return stdioCommandConfig{}, fmt.Errorf("scheme must be stdio")
+	}
+
+	command := strings.TrimSpace(parsed.Host)
+	if command != "" {
+		if path := strings.Trim(parsed.EscapedPath(), "/"); path != "" {
+			return stdioCommandConfig{}, fmt.Errorf("path is not supported when the command is in the host; use repeated arg query parameters")
+		}
+	} else {
+		command = strings.TrimSpace(parsed.Path)
+	}
+	if command == "" {
+		return stdioCommandConfig{}, fmt.Errorf("command is empty")
+	}
+
+	query := parsed.Query()
+	out := stdioCommandConfig{
+		Command: command,
+		Args:    slices.Clone(query["arg"]),
+	}
+	if values := query["cwd"]; len(values) > 1 {
+		return stdioCommandConfig{}, fmt.Errorf("cwd can only be set once")
+	} else if len(values) == 1 {
+		out.CWD = values[0]
+	}
+
+	var unknown []string
+	for key, values := range query {
+		switch {
+		case key == "arg", key == "cwd":
+			continue
+		case strings.HasPrefix(key, "env."):
+			name := strings.TrimPrefix(key, "env.")
+			if name == "" || strings.Contains(name, "=") {
+				return stdioCommandConfig{}, fmt.Errorf("invalid environment variable name %q", name)
+			}
+			for _, value := range values {
+				out.Env = append(out.Env, name+"="+value)
+			}
+		default:
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		return stdioCommandConfig{}, fmt.Errorf("unsupported query parameter %q", unknown[0])
+	}
+	return out, nil
 }
 
 func cloneServerConfig(cfg config.MCPServer) config.MCPServer {

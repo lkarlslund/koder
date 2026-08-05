@@ -1562,7 +1562,8 @@
             </div>
             <div class="col-12">
               <label class="form-label small text-secondary">URL</label>
-              <input class="form-control" x-model="mcpDraft.url" autocomplete="off">
+              <input class="form-control" x-model="mcpDraft.url" placeholder="https://mcp.example/sse or stdio://uvx?arg=mcp-server-git" autocomplete="off">
+              <div class="form-text">Use repeated <code>arg</code> query parameters for stdio command arguments. Optional stdio query fields: <code>cwd</code> and <code>env.NAME</code>.</div>
             </div>
             <div class="col-md-6">
               <label class="form-label small text-secondary">Startup timeout</label>
@@ -1595,6 +1596,7 @@
             <div class="col-12">
               <label class="form-label small text-secondary">Headers JSON</label>
               <textarea class="form-control font-monospace" rows="4" x-model="mcpHeadersText" spellcheck="false"></textarea>
+              <div class="form-text">Headers and bearer token auth only apply to HTTP MCP servers.</div>
             </div>
             <div class="col-12" x-show="mcpStatus">
               <div class="alert mb-0" :class="mcpStatusKind === 'success' ? 'alert-success' : (mcpStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="mcpStatus"></div>
