@@ -140,11 +140,6 @@ const resolve=(cfg,action)=>{
 	        if(semanticMatches.length)candidates=semanticMatches;
 	      }
 	    }
-	    if(!cfg.exact&&candidates.length>1&&['click','capture'].includes(action)&&candidates.every(el=>role(el)==='image')){
-	      const ranked=[...candidates].sort((a,b)=>{const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return br.width*br.height-ar.width*ar.height});
-	      const first=ranked[0].getBoundingClientRect(),second=ranked[1].getBoundingClientRect();
-	      if(first.width*first.height>second.width*second.height)candidates=[ranked[0]];
-	    }
 	  }
   const selectorNeedsActionType=['fill','type','select','check','uncheck','upload'].includes(action);
   if(!cfg.selector||selectorNeedsActionType)candidates=candidates.filter(allowed);
@@ -154,6 +149,11 @@ const resolve=(cfg,action)=>{
   if(occurrence>0){
     if(occurrence>candidates.length)throw new Error('Browser target occurrence '+occurrence+' not found; matched '+candidates.length+' element(s)');
     return candidates[occurrence-1];
+  }
+  if(candidates.length>1&&(action==='capture'||(action==='click'&&!cfg.selector))&&candidates.every(el=>role(el)==='image')){
+    const ranked=[...candidates].sort((a,b)=>{const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();return br.width*br.height-ar.width*ar.height});
+    const first=ranked[0].getBoundingClientRect(),second=ranked[1].getBoundingClientRect();
+    if(first.width*first.height>second.width*second.height)candidates=[ranked[0]];
   }
   if(candidates.length===1)return candidates[0];
   const describe=el=>{

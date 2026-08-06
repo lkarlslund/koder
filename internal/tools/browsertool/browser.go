@@ -238,6 +238,9 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		value, err = service.Evaluate(ctx, chat, args["expression"])
 	case tools.BrowserScreenshot, tools.BrowserImage:
 		locator, _ := locatorFromArgs(args, "", t.id == tools.BrowserImage)
+		if t.id == tools.BrowserImage && locator.Selector == "" && locator.Role == "" {
+			locator.Role = "image"
+		}
 		binary, binaryErr := service.Screenshot(ctx, chat, locator, boolArg(args, "full_page"), args["format"], intArg(args, "quality", 90))
 		return binaryResult(opts, t.id.String(), args["save_to_file"], binary, binaryErr)
 	case tools.BrowserPDF:

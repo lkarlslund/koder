@@ -55,8 +55,8 @@ func TestChromiumIntegration(t *testing.T) {
 <div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
 <input type="file" aria-label="Upload file">
 <img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E">
-<a id="profile-link" href="#profile" onclick="event.preventDefault();document.querySelector('output').textContent='profile-clicked'"><img id="profile-photo" alt="View Michael Christensen’s profile" width="152" height="152" src="profile-displayphoto-shrink_100_100.jpg"></a>
-<a href="#small-profile" onclick="event.preventDefault();document.querySelector('output').textContent='small-profile-clicked'"><img alt="" width="32" height="32" src="profile-displayphoto-small.jpg"></a>
+<a id="profile-link" href="#profile" onclick="event.preventDefault();document.querySelector('output').textContent='profile-clicked'"><img class="profile-variant" id="profile-photo" alt="View Michael Christensen’s profile" width="152" height="152" src="profile-displayphoto-shrink_100_100.jpg"></a>
+<a href="#small-profile" onclick="event.preventDefault();document.querySelector('output').textContent='small-profile-clicked'"><img class="profile-variant" alt="" width="32" height="32" src="profile-displayphoto-small.jpg"></a>
 <img alt="Responsive profile" style="display:none" width="20" height="20" src="responsive-hidden.jpg">
 <img alt="Responsive profile" width="40" height="40" src="responsive-visible.jpg">
 <output>waiting</output><script>document.addEventListener('keydown',event=>{if(event.key==='F11')document.querySelector('output').textContent='global-f11'})</script>`))
@@ -294,6 +294,9 @@ func TestChromiumIntegration(t *testing.T) {
 	}
 	if _, err := m.Find(t.Context(), chat, "Responsive profile", "img", 8*1024); err != nil {
 		t.Fatalf("find image with standard ARIA img role: %v", err)
+	}
+	if shot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Selector: ".profile-variant"}, false, "png", 90); err != nil || len(shot.Data) == 0 {
+		t.Fatalf("responsive image selector did not prefer uniquely largest match: %d bytes, %v", len(shot.Data), err)
 	}
 	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-one", "load"); err != nil {
 		t.Fatalf("navigate first history page: %v", err)

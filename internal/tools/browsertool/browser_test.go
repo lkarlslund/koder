@@ -163,6 +163,26 @@ func TestBrowserScreenshotWithoutFileReturnsAttachment(t *testing.T) {
 	}
 }
 
+func TestBrowserImageDefaultsSemanticTargetToImageRole(t *testing.T) {
+	browser := &locatorBrowser{}
+	_, err := (tool{id: tools.BrowserImage}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{
+			Workdir:     t.TempDir(),
+			Browser:     browser,
+			Attachments: attachment.NewManager(t.TempDir()),
+			SessionID:   "session-1",
+			ChatID:      "chat-1",
+		},
+		Request: tools.Request{Tool: tools.BrowserImage, Args: map[string]string{"target": "Profile photo"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if browser.locator.Target != "Profile photo" || browser.locator.Role != "image" {
+		t.Fatalf("browser image locator = %#v", browser.locator)
+	}
+}
+
 func TestBrowserBinaryCanSaveWithoutAttachmentStorage(t *testing.T) {
 	workdir := t.TempDir()
 	result, err := (tool{id: tools.BrowserResponseBody}).Call(t.Context(), tools.Options{
@@ -268,6 +288,11 @@ var savedPNG = []byte("\x89PNG\r\n\x1a\nimage")
 
 type savingBrowser struct{ fakeBrowser }
 
+type locatorBrowser struct {
+	fakeBrowser
+	locator browserapi.Locator
+}
+
 type waitBrowser struct {
 	fakeBrowser
 	findCalls     int
@@ -296,6 +321,11 @@ func (savingBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int
 }
 
 func (savingBrowser) Screenshot(context.Context, browserapi.Chat, browserapi.Locator, bool, string, int) (browserapi.Binary, error) {
+	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
+}
+
+func (b *locatorBrowser) Screenshot(_ context.Context, _ browserapi.Chat, locator browserapi.Locator, _ bool, _ string, _ int) (browserapi.Binary, error) {
+	b.locator = locator
 	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
 }
 
