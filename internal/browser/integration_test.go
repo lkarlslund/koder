@@ -3,6 +3,9 @@ package browser
 import (
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +22,13 @@ import (
 func TestChromiumIntegration(t *testing.T) {
 	if os.Getenv("KODER_BROWSER_TEST") == "" {
 		t.Skip("set KODER_BROWSER_TEST=1 to run Chromium integration")
+	}
+	transparentImage := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	transparentImage.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 0})
+	transparentImage.SetNRGBA(1, 0, color.NRGBA{G: 255, A: 128})
+	var transparentPNG bytes.Buffer
+	if err := png.Encode(&transparentPNG, transparentImage); err != nil {
+		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/history-one" {
@@ -44,6 +54,11 @@ func TestChromiumIntegration(t *testing.T) {
 			_, _ = w.Write([]byte("download-body"))
 			return
 		}
+		if r.URL.Path == "/transparent.png" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(transparentPNG.Bytes())
+			return
+		}
 		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title>
 <button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button>
 <a href="/download">Download</a>
@@ -57,6 +72,8 @@ func TestChromiumIntegration(t *testing.T) {
 <div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
 <input type="file" aria-label="Upload file">
 <img alt="Photo" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='red'/%3E%3C/svg%3E">
+<img alt="Transparent logo" width="20" height="20" src="/transparent.png">
+<canvas aria-label="Transparent canvas" width="2" height="2"></canvas>
 <a id="profile-link" href="#profile" onclick="event.preventDefault();document.querySelector('output').textContent='profile-clicked'"><img class="profile-variant" id="profile-photo" alt="View Michael Christensen’s profile" width="152" height="152" src="profile-displayphoto-shrink_100_100.jpg"></a>
 <a href="#small-profile" onclick="event.preventDefault();document.querySelector('output').textContent='small-profile-clicked'"><img class="profile-variant" alt="" width="32" height="32" src="profile-displayphoto-small.jpg"></a>
 <img alt="Responsive profile" style="display:none" width="20" height="20" src="responsive-hidden.jpg">
@@ -299,6 +316,37 @@ func TestChromiumIntegration(t *testing.T) {
 	}
 	if shot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Selector: ".profile-variant"}, false, "png", 90); err != nil || len(shot.Data) == 0 {
 		t.Fatalf("responsive image selector did not prefer uniquely largest match: %d bytes, %v", len(shot.Data), err)
+	}
+	extracted, err := m.Image(t.Context(), chat, browserapi.Locator{Target: "Transparent logo", Role: "image", Exact: true})
+	if err != nil {
+		t.Fatalf("extract original browser image: %v", err)
+	}
+	if extracted.MIME != "image/png" || !bytes.Equal(extracted.Data, transparentPNG.Bytes()) {
+		t.Fatalf("browser image was not original PNG: name=%q mime=%q bytes=%d", extracted.Name, extracted.MIME, len(extracted.Data))
+	}
+	decoded, err := png.Decode(bytes.NewReader(extracted.Data))
+	if err != nil {
+		t.Fatalf("decode extracted browser image: %v", err)
+	}
+	_, _, _, alpha := decoded.At(0, 0).RGBA()
+	if alpha != 0 {
+		t.Fatalf("browser image transparency was composited: alpha=%d", alpha)
+	}
+	canvasImage, err := m.Image(t.Context(), chat, browserapi.Locator{Target: "Transparent canvas", Role: "image", Exact: true})
+	if err != nil || canvasImage.MIME != "image/png" {
+		t.Fatalf("extract transparent canvas: mime=%q bytes=%d err=%v", canvasImage.MIME, len(canvasImage.Data), err)
+	}
+	decodedCanvas, err := png.Decode(bytes.NewReader(canvasImage.Data))
+	if err != nil {
+		t.Fatalf("decode extracted canvas: %v", err)
+	}
+	_, _, _, canvasAlpha := decodedCanvas.At(0, 0).RGBA()
+	if canvasAlpha != 0 {
+		t.Fatalf("browser canvas transparency was composited: alpha=%d", canvasAlpha)
+	}
+	dataImage, err := m.Image(t.Context(), chat, browserapi.Locator{Target: "Photo", Role: "image", Exact: true})
+	if err != nil || dataImage.MIME != "image/svg+xml" || !bytes.Contains(dataImage.Data, []byte(`fill="blue"`)) {
+		t.Fatalf("extract data URL image: name=%q mime=%q bytes=%d err=%v", dataImage.Name, dataImage.MIME, len(dataImage.Data), err)
 	}
 	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-one", "load"); err != nil {
 		t.Fatalf("navigate first history page: %v", err)

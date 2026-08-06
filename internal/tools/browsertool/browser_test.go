@@ -181,6 +181,9 @@ func TestBrowserImageDefaultsSemanticTargetToImageRole(t *testing.T) {
 	if browser.locator.Target != "Profile photo" || browser.locator.Role != "image" {
 		t.Fatalf("browser image locator = %#v", browser.locator)
 	}
+	if browser.imageCalls != 1 || browser.screenshotCalls != 0 {
+		t.Fatalf("browser image calls: image=%d screenshot=%d", browser.imageCalls, browser.screenshotCalls)
+	}
 }
 
 func TestBrowserBinaryCanSaveWithoutAttachmentStorage(t *testing.T) {
@@ -290,7 +293,9 @@ type savingBrowser struct{ fakeBrowser }
 
 type locatorBrowser struct {
 	fakeBrowser
-	locator browserapi.Locator
+	locator         browserapi.Locator
+	imageCalls      int
+	screenshotCalls int
 }
 
 type waitBrowser struct {
@@ -324,9 +329,20 @@ func (savingBrowser) Screenshot(context.Context, browserapi.Chat, browserapi.Loc
 	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
 }
 
+func (savingBrowser) Image(context.Context, browserapi.Chat, browserapi.Locator) (browserapi.Binary, error) {
+	return browserapi.Binary{Name: "browser-image.png", MIME: "image/png", Data: savedPNG}, nil
+}
+
 func (b *locatorBrowser) Screenshot(_ context.Context, _ browserapi.Chat, locator browserapi.Locator, _ bool, _ string, _ int) (browserapi.Binary, error) {
 	b.locator = locator
+	b.screenshotCalls++
 	return browserapi.Binary{Name: "browser-screenshot.png", MIME: "image/png", Data: savedPNG}, nil
+}
+
+func (b *locatorBrowser) Image(_ context.Context, _ browserapi.Chat, locator browserapi.Locator) (browserapi.Binary, error) {
+	b.locator = locator
+	b.imageCalls++
+	return browserapi.Binary{Name: "browser-image.png", MIME: "image/png", Data: savedPNG}, nil
 }
 
 func (savingBrowser) ResponseBody(context.Context, browserapi.Chat, string) (browserapi.Binary, error) {
@@ -380,6 +396,9 @@ func (fakeBrowser) Upload(context.Context, browserapi.Chat, browserapi.Locator, 
 }
 func (fakeBrowser) Evaluate(context.Context, browserapi.Chat, string) (string, error) { return "", nil }
 func (fakeBrowser) Screenshot(context.Context, browserapi.Chat, browserapi.Locator, bool, string, int) (browserapi.Binary, error) {
+	return browserapi.Binary{}, errors.New("unused")
+}
+func (fakeBrowser) Image(context.Context, browserapi.Chat, browserapi.Locator) (browserapi.Binary, error) {
 	return browserapi.Binary{}, errors.New("unused")
 }
 func (fakeBrowser) PDF(context.Context, browserapi.Chat) (browserapi.Binary, error) {

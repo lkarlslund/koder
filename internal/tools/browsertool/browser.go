@@ -53,7 +53,7 @@ var specs = []tool{
 	{tools.BrowserUpload, "Upload browser files", "Find a current file input and upload authorized workspace files through it.", locatorObject(`"paths":{"type":"array","items":{"type":"string"}}`, true, "paths")},
 	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},`+saveToFileProperty), "expression")},
 	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a current semantic target. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(`"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},`+saveToFileProperty, false)},
-	{tools.BrowserImage, "Capture browser image", "Find and capture a current image, canvas, or visual element. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(saveToFileProperty, true)},
+	{tools.BrowserImage, "Extract browser image", "Extract the original bytes of a current image, or the transparent content of a canvas or inline SVG, without capturing the surrounding page. Return it as a session attachment unless save_to_file persists it to disk instead. Use browser_screenshot for rendered page elements.", locatorObject(saveToFileProperty, true)},
 	{tools.BrowserPDF, "Save browser PDF", "Print the selected page as a PDF. Return it as a session attachment unless save_to_file persists it to disk instead.", object(saveToFileProperty)},
 	{tools.BrowserConsole, "Browser console", "Read bounded console records for the selected tab.", object(`"level":{"type":"string"},"limit":{"type":"integer"},` + saveToFileProperty)},
 	{tools.BrowserRequests, "Browser requests", "List bounded network records for the selected tab.", object(`"limit":{"type":"integer"},` + saveToFileProperty)},
@@ -236,12 +236,16 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		value = map[string]any{"uploaded": len(paths)}
 	case tools.BrowserEvaluate:
 		value, err = service.Evaluate(ctx, chat, args["expression"])
-	case tools.BrowserScreenshot, tools.BrowserImage:
-		locator, _ := locatorFromArgs(args, "", t.id == tools.BrowserImage)
-		if t.id == tools.BrowserImage && locator.Selector == "" && locator.Role == "" {
+	case tools.BrowserScreenshot:
+		locator, _ := locatorFromArgs(args, "", false)
+		binary, binaryErr := service.Screenshot(ctx, chat, locator, boolArg(args, "full_page"), args["format"], intArg(args, "quality", 90))
+		return binaryResult(opts, t.id.String(), args["save_to_file"], binary, binaryErr)
+	case tools.BrowserImage:
+		locator, _ := locatorFromArgs(args, "", true)
+		if locator.Selector == "" && locator.Role == "" {
 			locator.Role = "image"
 		}
-		binary, binaryErr := service.Screenshot(ctx, chat, locator, boolArg(args, "full_page"), args["format"], intArg(args, "quality", 90))
+		binary, binaryErr := service.Image(ctx, chat, locator)
 		return binaryResult(opts, t.id.String(), args["save_to_file"], binary, binaryErr)
 	case tools.BrowserPDF:
 		binary, binaryErr := service.PDF(ctx, chat)

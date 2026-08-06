@@ -65,6 +65,7 @@ const resolve=(cfg,action)=>{
     if(tag==='TEXTAREA')return 'textbox';
     if(tag==='SELECT')return el.multiple?'listbox':'combobox';
     if(tag==='IMG')return 'image';
+	if(tag==='CANVAS'||tag==='SVG')return 'image';
     if(tag==='INPUT'){
       const type=(el.type||'text').toLowerCase();
       if(type==='checkbox')return 'checkbox';

@@ -101,6 +101,7 @@ type Service interface {
 	Upload(context.Context, Chat, Locator, []string) error
 	Evaluate(context.Context, Chat, string) (string, error)
 	Screenshot(context.Context, Chat, Locator, bool, string, int) (Binary, error)
+	Image(context.Context, Chat, Locator) (Binary, error)
 	PDF(context.Context, Chat) (Binary, error)
 	Console(context.Context, Chat, string, int) ([]ConsoleRecord, error)
 	Requests(context.Context, Chat, int) ([]RequestRecord, error)
