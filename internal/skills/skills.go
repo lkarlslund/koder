@@ -29,7 +29,8 @@ type Skill struct {
 }
 
 type DiscoverOptions struct {
-	UserRoots []string
+	ProjectRoot string
+	UserRoots   []string
 }
 
 func Discover(workdir string) []Skill {
@@ -37,7 +38,10 @@ func Discover(workdir string) []Skill {
 }
 
 func DiscoverWithOptions(workdir string, opts DiscoverOptions) []Skill {
-	projectRoot := agents.FindProjectRoot(workdir)
+	projectRoot := agents.NormalizeProjectRoot(opts.ProjectRoot)
+	if strings.TrimSpace(opts.ProjectRoot) == "" {
+		projectRoot = agents.NormalizeProjectRoot(workdir)
+	}
 	roots := projectRoots(workdir, projectRoot)
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		roots = append(roots, rootSpec{

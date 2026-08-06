@@ -65,8 +65,8 @@ func NewManager(stateDir string, globalPath string) *Manager {
 	}
 }
 
-func FindProjectRoot(cwd string) string {
-	start := strings.TrimSpace(cwd)
+func NormalizeProjectRoot(projectRoot string) string {
+	start := strings.TrimSpace(projectRoot)
 	if start == "" {
 		start = "."
 	}
@@ -74,28 +74,26 @@ func FindProjectRoot(cwd string) string {
 	if err != nil {
 		return start
 	}
-	home, _ := os.UserHomeDir()
-	home = cleanPath(home)
-	current := cleanPath(abs)
-	for {
-		if hasDir(filepath.Join(current, ".git")) || hasDir(filepath.Join(current, ".koder")) {
-			return current
-		}
-		if current == cleanPath(home) || isFilesystemRoot(current) {
-			return cleanPath(abs)
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return cleanPath(abs)
-		}
-		current = parent
-	}
+	return cleanPath(abs)
 }
 
-func (m *Manager) Discover(ctx context.Context, cwd string) (Snapshot, error) {
-	root := FindProjectRoot(cwd)
+func (m *Manager) Discover(ctx context.Context, projectRoot string) (Snapshot, error) {
+	return m.DiscoverProject(ctx, projectRoot, projectRoot)
+}
+
+// DiscoverProject discovers instructions without allowing project-root inference
+// to expand beyond the root owned by the session.
+func (m *Manager) DiscoverProject(ctx context.Context, projectRoot, cwd string) (Snapshot, error) {
+	root := cleanPath(projectRoot)
+	if root == "" {
+		root = cleanPath(cwd)
+	}
+	cwd = cleanPath(cwd)
+	if cwd == "" || !pathWithin(cwd, root) {
+		cwd = root
+	}
 	snapshot := Snapshot{
-		CWD:         cleanPath(cwd),
+		CWD:         cwd,
 		ProjectRoot: root,
 		GlobalPath:  m.globalPath,
 	}
@@ -120,7 +118,7 @@ func (m *Manager) Discover(ctx context.Context, cwd string) (Snapshot, error) {
 		queue = append(queue, queueItem{path: info.Path, kind: "global", priority: 0})
 	}
 	priority := 1000
-	for _, dir := range dirsFromCWDToRoot(cleanPath(cwd), root) {
+	for _, dir := range dirsFromCWDToRoot(cwd, root) {
 		select {
 		case <-ctx.Done():
 			return Snapshot{}, ctx.Err()
@@ -158,7 +156,11 @@ func (m *Manager) Discover(ctx context.Context, cwd string) (Snapshot, error) {
 		if err != nil {
 			continue
 		}
-		for _, ref := range discoverReferencedFiles(string(body), filepath.Dir(item.path), root) {
+		refs, err := discoverReferencedFiles(ctx, string(body), filepath.Dir(item.path), root)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		for _, ref := range refs {
 			info, ok := readTrackedFile(ref)
 			if !ok {
 				continue
@@ -338,10 +340,10 @@ func readTrackedFile(path string) (trackedFile, bool) {
 	}, true
 }
 
-func discoverReferencedFiles(body string, baseDir string, projectRoot string) []string {
+func discoverReferencedFiles(ctx context.Context, body string, baseDir string, projectRoot string) ([]string, error) {
 	matches := referencePattern.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
-		return nil
+		return nil, nil
 	}
 	seen := map[string]struct{}{}
 	var out []string
@@ -353,7 +355,11 @@ func discoverReferencedFiles(body string, baseDir string, projectRoot string) []
 		if token == "" || strings.EqualFold(filepath.Base(token), agentsFileName) {
 			continue
 		}
-		for _, candidate := range resolveCandidates(token, baseDir, projectRoot) {
+		candidates, err := resolveCandidates(ctx, token, baseDir, projectRoot)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range candidates {
 			if _, ok := seen[candidate]; ok {
 				continue
 			}
@@ -367,10 +373,10 @@ func discoverReferencedFiles(body string, baseDir string, projectRoot string) []
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
-func resolveCandidates(token, baseDir, projectRoot string) []string {
+func resolveCandidates(ctx context.Context, token, baseDir, projectRoot string) ([]string, error) {
 	token = filepath.Clean(token)
 	var candidates []string
 	if strings.Contains(token, string(filepath.Separator)) || strings.Contains(token, "/") {
@@ -378,14 +384,17 @@ func resolveCandidates(token, baseDir, projectRoot string) []string {
 			cleanPath(filepath.Join(baseDir, token)),
 			cleanPath(filepath.Join(projectRoot, token)),
 		)
-		return dedupeStrings(candidates)
+		return dedupeStrings(candidates), nil
 	}
 	candidates = append(candidates,
 		cleanPath(filepath.Join(baseDir, token)),
 		cleanPath(filepath.Join(projectRoot, token)),
 	)
 	var found []string
-	_ = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil || d == nil || d.IsDir() {
 			return nil
 		}
@@ -397,8 +406,11 @@ func resolveCandidates(token, baseDir, projectRoot string) []string {
 		}
 		return nil
 	})
+	if err != nil && !errors.Is(err, fs.SkipAll) {
+		return nil, err
+	}
 	candidates = append(candidates, found...)
-	return dedupeStrings(candidates)
+	return dedupeStrings(candidates), nil
 }
 
 func parseResolverResponse(raw string) (resolverResponse, error) {
@@ -446,14 +458,9 @@ func cleanPath(path string) string {
 	return filepath.Clean(abs)
 }
 
-func isFilesystemRoot(path string) bool {
-	parent := filepath.Dir(path)
-	return parent == path
-}
-
-func hasDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func isPlainText(path string, data []byte) bool {

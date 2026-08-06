@@ -157,7 +157,8 @@ func (r *Runtime) ensureSessionAgents(ctx context.Context, session domain.Sessio
 	if r.sessions == nil {
 		return domain.Session{}, fmt.Errorf("session source is required")
 	}
-	snapshot, err := r.agents.Discover(ctx, sessionProjectRoot(session))
+	projectRoot := sessionProjectRoot(session)
+	snapshot, err := r.agents.DiscoverProject(ctx, projectRoot, projectRoot)
 	if err != nil {
 		return domain.Session{}, err
 	}

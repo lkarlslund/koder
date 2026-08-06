@@ -22,7 +22,7 @@ func TestDiscoverPrefersNearestProjectSkill(t *testing.T) {
 	writeSkill(t, filepath.Join(home, ".agents", "skills", "global-only", fileName), "global-only", "global")
 	writeSkill(t, filepath.Join(home, ".koder", "skills", "managed-only", fileName), "managed-only", "managed")
 
-	items := Discover(cwd)
+	items := DiscoverWithOptions(cwd, DiscoverOptions{ProjectRoot: repo})
 	if len(items) != 3 {
 		t.Fatalf("expected 3 skills, got %d: %s", len(items), DebugString(items))
 	}

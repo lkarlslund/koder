@@ -80,7 +80,7 @@ type discoveryPath struct {
 // collectDiscoveryPaths returns the directories koder would search
 // for skills, matching the logic in skills.Discover.
 func collectDiscoveryPaths(workdir string, opts skills.DiscoverOptions) []discoveryPath {
-	projectRoot := agents.FindProjectRoot(workdir)
+	projectRoot := agents.NormalizeProjectRoot(workdir)
 	workdir = cleanPathAbs(workdir)
 	projectRoot = cleanPathAbs(projectRoot)
 

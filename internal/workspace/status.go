@@ -49,13 +49,13 @@ type SnapshotResult struct {
 }
 
 func Snapshot(ctx context.Context, dir string) (SnapshotResult, error) {
-	projectRoot := agents.FindProjectRoot(dir)
+	projectRoot := agents.NormalizeProjectRoot(dir)
 	refreshedAt := time.Now().UTC()
 	result := SnapshotResult{
 		Status: Status{ProjectRoot: projectRoot, RefreshedAt: refreshedAt},
 		Diff:   Diff{ProjectRoot: projectRoot, RefreshedAt: refreshedAt},
 	}
-	snapshot, discoverErr := agents.NewManager("", "").Discover(ctx, dir)
+	snapshot, discoverErr := agents.NewManager("", "").DiscoverProject(ctx, projectRoot, dir)
 	if discoverErr == nil {
 		if snapshot.ProjectRoot != "" {
 			result.Status.ProjectRoot = snapshot.ProjectRoot

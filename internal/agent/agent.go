@@ -391,7 +391,8 @@ func needsSessionAgentsRefresh(session domain.Session) bool {
 }
 
 func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {
-	snapshot, err := e.agents.Discover(ctx, sessionProjectRoot(session))
+	projectRoot := sessionProjectRoot(session)
+	snapshot, err := e.agents.DiscoverProject(ctx, projectRoot, projectRoot)
 	if err != nil {
 		return domain.Session{}, err
 	}

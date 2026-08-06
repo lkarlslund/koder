@@ -2,34 +2,68 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestFindProjectRootPrefersNearestMarker(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "repo")
-	nested := filepath.Join(project, "a", "b")
-	if err := os.MkdirAll(filepath.Join(project, ".git"), 0o755); err != nil {
+func TestNormalizeProjectRootDoesNotSearchParentMarkers(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "project")
+	if err := os.MkdirAll(filepath.Join(home, ".koder"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(project, "a", ".koder"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(nested, 0o755); err != nil {
+	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := FindProjectRoot(nested); got != filepath.Join(project, "a") {
-		t.Fatalf("expected nearest marker root, got %q", got)
+	if got := NormalizeProjectRoot(project); got != project {
+		t.Fatalf("expected project root %q, got %q", project, got)
 	}
 }
 
-func TestFindProjectRootFallsBackToCWD(t *testing.T) {
+func TestDiscoverProjectKeepsAuthoritativeRoot(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "project")
+	if err := os.MkdirAll(filepath.Join(home, ".koder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, agentsFileName), []byte("project rules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(t.TempDir(), "")
+	snap, err := mgr.DiscoverProject(context.Background(), project, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.ProjectRoot != project {
+		t.Fatalf("expected authoritative root %q, got %q", project, snap.ProjectRoot)
+	}
+	if len(snap.Files) != 1 || snap.Files[0].Path != filepath.Join(project, agentsFileName) {
+		t.Fatalf("unexpected discovered files: %#v", snap.Files)
+	}
+}
+
+func TestResolveCandidatesHonorsCancellation(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := resolveCandidates(ctx, "missing.md", root, root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestNormalizeProjectRootUsesProvidedDirectory(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("HOME", cwd)
-	if got := FindProjectRoot(cwd); got != cwd {
-		t.Fatalf("expected cwd fallback, got %q", got)
+	if got := NormalizeProjectRoot(cwd); got != cwd {
+		t.Fatalf("expected provided project root, got %q", got)
 	}
 }
 
@@ -60,7 +94,7 @@ func TestDiscoverIncludesAgentsAndRecursiveReferences(t *testing.T) {
 		}
 	}
 	mgr := NewManager(t.TempDir(), globalPath)
-	snap, err := mgr.Discover(context.Background(), sub)
+	snap, err := mgr.DiscoverProject(context.Background(), root, sub)
 	if err != nil {
 		t.Fatal(err)
 	}
