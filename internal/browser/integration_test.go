@@ -68,6 +68,7 @@ func TestChromiumIntegration(t *testing.T) {
 <button id="hover" onmouseover="document.querySelector('output').textContent='hovered'">Details</button>
 <section aria-label="Alpha panel"><button onclick="document.querySelector('output').textContent='alpha'">Delete</button></section>
 <section aria-label="Beta panel"><button onclick="document.querySelector('output').textContent='beta'">Delete</button></section>
+<ul><li><a href="#first-person">Same person</a><span>Target company</span></li><li><a href="#second-person">Same person</a><span>Other company</span></li></ul>
 <div aria-label="Drag source" draggable="true">Move me</div><div aria-label="Drop target" ondragover="event.preventDefault()" ondrop="document.querySelector('output').textContent='dropped'">Drop here</div>
 <div aria-label="Scroll area" style="height:20px;overflow:auto"><div style="height:200px">Scrollable</div></div>
 <input type="file" aria-label="Upload file">
@@ -230,6 +231,12 @@ func TestChromiumIntegration(t *testing.T) {
 	selectorErr := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "section button"}, "")
 	if selectorErr == nil || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":1}`) || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":2}`) {
 		t.Fatalf("selector ambiguity omitted complete locator alternatives: %v", selectorErr)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Same person", Role: "link", Within: "Target company", Exact: true}, ""); err != nil {
+		t.Fatalf("structural within scope matched a shared ancestor: %v", err)
+	}
+	if location, err := m.Evaluate(t.Context(), chat, `location.hash`); err != nil || location != `"#first-person"` {
+		t.Fatalf("structural within scope selected wrong candidate: hash=%s err=%v", location, err)
 	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Within: "Alpha panel", Exact: true}, ""); err != nil {
 		t.Fatalf("click scoped semantic target: %v", err)

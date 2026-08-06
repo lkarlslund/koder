@@ -396,7 +396,7 @@ func locatorProperties(prefix string) string {
 		}
 		return prefix + "_" + field
 	}
-	return fmt.Sprintf(`%q:{"type":"string","description":"Accessible name, associated label, or visible text. For advanced targeting, use css= followed by a CSS selector or xpath= followed by an XPath expression."},%q:{"type":"string","description":"Optional semantic role such as button, textbox, link, checkbox, or image."},%q:{"type":"string","description":"Optional ancestor text used to scope an otherwise ambiguous target."},%q:{"type":"boolean","description":"Require an exact semantic name match. Defaults to false; ambiguous partial matches fail safely."},%q:{"type":"integer","minimum":1,"description":"One-based occurrence used only to disambiguate multiple matches."}`, name("target"), name("role"), name("within"), name("exact"), name("occurrence"))
+	return fmt.Sprintf(`%q:{"type":"string","description":"Accessible name, associated label, or visible text. For advanced targeting, use css= followed by a CSS selector or xpath= followed by an XPath expression."},%q:{"type":"string","description":"Optional semantic role such as button, textbox, link, checkbox, or image."},%q:{"type":"string","description":"Optional text or accessible label from the containing list item, row, option, article, section, form, dialog, or fieldset."},%q:{"type":"boolean","description":"Require an exact semantic name match. Defaults to false; ambiguous partial matches fail safely."},%q:{"type":"integer","minimum":1,"description":"One-based occurrence used only to disambiguate multiple matches."}`, name("target"), name("role"), name("within"), name("exact"), name("occurrence"))
 }
 
 func usesLocator(kind tools.ID) bool {

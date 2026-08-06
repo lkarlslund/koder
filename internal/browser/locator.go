@@ -111,8 +111,9 @@ const resolve=(cfg,action)=>{
     if(!cfg.within)return true;
     const wanted=lower(cfg.within);
     for(let parent=el.parentElement;parent;parent=parent.parentElement){
-      const candidate=lower(name(parent)||parent.innerText||parent.textContent);
-      if(candidate.includes(wanted))return true;
+		const explicit=lower(labelledBy(parent)||parent.getAttribute('aria-label')||label(parent)||parent.title||'');
+		if(explicit.includes(wanted))return true;
+		if(parent.matches('li,[role="listitem"],[role="row"],[role="option"],article,section,tr,form,dialog,fieldset')&&lower(parent.innerText||parent.textContent).includes(wanted))return true;
     }
     return false;
   };
@@ -182,5 +183,5 @@ const resolve=(cfg,action)=>{
   const requested=cfg.selector?'selector "'+cfg.selector+'"':'target "'+cfg.target+'"'+(cfg.role?' with role "'+cfg.role+'"':'');
   if(candidates.length===0)throw new Error('Browser '+requested+' was not found in the current DOM');
 	const alternatives=candidates.slice(0,5).map((el,index)=>(index+1)+'. '+describe(el)+' -> '+suggestedLocator(el)).join('; ');
-	throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements. Retry with one complete argument set: '+alternatives+(candidates.length>5?'; ...':'')+'. You may also refine with within or selector.');
+	throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements. Copy exactly one complete argument set into the next call without omitting or changing fields: '+alternatives+(candidates.length>5?'; ...':'')+'.');
 };`
