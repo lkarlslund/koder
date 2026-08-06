@@ -53,6 +53,7 @@ const semanticResolverJS = `
 const resolve=(cfg,action)=>{
   const norm=value=>(value||'').replace(/\u00a0/g,' ').replace(/[\u2018\u2019]/g,"'").replace(/[\u2013\u2014]/g,'-').replace(/\s+/g,' ').trim();
   const lower=value=>norm(value).toLocaleLowerCase();
+  const normalizedRole=value=>{const result=lower(value);return result==='img'?'image':result};
   const visible=el=>{
     const style=getComputedStyle(el);
     return style.display!=='none'&&style.visibility!=='hidden'&&style.opacity!=='0'&&el.getClientRects().length>0;
@@ -75,7 +76,7 @@ const resolve=(cfg,action)=>{
     if(/^H[1-6]$/.test(tag))return 'heading';
     return '';
   };
-  const role=el=>lower(el.getAttribute('role')||implicitRole(el));
+  const role=el=>normalizedRole(el.getAttribute('role')||implicitRole(el));
   const labelledBy=el=>norm((el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||'').join(' '));
 	const labelText=item=>{const clone=item.cloneNode(true);for(const control of clone.querySelectorAll('input,select,textarea,button'))control.remove();return clone.textContent||''};
 	const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(labelText).join(' '):'');
@@ -124,7 +125,7 @@ const resolve=(cfg,action)=>{
     }
 	  }else{
 	    const wanted=lower(cfg.target);
-    const wantedRole=lower(cfg.role);
+    const wantedRole=normalizedRole(cfg.role);
     candidates=collect(document).filter(el=>{
       if(!allowed(el)||!inScope(el))return false;
       if(action!=='capture'&&action!=='upload'&&!visible(el))return false;

@@ -188,6 +188,9 @@ func TestChromiumIntegration(t *testing.T) {
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "View Michael Christensen's profile", Role: "image", Exact: true}, ""); err != nil {
 		t.Fatalf("click linked image with normalized accessible name: %v", err)
 	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "View Michael Christensen's profile", Role: "img", Exact: true}, ""); err != nil {
+		t.Fatalf("click linked image with standard ARIA img role: %v", err)
+	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Profile photo"}, ""); err != nil {
 		t.Fatalf("click natural image target: %v", err)
 	}
@@ -288,6 +291,9 @@ func TestChromiumIntegration(t *testing.T) {
 	responsiveShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{Target: "Responsive profile", Role: "image", Exact: true}, false, "png", 90)
 	if err != nil || len(responsiveShot.Data) == 0 || responsiveShot.MIME != "image/png" {
 		t.Fatalf("visible responsive image did not resolve uniquely: %d bytes %s, %v", len(responsiveShot.Data), responsiveShot.MIME, err)
+	}
+	if _, err := m.Find(t.Context(), chat, "Responsive profile", "img", 8*1024); err != nil {
+		t.Fatalf("find image with standard ARIA img role: %v", err)
 	}
 	if _, err := m.Navigate(t.Context(), chat, server.URL+"/history-one", "load"); err != nil {
 		t.Fatalf("navigate first history page: %v", err)
