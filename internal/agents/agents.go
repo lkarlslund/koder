@@ -7,10 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -20,8 +18,6 @@ import (
 )
 
 const agentsFileName = "AGENTS.md"
-
-var referencePattern = regexp.MustCompile(`(?m)(^|[\s("'` + "`" + `])([A-Za-z0-9][A-Za-z0-9._/-]*\.[A-Za-z0-9._-]+)`)
 
 type FileInfo struct {
 	Path         string    `json:"path"`
@@ -98,13 +94,6 @@ func (m *Manager) DiscoverProject(ctx context.Context, projectRoot, cwd string) 
 		GlobalPath:  m.globalPath,
 	}
 	visited := map[string]struct{}{}
-	type queueItem struct {
-		path         string
-		kind         string
-		priority     int
-		discoveredBy string
-	}
-	var queue []queueItem
 	if info, ok := readTrackedFile(m.globalPath); ok {
 		snapshot.Files = append(snapshot.Files, FileInfo{
 			Path:     info.Path,
@@ -115,7 +104,6 @@ func (m *Manager) DiscoverProject(ctx context.Context, projectRoot, cwd string) 
 			Size:     info.Size,
 		})
 		visited[info.Path] = struct{}{}
-		queue = append(queue, queueItem{path: info.Path, kind: "global", priority: 0})
 	}
 	priority := 1000
 	for _, dir := range dirsFromCWDToRoot(cwd, root) {
@@ -141,50 +129,7 @@ func (m *Manager) DiscoverProject(ctx context.Context, projectRoot, cwd string) 
 			Size:     info.Size,
 		})
 		visited[info.Path] = struct{}{}
-		queue = append(queue, queueItem{path: info.Path, kind: "project", priority: priority})
 		priority--
-	}
-	// Recursively expand text file mentions from AGENTS/referenced files.
-	for idx := 0; idx < len(queue); idx++ {
-		select {
-		case <-ctx.Done():
-			return Snapshot{}, ctx.Err()
-		default:
-		}
-		item := queue[idx]
-		body, err := os.ReadFile(item.path)
-		if err != nil {
-			continue
-		}
-		refs, err := discoverReferencedFiles(ctx, string(body), filepath.Dir(item.path), root)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		for _, ref := range refs {
-			info, ok := readTrackedFile(ref)
-			if !ok {
-				continue
-			}
-			if _, seen := visited[info.Path]; seen {
-				continue
-			}
-			snapshot.Files = append(snapshot.Files, FileInfo{
-				Path:         info.Path,
-				Kind:         "referenced",
-				Priority:     item.priority,
-				ModTime:      info.ModTime,
-				Checksum:     info.Checksum,
-				Size:         info.Size,
-				DiscoveredBy: item.path,
-			})
-			visited[info.Path] = struct{}{}
-			queue = append(queue, queueItem{
-				path:         info.Path,
-				kind:         "referenced",
-				priority:     item.priority,
-				discoveredBy: item.path,
-			})
-		}
 	}
 	sort.SliceStable(snapshot.Files, func(i, j int) bool {
 		if snapshot.Files[i].Priority != snapshot.Files[j].Priority {
@@ -255,7 +200,6 @@ func (m *Manager) Resolve(ctx context.Context, client *provider.Client, modelID 
 	prompt.WriteString("Rules:\n")
 	prompt.WriteString("- Preserve all non-conflicting instructions.\n")
 	prompt.WriteString("- Resolve conflicts by priority: larger priority number wins; project files override global; closer AGENTS.md files override broader ones.\n")
-	prompt.WriteString("- Referenced files are supporting detail for the file that mentioned them.\n")
 	prompt.WriteString("- Return strict JSON with keys resolved_agents_md and conflict_summary.\n")
 	prompt.WriteString("- conflict_summary must be either 'No conflicts' or a concise list of overrides/behavior changes.\n\n")
 	for _, item := range snapshot.Files {
@@ -340,79 +284,6 @@ func readTrackedFile(path string) (trackedFile, bool) {
 	}, true
 }
 
-func discoverReferencedFiles(ctx context.Context, body string, baseDir string, projectRoot string) ([]string, error) {
-	matches := referencePattern.FindAllStringSubmatch(body, -1)
-	if len(matches) == 0 {
-		return nil, nil
-	}
-	seen := map[string]struct{}{}
-	var out []string
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		token := strings.TrimSpace(match[2])
-		if token == "" || strings.EqualFold(filepath.Base(token), agentsFileName) {
-			continue
-		}
-		candidates, err := resolveCandidates(ctx, token, baseDir, projectRoot)
-		if err != nil {
-			return nil, err
-		}
-		for _, candidate := range candidates {
-			if _, ok := seen[candidate]; ok {
-				continue
-			}
-			info, ok := readTrackedFile(candidate)
-			if !ok {
-				continue
-			}
-			seen[info.Path] = struct{}{}
-			out = append(out, info.Path)
-			break
-		}
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-func resolveCandidates(ctx context.Context, token, baseDir, projectRoot string) ([]string, error) {
-	token = filepath.Clean(token)
-	var candidates []string
-	if strings.Contains(token, string(filepath.Separator)) || strings.Contains(token, "/") {
-		candidates = append(candidates,
-			cleanPath(filepath.Join(baseDir, token)),
-			cleanPath(filepath.Join(projectRoot, token)),
-		)
-		return dedupeStrings(candidates), nil
-	}
-	candidates = append(candidates,
-		cleanPath(filepath.Join(baseDir, token)),
-		cleanPath(filepath.Join(projectRoot, token)),
-	)
-	var found []string
-	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if err != nil || d == nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Base(path) == token {
-			found = append(found, cleanPath(path))
-			if len(found) >= 5 {
-				return fs.SkipAll
-			}
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, fs.SkipAll) {
-		return nil, err
-	}
-	candidates = append(candidates, found...)
-	return dedupeStrings(candidates), nil
-}
-
 func parseResolverResponse(raw string) (resolverResponse, error) {
 	text := strings.TrimSpace(raw)
 	text = strings.TrimPrefix(text, "```json")
@@ -481,20 +352,4 @@ func isPlainText(path string, data []byte) bool {
 		}
 	}
 	return true
-}
-
-func dedupeStrings(in []string) []string {
-	var out []string
-	seen := map[string]struct{}{}
-	for _, item := range in {
-		if strings.TrimSpace(item) == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
 }

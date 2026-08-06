@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,16 +49,6 @@ func TestDiscoverProjectKeepsAuthoritativeRoot(t *testing.T) {
 	}
 }
 
-func TestResolveCandidatesHonorsCancellation(t *testing.T) {
-	root := t.TempDir()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := resolveCandidates(ctx, "missing.md", root, root)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context cancellation, got %v", err)
-	}
-}
-
 func TestNormalizeProjectRootUsesProvidedDirectory(t *testing.T) {
 	cwd := t.TempDir()
 	if got := NormalizeProjectRoot(cwd); got != cwd {
@@ -67,7 +56,7 @@ func TestNormalizeProjectRootUsesProvidedDirectory(t *testing.T) {
 	}
 }
 
-func TestDiscoverIncludesAgentsAndRecursiveReferences(t *testing.T) {
+func TestDiscoverIncludesOnlyApplicableAgentsFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -101,14 +90,19 @@ func TestDiscoverIncludesAgentsAndRecursiveReferences(t *testing.T) {
 	if snap.ProjectRoot != root {
 		t.Fatalf("unexpected project root: %q", snap.ProjectRoot)
 	}
-	if len(snap.Files) != 5 {
-		t.Fatalf("expected 5 discovered files, got %d", len(snap.Files))
+	if len(snap.Files) != 3 {
+		t.Fatalf("expected 3 AGENTS files, got %d: %#v", len(snap.Files), snap.Files)
 	}
 	if snap.Files[0].Path != filepath.Join(root, "app", "AGENTS.md") {
 		t.Fatalf("expected closest AGENTS first, got %#v", snap.Files[0])
 	}
 	if snap.Checksum == "" {
 		t.Fatal("expected checksum")
+	}
+	for _, item := range snap.Files {
+		if filepath.Base(item.Path) != agentsFileName {
+			t.Fatalf("unexpected non-AGENTS file: %#v", item)
+		}
 	}
 }
 
