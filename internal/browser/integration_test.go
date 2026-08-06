@@ -2,9 +2,11 @@ package browser
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -376,5 +378,20 @@ func TestChromiumIntegration(t *testing.T) {
 	tabs, err = m.Tabs(t.Context(), chat)
 	if err != nil || len(tabs) != 1 || tabs[0].ID != tab.ID {
 		t.Fatalf("closed tab remains listed: %#v, %v", tabs, err)
+	}
+	if err := m.Stop(t.Context()); err != nil {
+		t.Fatalf("gracefully stop browser: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(m.profileDir, "Default", "Preferences"))
+	if err != nil {
+		t.Fatalf("read browser preferences after shutdown: %v", err)
+	}
+	var preferences map[string]any
+	if err := json.Unmarshal(data, &preferences); err != nil {
+		t.Fatalf("decode browser preferences after shutdown: %v", err)
+	}
+	profile := preferences["profile"].(map[string]any)
+	if profile["exit_type"] != "Normal" || profile["exited_cleanly"] != true {
+		t.Fatalf("browser did not record a clean shutdown: %#v", profile)
 	}
 }

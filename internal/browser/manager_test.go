@@ -1,7 +1,10 @@
 package browser
 
 import (
+	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +55,41 @@ func TestListingTabsDoesNotStartBrowser(t *testing.T) {
 	}
 	if len(tabs) != 0 || m.state != stateStopped || m.browserCtx != nil {
 		t.Fatalf("tab listing started browser: tabs=%#v state=%s", tabs, m.state)
+	}
+}
+
+func TestProfilePreferencesDisableRestoreAndPasswordStorage(t *testing.T) {
+	m := NewManager(config.Browser{}, t.TempDir())
+	path := filepath.Join(m.profileDir, "Default", "Preferences")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("{\"profile\":{\"exit_type\":\"Crashed\",\"keep\":\"value\"},\"session\":{\"restore_on_startup\":1},\"unrelated\":{\"value\":42}}")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.enforceProfilePreferences(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preferences map[string]any
+	if err := json.Unmarshal(data, &preferences); err != nil {
+		t.Fatal(err)
+	}
+	profile := preferences["profile"].(map[string]any)
+	session := preferences["session"].(map[string]any)
+	translate := preferences["translate"].(map[string]any)
+	if profile["exit_type"] != "Normal" || profile["exited_cleanly"] != true ||
+		profile["password_manager_enabled"] != false || profile["password_manager_leak_detection"] != false ||
+		preferences["credentials_enable_service"] != false || preferences["credentials_enable_autosignin"] != false ||
+		session["restore_on_startup"] != float64(5) || translate["enabled"] != false {
+		t.Fatalf("unexpected managed preferences: %#v", preferences)
+	}
+	if profile["keep"] != "value" || preferences["unrelated"].(map[string]any)["value"] != float64(42) {
+		t.Fatalf("unrelated preferences were not preserved: %#v", preferences)
 	}
 }
 

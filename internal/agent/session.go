@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/lkarlslund/koder/internal/chat"
@@ -91,11 +92,12 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e == nil {
 		return nil
 	}
+	var browserErr error
 	if e.browser != nil {
-		_ = e.browser.Stop(ctx)
+		browserErr = e.browser.Stop(ctx)
 	}
 	if e.registry == nil {
-		return nil
+		return browserErr
 	}
-	return e.registry.Shutdown(ctx, reason)
+	return errors.Join(browserErr, e.registry.Shutdown(ctx, reason))
 }

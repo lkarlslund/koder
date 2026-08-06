@@ -173,6 +173,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.setError(err)
 		return err
 	}
+	if err := m.enforceProfilePreferences(); err != nil {
+		err = fmt.Errorf("configure browser profile: %w", err)
+		m.setError(err)
+		return err
+	}
 	runtimeDir := filepath.Join(m.stateDir, "run")
 	if err := os.RemoveAll(runtimeDir); err != nil {
 		err = fmt.Errorf("clear browser runtime: %w", err)
@@ -192,7 +197,8 @@ func (m *Manager) Start(ctx context.Context) error {
 		chromedp.Flag("headless", !m.cfg.Headed),
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
-		chromedp.Flag("disable-features", "Translate,PasswordManagerOnboarding,InfiniteSessionRestore"),
+		chromedp.Flag("disable-features", "Translate,PasswordManagerOnboarding,PasswordManagerEnabled,InfiniteSessionRestore"),
+		chromedp.Flag("hide-crash-restore-bubble", true),
 		chromedp.Flag("password-store", "basic"),
 		chromedp.Flag("restore-last-session", false),
 		chromedp.ModifyCmdFunc(func(cmd *exec.Cmd) { sandboxCommand(cmd, m.profileDir, runtimeDir) }),
@@ -230,9 +236,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) Stop(_ context.Context) error {
+func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
-	stop, allocStop := m.stop, m.allocStop
+	browserCtx, stop, allocStop := m.browserCtx, m.stop, m.allocStop
 	m.stop, m.allocStop = nil, nil
 	m.browserCtx, m.allocCtx = nil, nil
 	m.tabs = map[string]*ownedTab{}
@@ -240,14 +246,26 @@ func (m *Manager) Stop(_ context.Context) error {
 	m.downloads = map[string]*downloadState{}
 	m.state, m.lastErr = stateStopped, ""
 	m.mu.Unlock()
+	var closeErr error
+	var preferenceErr error
+	if browserCtx != nil {
+		timeout := 10 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			timeout = min(timeout, max(time.Until(deadline), time.Millisecond))
+		}
+		closeCtx, cancel := context.WithTimeout(browserCtx, timeout)
+		closeErr = chromedp.Cancel(closeCtx)
+		cancel()
+		preferenceErr = m.enforceProfilePreferences()
+	}
 	if stop != nil {
 		stop()
 	}
 	if allocStop != nil {
 		allocStop()
 	}
-	_ = os.RemoveAll(filepath.Join(m.stateDir, "run"))
-	return nil
+	runtimeErr := os.RemoveAll(filepath.Join(m.stateDir, "run"))
+	return errors.Join(closeErr, preferenceErr, runtimeErr)
 }
 
 func (m *Manager) Restart(ctx context.Context) error {
