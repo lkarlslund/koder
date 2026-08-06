@@ -164,7 +164,23 @@ const resolve=(cfg,action)=>{
 		const size=rect.width>0&&rect.height>0?' '+Math.round(rect.width)+'x'+Math.round(rect.height):'';
     return r+(n?' "'+n.slice(0,120)+'"':'')+size;
   };
+	const suggestedLocator=el=>{
+		if(cfg.selector){
+			const locator={target:cfg.selector.startsWith('xpath=')?cfg.selector:'css='+cfg.selector};
+			if(candidates.length>1)locator.occurrence=candidates.indexOf(el)+1;
+			return JSON.stringify(locator);
+		}
+		const n=name(el),r=role(el);
+		const same=candidates.filter(other=>role(other)===r&&lower(name(other))===lower(n));
+		const locator={target:n};
+		if(r)locator.role=r;
+		if(cfg.within)locator.within=cfg.within;
+		locator.exact=true;
+		if(same.length>1)locator.occurrence=same.indexOf(el)+1;
+		return JSON.stringify(locator);
+	};
   const requested=cfg.selector?'selector "'+cfg.selector+'"':'target "'+cfg.target+'"'+(cfg.role?' with role "'+cfg.role+'"':'');
   if(candidates.length===0)throw new Error('Browser '+requested+' was not found in the current DOM');
-  throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements: '+candidates.slice(0,5).map((el,index)=>(index+1)+'. '+describe(el)).join('; ')+'. Refine with role, within, exact, occurrence, or selector.');
+	const alternatives=candidates.slice(0,5).map((el,index)=>(index+1)+'. '+describe(el)+' -> '+suggestedLocator(el)).join('; ');
+	throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements. Retry with one complete argument set: '+alternatives+(candidates.length>5?'; ...':'')+'. You may also refine with within or selector.');
 };`

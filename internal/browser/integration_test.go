@@ -186,8 +186,50 @@ func TestChromiumIntegration(t *testing.T) {
 	if err := m.Interact(t.Context(), chat, "hover", browserapi.Locator{Target: "Details"}, ""); err != nil {
 		t.Fatalf("hover semantic target: %v", err)
 	}
-	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Exact: true}, ""); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	foundDeletes, err := m.Find(t.Context(), chat, "Delete", "button", 8*1024)
+	if err != nil {
+		t.Fatalf("find duplicate buttons: %v", err)
+	}
+	deleteLines := strings.Split(foundDeletes.Text, "\n")
+	if len(deleteLines) != 2 || strings.HasPrefix(deleteLines[0], " ") || strings.HasPrefix(deleteLines[1], " ") {
+		t.Fatalf("browser find did not return flat candidates: %q", foundDeletes.Text)
+	}
+	for _, locator := range []string{
+		`locator: {"target":"Delete","role":"button","exact":true,"occurrence":1}`,
+		`locator: {"target":"Delete","role":"button","exact":true,"occurrence":2}`,
+	} {
+		if !strings.Contains(foundDeletes.Text, locator) {
+			t.Fatalf("browser find omitted ready locator %s: %q", locator, foundDeletes.Text)
+		}
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `(()=>{const group=document.createElement('div');group.id='many-candidates';for(let i=0;i<13;i++){const button=document.createElement('button');button.textContent='Repeated candidate';group.appendChild(button)}document.body.appendChild(group)})()`); err != nil {
+		t.Fatalf("create repeated browser candidates: %v", err)
+	}
+	manyCandidates, err := m.Find(t.Context(), chat, "Repeated candidate", "button", 32*1024)
+	if err != nil {
+		t.Fatalf("find capped candidates: %v", err)
+	}
+	if strings.Count(manyCandidates.Text, "locator: ") != 10 || !strings.Contains(manyCandidates.Text, "... 3 more candidates omitted; refine query or role.") {
+		t.Fatalf("browser find candidate cap not enforced: %q", manyCandidates.Text)
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('#many-candidates').remove()`); err != nil {
+		t.Fatalf("remove repeated browser candidates: %v", err)
+	}
+	err = m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Exact: true}, "")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous semantic target error = %v", err)
+	}
+	for _, locator := range []string{
+		`{"target":"Delete","role":"button","exact":true,"occurrence":1}`,
+		`{"target":"Delete","role":"button","exact":true,"occurrence":2}`,
+	} {
+		if !strings.Contains(err.Error(), locator) {
+			t.Fatalf("ambiguity error omitted complete locator %s: %v", locator, err)
+		}
+	}
+	selectorErr := m.Interact(t.Context(), chat, "click", browserapi.Locator{Selector: "section button"}, "")
+	if selectorErr == nil || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":1}`) || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":2}`) {
+		t.Fatalf("selector ambiguity omitted complete locator alternatives: %v", selectorErr)
 	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Delete", Role: "button", Within: "Alpha panel", Exact: true}, ""); err != nil {
 		t.Fatalf("click scoped semantic target: %v", err)

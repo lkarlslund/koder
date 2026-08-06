@@ -38,7 +38,7 @@ var specs = []tool{
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
 	{tools.BrowserReload, "Reload browser", "Reload the selected tab.", object(``)},
 	{tools.BrowserSnapshot, "Browser snapshot", "Return an informational compact view of the current visible DOM. Interactions resolve their own targets and do not depend on snapshots.", object(`"depth":{"type":"integer"},"max_chars":{"type":"integer"},` + saveToFileProperty)},
-	{tools.BrowserFind, "Find in browser", "Return an informational filtered view of current visible page elements. Interactions do not depend on this result.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
+	{tools.BrowserFind, "Find in browser", "Return up to 10 current visible semantic candidates as a flat list, with complete locator arguments ready for a subsequent interaction. Locators are resolved against the current DOM and are not stored references. Refine query or role when more candidates are omitted.", required(object(`"query":{"type":"string"},"role":{"type":"string"},"max_chars":{"type":"integer"},`+saveToFileProperty), "query")},
 	{tools.BrowserClick, "Click browser element", "Find a current visible element by accessible name, label, or text and click it.", locatorObject("", true)},
 	{tools.BrowserFill, "Fill browser element", "Find a current editable control and replace its value.", locatorObject(`"value":{"type":"string"}`, true, "value")},
 	{tools.BrowserType, "Type in browser element", "Find a current editable control and type text into it.", locatorObject(`"value":{"type":"string"}`, true, "value")},

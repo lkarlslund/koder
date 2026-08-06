@@ -681,7 +681,26 @@ func (m *Manager) snapshot(ctx context.Context, chat browserapi.Chat, query, rol
 }
 
 func (m *Manager) Find(ctx context.Context, chat browserapi.Chat, query, role string, maxChars int) (browserapi.Snapshot, error) {
-	return m.snapshot(ctx, chat, query, role, -1, maxChars)
+	tab, tabCtx, err := m.ownedSelected(ctx, chat)
+	if err != nil {
+		return browserapi.Snapshot{}, err
+	}
+	if maxChars <= 0 {
+		maxChars = 32 * 1024
+	}
+	if maxChars > 128*1024 {
+		maxChars = 128 * 1024
+	}
+	tab.mu.Lock()
+	defer tab.mu.Unlock()
+	var text string
+	opCtx, cancel := m.operationContext(ctx, tabCtx)
+	defer cancel()
+	if err := chromedp.Run(opCtx, chromedp.Evaluate(findScript(query, role), &text)); err != nil {
+		return browserapi.Snapshot{}, fmt.Errorf("find browser candidates: %w", err)
+	}
+	text, truncated := truncateSnapshot(text, maxChars)
+	return browserapi.Snapshot{TabID: tab.id, Text: text, Truncated: truncated}, nil
 }
 
 func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action string, locator browserapi.Locator, value string) error {
@@ -1521,6 +1540,13 @@ func snapshotScript(query, wantedRole string, depth int) string {
 		wantedRole = "image"
 	}
 	return fmt.Sprintf(`(()=>{const q=%s.toLowerCase();const wantedRole=%s.toLowerCase();const maxDepth=%d;const out=[];const norm=value=>(value||'').replace(/\s+/g,' ').trim();const implicitRole=el=>{const tag=el.tagName;if(tag==='A'&&el.hasAttribute('href'))return 'link';if(tag==='BUTTON')return 'button';if(tag==='TEXTAREA')return 'textbox';if(tag==='SELECT')return el.multiple?'listbox':'combobox';if(tag==='IMG')return 'image';if(tag==='INPUT'){const type=(el.type||'text').toLowerCase();if(type==='checkbox')return 'checkbox';if(type==='radio')return 'radio';if(['button','submit','reset','image','file'].includes(type))return 'button';if(type==='range')return 'slider';return 'textbox'}if(/^H[1-6]$/.test(tag))return 'heading';return ''};const role=el=>norm(el.getAttribute('role')||implicitRole(el)).toLowerCase();const labelText=item=>{const clone=item.cloneNode(true);for(const control of clone.querySelectorAll('input,select,textarea,button'))control.remove();return clone.textContent||''};const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(labelText).join(' '):'');const labelledBy=el=>norm((el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||'').join(' '));const name=el=>norm(labelledBy(el)||el.getAttribute('aria-label')||label(el)||el.alt||el.title||el.placeholder||el.innerText||el.value||el.textContent||'');const walk=(el,d)=>{if(!el||(maxDepth>=0&&d>maxDepth))return;const style=getComputedStyle(el);if(style.display==='none'||style.visibility==='hidden')return;const r=role(el);const n=name(el);const semantic=r||el.tabIndex>=0;if((!q||n.toLowerCase().includes(q))&&(!wantedRole||r===wantedRole)&&(n||semantic))out.push('  '.repeat(d)+(r||el.tagName.toLowerCase())+(n?' "'+n.slice(0,300)+'"':''));for(const child of el.children)walk(child,d+1)};walk(document.body,0);return out.join('\n')})()`, jsString(strings.TrimSpace(query)), jsString(strings.TrimSpace(wantedRole)), depth)
+}
+
+func findScript(query, wantedRole string) string {
+	if strings.EqualFold(strings.TrimSpace(wantedRole), "img") {
+		wantedRole = "image"
+	}
+	return fmt.Sprintf(`(()=>{const query=%s.toLocaleLowerCase();const wantedRole=%s.toLocaleLowerCase();const norm=value=>(value||'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();const lower=value=>norm(value).toLocaleLowerCase();const visible=el=>{const style=getComputedStyle(el);return style.display!=='none'&&style.visibility!=='hidden'&&style.opacity!=='0'&&el.getClientRects().length>0};const implicitRole=el=>{const tag=el.tagName;if(tag==='A'&&el.hasAttribute('href'))return 'link';if(tag==='BUTTON')return 'button';if(tag==='TEXTAREA')return 'textbox';if(tag==='SELECT')return el.multiple?'listbox':'combobox';if(tag==='IMG'||tag==='CANVAS'||tag==='SVG')return 'image';if(tag==='INPUT'){const type=(el.type||'text').toLowerCase();if(type==='checkbox')return 'checkbox';if(type==='radio')return 'radio';if(['button','submit','reset','image','file'].includes(type))return 'button';if(type==='range')return 'slider';return 'textbox'}if(/^H[1-6]$/.test(tag))return 'heading';return ''};const role=el=>{const value=lower(el.getAttribute('role')||implicitRole(el));return value==='img'?'image':value};const labelText=item=>{const clone=item.cloneNode(true);for(const control of clone.querySelectorAll('input,select,textarea,button'))control.remove();return clone.textContent||''};const label=el=>norm(el.labels&&el.labels.length?[...el.labels].map(labelText).join(' '):'');const labelledBy=el=>norm((el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||'').join(' '));const name=el=>norm(labelledBy(el)||el.getAttribute('aria-label')||label(el)||el.alt||el.title||el.placeholder||el.innerText||el.value||el.textContent||'');const collect=root=>{const out=[];for(const el of root.querySelectorAll('*')){out.push(el);if(el.shadowRoot)out.push(...collect(el.shadowRoot))}return out};const candidates=collect(document).filter(el=>{if(!visible(el))return false;const r=role(el);if(!r&&el.tabIndex<0)return false;if(wantedRole&&r!==wantedRole)return false;return !query||lower(name(el)).includes(query)});const context=el=>{const own=lower(name(el));for(let parent=el.parentElement;parent&&parent!==document.body;parent=parent.parentElement){const text=norm(parent.innerText||parent.textContent);if(lower(text)!==own&&text.length>own.length)return text.slice(0,240)}return ''};const lines=candidates.slice(0,10).map((el,index)=>{const n=name(el);const r=role(el)||el.tagName.toLowerCase();const same=candidates.filter(other=>role(other)===role(el)&&lower(name(other))===lower(n));const locator={target:n};if(role(el))locator.role=role(el);locator.exact=true;if(same.length>1)locator.occurrence=same.indexOf(el)+1;const detail=context(el);return (index+1)+'. '+r+' '+JSON.stringify(n)+(detail?' | context: '+JSON.stringify(detail):'')+' | locator: '+JSON.stringify(locator)});if(candidates.length>10)lines.push('... '+(candidates.length-10)+' more candidates omitted; refine query or role.');return lines.length?lines.join('\n'):'No visible semantic candidates found for '+JSON.stringify(%s)})()`, jsString(strings.TrimSpace(query)), jsString(strings.TrimSpace(wantedRole)), jsString(strings.TrimSpace(query)))
 }
 
 func truncateSnapshot(text string, maxChars int) (string, bool) {
