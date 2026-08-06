@@ -54,6 +54,18 @@ func TestWebFetchMarkdownAndRedirectMetadata(t *testing.T) {
 	}
 }
 
+func TestWebFetchDefinitionDirectsRenderedPagesToBrowserTools(t *testing.T) {
+	spec := tools.Info(domain.ToolKindWebFetch)
+	for _, expected := range []string{"does not run JavaScript", "browser_tab_new", "browser_navigate", "browser_snapshot", "browser_find"} {
+		if !strings.Contains(spec.Usage, expected) {
+			t.Fatalf("webfetch usage does not mention %q: %s", expected, spec.Usage)
+		}
+	}
+	if strings.Contains(spec.Description, "rendered contents") {
+		t.Fatalf("webfetch description incorrectly promises rendered contents: %s", spec.Description)
+	}
+}
+
 func TestWebFetchTextAndHTMLFormats(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
