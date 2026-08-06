@@ -85,6 +85,65 @@ func TestParseProviderCallStoresNormalizedArguments(t *testing.T) {
 	}
 }
 
+func TestParseProviderCallCanonicalizesAllSchemaIntegerArguments(t *testing.T) {
+	req, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_wait",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindBrowserWait.String(),
+			Arguments: `{"text":"ready","timeout_ms":2000.00000}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Args["timeout_ms"]; got != "2000" {
+		t.Fatalf("expected canonical timeout, got %q", got)
+	}
+}
+
+func TestParseProviderCallRejectsSchemaIntegerOutsideBounds(t *testing.T) {
+	_, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_wait",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindBrowserWait.String(),
+			Arguments: `{"text":"ready","timeout_ms":200000000000}`,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "timeout_ms must be at most 120000") {
+		t.Fatalf("expected bounded timeout error, got %v", err)
+	}
+}
+
+func TestParseProviderCallRejectsExecWaitOutsideRuntimeBounds(t *testing.T) {
+	_, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_wait",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindExecWriteStdin.String(),
+			Arguments: `{"process_id":"exec_1","yield_time_ms":1500000000000000}`,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "at most 300000") {
+		t.Fatalf("expected bounded exec wait error, got %v", err)
+	}
+}
+
+func TestParseProviderCallPreservesLargeJSONNumberWithoutFloatRounding(t *testing.T) {
+	_, err := tools.ParseProviderCall(provider.ToolCall{
+		ID: "call_wait",
+		Function: provider.FunctionCall{
+			Name:      domain.ToolKindBrowserWait.String(),
+			Arguments: `{"text":"ready","timeout_ms":9007199254740993}`,
+		},
+	})
+	var callErr tools.ProviderCallError
+	if !errors.As(err, &callErr) {
+		t.Fatalf("expected provider call error, got %T %v", err, err)
+	}
+	if got := callErr.Request.Args["timeout_ms"]; got != "9007199254740993" {
+		t.Fatalf("provider number was rounded: %q", got)
+	}
+}
+
 func TestParseProviderCallReturnsPartialRequestOnNormalizeError(t *testing.T) {
 	_, err := tools.ParseProviderCall(provider.ToolCall{
 		ID: "call_1",

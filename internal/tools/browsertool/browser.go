@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"net/url"
 	"os"
 	"strconv"
@@ -49,7 +48,7 @@ var specs = []tool{
 	{tools.BrowserHover, "Hover browser element", "Find a current visible element and hover it.", locatorObject("", true)},
 	{tools.BrowserDrag, "Drag browser element", "Find current source and destination elements and drag the source onto the destination.", dragLocatorObject()},
 	{tools.BrowserScroll, "Scroll browser", "Scroll the page, or find and scroll a current element when a semantic target or selector is provided.", locatorObject(`"x":{"type":"integer"},"y":{"type":"integer"}`, false)},
-	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer"},`+saveToFileProperty), "text")},
+	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},`+saveToFileProperty), "text")},
 	{tools.BrowserUpload, "Upload browser files", "Find a current file input and upload authorized workspace files through it.", locatorObject(`"paths":{"type":"array","items":{"type":"string"}}`, true, "paths")},
 	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},`+saveToFileProperty), "expression")},
 	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a current semantic target. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(`"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},`+saveToFileProperty, false)},
@@ -482,14 +481,14 @@ func requiredArgs(kind tools.ID) []string {
 
 func intArg(args map[string]string, key string, fallback int) int {
 	value := strings.TrimSpace(args[key])
-	if parsed, err := strconv.Atoi(value); err == nil {
-		return parsed
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed != math.Trunc(parsed) || parsed < math.MinInt || parsed > math.MaxInt {
+	if value == "" {
 		return fallback
 	}
-	return int(parsed)
+	parsed, err := tools.ParseToolInt(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed.Int()
 }
 
 func boolArg(args map[string]string, key string) bool {

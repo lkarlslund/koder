@@ -247,15 +247,6 @@ func TestBrowserWaitBoundsBlockedEvaluation(t *testing.T) {
 	}
 }
 
-func TestIntArgAcceptsIntegralFloatEncoding(t *testing.T) {
-	if got := intArg(map[string]string{"value": "2000.00000"}, "value", 30_000); got != 2000 {
-		t.Fatalf("intArg() = %d, want 2000", got)
-	}
-	if got := intArg(map[string]string{"value": "2.5"}, "value", 30_000); got != 30_000 {
-		t.Fatalf("intArg() = %d for fractional value, want fallback", got)
-	}
-}
-
 func TestSemanticLocatorArguments(t *testing.T) {
 	locator, err := locatorFromArgs(map[string]string{
 		"target": "Submit order", "role": "button", "within": "Checkout", "exact": "true", "occurrence": "2.00000",

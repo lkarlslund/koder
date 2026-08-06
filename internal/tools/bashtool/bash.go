@@ -18,7 +18,7 @@ func init() {
 		Title:       "Run command",
 		Description: "Run a small one-shot shell command in the workspace.",
 		Usage:       "Run a small one-shot shell command in the workspace. Keep command executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Prefer dedicated file/search tools for reading, writing, editing, and searching files. Use exec_command for long-running, interactive, or background work.",
-		Parameters:  `{"type":"object","properties":{"command":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds"}},"required":["command"],"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"command":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":1,"description":"Optional timeout in milliseconds"}},"required":["command"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }

@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -694,14 +696,18 @@ func normalizeRequest(req Request) (Request, Tool, error) {
 	if req.Tool == "" {
 		return req, nil, errors.New("tool is empty")
 	}
-	tool, ok := Lookup(req.Tool)
+	tool, spec, ok := lookupWithSpec(req.Tool)
 	if !ok {
 		return req, nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	}
 	if req.Args == nil {
 		req.Args = map[string]string{}
 	}
-	args, err := tool.NormalizeArgs(req.Args)
+	args, err := normalizeSchemaIntegers(spec, req.Args)
+	if err != nil {
+		return req, tool, err
+	}
+	args, err = tool.NormalizeArgs(args)
 	if err != nil {
 		return req, nil, err
 	}
@@ -729,7 +735,15 @@ func decodeStringMap(data []byte) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("multiple JSON values")
+		}
 		return nil, err
 	}
 	out := make(map[string]string, len(raw))
@@ -745,8 +759,8 @@ func decodeStringMap(data []byte) (map[string]string, error) {
 			} else {
 				out[key] = "false"
 			}
-		case float64:
-			out[key] = strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%f", typed), "0"), ".")
+		case json.Number:
+			out[key] = typed.String()
 		default:
 			encoded, err := json.Marshal(typed)
 			if err != nil {
