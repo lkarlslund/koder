@@ -3276,6 +3276,15 @@
         toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
         toolStatusBadgeClass(tool) { return toolStatusBadgeClassName(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
+        toolCancelable(tool) {
+          return this.toolCallID(tool) && toolStatus(tool) === 'running';
+        },
+        cancelTool(tool) {
+          const toolCallID = this.toolCallID(tool);
+          if (!toolCallID) return;
+          this.rpc('cancel_tool', {tool_call_id: toolCallID})
+            .catch(err => this.showToast(err.message || 'cancel tool failed'));
+        },
         toolCommandInspectable(tool) {
           return String((tool && tool.tool) || '') === 'exec_command' && this.toolCommandText(tool) !== '';
         },

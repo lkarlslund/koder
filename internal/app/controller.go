@@ -1148,6 +1148,18 @@ func denyRuntimeTool(rt *chat.Chat, toolCallID string) error {
 	return nil
 }
 
+// CancelToolForSelection cancels one running tool call in the selected chat.
+func (c *Controller) CancelToolForSelection(ctx context.Context, selection Selection, toolCallID string) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	return rt.CancelTool(toolCallID)
+}
+
 // NewChatForSelection creates a chat in the selected session without changing controller selection.
 func (c *Controller) NewChatForSelection(ctx context.Context, selection Selection, title string) (domain.Chat, error) {
 	owner, session, parent, _, err := c.resolveSelectedRuntime(ctx, selection, true)

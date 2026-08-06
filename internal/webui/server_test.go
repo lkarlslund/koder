@@ -1259,7 +1259,7 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 func TestApprovalRPCRequiresToolCallID(t *testing.T) {
 	ctrl := newTestController(t)
 	srv := &Server{controller: ctrl}
-	for _, method := range []string{"approve", "deny"} {
+	for _, method := range []string{"approve", "deny", "cancel_tool"} {
 		t.Run(method, func(t *testing.T) {
 			_, err := srv.handleRPC(context.Background(), "client", method, json.RawMessage(`{"id":"legacy-approval"}`))
 			if err == nil || !strings.Contains(err.Error(), "tool_call_id is required") {
@@ -2199,6 +2199,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
+	}
+	if !strings.Contains(fullPage, `toolCancelable(tool)`) || !strings.Contains(fullPage, `cancelTool(tool)`) || !strings.Contains(fullPage, `this.rpc('cancel_tool', {tool_call_id: toolCallID})`) {
+		t.Fatalf("expected running tool cards to expose a scoped cancel action")
 	}
 	if !strings.Contains(fullPage, `x-show="approvals().length > 0"`) {
 		t.Fatalf("expected approvals sidebar section to hide when there are no approvals")

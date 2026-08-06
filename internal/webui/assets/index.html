@@ -176,6 +176,7 @@
                       <i class="bi bi-wrench-adjustable"></i>
                       <span x-text="toolTitle(tool)"></span>
                       <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-text="toolStatusBadge(tool)"></span>
+                      <button type="button" class="tool-cancel-button" x-show="toolCancelable(tool)" title="Cancel running tool" aria-label="Cancel running tool" @click.stop="cancelTool(tool)"><i class="bi bi-stop-fill"></i></button>
                       <button type="button" class="tool-command-button" x-show="toolCommandInspectable(tool)" title="Show exact command" @click.stop="openToolCommandModal(tool)"><i class="bi bi-terminal"></i></button>
                     </div>
                     <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>

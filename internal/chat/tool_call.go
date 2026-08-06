@@ -19,6 +19,11 @@ type completedToolCall struct {
 	err    error
 }
 
+type rawToolCallResult struct {
+	result tools.Result
+	err    error
+}
+
 // RunToolCalls executes model-requested tools and records their results through
 // this chat. Parallel tool calls are all completed before lint diagnostics are
 // appended for files touched by the batch.
@@ -35,14 +40,37 @@ func (r *Chat) RunToolCalls(ctx context.Context, calls []tools.Request, out chan
 	}
 	results := make(chan completedToolCall, len(calls))
 	for _, call := range calls {
-		go func(call tools.Request) {
-			events, err := r.runToolCallWithLifecycle(ctx, runtime, call, func(evt domain.Event) {
+		toolCtx, cancel := context.WithCancel(ctx)
+		addressable := strings.TrimSpace(call.ToolCallID) != ""
+		if addressable {
+			if err := r.registerToolCancel(call.ToolCallID, cancel); err != nil {
+				cancel()
+				return false, err
+			}
+		}
+		go func(call tools.Request, addressable bool, toolCtx context.Context, cancel context.CancelFunc) {
+			defer cancel()
+			if addressable {
+				defer r.unregisterToolCancel(call.ToolCallID)
+			}
+			events, err := r.runToolCallWithLifecycle(toolCtx, runtime, call, func(evt domain.Event) {
 				if out != nil {
 					out <- evt
 				}
 			})
+			if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+				recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				evt, recordErr := r.RecordToolCanceled(recordCtx, call)
+				recordCancel()
+				if recordErr == nil {
+					events = []domain.Event{evt}
+					err = nil
+				} else {
+					err = recordErr
+				}
+			}
 			results <- completedToolCall{events: events, err: err}
-		}(call)
+		}(call, addressable, toolCtx, cancel)
 	}
 
 	var firstErr error
@@ -106,7 +134,19 @@ func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools
 			})
 		}
 	}
-	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
+	completed := make(chan rawToolCallResult, 1)
+	go func() {
+		result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
+		completed <- rawToolCallResult{result: result, err: err}
+	}()
+	var result tools.Result
+	var err error
+	select {
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	case call := <-completed:
+		result, err = call.result, call.err
+	}
 	if err != nil {
 		if isInterruptedToolError(err) {
 			return nil, err
@@ -243,6 +283,28 @@ func (r *Chat) RecordToolError(ctx context.Context, req tools.Request, execErr e
 	}
 	text := fmt.Sprintf("%s failed: %v", req.Tool, execErr)
 	item, err := r.attachToolOutcome(ctx, req, nil, &domain.ToolError{Message: text})
+	if err != nil {
+		return domain.Event{}, err
+	}
+	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
+}
+
+// RecordToolCanceled records a user-requested cancellation as a terminal tool result.
+func (r *Chat) RecordToolCanceled(ctx context.Context, req tools.Request) (domain.Event, error) {
+	if r == nil {
+		return domain.Event{}, fmt.Errorf("chat runtime is required")
+	}
+	text := fmt.Sprintf("%s canceled by user", req.Tool)
+	toolErr := domain.ToolError{Message: text, Code: "canceled"}
+	var (
+		item domain.TimelineItem
+		err  error
+	)
+	if strings.TrimSpace(req.ToolCallID) != "" {
+		item, err = r.AttachToolCanceled(ctx, req.ToolCallID, toolErr)
+	} else {
+		item, err = r.attachToolOutcome(ctx, req, nil, &toolErr)
+	}
 	if err != nil {
 		return domain.Event{}, err
 	}

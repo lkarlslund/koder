@@ -1071,6 +1071,18 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, fmt.Errorf("tool_call_id is required")
 		}
 		return map[string]bool{"accepted": true}, s.controller.DenyForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
+	case "cancel_tool":
+		var in struct {
+			ToolCallID string `json:"tool_call_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		in.ToolCallID = strings.TrimSpace(in.ToolCallID)
+		if in.ToolCallID == "" {
+			return nil, fmt.Errorf("tool_call_id is required")
+		}
+		return map[string]bool{"accepted": true}, s.controller.CancelToolForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
 	case "composer_completions":
 		var in struct {
 			Text      string `json:"text"`

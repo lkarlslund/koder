@@ -115,6 +115,7 @@ type Chat struct {
 	statusText       string
 	active           bool
 	cancel           context.CancelFunc
+	toolCancels      map[string]context.CancelFunc
 	queue            []domain.QueuedInput
 	queueNotes       map[id.ID]string
 	activeUserSource string
@@ -382,6 +383,7 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		statusText:     statusText,
 		queue:          cloneQueuedInputs(chatRecord.QueuedInputs),
 		queueNotes:     map[id.ID]string{},
+		toolCancels:    map[string]context.CancelFunc{},
 		timelineLoaded: timelineLoaded,
 		inbox:          make(chan any, 64),
 		done:           make(chan struct{}),
@@ -1003,6 +1005,51 @@ func (r *Chat) ApproveTool(toolCallID string) {
 
 func (r *Chat) DenyTool(toolCallID string) {
 	r.inbox <- denyCmd{toolCallID: strings.TrimSpace(toolCallID)}
+}
+
+// CancelTool cancels one currently running tool without interrupting the turn.
+func (r *Chat) CancelTool(toolCallID string) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return fmt.Errorf("tool_call_id is required")
+	}
+	r.mu.RLock()
+	cancel := r.toolCancels[toolCallID]
+	r.mu.RUnlock()
+	if cancel == nil {
+		return fmt.Errorf("tool call %q is not running", toolCallID)
+	}
+	cancel()
+	return nil
+}
+
+func (r *Chat) registerToolCancel(toolCallID string, cancel context.CancelFunc) error {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" || cancel == nil {
+		return fmt.Errorf("running tool call requires an id and cancel function")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return fmt.Errorf("chat is closed")
+	}
+	if _, exists := r.toolCancels[toolCallID]; exists {
+		return fmt.Errorf("tool call %q is already running", toolCallID)
+	}
+	if r.toolCancels == nil {
+		r.toolCancels = map[string]context.CancelFunc{}
+	}
+	r.toolCancels[toolCallID] = cancel
+	return nil
+}
+
+func (r *Chat) unregisterToolCancel(toolCallID string) {
+	r.mu.Lock()
+	delete(r.toolCancels, strings.TrimSpace(toolCallID))
+	r.mu.Unlock()
 }
 
 func (r *Chat) Compact(instructions string) error {
@@ -1786,6 +1833,21 @@ func (r *Chat) AttachToolError(ctx context.Context, toolCallID string, toolErr d
 		call.Approval = nil
 		call.ApprovalID = ""
 		call.Status = domain.ToolStatusErrored
+		if call.CompletedAt.IsZero() {
+			call.CompletedAt = time.Now().UTC()
+		}
+		return nil
+	})
+}
+
+// AttachToolCanceled marks one live tool call as canceled and persists the updated item.
+func (r *Chat) AttachToolCanceled(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+		call.Error = &toolErr
+		call.Result = nil
+		call.Approval = nil
+		call.ApprovalID = ""
+		call.Status = domain.ToolStatusCanceled
 		if call.CompletedAt.IsZero() {
 			call.CompletedAt = time.Now().UTC()
 		}
