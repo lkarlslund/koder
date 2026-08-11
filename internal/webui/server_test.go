@@ -1513,6 +1513,20 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `syncActiveChatURL()`) {
 		t.Fatalf("expected app to include welcome screen and opt-in URL sync")
 	}
+	if !strings.Contains(fullPage, `rpc('new_quick_chat', {})`) ||
+		!strings.Contains(fullPage, `@auxclick.stop.prevent="newQuickChat($event)"`) ||
+		!strings.Contains(fullPage, `window.open('', '_blank')`) ||
+		!strings.Contains(fullPage, `Sessions &amp; Chats`) ||
+		!strings.Contains(fullPage, `sessionTab === 'chats'`) ||
+		!strings.Contains(fullPage, `rpc('close_quick_chat'`) ||
+		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) ||
+		!strings.Contains(fullPage, `quick-chat-shell`) {
+		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, management, and focused layout")
+	}
+	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && !quickChatMode()`) ||
+		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) {
+		t.Fatalf("expected Quick Chat mode to hide fork controls while retaining model selection")
+	}
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
 	}
@@ -3086,10 +3100,28 @@ func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
 	if !stateResp.OK || stateResp.Result.Session.ID != selected.Session.ID {
 		t.Fatalf("quick creation changed selection: %#v", stateResp.Result.Session)
 	}
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"close_quick_chat","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
 		t.Fatal(err)
 	}
 	msg = readRPCResponse(t, ctx, conn, 3)
+	var switchResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session      domain.Session `json:"session"`
+			ActiveChatID id.ID          `json:"active_chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &switchResp); err != nil {
+		t.Fatal(err)
+	}
+	if !switchResp.OK || switchResp.Result.Session.ID != created.Result.SessionID || switchResp.Result.Session.Kind != domain.SessionKindQuick || switchResp.Result.ActiveChatID != created.Result.ChatID {
+		t.Fatalf("switch quick chat failed: %#v", switchResp)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":4,"method":"close_quick_chat","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 4)
 	var closeResp struct {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`

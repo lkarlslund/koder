@@ -488,7 +488,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	}
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
-		base.Sessions = sessions
+		base.Sessions, base.QuickChats = splitSessions(sessions)
 	} else if len(base.Sessions) == 0 {
 		return State{}, err
 	}

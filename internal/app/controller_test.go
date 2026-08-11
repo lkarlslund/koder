@@ -2220,6 +2220,16 @@ func TestQuickChatLifecycleSeparatesListsAndPromotes(t *testing.T) {
 	if len(state.QuickChats) != 1 || state.QuickChats[0].ID != quick.ID {
 		t.Fatalf("unexpected quick chat list: %#v", state.QuickChats)
 	}
+	selected, err := ctrl.StateForSelection(ctx, Selection{SessionID: quick.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Session.ID != quick.ID || selected.Session.Kind != domain.SessionKindQuick || selected.ActiveChatID != chatRecord.ID {
+		t.Fatalf("unexpected selected quick chat state: %#v", selected)
+	}
+	if len(selected.QuickChats) != 1 || selected.QuickChats[0].ID != quick.ID {
+		t.Fatalf("selected state lost quick chat list: %#v", selected.QuickChats)
+	}
 	updated, err := ctrl.PromoteQuickChat(ctx, quick.ID, agent.PromoteQuickRequest{Mode: agent.QuickPromotionAssign})
 	if err != nil {
 		t.Fatal(err)

@@ -970,7 +970,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1482,6 +1482,7 @@
           if (msg.type === 'tasks_delta') this.applyTasksDelta(msg.payload);
           if (msg.type === 'restart_delta') this.applyRestartDelta(msg.payload);
           if (msg.type === 'session_delta') this.applySessionDelta(msg.payload);
+          if (msg.type === 'sessions_delta') this.applySessionsDelta(msg.payload);
           if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
@@ -1565,6 +1566,30 @@
           if (id && id === this.currentSessionID()) {
             this.state.session = delta.session;
             this.state.Session = delta.session;
+          }
+          this.reportClientStateSoon();
+        },
+        applySessionsDelta(delta) {
+          if (!delta) return;
+          const normalized = this.normalizeSessionState({...this.sessionState, ...delta});
+          if (delta.session) {
+            const updated = delta.session;
+            const id = this.sessionID(updated);
+            const target = this.isQuickSession(updated) ? normalized.quick_chats : normalized.sessions;
+            const other = this.isQuickSession(updated) ? normalized.sessions : normalized.quick_chats;
+            const otherIndex = other.findIndex(item => this.sessionID(item) === id);
+            if (otherIndex >= 0) other.splice(otherIndex, 1);
+            const index = target.findIndex(item => this.sessionID(item) === id);
+            if (index >= 0) target[index] = updated; else target.unshift(updated);
+          }
+          this.sessionState = normalized;
+          this.state.sessions = normalized.sessions; this.state.Sessions = normalized.sessions;
+          this.state.quick_chats = normalized.quick_chats; this.state.QuickChats = normalized.quick_chats;
+          const deleted = String(delta.deleted_session_id || '').trim();
+          if (deleted && deleted === this.currentSessionID()) {
+            this.allowSessionURLSync = true;
+            history.replaceState(null, '', '/');
+            this.applyState({...this.state, session: null, Session: null, chats: [], Chats: [], active_chat_id: '', ActiveChatID: '', snapshot: {}, Snapshot: {}, snapshots: {}, Snapshots: {}, error: 'Quick Chat closed.'});
           }
           this.reportClientStateSoon();
         },
@@ -2079,6 +2104,7 @@
         welcomeMode() { return !this.currentSessionID() && !this.hydratingSession.active; },
         hydratingSessionMode() { return !!this.hydratingSession.active; },
         sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
+        quickChatMode() { return this.isQuickSession(this.currentSession()); },
         switchingChatMode() { return !!this.switchingChat.active; },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
         sessionURL(id) {
@@ -4297,6 +4323,7 @@
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
+          this.sessionTab = this.quickChatMode() ? 'chats' : 'sessions';
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });
@@ -4307,6 +4334,8 @@
             this.sessionState = this.normalizeSessionState(result);
             this.state.sessions = this.sessionState.sessions;
             this.state.Sessions = this.state.sessions;
+            this.state.quick_chats = this.sessionState.quick_chats;
+            this.state.QuickChats = this.state.quick_chats;
             this.state.project_root = this.sessionState.project_root || this.state.project_root || '';
             this.state.ProjectRoot = this.state.project_root;
           }).catch(err => this.showToast(err.message));
@@ -4314,19 +4343,26 @@
         normalizeSessionState(value) {
           const source = value || {};
           const sessions = source.sessions || source.Sessions || [];
+          const quickChats = source.quick_chats || source.QuickChats || [];
           return {
             project_root: source.project_root || source.ProjectRoot || '',
             sessions: Array.isArray(sessions) ? sessions : [],
+            quick_chats: Array.isArray(quickChats) ? quickChats : [],
           };
         },
         sessionRows() {
           if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
           return this.normalizeSessionState(this.state).sessions || this.sessionState.sessions || [];
         },
+        quickChatRows() {
+          if (this.showSessions && Array.isArray(this.sessionState.quick_chats)) return this.sessionState.quick_chats;
+          return this.normalizeSessionState(this.state).quick_chats || this.sessionState.quick_chats || [];
+        },
         activeSessionID() { return this.currentSessionID(); },
         currentSession() { return this.state.session || this.state.Session || {}; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
+        isQuickSession(session) { return String(session?.kind || session?.Kind || '').toLowerCase() === 'quick'; },
         workspaceTitleSuffix() {
           const root = String(this.state.project_root || this.state.ProjectRoot || '').trim();
           return root ? `(${root})` : '';
@@ -4335,7 +4371,7 @@
         beginHydratingSession(id) {
           id = String(id || '').trim();
           if (!id) return;
-          const session = this.sessionRows().find(row => this.sessionID(row) === id) || {};
+          const session = [...this.sessionRows(), ...this.quickChatRows()].find(row => this.sessionID(row) === id) || {};
           this.hydratingSession = {active: true, id, title: this.sessionTitle(session), error: ''};
           this.showSessions = false;
           this.closeSessionEditor();
@@ -4362,6 +4398,68 @@
             this.hydratingSession = {...this.hydratingSession, active: false, error: message};
             this.showToast(message);
           });
+        },
+        newQuickChat(ev) {
+          if (this.quickChatCreating) return;
+          const newTab = this.shouldOpenInNewTab(ev);
+          let pendingTab = null;
+          if (newTab) {
+            pendingTab = window.open('', '_blank');
+            if (!pendingTab) { this.showToast('The browser blocked the new Quick Chat tab.'); return; }
+            try {
+              pendingTab.opener = null;
+              pendingTab.document.title = 'Creating Quick Chat';
+              pendingTab.document.body.innerHTML = '<p style="font:16px system-ui;padding:2rem">Creating Quick Chat…</p>';
+            } catch (_) {}
+          }
+          this.quickChatCreating = true;
+          this.rpc('new_quick_chat', {}).then(result => {
+            const sessionID = String(result?.session_id || '').trim();
+            const chatID = String(result?.chat_id || '').trim();
+            if (!sessionID || !chatID) throw new Error('Quick Chat creation returned no session');
+            const url = this.chatURL(chatID, sessionID);
+            if (pendingTab) { pendingTab.location.replace(url); return; }
+            this.beginHydratingSession(sessionID);
+            this.allowSessionURLSync = true;
+            return this.rpc('switch_session', {session_id: sessionID}).then(state => { this.applyState(state, {scrollToBottom: true}); this.closeSessionDialog(); });
+          }).catch(err => {
+            if (pendingTab && !pendingTab.closed) pendingTab.close();
+            this.showToast(err.message || 'Quick Chat creation failed');
+          }).finally(() => { this.quickChatCreating = false; });
+        },
+        closeQuickChat(id) {
+          id = String(id || '').trim();
+          if (!id || !confirm('Close this Quick Chat and permanently delete its chat and generated files?')) return;
+          const close = cancelActive => this.rpc('close_quick_chat', {session_id: id, cancel_active: cancelActive});
+          close(false).then(state => { this.applyState(state); this.showSessions = false; }).catch(err => {
+            if (!String(err.message || '').includes('cancellation confirmation')) { this.showToast(err.message); return; }
+            if (!confirm('This Quick Chat is active. Cancel its current work and close it now?')) return;
+            close(true).then(state => { this.applyState(state); this.showSessions = false; }).catch(closeErr => this.showToast(closeErr.message));
+          });
+        },
+        beginPromoteQuickChat(session) {
+          this.quickPromotion = {sessionID: this.sessionID(session), mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''};
+          this.showQuickPromotion = true;
+        },
+        closeQuickPromotion() {
+          if (this.quickPromotion.busy) return;
+          this.showQuickPromotion = false;
+        },
+        browsePromotionFolder() {
+          this.rpc('browse_project_folder', {}).then(result => {
+            if (result?.project_root) this.quickPromotion.projectRoot = result.project_root;
+          }).catch(err => this.showToast(err.message));
+        },
+        promoteQuickChat() {
+          const draft = this.quickPromotion;
+          if (!draft.sessionID || draft.busy) return;
+          draft.busy = true; draft.error = '';
+          this.rpc('promote_quick_chat', {
+            session_id: draft.sessionID, mode: draft.mode, project_root: String(draft.projectRoot || '').trim(), discard_generated_files: !!draft.discardGeneratedFiles,
+          }).then(state => {
+            this.applyState(state); this.showQuickPromotion = false; this.sessionTab = 'sessions';
+            return this.rpc('list_sessions', {});
+          }).then(result => { if (result) this.sessionState = this.normalizeSessionState(result); }).catch(err => { draft.error = err.message; }).finally(() => { draft.busy = false; });
         },
         beginCreateSessionFromWelcome() {
           this.sessionState = this.normalizeSessionState(this.state);

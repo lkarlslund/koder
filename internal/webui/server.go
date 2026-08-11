@@ -1515,6 +1515,11 @@ func (s *Server) sessionExists(ctx context.Context, sessionID id.ID) (bool, erro
 			return true, nil
 		}
 	}
+	for _, session := range state.QuickChats {
+		if session.ID == sessionID {
+			return true, nil
+		}
+	}
 	return false, nil
 }
 
