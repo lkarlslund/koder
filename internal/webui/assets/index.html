@@ -24,7 +24,7 @@
   <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
 </head>
 <body class="bg-body text-body">
-  <div class="app-shell" :class="{'quick-chat-shell': quickChatMode()}" :style="appShellStyle()">
+  <div class="app-shell" :style="appShellStyle()">
     <nav class="topbar navbar bg-body-tertiary px-3">
       <div class="topbar-main d-flex align-items-center gap-2">
         <img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true">
@@ -42,7 +42,7 @@
         <button class="btn btn-sm btn-outline-secondary" type="button" x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()" style="display: none;"><i class="bi bi-cpu"></i><span class="visually-hidden">Choose model</span></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Keep as Session" x-show="quickChatMode()" @click="beginPromoteQuickChat(currentSession())" style="display: none;"><i class="bi bi-bookmark-check"></i><span class="visually-hidden">Keep as Session</span></button>
         <button class="btn btn-sm btn-outline-danger" type="button" title="Close Quick Chat" x-show="quickChatMode()" @click="closeQuickChat(currentSessionID())" style="display: none;"><i class="bi bi-x-lg"></i><span class="visually-hidden">Close Quick Chat</span></button>
-        <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" x-show="!quickChatMode()" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
+        <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Open board" x-show="currentSessionID() && !quickChatMode()" @click="openSessionBoard()" style="display: none;"><i class="bi bi-kanban"></i><span class="visually-hidden">Open board</span></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID() && !quickChatMode()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
@@ -53,7 +53,7 @@
       </div>
     </nav>
 
-    <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="sessionLoadedMode() && !quickChatMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
+    <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="sessionLoadedMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
       <i class="bi bi-layout-sidebar-inset-reverse"></i>
       <span class="visually-hidden">Open sidebar</span>
     </button>
@@ -254,11 +254,11 @@
       <div class="timeline-spacer" aria-hidden="true" x-show="timelineBottomSpacerHeight() > 0" :style="{height: timelineBottomSpacerHeight() + 'px'}"></div>
     </main>
 
-    <div class="sidebar-resizer" x-show="sessionLoadedMode() && !quickChatMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
+    <div class="sidebar-resizer" x-show="sessionLoadedMode()" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
-    <div class="mobile-sidebar-backdrop" x-show="sessionLoadedMode() && !quickChatMode() && mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
+    <div class="mobile-sidebar-backdrop" x-show="sessionLoadedMode() && mobileSidebarOpen" x-transition.opacity @click="closeMobileSidebar()" style="display: none;"></div>
 
-    <aside class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode() && !quickChatMode()" :class="{'mobile-open': mobileSidebarOpen}">
+    <aside class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()" :class="{'mobile-open': mobileSidebarOpen}">
       <div class="mobile-sidebar-header">
         <span class="fw-semibold">Sidebar</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" title="Close sidebar" @click="closeMobileSidebar()"><i class="bi bi-x-lg"></i></button>
@@ -327,12 +327,12 @@
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
-          <div class="d-flex align-items-center gap-1">
+          <div class="d-flex align-items-center gap-1" x-show="!quickChatMode()">
             <button class="btn btn-sm btn-outline-secondary" title="Cleanup chats" @click="openCleanupDialog()"><i class="bi bi-magic"></i></button>
             <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
           </div>
         </div>
-        <div class="status-filter-row" x-show="chatStatusFilterOptions().length > 0">
+        <div class="status-filter-row" x-show="!quickChatMode() && chatStatusFilterOptions().length > 0">
           <template x-for="filter in chatStatusFilterOptions()" :key="filter.status">
             <button type="button" class="status-filter-button" :class="{'active': chatStatusFilterEnabled(filter.status)}" :title="chatStatusFilterTitle(filter)" @click="toggleChatStatusFilter(filter.status)">
               <i class="bi" :class="filter.icon"></i>
@@ -343,20 +343,25 @@
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
-            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" draggable="true" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat)}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
-              <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
-                <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder"></i>
-                <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
-                <i class="bi" :class="chatArchived(chat) ? 'bi-archive' : 'bi-chat-left-text'"></i>
-                <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
-                <button type="button" class="btn btn-sm p-0 border-0 bg-transparent chat-title-edit" title="Rename chat" @click.stop="renameChat(chat)" @pointerdown.stop @mousedown.stop draggable="false">
-                  <i class="bi bi-pencil"></i>
+            <div class="list-group-item list-group-item-action chat-list-item" :draggable="!quickChatMode()" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat)}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
+              <div class="d-flex align-items-center gap-1">
+                <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
+                  <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder" x-show="!quickChatMode()"></i>
+                  <i class="bi" :class="chatArchived(chat) ? 'bi-archive' : 'bi-chat-left-text'"></i>
+                  <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
+                  <button type="button" class="btn btn-sm p-0 border-0 bg-transparent chat-title-edit" title="Rename chat" x-show="!quickChatMode()" @click.stop="renameChat(chat)" @pointerdown.stop @mousedown.stop draggable="false">
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)" :title="chatContextTooltip(chat)"></span>
+                </div>
+                <button type="button" class="btn btn-sm" x-show="!quickChatMode()" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Archive chat" @click.stop="deleteChat(chatID(chat))">
+                  <i class="bi bi-archive"></i>
                 </button>
-                <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)" :title="chatContextTooltip(chat)"></span>
               </div>
-              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Archive chat" @click.stop="deleteChat(chatID(chat))">
-                <i class="bi bi-archive"></i>
-              </button>
+              <div class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'" :title="chatStatusLabel(chat)" style="display: none;">
+                <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]"></i>
+                <span class="text-truncate" x-text="chatStatusLabel(chat)"></span>
+              </div>
             </div>
           </template>
         </div>
@@ -374,7 +379,7 @@
           </div>
         </template>
       </div>
-      <div class="sidebar-section" x-show="milestoneItems().length > 0" style="display: none;">
+      <div class="sidebar-section" x-show="!quickChatMode() && milestoneItems().length > 0" style="display: none;">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
         </div>
@@ -427,7 +432,7 @@
           </template>
         </div>
       </div>
-      <div class="sidebar-section">
+      <div class="sidebar-section" x-show="!quickChatMode()">
         <div class="sidebar-info-row git-summary-row">
           <span class="sidebar-heading">Git</span>
           <span class="fw-semibold text-truncate" x-show="gitStatus().available" x-text="gitStatus().branch || '-'"></span>

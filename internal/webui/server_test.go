@@ -1519,13 +1519,19 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `Sessions &amp; Chats`) ||
 		!strings.Contains(fullPage, `sessionTab === 'chats'`) ||
 		!strings.Contains(fullPage, `rpc('close_quick_chat'`) ||
-		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) ||
-		!strings.Contains(fullPage, `quick-chat-shell`) {
-		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, management, and focused layout")
+		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) {
+		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, and management")
 	}
 	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && !quickChatMode()`) ||
-		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) {
-		t.Fatalf("expected Quick Chat mode to hide fork controls while retaining model selection")
+		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
+		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||
+		!strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) {
+		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
+	}
+	if !strings.Contains(fullPage, `class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'"`) ||
+		!strings.Contains(fullPage, `x-text="chatStatusLabel(chat)"`) ||
+		!strings.Contains(fullPage, `.chat-status-line { display: flex;`) {
+		t.Fatalf("expected each non-idle chat to show its detailed phase below the chat row")
 	}
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
@@ -2100,7 +2106,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
-	if !strings.Contains(fullPage, `x-show="milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+	if !strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
 		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
 	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
@@ -2160,7 +2166,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `bi-archive`) {
 		t.Fatalf("expected chat sidebar to archive chats and filter by status")
 	}
-	if !strings.Contains(fullPage, `draggable="true"`) ||
+	if !strings.Contains(fullPage, `:draggable="!quickChatMode()"`) ||
 		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||
 		!strings.Contains(fullPage, `reorder_chats`) ||
 		!strings.Contains(fullPage, `chat_ids: orderedIDs`) {
@@ -2169,13 +2175,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
 		t.Fatalf("expected chat list trash action")
 	}
-	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
-		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
+	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-line`) {
+		t.Fatalf("expected chat sidebar to render detailed per-chat status lines")
 	}
 	statusIdx := strings.Index(fullPage, `chat-status-icon bi`)
 	chatIconIdx := strings.Index(fullPage, `bi-chat-left-text`)
-	if statusIdx < 0 || chatIconIdx < 0 || statusIdx > chatIconIdx {
-		t.Fatalf("expected chat busy indicator to render before the chat icon")
+	if statusIdx < 0 || chatIconIdx < 0 || statusIdx < chatIconIdx {
+		t.Fatalf("expected detailed chat status to render below the chat entry")
 	}
 	if !strings.Contains(fullPage, `chat-list-item`) || !strings.Contains(fullPage, `.sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }`) {
 		t.Fatalf("expected compact chat list row spacing")
@@ -2185,7 +2191,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `chat-title`) ||
 		!strings.Contains(fullPage, `chat-title-edit`) ||
 		!strings.Contains(fullPage, `.sidebar-list .chat-list-main, .sidebar-list .chat-list-content, .sidebar-list .chat-title { min-width: 0; }`) ||
-		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }`) {
+		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .d-flex > .btn:last-child { flex: 0 0 auto; }`) {
 		t.Fatalf("expected chat rows to constrain title overflow inside sidebar")
 	}
 	if !strings.Contains(fullPage, `chatContextLabel(chat)`) ||
@@ -2232,8 +2238,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatPendingApprovals(chat)`) || !strings.Contains(fullPage, `bi-exclamation-triangle-fill`) {
 		t.Fatalf("expected chats with pending approvals to render a warning triangle status")
 	}
-	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) {
-		t.Fatalf("expected idle chat status icon to be static")
+	if !strings.Contains(fullPage, `x-show="chatStatusValue(chat) !== 'idle'"`) {
+		t.Fatalf("expected idle chats to omit the separate status line")
 	}
 	if !strings.Contains(fullPage, `.chat-list-item.active .chat-status-icon.status-running`) || !strings.Contains(fullPage, `drop-shadow(0 0 2px rgba(0, 0, 0, .55))`) {
 		t.Fatalf("expected selected busy chat status icons to stay visible on active row background")
