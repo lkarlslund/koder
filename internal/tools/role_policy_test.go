@@ -67,6 +67,30 @@ func TestExecuteWithChatRejectsAllChatToolsForExecutionRole(t *testing.T) {
 	}
 }
 
+func TestStandaloneRoleRejectsAllChatTools(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{ChatRole: chatrole.Standalone})
+	for _, def := range defs {
+		for _, denied := range executionForbiddenChatTools() {
+			if def.Function.Name == denied.String() {
+				t.Fatalf("standalone definitions exposed forbidden tool %q", def.Function.Name)
+			}
+		}
+	}
+	for _, kind := range executionForbiddenChatTools() {
+		_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+			SessionID: "session-1",
+			ChatID:    "chat-1",
+			ChatRole:  chatrole.Standalone,
+		}, Request: tools.Request{
+			Tool: kind,
+			Args: map[string]string{"chat_id": "child-1", "profile": string(chatrole.Execution), "objective": "no", "message": "no", "archived": "true", "title": "no"},
+		}})
+		if err == nil || !tools.IsDenied(err) {
+			t.Fatalf("expected %s to be denied, got %v", kind, err)
+		}
+	}
+}
+
 func TestDefinitionsHideDisabledTools(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{
 		AllowedTools: map[tools.ID]bool{domain.ToolKindFileRead: false},

@@ -1,6 +1,33 @@
 package domain
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestSessionKindJSONAndZeroValue(t *testing.T) {
+	if got := SessionKind(0); got != SessionKindRegular || got.String() != "regular" {
+		t.Fatalf("zero session kind = %v, want regular", got)
+	}
+	data, err := json.Marshal(Session{Kind: SessionKindQuick})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Session
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != SessionKindQuick {
+		t.Fatalf("decoded kind = %v, want quick", decoded.Kind)
+	}
+	decoded = Session{}
+	if err := json.Unmarshal([]byte(`{"Title":"legacy"}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != SessionKindRegular {
+		t.Fatalf("legacy kind = %v, want regular", decoded.Kind)
+	}
+}
 
 func TestUsageContextTokens(t *testing.T) {
 	tests := []struct {

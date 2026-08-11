@@ -15,6 +15,7 @@ const (
 	Planning     Role = domain.WorkflowRolePlanning
 	Execution    Role = domain.WorkflowRoleExecution
 	Compaction   Role = domain.WorkflowRoleCompaction
+	Standalone   Role = domain.WorkflowRoleStandalone
 )
 
 // Spec describes a chat role's behavior contract.
@@ -56,6 +57,23 @@ func DefaultRegistry() Registry {
 		General:      orchestrationSpec(General, "Chat"),
 		Orchestrator: orchestrationSpec(Orchestrator, "Orchestrate"),
 		Planning:     orchestrationSpec(Planning, "Plan"),
+		Standalone: {
+			Registered:  true,
+			Name:        Standalone,
+			DisplayName: "Standalone",
+			SystemPrompt: strings.TrimSpace(`This is a standalone chat.
+
+Answer the user's questions and complete requested work directly. Do not create, control, or coordinate other chats.`),
+			DenyTools: toolSet(
+				"chat_list",
+				"chat_start",
+				"chat_send",
+				"chat_cancel",
+				"chat_archive",
+				"chat_rename",
+				"chat_cleanup",
+			),
+		},
 		Compaction: {
 			Registered:  true,
 			Name:        Compaction,

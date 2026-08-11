@@ -203,7 +203,7 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 			t.Fatalf("expected %s to expose chat_start", role)
 		}
 	}
-	for _, role := range []domain.WorkflowRole{chatrole.Execution} {
+	for _, role := range []domain.WorkflowRole{chatrole.Execution, chatrole.Standalone} {
 		if _, ok := (startTool{}).Definition(tools.Runtime{ChatRole: role}, tools.ToolSpec{}); ok {
 			t.Fatalf("expected %s to hide chat_start", role)
 		}

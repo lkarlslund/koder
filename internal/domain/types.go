@@ -9,7 +9,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-//go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -trimprefix=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin -transform=snake -json -text -values -output=messagerole_enumer.go
+//go:generate go tool enumer -type=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin,SessionKind -trimprefix=MessageRole,PartKind,ApprovalStatus,LegacyTaskStatus,MilestoneStatus,TaskStatus,EventKind,QueuedInputKind,QueuedInputDelivery,QueuedInputOrigin,SessionKind -transform=snake -json -text -values -output=messagerole_enumer.go
 type MessageRole uint8
 
 const (
@@ -291,25 +291,34 @@ const (
 )
 
 type Session struct {
-	ID                ID
-	ParentID          *ID
-	Title             string
-	TitleGeneratedAt  time.Time
-	TitleRefreshCount int
-	PermissionProfile string
-	PermissionRules   []PermissionOverride
-	ToolStates        ToolStates
-	AccessSettings    accesssettings.Settings
-	ProjectRoot       string
-	ProjectChecksum   string
-	AgentsResolved    string
-	AgentsSummary     string
-	AgentsFiles       []AgentsFile
-	AgentsGeneratedAt time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	LastMessage       string
+	ID                 ID
+	ParentID           *ID
+	Kind               SessionKind
+	Title              string
+	TitleGeneratedAt   time.Time
+	TitleRefreshCount  int
+	PermissionProfile  string
+	PermissionRules    []PermissionOverride
+	ToolStates         ToolStates
+	AccessSettings     accesssettings.Settings
+	ProjectRoot        string
+	ProjectRootManaged bool
+	ProjectChecksum    string
+	AgentsResolved     string
+	AgentsSummary      string
+	AgentsFiles        []AgentsFile
+	AgentsGeneratedAt  time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	LastMessage        string
 }
+
+type SessionKind uint8
+
+const (
+	SessionKindRegular SessionKind = iota
+	SessionKindQuick
+)
 
 type WorkflowRole string
 
@@ -319,6 +328,7 @@ const (
 	WorkflowRolePlanning     WorkflowRole = "planning"
 	WorkflowRoleExecution    WorkflowRole = "execution"
 	WorkflowRoleCompaction   WorkflowRole = "compaction"
+	WorkflowRoleStandalone   WorkflowRole = "standalone"
 )
 
 func (r WorkflowRole) String() string {
