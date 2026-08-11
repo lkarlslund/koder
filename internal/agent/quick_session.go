@@ -153,12 +153,12 @@ func validateExistingProjectRoot(path string) (string, error) {
 	return path, nil
 }
 
-func directoryHasEntries(path string) (bool, error) {
+func directoryHasEntries(path string) (hasEntries bool, err error) {
 	dir, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
-	defer dir.Close()
+	defer func() { err = errors.Join(err, dir.Close()) }()
 	_, err = dir.Readdirnames(1)
 	switch {
 	case err == nil:
@@ -216,12 +216,12 @@ func copyDirectory(source, destination string) error {
 	})
 }
 
-func copyRegularFile(source, destination string, mode fs.FileMode) error {
+func copyRegularFile(source, destination string, mode fs.FileMode) (err error) {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { err = errors.Join(err, in.Close()) }()
 	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
