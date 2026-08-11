@@ -43,7 +43,7 @@ func (r *Runtime) ChatRequest(session domain.Session, chat domain.Chat, messages
 		modelCfg = r.modelConfigForChat(chat)
 	}
 	extraBody := provider.RequestExtraBody(providerCfg, modelCfg)
-	extraBody = provider.WithLlamaCacheAffinity(extraBody, providerCfg, session.ID, chat.ID)
+	extraBody = provider.WithLlamaPromptCache(extraBody, providerCfg)
 	req := provider.ChatRequest{
 		SessionID:          session.ID,
 		ChatID:             chat.ID,

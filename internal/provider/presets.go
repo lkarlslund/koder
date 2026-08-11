@@ -1,12 +1,10 @@
 package provider
 
 import (
-	"hash/fnv"
 	"net/url"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
-	"github.com/lkarlslund/koder/internal/id"
 )
 
 const (
@@ -119,32 +117,15 @@ func protectedExtraBodyKey(key string) bool {
 	}
 }
 
-func WithLlamaCacheAffinity(body map[string]any, cfg config.Provider, sessionID, chatID id.ID) map[string]any {
-	if cfg.LlamaSlots <= 0 || !looksLikeLlamaProvider(cfg) {
-		return body
-	}
-	key := strings.TrimSpace(string(chatID))
-	if config.NormalizeLlamaSlotScope(cfg.LlamaSlotScope) == "session" {
-		key = strings.TrimSpace(string(sessionID))
-	}
-	if key == "" {
+func WithLlamaPromptCache(body map[string]any, cfg config.Provider) map[string]any {
+	if !looksLikeLlamaProvider(cfg) {
 		return body
 	}
 	if body == nil {
 		body = map[string]any{}
 	}
 	body["cache_prompt"] = true
-	body["id_slot"] = stableSlot(key, cfg.LlamaSlots)
 	return body
-}
-
-func stableSlot(key string, slots int) int {
-	if slots <= 0 {
-		return 0
-	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return int(h.Sum32() % uint32(slots))
 }
 
 func applyModelRequestOptions(body map[string]any, cfg config.Provider, model config.ModelConfig) {
