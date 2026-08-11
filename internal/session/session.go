@@ -921,6 +921,12 @@ func (s *Session) PromoteQuick(ctx context.Context, projectRoot string) (domain.
 	}
 	s.session = updatedSession
 	s.chats[0] = updatedChat
+	if s.workspaceWatchCancel != nil {
+		s.workspaceWatchCancel()
+		s.workspaceWatchCancel = nil
+	}
+	s.workspace = workspacepkg.Status{ProjectRoot: updatedSession.ProjectRoot}
+	s.gitDiff = workspacepkg.Diff{ProjectRoot: updatedSession.ProjectRoot}
 	for _, rt := range s.runtimes {
 		if rt != nil {
 			rt.SetSession(updatedSession)

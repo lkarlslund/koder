@@ -3037,6 +3037,71 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	}
 }
 
+func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
+	ctrl := newTestController(t)
+	selected := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsURL := fmt.Sprintf("ws://%s/ws?session=%s&chat=%s", srv.Addr(), selected.Session.ID, selected.ActiveChatID)
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"new_quick_chat","params":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var created struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			SessionID id.ID `json:"session_id"`
+			ChatID    id.ID `json:"chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.OK || created.Result.SessionID == "" || created.Result.ChatID == "" {
+		t.Fatalf("unexpected quick chat response: %#v", created)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"get_state","params":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var stateResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session domain.Session `json:"session"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(msg, &stateResp); err != nil {
+		t.Fatal(err)
+	}
+	if !stateResp.OK || stateResp.Result.Session.ID != selected.Session.ID {
+		t.Fatalf("quick creation changed selection: %#v", stateResp.Result.Session)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"close_quick_chat","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 3)
+	var closeResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &closeResp); err != nil {
+		t.Fatal(err)
+	}
+	if !closeResp.OK {
+		t.Fatalf("close quick chat failed: %s", closeResp.Error)
+	}
+}
+
 func TestWebSocketNewSessionCreatesMissingProjectRootOnlyWhenRequested(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())

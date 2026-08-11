@@ -27,6 +27,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
@@ -485,6 +486,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !websocketUsesGlobalControllerEvent(event.Type) {
 				continue
 			}
+			s.applyGlobalSessionEvent(event)
 			select {
 			case pushEvents <- event:
 			case <-ctx.Done():
@@ -619,6 +621,27 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+func (s *Server) applyGlobalSessionEvent(event app.Event) {
+	if event.Type != "sessions_delta" {
+		return
+	}
+	payload, ok := event.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	deleted, ok := payload["deleted_session_id"].(id.ID)
+	if !ok || deleted == "" {
+		return
+	}
+	s.clientSelectionMu.Lock()
+	for clientID, selection := range s.clientSelections {
+		if selection.SessionID == deleted {
+			delete(s.clientSelections, clientID)
+		}
+	}
+	s.clientSelectionMu.Unlock()
 }
 
 func (s *Server) recordWebSocketWrite(clientID string, eventType string, size int) {
@@ -968,6 +991,45 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		s.setClientSelection(clientID, clientSelection{SessionID: session.ID})
+		return s.stateForClient(ctx, clientID)
+	case "new_quick_chat":
+		session, chatRecord, err := s.controller.CreateQuickChat(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"session_id": session.ID, "chat_id": chatRecord.ID}, nil
+	case "close_quick_chat":
+		var in struct {
+			SessionID    id.ID `json:"session_id"`
+			CancelActive bool  `json:"cancel_active"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		selection := s.clientSelection(clientID)
+		if err := s.controller.CloseQuickChat(ctx, in.SessionID, in.CancelActive); err != nil {
+			return nil, err
+		}
+		if selection.SessionID == in.SessionID {
+			s.clearClientSelection(clientID)
+			return s.welcomeState(ctx, "Quick Chat closed."), nil
+		}
+		return s.stateForClient(ctx, clientID)
+	case "promote_quick_chat":
+		var in struct {
+			SessionID             id.ID                    `json:"session_id"`
+			Mode                  agent.QuickPromotionMode `json:"mode"`
+			ProjectRoot           string                   `json:"project_root"`
+			DiscardGeneratedFiles bool                     `json:"discard_generated_files"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if _, err := s.controller.PromoteQuickChat(ctx, in.SessionID, agent.PromoteQuickRequest{
+			Mode: in.Mode, ProjectRoot: in.ProjectRoot, DiscardGeneratedFiles: in.DiscardGeneratedFiles,
+		}); err != nil {
+			return nil, err
+		}
 		return s.stateForClient(ctx, clientID)
 	case "rename_session":
 		var in struct {
@@ -1351,6 +1413,7 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 	state := s.controller.State()
 	return app.State{
 		Sessions:      sessionState.Sessions,
+		QuickChats:    sessionState.QuickChats,
 		Theme:         state.Theme,
 		TTS:           state.TTS,
 		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
@@ -1507,6 +1570,7 @@ func (s *Server) deleteClientSelection(clientID string) {
 type stateDelta struct {
 	Session       any    `json:"session,omitempty"`
 	Sessions      any    `json:"sessions,omitempty"`
+	QuickChats    any    `json:"quick_chats,omitempty"`
 	Chats         any    `json:"chats,omitempty"`
 	ChatStatuses  any    `json:"chat_statuses,omitempty"`
 	ActiveChatID  id.ID  `json:"active_chat_id,omitempty"`
@@ -1640,6 +1704,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 	return stateDelta{
 		Session:       state.Session,
 		Sessions:      state.Sessions,
+		QuickChats:    state.QuickChats,
 		Chats:         state.Chats,
 		ChatStatuses:  state.ChatStatuses,
 		ActiveChatID:  state.ActiveChatID,

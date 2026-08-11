@@ -2203,6 +2203,58 @@ func activateTestSession(t *testing.T, ctrl *Controller, projectRoot string) dom
 	return session
 }
 
+func TestQuickChatLifecycleSeparatesListsAndPromotes(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	quick, chatRecord, err := ctrl.CreateQuickChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quick.Kind != domain.SessionKindQuick || chatRecord.WorkflowRole != chatrole.Standalone {
+		t.Fatalf("unexpected quick chat: %#v %#v", quick, chatRecord)
+	}
+	state, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 1 || state.QuickChats[0].ID != quick.ID {
+		t.Fatalf("unexpected quick chat list: %#v", state.QuickChats)
+	}
+	updated, err := ctrl.PromoteQuickChat(ctx, quick.ID, agent.PromoteQuickRequest{Mode: agent.QuickPromotionAssign})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Kind != domain.SessionKindRegular {
+		t.Fatalf("promoted kind = %v", updated.Kind)
+	}
+	state, err = ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 0 {
+		t.Fatalf("promoted chat remained quick: %#v", state.QuickChats)
+	}
+}
+
+func TestCloseQuickChatRemovesItFromQuickList(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	quick, _, err := ctrl.CreateQuickChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.CloseQuickChat(ctx, quick.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 0 {
+		t.Fatalf("closed quick chat remained listed: %#v", state.QuickChats)
+	}
+}
+
 func TestNewestSessionUsesUpdatedAtThenID(t *testing.T) {
 	now := time.Now()
 	got := newestSession([]domain.Session{
