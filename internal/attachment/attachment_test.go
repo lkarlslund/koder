@@ -24,6 +24,19 @@ func TestImportSessionData(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionData(t *testing.T) {
+	m := NewManager(t.TempDir())
+	if _, err := m.ImportSessionData("session-1", []byte("hello"), "result.txt", "text/plain", SourceBrowser); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeleteSessionData("session-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(m.SessionDir("session-1")); !os.IsNotExist(err) {
+		t.Fatalf("expected session attachments removed, got %v", err)
+	}
+}
+
 func TestImportClipboardImageAndAdoptDraft(t *testing.T) {
 	manager := NewManager(t.TempDir())
 

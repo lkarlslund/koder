@@ -47,6 +47,9 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	}
 	snapshot := c.session.Snapshot()
 	session := snapshot.Session
+	if session.Kind == domain.SessionKindQuick {
+		return chattool.Status{}, fmt.Errorf("quick sessions cannot start child chats")
+	}
 	parentChat, ok := chatByID(snapshot.Chats, parentChatID)
 	if session.ID == "" || session.ID != sessionID {
 		return chattool.Status{}, fmt.Errorf("session %s is not active", sessionID)

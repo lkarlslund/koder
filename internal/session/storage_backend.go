@@ -24,17 +24,48 @@ func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 }
 
 func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID, permissionProfile string, parentID *id.ID) (domain.Session, error) {
+	return createSessionRecordWithOptions(ctx, st, chatsSrc, createSessionOptions{
+		Title: title, ProviderID: providerID, ModelID: modelID, PermissionProfile: permissionProfile, ParentID: parentID,
+		InitialChatRole: chatrole.Orchestrator,
+	})
+}
+
+type createSessionOptions struct {
+	ID                 id.ID
+	Title              string
+	ProviderID         string
+	ModelID            string
+	PermissionProfile  string
+	ParentID           *id.ID
+	Kind               domain.SessionKind
+	ProjectRoot        string
+	ProjectRootManaged bool
+	InitialChatRole    domain.WorkflowRole
+}
+
+func createSessionRecordWithOptions(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, opts createSessionOptions) (domain.Session, error) {
 	now := time.Now().UTC()
+	sessionID := opts.ID
+	if sessionID == "" {
+		sessionID = id.NewAt(now)
+	}
+	role := opts.InitialChatRole
+	if role == "" {
+		role = chatrole.Orchestrator
+	}
 	session := domain.Session{
-		ID:                id.NewAt(now),
-		ParentID:          parentID,
-		Title:             title,
-		PermissionProfile: permissionProfile,
-		PermissionRules:   nil,
-		ToolStates:        map[domain.ToolKind]bool{},
-		AccessSettings:    accesssettings.Default(),
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                 sessionID,
+		ParentID:           opts.ParentID,
+		Kind:               opts.Kind,
+		Title:              opts.Title,
+		PermissionProfile:  opts.PermissionProfile,
+		PermissionRules:    nil,
+		ToolStates:         map[domain.ToolKind]bool{},
+		AccessSettings:     accesssettings.Default(),
+		ProjectRoot:        opts.ProjectRoot,
+		ProjectRootManaged: opts.ProjectRootManaged,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if err := sessionCollection(st).Put(ctx, session); err != nil {
 		return domain.Session{}, err
@@ -45,9 +76,9 @@ func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg
 	if _, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{
 		Session:    session,
 		Title:      "Main",
-		Role:       chatrole.Orchestrator,
-		ProviderID: providerID,
-		ModelID:    modelID,
+		Role:       role,
+		ProviderID: opts.ProviderID,
+		ModelID:    opts.ModelID,
 		Position:   0,
 	}); err != nil {
 		return domain.Session{}, err

@@ -86,6 +86,17 @@ func (m *Manager) SessionDir(sessionID id.ID) string {
 	return filepath.Join(m.root, "sessions", string(sessionID))
 }
 
+// DeleteSessionData removes all durable attachments owned by a session.
+func (m *Manager) DeleteSessionData(sessionID id.ID) error {
+	if m == nil || sessionID == "" {
+		return fmt.Errorf("session attachment destination is required")
+	}
+	if err := os.RemoveAll(m.SessionDir(sessionID)); err != nil {
+		return fmt.Errorf("delete session attachments: %w", err)
+	}
+	return nil
+}
+
 func (m *Manager) ImportClipboardImage(png []byte) (Draft, error) {
 	return m.ImportClipboardImageData(png, "clipboard.png", "image/png")
 }
