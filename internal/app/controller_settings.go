@@ -61,7 +61,6 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		SelectedModel:           result.SelectedModel,
 		PromptProgressProbed:    result.PromptProgressProbed,
 		PromptProgressSupported: result.PromptProgressSupported,
-		LlamaSlots:              result.LlamaSlots,
 	}, nil
 }
 
@@ -78,10 +77,8 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	catalogDraft.Model = probe.SelectedModel
 	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
 	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
-	catalogDraft.LlamaSlots = probe.LlamaSlots
 	draft.PromptProgressProbed = probe.PromptProgressProbed
 	draft.PromptProgressSupported = probe.PromptProgressSupported
-	draft.LlamaSlots = probe.LlamaSlots
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {
@@ -317,7 +314,6 @@ func (c *Controller) ModelOptionsForSelection(ctx context.Context, selection Sel
 	if err != nil {
 		return nil, err
 	}
-	c.refreshDetectedLlamaSlots(ctx, cfg, options)
 	return options, nil
 }
 
@@ -567,62 +563,6 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		return nil, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
 	}
 	return options, nil
-}
-
-func (c *Controller) refreshDetectedLlamaSlots(ctx context.Context, cfg config.Config, options []ModelOption) {
-	if c == nil || len(options) == 0 {
-		return
-	}
-	modelByProvider := map[string]string{}
-	for _, option := range options {
-		providerID := strings.TrimSpace(option.SourceProviderID)
-		modelID := strings.TrimSpace(option.SourceModelID)
-		if providerID == "" {
-			providerID = strings.TrimSpace(option.ProviderID)
-		}
-		if modelID == "" {
-			modelID = strings.TrimSpace(option.ModelID)
-		}
-		if providerID == "" || modelID == "" {
-			continue
-		}
-		if _, ok := modelByProvider[providerID]; !ok {
-			modelByProvider[providerID] = modelID
-		}
-	}
-	updates := map[string]int{}
-	for providerID, modelID := range modelByProvider {
-		providerCfg, ok := cfg.Provider(providerID)
-		if !ok || providerCfg.Disabled || providerCfg.LlamaSlots > 0 {
-			continue
-		}
-		slots, err := provider.DetectLlamaSlots(ctx, providerID, providerCfg, modelID, nil)
-		if err != nil || slots <= 0 {
-			continue
-		}
-		updates[providerID] = slots
-	}
-	if len(updates) == 0 {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	changed := false
-	for providerID, slots := range updates {
-		providerCfg, ok := c.cfg.Providers[providerID]
-		if !ok || providerCfg.Disabled || providerCfg.LlamaSlots > 0 {
-			continue
-		}
-		providerCfg.LlamaSlots = slots
-		providerCfg.LlamaSlotScope = config.NormalizeLlamaSlotScope(providerCfg.LlamaSlotScope)
-		c.cfg.Providers[providerID] = providerCfg
-		changed = true
-	}
-	if changed {
-		if err := c.cfg.Save(); err == nil && c.agent != nil {
-			c.agent.UpdateConfig(c.cfg)
-		}
-	}
 }
 
 // SetDefaultModel persists the model used for new sessions.
@@ -891,12 +831,6 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	if !providerOK {
 		return
 	}
-	detectedSlots := 0
-	if providerCfg.LlamaSlots <= 0 {
-		if slots, err := provider.DetectLlamaSlots(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && slots > 0 {
-			detectedSlots = slots
-		}
-	}
 	contextWindow := existing.ContextWindow
 	if provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing)) {
 		if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
@@ -911,9 +845,7 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		preset = "auto"
 	}
 	if existingOK && existing.ContextWindow == contextWindow && strings.TrimSpace(existing.ModelPreset) == preset {
-		if detectedSlots <= 0 {
-			return
-		}
+		return
 	}
 	model := existing
 	model.ProviderID = providerID
@@ -925,14 +857,6 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	if !existingOK || existing.ContextWindow != contextWindow || strings.TrimSpace(existing.ModelPreset) != preset {
 		c.cfg.SetModelConfig(model)
 		changed = true
-	}
-	if detectedSlots > 0 {
-		if latest, ok := c.cfg.Providers[sourceProviderID]; ok && !latest.Disabled && latest.LlamaSlots <= 0 {
-			latest.LlamaSlots = detectedSlots
-			latest.LlamaSlotScope = config.NormalizeLlamaSlotScope(latest.LlamaSlotScope)
-			c.cfg.Providers[sourceProviderID] = latest
-			changed = true
-		}
 	}
 	if changed && c.cfg.Path() != "" {
 		if err := c.cfg.Save(); err == nil && c.agent != nil {
@@ -1330,8 +1254,6 @@ func (c *Controller) providerStateLocked() ProviderState {
 			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
 			PromptProgressProbed:    cfg.PromptProgressProbed,
 			PromptProgressSupported: cfg.PromptProgressSupported,
-			LlamaSlots:              cfg.LlamaSlots,
-			LlamaSlotScope:          providerConfigLlamaSlotScope(cfg),
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
 			drafts[id] = providerDraftFromCatalog(draft)
@@ -1366,8 +1288,6 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
 		PromptProgressProbed:    draft.PromptProgressProbed,
 		PromptProgressSupported: draft.PromptProgressSupported,
-		LlamaSlots:              draft.LlamaSlots,
-		LlamaSlotScope:          catalogDraftLlamaSlotScope(draft),
 	}
 }
 
@@ -1390,8 +1310,6 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
 		PromptProgressProbed:    draft.PromptProgressProbed,
 		PromptProgressSupported: draft.PromptProgressSupported,
-		LlamaSlots:              draft.LlamaSlots,
-		LlamaSlotScope:          draftLlamaSlotScope(draft),
 	}
 }
 
@@ -1440,29 +1358,6 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.PromptProgressMode = config.NormalizePromptProgressMode(draft.PromptProgressMode)
 	next.PromptProgressProbed = draft.PromptProgressProbed
 	next.PromptProgressSupported = draft.PromptProgressSupported
-	next.LlamaSlots = draft.LlamaSlots
-	next.LlamaSlotScope = draftLlamaSlotScope(draft)
-}
-
-func providerConfigLlamaSlotScope(cfg config.Provider) string {
-	if cfg.LlamaSlots <= 0 && strings.TrimSpace(cfg.LlamaSlotScope) == "" {
-		return ""
-	}
-	return config.NormalizeLlamaSlotScope(cfg.LlamaSlotScope)
-}
-
-func draftLlamaSlotScope(draft ProviderDraft) string {
-	if draft.LlamaSlots <= 0 && strings.TrimSpace(draft.LlamaSlotScope) == "" {
-		return ""
-	}
-	return config.NormalizeLlamaSlotScope(draft.LlamaSlotScope)
-}
-
-func catalogDraftLlamaSlotScope(draft provider.ConnectDraft) string {
-	if draft.LlamaSlots <= 0 && strings.TrimSpace(draft.LlamaSlotScope) == "" {
-		return ""
-	}
-	return config.NormalizeLlamaSlotScope(draft.LlamaSlotScope)
 }
 
 func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {

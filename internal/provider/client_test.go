@@ -258,66 +258,6 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 	}
 }
 
-func TestDetectLlamaSlotsUsesSlotsEndpoint(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			http.NotFound(w, r)
-		case "/slots":
-			if got := r.URL.Query().Get("model"); got != "model-a" {
-				t.Fatalf("unexpected model query: %q", got)
-			}
-			_, _ = w.Write([]byte(`[{"id":0},{"id":1},{"id":2}]`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	got, err := DetectLlamaSlots(context.Background(), "openai-compatible", config.Provider{
-		Kind:    ProviderKindCompatible,
-		BaseURL: server.URL + "/v1",
-		Timeout: time.Second,
-	}, "model-a", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 3 {
-		t.Fatalf("unexpected detected slot count: %d", got)
-	}
-}
-
-func TestDetectLlamaSlotsFallsBackToPropsMaxInstances(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			http.NotFound(w, r)
-		case "/slots":
-			http.NotFound(w, r)
-		case "/props":
-			if got := r.URL.Query().Get("model"); got != "model-a" {
-				t.Fatalf("unexpected model query: %q", got)
-			}
-			_, _ = w.Write([]byte(`{"max_instances":2,"default_generation_settings":{"n_ctx":8192}}`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	got, err := DetectLlamaSlots(context.Background(), "openai-compatible", config.Provider{
-		Kind:    ProviderKindCompatible,
-		BaseURL: server.URL + "/v1",
-		Timeout: time.Second,
-	}, "model-a", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 2 {
-		t.Fatalf("unexpected detected slot count: %d", got)
-	}
-}
-
 func TestDetectContextWindowUsesCompatibleModelStatusArgs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -367,32 +307,6 @@ func TestDetectContextWindowDoesNotLoadUnloadedRouterModel(t *testing.T) {
 	}
 	if got != 262144 || propsCalls != 0 {
 		t.Fatalf("expected passive context detection, got context=%d props_calls=%d", got, propsCalls)
-	}
-}
-
-func TestDetectLlamaSlotsDoesNotLoadUnloadedRouterModel(t *testing.T) {
-	var activeProbeCalls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"value":"unloaded","preset":"parallel = 2\n"}}]}`))
-		case "/slots", "/props":
-			activeProbeCalls++
-			http.Error(w, "must not load model", http.StatusInternalServerError)
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	got, err := DetectLlamaSlots(context.Background(), "openai-compatible", config.Provider{
-		Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second,
-	}, "model-a", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 2 || activeProbeCalls != 0 {
-		t.Fatalf("expected passive slot detection, got slots=%d active_probe_calls=%d", got, activeProbeCalls)
 	}
 }
 
