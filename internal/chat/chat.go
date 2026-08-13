@@ -53,6 +53,7 @@ const (
 	StatusStreamingResponse Status = "streaming_response"
 	StatusRunningTools      Status = "running_tools"
 	StatusWaitingApproval   Status = "waiting_approval"
+	StatusWaitingInput      Status = "waiting_input"
 	StatusErrored           Status = "error"
 )
 
@@ -73,6 +74,7 @@ type Snapshot struct {
 	TimelineLoadedAll bool
 	TimelineBefore    id.ID
 	Approvals         []Approval
+	PendingUserInput  int
 	QueuedInputs      []domain.QueuedInput
 	ExecProcesses     []tools.ExecProcess
 	PendingAssistant  PendingAssistantTurn
@@ -191,6 +193,10 @@ type approveCmd struct {
 type denyCmd struct {
 	toolCallID string
 }
+type submitUserInputCmd struct {
+	answers []tools.UserInputAnswer
+	reply   chan error
+}
 type closeCmd struct{}
 type streamEventCmd struct {
 	turn  uint64
@@ -203,6 +209,7 @@ type streamClosedCmd struct {
 type TurnStepResult struct {
 	Continue         bool
 	WaitingApproval  bool
+	WaitingInput     bool
 	Done             bool
 	TurnInstructions []provider.InstructionBlock
 }
@@ -372,6 +379,9 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 	if len(approvals) > 0 {
 		status = StatusWaitingApproval
 		statusText = "Waiting for approval"
+	} else if hasPendingUserInput(timeline) {
+		status = StatusWaitingInput
+		statusText = "Waiting for input"
 	}
 	c := &Chat{
 		deps:           deps,
@@ -1007,6 +1017,24 @@ func (r *Chat) DenyTool(toolCallID string) {
 	r.inbox <- denyCmd{toolCallID: strings.TrimSpace(toolCallID)}
 }
 
+func (r *Chat) SubmitUserInput(ctx context.Context, answers []tools.UserInputAnswer) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	reply := make(chan error, 1)
+	select {
+	case r.inbox <- submitUserInputCmd{answers: slices.Clone(answers), reply: reply}:
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
 // CancelTool cancels one currently running tool without interrupting the turn.
 func (r *Chat) CancelTool(toolCallID string) error {
 	if r == nil {
@@ -1391,6 +1419,7 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 		TimelineHasMore:   !r.timelineLoaded,
 		TimelineLoadedAll: r.timelineLoaded,
 		Approvals:         r.state.Approvals(),
+		PendingUserInput:  pendingUserInputCount(r.state.SnapshotTimeline()),
 		QueuedInputs:      visibleQueuedInputs(r.queue),
 		PendingAssistant:  r.state.PendingAssistant(),
 		Turn:              turnForStatus(r.status, r.active, r.cancelState),
@@ -2108,6 +2137,8 @@ func (r *Chat) loop() {
 			r.handleApprove(typed.toolCallID, typed.rule)
 		case denyCmd:
 			r.handleDeny(typed.toolCallID)
+		case submitUserInputCmd:
+			r.handleSubmitUserInput(typed.answers, typed.reply)
 		case streamEventCmd:
 			r.handleStreamEventForTurn(typed.turn, typed.event)
 		case streamClosedCmd:
@@ -2273,7 +2304,7 @@ func (r *Chat) handleSendQueueItemNow(id id.ID) {
 		item.CreatedAt = time.Now().UTC()
 	}
 	remaining := append(slices.Clone(r.queue[:idx]), r.queue[idx+1:]...)
-	if !r.draining && !r.active && r.status != StatusWaitingApproval {
+	if !r.draining && !r.active && r.status != StatusWaitingApproval && r.status != StatusWaitingInput {
 		r.mu.Unlock()
 		r.handleDispatchQueued(item, remaining)
 		return
@@ -2319,7 +2350,7 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 		})
 	}
 	cancel := r.cancel
-	wasActive := r.active || r.status == StatusWaitingApproval
+	wasActive := r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput
 	if wasActive {
 		if r.state != nil {
 			r.state.DiscardActiveAssistant()
@@ -2357,7 +2388,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, true, false, false))
 		return
 	}
-	if r.active || r.status == StatusWaitingApproval {
+	if r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput {
 		r.queue = cloneQueuedInputs(remaining)
 		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
 		if r.state != nil {
@@ -2460,7 +2491,7 @@ func (r *Chat) handleCompact(instructions string, reply chan<- error) {
 		r.mu.Unlock()
 		reply <- fmt.Errorf("cannot compact archived chat")
 		return
-	case r.draining || r.active || r.status == StatusWaitingApproval:
+	case r.draining || r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput:
 		r.mu.Unlock()
 		reply <- fmt.Errorf("cannot compact while chat is busy")
 		return
@@ -2628,7 +2659,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		return
 	}
 	r.mu.Lock()
-	if r.active || r.status == StatusWaitingApproval || r.draining {
+	if r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput || r.draining {
 		r.mu.Unlock()
 		return
 	}
@@ -2652,7 +2683,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		}
 	}
 	r.mu.Lock()
-	if r.active || r.status == StatusWaitingApproval || r.draining || !r.state.HasPendingExecutableToolCalls() {
+	if r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput || r.draining || !r.state.HasPendingExecutableToolCalls() {
 		r.mu.Unlock()
 		return
 	}
@@ -2834,6 +2865,13 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	case domain.EventKindApprovalAsk:
 		r.status = StatusWaitingApproval
 		r.statusText = strings.TrimSpace(evt.Text)
+		r.active = false
+		r.cancel = nil
+		r.cancelState = CancelStateNone
+		r.running = nil
+	case domain.EventKindUserInputAsk:
+		r.status = StatusWaitingInput
+		r.statusText = "Waiting for input"
 		r.active = false
 		r.cancel = nil
 		r.cancelState = CancelStateNone
@@ -3046,8 +3084,8 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 		r.cancel = nil
 	}
 	discardPartialAssistant := r.cancelState == CancelStateCancelling
-	shouldDispatch := r.status != StatusWaitingApproval
-	if r.status != StatusErrored && r.status != StatusWaitingApproval {
+	shouldDispatch := r.status != StatusWaitingApproval && r.status != StatusWaitingInput
+	if r.status != StatusErrored && r.status != StatusWaitingApproval && r.status != StatusWaitingInput {
 		r.active = false
 		r.status = StatusIdle
 		r.statusText = "Idle"
@@ -3110,7 +3148,7 @@ func (r *Chat) handleClose() {
 
 func (r *Chat) maybeDispatchNext() {
 	r.mu.Lock()
-	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval {
+	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput {
 		r.mu.Unlock()
 		return
 	}
@@ -3124,7 +3162,7 @@ func (r *Chat) maybeDispatchNext() {
 		return
 	}
 	r.mu.Lock()
-	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval {
+	if r.chat.Archived || r.draining || r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput {
 		r.mu.Unlock()
 		return
 	}
@@ -3251,7 +3289,7 @@ func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions []provider
 			r.handleTurnError(ctx, out, err)
 			return
 		}
-		if result.WaitingApproval || result.Done {
+		if result.WaitingApproval || result.WaitingInput || result.Done {
 			return
 		}
 		if !result.Continue {

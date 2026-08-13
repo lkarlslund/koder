@@ -24,6 +24,7 @@ const (
 	FileWrite           ID = domain.ToolKindFileWrite
 	Task                ID = domain.ToolKindTask
 	Question            ID = domain.ToolKindQuestion
+	RequestUserInput    ID = domain.ToolKindRequestUserInput
 	UpdatePlan          ID = domain.ToolKindUpdatePlan
 	MilestoneList       ID = domain.ToolKindMilestoneList
 	MilestoneAdd        ID = domain.ToolKindMilestoneAdd

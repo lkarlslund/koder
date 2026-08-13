@@ -34,6 +34,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
@@ -1133,6 +1134,17 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, fmt.Errorf("tool_call_id is required")
 		}
 		return map[string]bool{"accepted": true}, s.controller.DenyForSelection(ctx, s.appSelection(clientID), in.ToolCallID)
+	case "submit_user_input":
+		var in struct {
+			Answers []tools.UserInputAnswer `json:"answers"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if len(in.Answers) == 0 {
+			return nil, fmt.Errorf("answers are required")
+		}
+		return map[string]bool{"accepted": true}, s.controller.SubmitUserInputForSelection(ctx, s.appSelection(clientID), in.Answers)
 	case "cancel_tool":
 		var in struct {
 			ToolCallID string `json:"tool_call_id"`
@@ -1600,6 +1612,7 @@ type chatDelta struct {
 	Item              *domain.TimelineItem  `json:"item,omitempty"`
 	Timeline          []domain.TimelineItem `json:"timeline,omitempty"`
 	Approvals         any                   `json:"approvals,omitempty"`
+	PendingUserInput  int                   `json:"pending_user_input,omitempty"`
 	Queue             any                   `json:"queue,omitempty"`
 	ExecProcesses     any                   `json:"exec_processes,omitempty"`
 	Context           any                   `json:"context,omitempty"`
@@ -1643,6 +1656,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		ChatID:            snapshot.Chat.ID,
 		Chat:              snapshot.Chat,
 		Approvals:         snapshot.Approvals,
+		PendingUserInput:  snapshot.PendingUserInput,
 		Queue:             snapshot.QueuedInputs,
 		Context:           snapshot.Context,
 		TokenUsage:        snapshot.TokenUsage,

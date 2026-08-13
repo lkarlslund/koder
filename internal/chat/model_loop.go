@@ -139,6 +139,12 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 			if result, handled, err := l.handleRepeatedToolCall(ctx, rt, session.ID, calls, out); handled || err != nil {
 				return result, err
 			}
+			if hasUserInputRequest(calls) {
+				if err := rt.AwaitUserInput(ctx, calls, out); err != nil {
+					return TurnStepResult{}, err
+				}
+				return TurnStepResult{WaitingInput: true}, nil
+			}
 			needsApproval, handledErr := rt.RunToolCalls(ctx, calls, out)
 			if handledErr != nil {
 				return TurnStepResult{}, handledErr
@@ -183,6 +189,12 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		}
 		if rt.shouldStopAfterCurrentLLMTurn() {
 			return TurnStepResult{Done: true}, nil
+		}
+		if hasUserInputRequest([]tools.Request{*call}) {
+			if err := rt.AwaitUserInput(ctx, []tools.Request{*call}, out); err != nil {
+				return TurnStepResult{}, err
+			}
+			return TurnStepResult{WaitingInput: true}, nil
 		}
 		needsApproval, handledErr := rt.RunToolCalls(ctx, []tools.Request{*call}, out)
 		if handledErr != nil {
@@ -280,6 +292,15 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	}
 	out <- domain.Event{Kind: domain.EventKindMessageDone, Item: assistantItem}
 	return TurnStepResult{Done: true}, nil
+}
+
+func hasUserInputRequest(calls []tools.Request) bool {
+	for _, call := range calls {
+		if call.Tool == tools.RequestUserInput {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *modelTurnLoop) pauseContinuation(ctx context.Context, rt *Chat, sessionID id.ID, pause ContinuationPause, out chan<- domain.Event) {

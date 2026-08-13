@@ -112,6 +112,34 @@ func (r *Chat) RunToolCalls(ctx context.Context, calls []tools.Request, out chan
 	return waitingApproval, nil
 }
 
+func (r *Chat) AwaitUserInput(ctx context.Context, calls []tools.Request, out chan<- domain.Event) error {
+	var last domain.TimelineItem
+	for _, call := range calls {
+		if call.Tool != tools.RequestUserInput {
+			evt, err := r.RecordToolError(ctx, call, errors.New("executable tools cannot be combined with request_user_input"))
+			if err != nil {
+				return err
+			}
+			if out != nil {
+				out <- evt
+			}
+			continue
+		}
+		item, err := r.AttachToolAwaitingInput(ctx, call.ToolCallID)
+		if err != nil {
+			return err
+		}
+		last = item
+	}
+	if last.ID == "" {
+		return errors.New("request_user_input batch contained no valid questions")
+	}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindUserInputAsk, Text: "Waiting for input", Item: last}
+	}
+	return nil
+}
+
 // RunToolCall executes one prepared tool request and records the result through
 // the live chat owner.
 func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools.Request, emit func(domain.Event)) ([]domain.Event, error) {

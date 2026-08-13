@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-const _TurnName = "idlequeuedpreparingcompactingwaiting_llmstreamingrunning_toolswaiting_approvalcancellingerrored"
+const _TurnName = "idlequeuedpreparingcompactingwaiting_llmstreamingrunning_toolswaiting_approvalwaiting_inputcancellingerrored"
 
-var _TurnIndex = [...]uint8{0, 4, 10, 19, 29, 40, 49, 62, 78, 88, 95}
+var _TurnIndex = [...]uint8{0, 4, 10, 19, 29, 40, 49, 62, 78, 91, 101, 108}
 
-const _TurnLowerName = "idlequeuedpreparingcompactingwaiting_llmstreamingrunning_toolswaiting_approvalcancellingerrored"
+const _TurnLowerName = "idlequeuedpreparingcompactingwaiting_llmstreamingrunning_toolswaiting_approvalwaiting_inputcancellingerrored"
 
 func (i Turn) String() string {
 	if i >= Turn(len(_TurnIndex)-1) {
@@ -37,33 +37,36 @@ func _TurnNoOp() {
 	_ = x[TurnStreaming-(5)]
 	_ = x[TurnRunningTools-(6)]
 	_ = x[TurnWaitingApproval-(7)]
-	_ = x[TurnCancelling-(8)]
-	_ = x[TurnErrored-(9)]
+	_ = x[TurnWaitingInput-(8)]
+	_ = x[TurnCancelling-(9)]
+	_ = x[TurnErrored-(10)]
 }
 
-var _TurnValues = []Turn{TurnIdle, TurnQueued, TurnPreparing, TurnCompacting, TurnWaitingLLM, TurnStreaming, TurnRunningTools, TurnWaitingApproval, TurnCancelling, TurnErrored}
+var _TurnValues = []Turn{TurnIdle, TurnQueued, TurnPreparing, TurnCompacting, TurnWaitingLLM, TurnStreaming, TurnRunningTools, TurnWaitingApproval, TurnWaitingInput, TurnCancelling, TurnErrored}
 
 var _TurnNameToValueMap = map[string]Turn{
-	_TurnName[0:4]:        TurnIdle,
-	_TurnLowerName[0:4]:   TurnIdle,
-	_TurnName[4:10]:       TurnQueued,
-	_TurnLowerName[4:10]:  TurnQueued,
-	_TurnName[10:19]:      TurnPreparing,
-	_TurnLowerName[10:19]: TurnPreparing,
-	_TurnName[19:29]:      TurnCompacting,
-	_TurnLowerName[19:29]: TurnCompacting,
-	_TurnName[29:40]:      TurnWaitingLLM,
-	_TurnLowerName[29:40]: TurnWaitingLLM,
-	_TurnName[40:49]:      TurnStreaming,
-	_TurnLowerName[40:49]: TurnStreaming,
-	_TurnName[49:62]:      TurnRunningTools,
-	_TurnLowerName[49:62]: TurnRunningTools,
-	_TurnName[62:78]:      TurnWaitingApproval,
-	_TurnLowerName[62:78]: TurnWaitingApproval,
-	_TurnName[78:88]:      TurnCancelling,
-	_TurnLowerName[78:88]: TurnCancelling,
-	_TurnName[88:95]:      TurnErrored,
-	_TurnLowerName[88:95]: TurnErrored,
+	_TurnName[0:4]:          TurnIdle,
+	_TurnLowerName[0:4]:     TurnIdle,
+	_TurnName[4:10]:         TurnQueued,
+	_TurnLowerName[4:10]:    TurnQueued,
+	_TurnName[10:19]:        TurnPreparing,
+	_TurnLowerName[10:19]:   TurnPreparing,
+	_TurnName[19:29]:        TurnCompacting,
+	_TurnLowerName[19:29]:   TurnCompacting,
+	_TurnName[29:40]:        TurnWaitingLLM,
+	_TurnLowerName[29:40]:   TurnWaitingLLM,
+	_TurnName[40:49]:        TurnStreaming,
+	_TurnLowerName[40:49]:   TurnStreaming,
+	_TurnName[49:62]:        TurnRunningTools,
+	_TurnLowerName[49:62]:   TurnRunningTools,
+	_TurnName[62:78]:        TurnWaitingApproval,
+	_TurnLowerName[62:78]:   TurnWaitingApproval,
+	_TurnName[78:91]:        TurnWaitingInput,
+	_TurnLowerName[78:91]:   TurnWaitingInput,
+	_TurnName[91:101]:       TurnCancelling,
+	_TurnLowerName[91:101]:  TurnCancelling,
+	_TurnName[101:108]:      TurnErrored,
+	_TurnLowerName[101:108]: TurnErrored,
 }
 
 var _TurnNames = []string{
@@ -75,8 +78,9 @@ var _TurnNames = []string{
 	_TurnName[40:49],
 	_TurnName[49:62],
 	_TurnName[62:78],
-	_TurnName[78:88],
-	_TurnName[88:95],
+	_TurnName[78:91],
+	_TurnName[91:101],
+	_TurnName[101:108],
 }
 
 // TurnString retrieves an enum value from the enum constants string name.

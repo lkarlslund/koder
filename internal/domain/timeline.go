@@ -216,6 +216,7 @@ type ToolStatus string
 const (
 	ToolStatusPending          ToolStatus = "pending"
 	ToolStatusAwaitingApproval ToolStatus = "awaiting_approval"
+	ToolStatusAwaitingInput    ToolStatus = "awaiting_input"
 	ToolStatusRunning          ToolStatus = "running"
 	ToolStatusDone             ToolStatus = "done"
 	ToolStatusDenied           ToolStatus = "denied"

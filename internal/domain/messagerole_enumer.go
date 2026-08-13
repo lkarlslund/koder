@@ -722,11 +722,11 @@ func (i *TaskStatus) UnmarshalText(text []byte) error {
 	return err
 }
 
-const _EventKindName = "message_deltamessage_donereasoningtool_call_deltausagetool_starttool_resultapproval_askapproval_replytask_updatesession_titlechat_titleerrorstatus"
+const _EventKindName = "message_deltamessage_donereasoningtool_call_deltausagetool_starttool_resultapproval_askapproval_replyuser_input_askuser_input_replytask_updatesession_titlechat_titleerrorstatus"
 
-var _EventKindIndex = [...]uint8{0, 13, 25, 34, 49, 54, 64, 75, 87, 101, 112, 125, 135, 140, 146}
+var _EventKindIndex = [...]uint8{0, 13, 25, 34, 49, 54, 64, 75, 87, 101, 115, 131, 142, 155, 165, 170, 176}
 
-const _EventKindLowerName = "message_deltamessage_donereasoningtool_call_deltausagetool_starttool_resultapproval_askapproval_replytask_updatesession_titlechat_titleerrorstatus"
+const _EventKindLowerName = "message_deltamessage_donereasoningtool_call_deltausagetool_starttool_resultapproval_askapproval_replyuser_input_askuser_input_replytask_updatesession_titlechat_titleerrorstatus"
 
 func (i EventKind) String() string {
 	if i >= EventKind(len(_EventKindIndex)-1) {
@@ -752,14 +752,16 @@ func _EventKindNoOp() {
 	_ = x[EventKindToolResult-(6)]
 	_ = x[EventKindApprovalAsk-(7)]
 	_ = x[EventKindApprovalReply-(8)]
-	_ = x[EventKindTaskUpdate-(9)]
-	_ = x[EventKindSessionTitle-(10)]
-	_ = x[EventKindChatTitle-(11)]
-	_ = x[EventKindError-(12)]
-	_ = x[EventKindStatus-(13)]
+	_ = x[EventKindUserInputAsk-(9)]
+	_ = x[EventKindUserInputReply-(10)]
+	_ = x[EventKindTaskUpdate-(11)]
+	_ = x[EventKindSessionTitle-(12)]
+	_ = x[EventKindChatTitle-(13)]
+	_ = x[EventKindError-(14)]
+	_ = x[EventKindStatus-(15)]
 }
 
-var _EventKindValues = []EventKind{EventKindMessageDelta, EventKindMessageDone, EventKindReasoning, EventKindToolCallDelta, EventKindUsage, EventKindToolStart, EventKindToolResult, EventKindApprovalAsk, EventKindApprovalReply, EventKindTaskUpdate, EventKindSessionTitle, EventKindChatTitle, EventKindError, EventKindStatus}
+var _EventKindValues = []EventKind{EventKindMessageDelta, EventKindMessageDone, EventKindReasoning, EventKindToolCallDelta, EventKindUsage, EventKindToolStart, EventKindToolResult, EventKindApprovalAsk, EventKindApprovalReply, EventKindUserInputAsk, EventKindUserInputReply, EventKindTaskUpdate, EventKindSessionTitle, EventKindChatTitle, EventKindError, EventKindStatus}
 
 var _EventKindNameToValueMap = map[string]EventKind{
 	_EventKindName[0:13]:         EventKindMessageDelta,
@@ -780,16 +782,20 @@ var _EventKindNameToValueMap = map[string]EventKind{
 	_EventKindLowerName[75:87]:   EventKindApprovalAsk,
 	_EventKindName[87:101]:       EventKindApprovalReply,
 	_EventKindLowerName[87:101]:  EventKindApprovalReply,
-	_EventKindName[101:112]:      EventKindTaskUpdate,
-	_EventKindLowerName[101:112]: EventKindTaskUpdate,
-	_EventKindName[112:125]:      EventKindSessionTitle,
-	_EventKindLowerName[112:125]: EventKindSessionTitle,
-	_EventKindName[125:135]:      EventKindChatTitle,
-	_EventKindLowerName[125:135]: EventKindChatTitle,
-	_EventKindName[135:140]:      EventKindError,
-	_EventKindLowerName[135:140]: EventKindError,
-	_EventKindName[140:146]:      EventKindStatus,
-	_EventKindLowerName[140:146]: EventKindStatus,
+	_EventKindName[101:115]:      EventKindUserInputAsk,
+	_EventKindLowerName[101:115]: EventKindUserInputAsk,
+	_EventKindName[115:131]:      EventKindUserInputReply,
+	_EventKindLowerName[115:131]: EventKindUserInputReply,
+	_EventKindName[131:142]:      EventKindTaskUpdate,
+	_EventKindLowerName[131:142]: EventKindTaskUpdate,
+	_EventKindName[142:155]:      EventKindSessionTitle,
+	_EventKindLowerName[142:155]: EventKindSessionTitle,
+	_EventKindName[155:165]:      EventKindChatTitle,
+	_EventKindLowerName[155:165]: EventKindChatTitle,
+	_EventKindName[165:170]:      EventKindError,
+	_EventKindLowerName[165:170]: EventKindError,
+	_EventKindName[170:176]:      EventKindStatus,
+	_EventKindLowerName[170:176]: EventKindStatus,
 }
 
 var _EventKindNames = []string{
@@ -802,11 +808,13 @@ var _EventKindNames = []string{
 	_EventKindName[64:75],
 	_EventKindName[75:87],
 	_EventKindName[87:101],
-	_EventKindName[101:112],
-	_EventKindName[112:125],
-	_EventKindName[125:135],
-	_EventKindName[135:140],
-	_EventKindName[140:146],
+	_EventKindName[101:115],
+	_EventKindName[115:131],
+	_EventKindName[131:142],
+	_EventKindName[142:155],
+	_EventKindName[155:165],
+	_EventKindName[165:170],
+	_EventKindName[170:176],
 }
 
 // EventKindString retrieves an enum value from the enum constants string name.

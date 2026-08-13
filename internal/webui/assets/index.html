@@ -536,6 +536,45 @@
     <pre x-text="execHover.output"></pre>
   </div>
 
+  <div class="modal-backdrop-lite user-input-backdrop" x-show="userInputQuestions().length > 0" x-transition style="display: none;">
+    <section class="user-input-dialog bg-body border rounded shadow" role="dialog" aria-modal="true" aria-labelledby="user-input-title">
+      <header class="p-3 border-bottom">
+        <div class="d-flex align-items-start justify-content-between gap-3">
+          <div class="min-w-0">
+            <div class="small text-secondary" x-text="'Question ' + (userInputModal.index + 1) + ' of ' + userInputQuestions().length"></div>
+            <h2 class="h5 mb-0" id="user-input-title" x-text="currentUserInputQuestion()?.header || 'Your input'">Your input</h2>
+          </div>
+          <i class="bi bi-question-circle text-primary fs-4" aria-hidden="true"></i>
+        </div>
+      </header>
+      <div class="user-input-body p-3">
+        <p class="user-input-question mb-3" x-text="currentUserInputQuestion()?.question || ''"></p>
+        <div class="user-input-options" role="radiogroup">
+          <template x-for="option in (currentUserInputQuestion()?.options || [])" :key="option.label || option.Label">
+            <button type="button" class="user-input-option text-start" :class="{'selected': userInputAnswer(currentUserInputQuestion()).selected === String(option.label || option.Label || '')}" :aria-checked="userInputAnswer(currentUserInputQuestion()).selected === String(option.label || option.Label || '') ? 'true' : 'false'" role="radio" @click="selectUserInputOption(option.label || option.Label)">
+              <span class="user-input-option-marker"><i class="bi" :class="userInputAnswer(currentUserInputQuestion()).selected === String(option.label || option.Label || '') ? 'bi-check-circle-fill' : 'bi-circle'"></i></span>
+              <span class="min-w-0">
+                <span class="d-block fw-semibold" x-text="option.label || option.Label || ''"></span>
+                <span class="d-block small text-secondary" x-text="option.description || option.Description || ''"></span>
+              </span>
+            </button>
+          </template>
+        </div>
+        <label class="form-label small fw-semibold mt-3 mb-1" for="user-input-comment">Comment <span class="fw-normal text-secondary">(optional, or use instead of an option)</span></label>
+        <textarea id="user-input-comment" class="form-control" rows="3" placeholder="Add context…" :value="userInputAnswer(currentUserInputQuestion()).comment" @input="setUserInputComment($event.target.value)"></textarea>
+        <div class="alert alert-danger py-2 mt-3 mb-0" x-show="userInputModal.error" x-text="userInputModal.error" style="display: none;"></div>
+      </div>
+      <footer class="d-flex align-items-center justify-content-between gap-2 p-3 border-top">
+        <button type="button" class="btn btn-outline-secondary" :disabled="userInputModal.index === 0 || userInputModal.busy" @click="previousUserInputQuestion()"><i class="bi bi-arrow-left me-1"></i>Previous</button>
+        <button type="button" class="btn btn-primary" x-show="userInputModal.index < userInputQuestions().length - 1" :disabled="!userInputQuestionAnswered(currentUserInputQuestion()) || userInputModal.busy" @click="nextUserInputQuestion()">Next<i class="bi bi-arrow-right ms-1"></i></button>
+        <button type="button" class="btn btn-primary" x-show="userInputModal.index === userInputQuestions().length - 1" :disabled="!userInputCanSubmit() || userInputModal.busy" @click="submitUserInput()">
+          <span class="spinner-border spinner-border-sm me-1" x-show="userInputModal.busy" aria-hidden="true"></span>
+          Submit
+        </button>
+      </footer>
+    </section>
+  </div>
+
   <div class="modal-backdrop-lite" x-show="execProcessModal.open" x-transition @click.self="closeExecProcessConsole()" @keydown.escape.window="closeExecProcessConsole()" style="display: none;">
     <section class="tool-command-modal bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">

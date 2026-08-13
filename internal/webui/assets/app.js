@@ -588,7 +588,7 @@
       const status = normalizedToolStatus(tool);
       if (status === 'done') return 'tool-status-badge-done';
       if (status === 'running') return 'tool-status-badge-running';
-      if (status === 'awaiting_approval') return 'tool-status-badge-awaiting';
+      if (status === 'awaiting_approval' || status === 'awaiting_input') return 'tool-status-badge-awaiting';
       if (status === 'errored' || status === 'error' || status === 'failed' || status === 'denied') return 'tool-status-badge-error';
       if (status === 'canceled' || status === 'cancelled') return 'tool-status-badge-canceled';
       return 'tool-status-badge-pending';
@@ -978,6 +978,7 @@
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
+        userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
@@ -1641,6 +1642,7 @@
           const next = {...current};
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
+          if (delta.pending_user_input !== undefined) next.PendingUserInput = delta.pending_user_input;
           if (delta.queue !== undefined) {
             const queue = Array.isArray(delta.queue) ? delta.queue : [];
             next.QueuedInputs = queue;
@@ -1714,6 +1716,7 @@
             status_text: delta.status_text || '',
             busy: !!delta.active,
             pending_approvals: (delta.approvals || []).length,
+            pending_user_input: Number(delta.pending_user_input || 0),
             last_error: delta.error || '',
           };
           const idx = statuses.findIndex(existing => (existing.chat_id || existing.ChatID) === id);
@@ -2255,6 +2258,100 @@
           const id = String(this.activeChatID() || '');
           return this.timelineForChat(id, this.activeSnapshot());
         },
+        userInputQuestions() {
+          const timeline = this.timeline();
+          let calls = [];
+          for (let idx = timeline.length - 1; idx >= 0; idx--) {
+            const item = timeline[idx] || {};
+            if (String(item.kind || item.Kind || '').toLowerCase() !== 'assistant') continue;
+            const content = item.content || item.Content || {};
+            const tools = content.tools || content.Tools || [];
+            calls = tools.filter(tool => String(tool.tool || tool.Tool || '') === 'request_user_input' && toolStatus(tool) === 'awaiting_input');
+            break;
+          }
+          const questions = [];
+          for (const call of calls) {
+            const toolCallID = this.toolCallID(call);
+            let raw = firstValue(toolArgs(call), ['questions', 'Questions']);
+            if (typeof raw === 'string') {
+              try { raw = JSON.parse(raw); } catch (_) { raw = []; }
+            }
+            if (!Array.isArray(raw)) continue;
+            for (const question of raw) {
+              const id = String(question?.id || question?.ID || '').trim();
+              if (!toolCallID || !id) continue;
+              questions.push({
+                toolCallID,
+                id,
+                header: String(question.header || question.Header || 'Question'),
+                question: String(question.question || question.Question || ''),
+                options: Array.isArray(question.options || question.Options) ? (question.options || question.Options) : [],
+              });
+            }
+          }
+          const batchKey = questions.map(question => question.toolCallID + ':' + question.id).join('|');
+          if (batchKey !== this.userInputModal.batchKey) {
+            this.userInputModal = {batchKey, index: 0, answers: {}, busy: false, error: ''};
+          }
+          return questions;
+        },
+        currentUserInputQuestion() {
+          const questions = this.userInputQuestions();
+          if (!questions.length) return null;
+          const index = Math.max(0, Math.min(Number(this.userInputModal.index || 0), questions.length - 1));
+          return questions[index];
+        },
+        userInputAnswerKey(question) {
+          return question ? question.toolCallID + '\u0000' + question.id : '';
+        },
+        userInputAnswer(question) {
+          return this.userInputModal.answers[this.userInputAnswerKey(question)] || {selected: '', comment: ''};
+        },
+        updateUserInputAnswer(patch) {
+          const question = this.currentUserInputQuestion();
+          if (!question) return;
+          const key = this.userInputAnswerKey(question);
+          const current = this.userInputAnswer(question);
+          this.userInputModal.answers = {...this.userInputModal.answers, [key]: {...current, ...patch}};
+          this.userInputModal.error = '';
+        },
+        selectUserInputOption(label) {
+          this.updateUserInputAnswer({selected: String(label || '')});
+        },
+        setUserInputComment(comment) {
+          this.updateUserInputAnswer({comment: String(comment || '')});
+        },
+        userInputQuestionAnswered(question) {
+          const answer = this.userInputAnswer(question);
+          return !!String(answer.selected || '').trim() || !!String(answer.comment || '').trim();
+        },
+        userInputCanSubmit() {
+          const questions = this.userInputQuestions();
+          return questions.length > 0 && questions.every(question => this.userInputQuestionAnswered(question));
+        },
+        previousUserInputQuestion() {
+          this.userInputModal.index = Math.max(0, Number(this.userInputModal.index || 0) - 1);
+        },
+        nextUserInputQuestion() {
+          const questions = this.userInputQuestions();
+          if (!this.userInputQuestionAnswered(this.currentUserInputQuestion())) return;
+          this.userInputModal.index = Math.min(questions.length - 1, Number(this.userInputModal.index || 0) + 1);
+        },
+        submitUserInput() {
+          const questions = this.userInputQuestions();
+          if (!questions.length || !this.userInputCanSubmit() || this.userInputModal.busy) return;
+          const answers = questions.map(question => {
+            const answer = this.userInputAnswer(question);
+            return {tool_call_id: question.toolCallID, question_id: question.id, selected: String(answer.selected || '').trim(), comment: String(answer.comment || '').trim()};
+          });
+          this.userInputModal.busy = true;
+          this.userInputModal.error = '';
+          this.rpc('submit_user_input', {answers}).catch(err => {
+            this.userInputModal.error = err.message || 'Could not submit answers';
+          }).finally(() => {
+            this.userInputModal.busy = false;
+          });
+        },
         timelineForChat(chatID, snapshot = {}) {
           const id = String(chatID || snapshot?.Chat?.ID || snapshot?.Chat?.id || snapshot?.chat?.id || snapshot?.chat?.ID || '').trim();
           if (id && timelineStore.has(id)) return timelineStore.get(id);
@@ -2667,6 +2764,7 @@
           return '';
         },
         modalOpenName() {
+          if (this.userInputQuestions().length > 0) return 'user_input';
           if (this.imageLightbox?.open) return 'image';
           if (this.showProviderEditor) return 'provider';
           if (this.showModelConfigEditor) return 'model_config';
@@ -3119,12 +3217,20 @@
           const value = status.pending_approvals ?? status.PendingApprovals ?? 0;
           return Number(value) || 0;
         },
+        chatPendingUserInput(chat) {
+          const status = this.chatStatus(chat);
+          const value = status.pending_user_input ?? status.PendingUserInput ?? 0;
+          return Number(value) || 0;
+        },
         chatStatusValue(chat) {
+          if (this.chatPendingUserInput(chat) > 0) return 'waiting_input';
           if (this.chatPendingApprovals(chat) > 0) return 'waiting_approval';
           const status = this.chatStatus(chat);
           return String(status.status || status.Status || 'idle');
         },
         chatStatusLabel(chat) {
+          const pendingInput = this.chatPendingUserInput(chat);
+          if (pendingInput > 0) return pendingInput === 1 ? 'Waiting for input' : 'Waiting for ' + pendingInput + ' answers';
           const pending = this.chatPendingApprovals(chat);
           if (pending > 0) return pending === 1 ? 'Waiting for approval' : 'Waiting for ' + pending + ' approvals';
           const status = this.chatStatus(chat);
@@ -3138,6 +3244,7 @@
             streaming_response: 'Streaming response',
             running_tools: 'Running tools',
             waiting_approval: 'Waiting for approval',
+            waiting_input: 'Waiting for input',
             running: 'Running',
             completed: 'Completed',
             failed: 'Failed',
@@ -3155,6 +3262,7 @@
             streaming_response: 'Streaming',
             running_tools: 'Tools',
             waiting_approval: 'Approval',
+            waiting_input: 'Input',
             running: 'Running',
             pending: 'Pending',
             ready: 'Ready',
@@ -3184,7 +3292,7 @@
           });
         },
         statusSortIndex(status) {
-          const order = ['running', 'waiting_llm', 'streaming_thoughts', 'streaming_response', 'running_tools', 'waiting_approval', 'executing', 'decomposing', 'ready', 'pending', 'idle', 'completed', 'failed', 'blocked', 'cancelled', 'error', 'archived'];
+          const order = ['running', 'waiting_llm', 'streaming_thoughts', 'streaming_response', 'running_tools', 'waiting_input', 'waiting_approval', 'executing', 'decomposing', 'ready', 'pending', 'idle', 'completed', 'failed', 'blocked', 'cancelled', 'error', 'archived'];
           const idx = order.indexOf(String(status || ''));
           return idx >= 0 ? idx : order.length;
         },
@@ -3196,6 +3304,7 @@
           return this.chatStatusIconForValue(this.chatStatusValue(chat));
         },
         chatStatusIconForValue(value) {
+          if (value === 'waiting_input') return 'bi-question-circle-fill';
           if (value === 'waiting_approval') return 'bi-exclamation-triangle-fill';
           if (value === 'error' || value === 'failed') return 'bi-exclamation-triangle-fill';
           if (value === 'cancelled') return 'bi-x-circle-fill';
@@ -3296,6 +3405,7 @@
           this.closeMobileSidebar();
         },
         toolIcon(kind) {
+          if (kind === 'request_user_input') return 'bi-question-circle';
           if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
           if (kind === 'file_grep' || kind === 'file_glob' || kind === 'websearch') return 'bi-search';

@@ -2,44 +2,40 @@ package questiontool
 
 import (
 	"context"
+	"strings"
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-func TestNormalizeAndExecute(t *testing.T) {
+func TestNormalizeAndPreview(t *testing.T) {
 	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {
-		t.Fatal("expected empty question error")
+		t.Fatal("expected missing questions error")
 	}
-	req, err := (tool{}).NormalizeArgs(map[string]string{"question": " What next? "})
+	raw := `[{"id":" target ","header":" Target ","question":" Which target? ","options":[{"label":" A ","description":" First "},{"label":" B ","description":" Second "}]}]`
+	args, err := (tool{}).NormalizeArgs(map[string]string{"questions": raw})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{Args: req}})
+	if got := (tool{}).Preview(tools.Request{Args: args}); got != "Which target?" {
+		t.Fatalf("unexpected preview: %q", got)
+	}
+	questions, err := tools.ParseUserInputQuestions(args["questions"])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Output != "What next?" {
-		t.Fatalf("unexpected output: %q", result.Output)
+	if questions[0].ID != "target" || questions[0].Options[0].Label != "A" {
+		t.Fatalf("arguments were not normalized: %#v", questions)
 	}
 }
 
-func TestFinalizeResult(t *testing.T) {
-	result, body, err := tools.FinalizeResult(context.Background(), tools.Runtime{}, tools.Request{
-		Tool: domain.ToolKindQuestion,
-		Args: map[string]string{"question": "What next?"},
-	}, tools.Result{
-		Output: "What next?",
-		Stored: tools.QuestionStoredResult{Question: "What next?"},
-	})
-	if err != nil {
-		t.Fatal(err)
+func TestToolIsExposedAndRuntimeHandled(t *testing.T) {
+	spec := tools.Info(tools.RequestUserInput)
+	if !spec.ExposeToLLM || !strings.Contains(spec.Parameters, `"questions"`) {
+		t.Fatalf("unexpected tool spec: %#v", spec)
 	}
-	if body != "What next?" || result.Text != "What next?" {
-		t.Fatalf("unexpected result body=%q result=%#v", body, result)
-	}
-	if _, ok := result.Data.(tools.QuestionStoredResult); !ok {
-		t.Fatalf("expected typed question tool payload, got %#v", result.Data)
+	_, err := (tool{}).Call(context.Background(), tools.Options{})
+	if err == nil || !strings.Contains(err.Error(), "chat runtime") {
+		t.Fatalf("expected runtime-handled error, got %v", err)
 	}
 }

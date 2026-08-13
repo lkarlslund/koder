@@ -14,6 +14,7 @@ const (
 	TurnStreaming
 	TurnRunningTools
 	TurnWaitingApproval
+	TurnWaitingInput
 	TurnCancelling
 	TurnErrored
 )
@@ -33,6 +34,8 @@ func turnForStatus(status Status, active bool, cancelState CancelState) Turn {
 		return TurnRunningTools
 	case StatusWaitingApproval:
 		return TurnWaitingApproval
+	case StatusWaitingInput:
+		return TurnWaitingInput
 	case StatusErrored:
 		return TurnErrored
 	}

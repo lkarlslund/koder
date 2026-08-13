@@ -59,7 +59,8 @@ const (
 	ToolKindFileEdit            ToolKind = "file_edit"
 	ToolKindFileWrite           ToolKind = "file_write"
 	ToolKindTask                ToolKind = "task"
-	ToolKindQuestion            ToolKind = "question"
+	ToolKindRequestUserInput    ToolKind = "request_user_input"
+	ToolKindQuestion            ToolKind = "question" // Legacy stored tool kind.
 	ToolKindUpdatePlan          ToolKind = "update_plan"
 	ToolKindMilestoneList       ToolKind = "milestone_list"
 	ToolKindMilestoneAdd        ToolKind = "milestone_add"
@@ -143,7 +144,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindFileEdit,
 	ToolKindFileWrite,
 	ToolKindTask,
-	ToolKindQuestion,
+	ToolKindRequestUserInput,
 	ToolKindUpdatePlan,
 	ToolKindMilestoneList,
 	ToolKindMilestoneAdd,
@@ -283,6 +284,8 @@ const (
 	EventKindToolResult
 	EventKindApprovalAsk
 	EventKindApprovalReply
+	EventKindUserInputAsk
+	EventKindUserInputReply
 	EventKindTaskUpdate
 	EventKindSessionTitle
 	EventKindChatTitle

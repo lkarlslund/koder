@@ -180,7 +180,8 @@ type GrepStoredResult struct {
 }
 
 type QuestionStoredResult struct {
-	Question string `json:"question"`
+	Question string            `json:"question,omitempty"`
+	Answers  []UserInputAnswer `json:"answers,omitempty"`
 }
 
 type TaskStoredResult struct {
@@ -839,8 +840,16 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[GrepStoredResult](env.Payload, func(result GrepStoredResult) string {
 			return strings.TrimSpace(result.Output)
 		})
-	case Question:
+	case Question, RequestUserInput:
 		return decodeAndFormat[QuestionStoredResult](env.Payload, func(result QuestionStoredResult) string {
+			if len(result.Answers) > 0 {
+				encoded, err := json.Marshal(struct {
+					Answers []UserInputAnswer `json:"answers"`
+				}{Answers: result.Answers})
+				if err == nil {
+					return string(encoded)
+				}
+			}
 			return strings.TrimSpace(result.Question)
 		})
 	case Skill:

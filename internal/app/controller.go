@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/version"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
@@ -94,6 +95,7 @@ type ChatSidebarStatus struct {
 	Busy             bool   `json:"busy"`
 	QueuedInputs     int    `json:"queued_inputs,omitempty"`
 	PendingApprovals int    `json:"pending_approvals,omitempty"`
+	PendingUserInput int    `json:"pending_user_input,omitempty"`
 	StatusText       string `json:"status_text,omitempty"`
 	LastError        string `json:"last_error,omitempty"`
 }
@@ -1152,6 +1154,18 @@ func denyRuntimeTool(rt *chat.Chat, toolCallID string) error {
 	return nil
 }
 
+// SubmitUserInputForSelection answers every pending request_user_input question in the selected chat.
+func (c *Controller) SubmitUserInputForSelection(ctx context.Context, selection Selection, answers []tools.UserInputAnswer) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	return rt.SubmitUserInput(ctx, answers)
+}
+
 // CancelToolForSelection cancels one running tool call in the selected chat.
 func (c *Controller) CancelToolForSelection(ctx context.Context, selection Selection, toolCallID string) error {
 	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -2143,9 +2157,10 @@ func sidebarStatusFromSnapshot(snapshot chat.Snapshot) ChatSidebarStatus {
 	return ChatSidebarStatus{
 		ChatID:           snapshot.Chat.ID,
 		Status:           value,
-		Busy:             snapshot.Active || value == string(chat.StatusRunningTools) || value == string(chat.StatusWaitingLLM) || value == string(chat.StatusStreamingResponse) || value == string(chat.StatusStreamingThoughts) || value == string(chat.StatusWaitingApproval),
+		Busy:             snapshot.Active || value == string(chat.StatusRunningTools) || value == string(chat.StatusWaitingLLM) || value == string(chat.StatusStreamingResponse) || value == string(chat.StatusStreamingThoughts) || value == string(chat.StatusWaitingApproval) || value == string(chat.StatusWaitingInput),
 		QueuedInputs:     len(snapshot.QueuedInputs),
 		PendingApprovals: len(snapshot.Approvals),
+		PendingUserInput: snapshot.PendingUserInput,
 		StatusText:       text,
 	}
 }
@@ -2162,6 +2177,8 @@ func chatSidebarStatusText(status string) string {
 		return "Running tools"
 	case string(chat.StatusWaitingApproval):
 		return "Waiting for approval"
+	case string(chat.StatusWaitingInput):
+		return "Waiting for input"
 	case string(chat.StatusErrored):
 		return "Error"
 	case string(chattool.RunStateFailed):
