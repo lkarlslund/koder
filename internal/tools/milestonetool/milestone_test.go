@@ -246,6 +246,9 @@ func TestUpdateItemRejectsNoOpAndSummarizesDependencyChange(t *testing.T) {
 	if !strings.Contains(result.Output, "Updated milestone M001: depends_on_key=M002") || !strings.Contains(result.Output, "depends_on_key=M002") {
 		t.Fatalf("expected dependency change summary, got %q", result.Output)
 	}
+	if strings.Contains(result.Output, "Beta") {
+		t.Fatalf("expected dependency update to return only the changed milestone, got %q", result.Output)
+	}
 }
 
 func TestUpdateItemOnlyChecksTitleCollisionWhenTitleChanges(t *testing.T) {
@@ -486,7 +489,7 @@ func TestListAndAddExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Delta") || !strings.Contains(result.Output, "  - [pending] Delta") {
+	if !strings.Contains(result.Output, "Delta") || strings.Contains(result.Output, "Alpha") || strings.Contains(result.Output, "Beta") {
 		t.Fatalf("expected add output to contain new milestone, got %q", result.Output)
 	}
 	if _, err := (addItemsTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
@@ -501,11 +504,19 @@ func TestAddAndWritePersist(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
 
-	if _, err := (addItemsTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
+	finalized, err := (addItemsTool{}).FinalizeResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{"title": "Beta", "depends_on_key": "M001"},
-	}, tools.Result{Output: "added"}); err != nil {
+	}, tools.Result{Output: "added"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(finalized.Output, "Alpha") || !strings.Contains(finalized.Output, "Beta") {
+		t.Fatalf("expected finalized add result to contain only the created milestone, got %q", finalized.Output)
+	}
+	stored, ok := finalized.Stored.(tools.MilestonePlanStoredResult)
+	if !ok || len(stored.Milestones) != 1 || stored.Milestones[0].Key != "M002" {
+		t.Fatalf("expected one created milestone in stored result, got %#v", finalized.Stored)
 	}
 	plan, err := modeltest.GetPlan(context.Background(), st, session.ID)
 	if err != nil {

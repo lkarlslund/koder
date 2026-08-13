@@ -299,10 +299,11 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(planning.Plan{
+	createdKey := planning.MilestoneKey(nextMilestones[len(nextMilestones)-1])
+	return tools.MilestonePlanResult(tools.MilestonePlanForKey(planning.Plan{
 		Summary:    plan.Summary,
 		Milestones: nextMilestones,
-	}), nil
+	}, createdKey)), nil
 }
 
 func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -347,7 +348,7 @@ func callMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.R
 	if err := validateCompletedMilestoneTasks(ctx, control, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
 	}
-	result := tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated))
+	result := tools.MilestonePlanResult(tools.MilestonePlanForKey(updated, req.Args["milestone_key"]))
 	if summary := milestoneUpdateSummary(before, after); summary != "" {
 		result.Output = summary + "\n" + result.Output
 	}
@@ -428,11 +429,14 @@ func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, r
 	if err := planning.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return tools.Result{}, err
 	}
+	createdKey := planning.MilestoneKey(nextMilestones[len(nextMilestones)-1])
 	plan, err = control.SetMilestonePlan(ctx, runtime.SessionID, plan.Summary, nextMilestones)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	result.Stored = tools.MilestoneStoredResult(plan)
+	stored := tools.MilestoneStoredResult(tools.MilestonePlanForKey(plan, createdKey))
+	result.Stored = stored
+	result.Output = tools.FormatMilestoneOutput(stored)
 	return result, nil
 }
 func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
