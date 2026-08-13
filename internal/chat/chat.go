@@ -2636,6 +2636,26 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		r.mu.Unlock()
 		return
 	}
+	queue, queueChanged := withoutAutoResumeContinuations(r.queue)
+	if queueChanged {
+		r.queue = queue
+		r.chat.QueuedInputs = cloneQueuedInputs(queue)
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(queue)
+		})
+	}
+	r.mu.Unlock()
+	if queueChanged {
+		if err := r.persistQueue(); err != nil {
+			_ = r.markPersistError(err)
+			return
+		}
+	}
+	r.mu.Lock()
+	if r.active || r.status == StatusWaitingApproval || r.draining || !r.state.HasPendingExecutableToolCalls() {
+		r.mu.Unlock()
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
@@ -2651,7 +2671,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	r.status = StatusRunningTools
 	r.statusText = "Resuming tool calls"
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	r.broadcast(r.snapshotUpdateFlags(nil, false, queueChanged, true, false, false))
 
 	out := make(chan domain.Event, 32)
 	go func() {
@@ -2666,6 +2686,21 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		}
 	}()
 	r.forwardTurnEvents(turn, out)
+}
+
+func withoutAutoResumeContinuations(items []domain.QueuedInput) ([]domain.QueuedInput, bool) {
+	filtered := make([]domain.QueuedInput, 0, len(items))
+	for _, item := range items {
+		if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue &&
+			domain.UserMessageSourceForQueuedInput(item) == domain.UserMessageSourceAutoResume {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if len(filtered) == len(items) {
+		return items, false
+	}
+	return filtered, true
 }
 
 func (r *Chat) handleStreamEvent(evt domain.Event) {
