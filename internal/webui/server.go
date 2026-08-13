@@ -146,7 +146,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 }
 
 func (s *Server) handleSessionAttachment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}

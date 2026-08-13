@@ -316,7 +316,7 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 		return checkBrowserUploadPaths(runtime, req)
 	case FileWrite, FileEdit:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
-	case FileRead, ViewImage, ShowImage, FileGlob, FileGrep, CodeSearch, Lint:
+	case FileRead, ViewImage, ShowImage, ShowMedia, FileGlob, FileGrep, CodeSearch, Lint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:
 		return nil

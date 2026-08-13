@@ -134,6 +134,23 @@ func TestCompactModelTextForPartOmitsViewImageBytes(t *testing.T) {
 	}
 }
 
+func TestCompactModelTextForPartOmitsShowMediaBytes(t *testing.T) {
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindShowMedia, tools.StoredResultStatusOK, "Showed video", tools.ShowMediaStoredResult{
+		Path:      "demo.mp4",
+		MIMEType:  "video/mp4",
+		MediaKind: "video",
+		Summary:   "Showed video demo.mp4",
+	}), "", tools.DefaultCompactFormatLimits())
+	if !ok {
+		t.Fatal("expected compact media text")
+	}
+	for _, want := range []string{"media bytes omitted", "summary: Showed video demo.mp4", "path: demo.mp4", "mime: video/mp4"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in %q", want, text)
+		}
+	}
+}
+
 func TestCompactModelTextForPartBoundsReadOutput(t *testing.T) {
 	var readLines []tools.ReadStoredLine
 	for i := 1; i <= 8; i++ {

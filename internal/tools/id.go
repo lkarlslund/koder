@@ -8,6 +8,7 @@ const (
 	FileRead            ID = domain.ToolKindFileRead
 	ViewImage           ID = domain.ToolKindViewImage
 	ShowImage           ID = domain.ToolKindShowImage
+	ShowMedia           ID = domain.ToolKindShowMedia
 	FileGlob            ID = domain.ToolKindFileGlob
 	FileGrep            ID = domain.ToolKindFileGrep
 	CodeSearch          ID = domain.ToolKindCodeSearch

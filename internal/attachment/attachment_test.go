@@ -24,6 +24,33 @@ func TestImportSessionData(t *testing.T) {
 	}
 }
 
+func TestImportSessionFileCopiesMedia(t *testing.T) {
+	m := NewManager(t.TempDir())
+	source := filepath.Join(t.TempDir(), "demo.mp4")
+	if err := os.WriteFile(source, []byte("video-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := m.ImportSessionFile("session-1", source, "video/mp4", "show_media")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MIME != "video/mp4" || meta.Source != "show_media" || meta.Original != source || meta.Size != 10 {
+		t.Fatalf("unexpected metadata: %#v", meta)
+	}
+	if got, err := os.ReadFile(meta.Path); err != nil || string(got) != "video-data" {
+		t.Fatalf("read copied media: %q, %v", got, err)
+	}
+}
+
+func TestClassifyMIMERecognizesBrowserMedia(t *testing.T) {
+	if got := ClassifyMIME("audio/mpeg"); got != KindAudio {
+		t.Fatalf("audio kind = %q", got)
+	}
+	if got := ClassifyMIME("video/mp4; codecs=avc1"); got != KindVideo {
+		t.Fatalf("video kind = %q", got)
+	}
+}
+
 func TestDeleteSessionData(t *testing.T) {
 	m := NewManager(t.TempDir())
 	if _, err := m.ImportSessionData("session-1", []byte("hello"), "result.txt", "text/plain", SourceBrowser); err != nil {

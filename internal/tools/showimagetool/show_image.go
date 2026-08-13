@@ -15,32 +15,66 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-type tool struct{}
+const mediaParameters = `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local media path to show to the user"},"title":{"type":"string","description":"Optional short title shown above the media"}},"required":["path"],"additionalProperties":false}`
+
+type mediaTool struct{}
+type legacyImageTool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolSpec{
-		Title:       "Show image",
-		Description: "Show a local image file to the user.",
-		Usage:       "Show a local image file to the user in the browser UI to illustrate an explanation or result. This does not load the image into model vision context. Path may be relative to the workspace or absolute. Use this only for local image files that should be displayed to the user; use view_image when you need to inspect the image yourself.",
-		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local image path to show to the user"}},"required":["path"],"additionalProperties":false}`,
+	tools.Register(mediaTool{}, tools.ToolSpec{
+		Title:       "Show media",
+		Description: "Show a local image, audio, or video file to the user.",
+		Usage:       "Show a local image, audio, or video file in the browser UI to illustrate an explanation or result. This does not load media into model context. Playback always requires user interaction and never autoplays. Use view_image when you need to inspect an image yourself.",
+		Parameters:  mediaParameters,
 		ExposeToLLM: true,
+	})
+	tools.Register(legacyImageTool{}, tools.ToolSpec{
+		Title:       "Show image (legacy)",
+		Description: "Backward-compatible alias for old show_image calls.",
+		Parameters:  mediaParameters,
+		ExposeToLLM: false,
 	})
 }
 
-func (tool) ID() tools.ID             { return tools.ShowImage }
-func (tool) BypassesPermission() bool { return false }
+func (mediaTool) ID() tools.ID             { return tools.ShowMedia }
+func (mediaTool) BypassesPermission() bool { return false }
+func (mediaTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return normalizeArgs(args)
+}
+func (mediaTool) Preview(req tools.Request) string { return req.Args["path"] }
+func (mediaTool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	return call(opts, false)
+}
+func (mediaTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Showed media", strings.TrimSpace(result.Output)
+}
 
-func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+func (legacyImageTool) ID() tools.ID             { return tools.ShowImage }
+func (legacyImageTool) BypassesPermission() bool { return false }
+func (legacyImageTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return normalizeArgs(args)
+}
+func (legacyImageTool) Preview(req tools.Request) string { return req.Args["path"] }
+func (legacyImageTool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	return call(opts, true)
+}
+func (legacyImageTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Showed image", strings.TrimSpace(result.Output)
+}
+
+func normalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(args["path"])
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
-	return map[string]string{"path": path}, nil
+	out := map[string]string{"path": path}
+	if title := strings.TrimSpace(args["title"]); title != "" {
+		out["title"] = title
+	}
+	return out, nil
 }
 
-func (tool) Preview(req tools.Request) string { return req.Args["path"] }
-
-func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+func call(opts tools.Options, imageOnly bool) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
 	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
@@ -53,53 +87,58 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 	if info.IsDir() {
 		return tools.Result{}, fmt.Errorf("%s is a directory", rel)
 	}
-	mimeType, err := detectImageMIME(abs)
+	mimeType, kind, err := detectMediaMIME(abs)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	if attachment.ClassifyMIME(mimeType) != attachment.KindImage {
-		return tools.Result{}, fmt.Errorf("%s is not an image", rel)
+	if imageOnly && kind != attachment.KindImage {
+		return tools.Result{}, fmt.Errorf("unsupported image type %q", mimeType)
 	}
-	summary := "Showed image " + rel
+	title := strings.TrimSpace(req.Args["title"])
+	label := "Showed " + string(kind) + " " + rel
+	stored := tools.ShowMediaStoredResult{Path: rel, SourcePath: abs, MIMEType: mimeType, MediaKind: string(kind), Title: title, Summary: label}
+	if runtime.Attachments != nil && runtime.SessionID != "" {
+		meta, importErr := runtime.Attachments.ImportSessionFile(runtime.SessionID, abs, mimeType, "show_media")
+		if importErr != nil {
+			return tools.Result{}, importErr
+		}
+		meta.Path = ""
+		meta.Original = ""
+		stored.SessionID = string(runtime.SessionID)
+		stored.Attachment = &meta
+		stored.SourcePath = ""
+	}
 	return tools.Result{
-		Output: summary,
-		Meta: map[string]string{
-			"path":      rel,
-			"mime_type": mimeType,
-		},
-		Stored: tools.ShowImageStoredResult{
-			Path:       rel,
-			SourcePath: abs,
-			MIMEType:   mimeType,
-			Summary:    summary,
-		},
+		Output: label,
+		Meta:   map[string]string{"path": rel, "mime_type": mimeType, "media_kind": string(kind), "title": title},
+		Stored: stored,
 	}, nil
 }
 
-func (tool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
-	return "Showed image", strings.TrimSpace(result.Output)
-}
-
-func detectImageMIME(path string) (string, error) {
+func detectMediaMIME(path string) (string, attachment.Kind, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", attachment.KindUnsupported, err
 	}
 	defer file.Close()
-
 	var sniff [512]byte
 	n, err := file.Read(sniff[:])
 	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
+		return "", attachment.KindUnsupported, err
 	}
-	mimeType := http.DetectContentType(sniff[:n])
-	if mimeType == "application/octet-stream" {
-		if byExt := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); byExt != "" {
+	mimeType := strings.TrimSpace(strings.Split(http.DetectContentType(sniff[:n]), ";")[0])
+	if byExt := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); byExt != "" {
+		byExt = strings.TrimSpace(strings.Split(byExt, ";")[0])
+		detectedKind := attachment.ClassifyMIME(mimeType)
+		extensionKind := attachment.ClassifyMIME(byExt)
+		if (detectedKind != attachment.KindImage && detectedKind != attachment.KindAudio && detectedKind != attachment.KindVideo) &&
+			(extensionKind == attachment.KindImage || extensionKind == attachment.KindAudio || extensionKind == attachment.KindVideo) {
 			mimeType = byExt
 		}
 	}
-	if attachment.ClassifyMIME(mimeType) != attachment.KindImage {
-		return "", fmt.Errorf("unsupported image type %q", mimeType)
+	kind := attachment.ClassifyMIME(mimeType)
+	if kind != attachment.KindImage && kind != attachment.KindAudio && kind != attachment.KindVideo {
+		return "", kind, fmt.Errorf("unsupported media type %q", mimeType)
 	}
-	return mimeType, nil
+	return mimeType, kind, nil
 }

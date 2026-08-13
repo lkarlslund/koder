@@ -1509,7 +1509,7 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "milestone", "Milestone"
 	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TasksAdd, tools.TasksUpdate:
 		return "task", "Task"
-	case tools.ViewImage, tools.ShowImage:
+	case tools.ViewImage, tools.ShowImage, tools.ShowMedia:
 		return "image", "Image"
 	default:
 		key := kind.String()

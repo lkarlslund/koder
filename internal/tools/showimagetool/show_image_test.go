@@ -7,58 +7,91 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func TestNormalizeArgsRequiresPath(t *testing.T) {
-	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {
+	if _, err := (mediaTool{}).NormalizeArgs(map[string]string{}); err == nil {
 		t.Fatal("expected empty path error")
 	}
-	got, err := (tool{}).NormalizeArgs(map[string]string{"path": "images/screen.png"})
+	got, err := (mediaTool{}).NormalizeArgs(map[string]string{"path": "media/demo.mp4", "title": " Demo "})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["path"] != filepath.Join("images", "screen.png") {
-		t.Fatalf("unexpected normalized path %#v", got)
+	if got["path"] != filepath.Join("media", "demo.mp4") || got["title"] != "Demo" {
+		t.Fatalf("unexpected normalized arguments %#v", got)
 	}
 }
 
-func TestExecuteAcceptsImageAndStoresRenderablePath(t *testing.T) {
-	workspace := t.TempDir()
-	target := filepath.Join(workspace, "screen.png")
-	if err := os.WriteFile(target, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
-		t.Fatal(err)
+func TestShowMediaIsExposedAndShowImageIsLegacy(t *testing.T) {
+	if !tools.Info(tools.ShowMedia).ExposeToLLM {
+		t.Fatal("show_media should be exposed")
 	}
-
-	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
-		Args: map[string]string{"path": "screen.png"},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := result.Meta["mime_type"]; got != "image/png" {
-		t.Fatalf("expected image/png mime type, got %q", got)
-	}
-	stored, ok := result.Stored.(tools.ShowImageStoredResult)
-	if !ok {
-		t.Fatalf("expected show image stored result, got %#v", result.Stored)
-	}
-	if stored.Path != "screen.png" || stored.SourcePath == "" {
-		t.Fatalf("unexpected stored result %#v", stored)
+	if tools.Info(tools.ShowImage).ExposeToLLM {
+		t.Fatal("show_image should be hidden from the model")
 	}
 }
 
-func TestExecuteRejectsNonImageFile(t *testing.T) {
+func TestExecuteAcceptsImageAudioAndVideo(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		data []byte
+		kind attachment.Kind
+	}{
+		{name: "image", file: "screen.png", data: []byte("\x89PNG\r\n\x1a\nfake"), kind: attachment.KindImage},
+		{name: "audio", file: "sound.mp3", data: []byte("not-real-audio"), kind: attachment.KindAudio},
+		{name: "video", file: "demo.mp4", data: []byte("not-real-video"), kind: attachment.KindVideo},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			target := filepath.Join(workspace, tt.file)
+			if err := os.WriteFile(target, tt.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			manager := attachment.NewManager(t.TempDir())
+			result, err := (mediaTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, SessionID: "session-1", Attachments: manager}, Request: tools.Request{Args: map[string]string{"path": tt.file, "title": "Demo"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, ok := result.Stored.(tools.ShowMediaStoredResult)
+			if !ok || stored.MediaKind != string(tt.kind) || stored.Attachment == nil || stored.SessionID != "session-1" {
+				t.Fatalf("unexpected stored result %#v", result.Stored)
+			}
+			if stored.SourcePath != "" || stored.Attachment.Path != "" || stored.Attachment.Original != "" {
+				t.Fatalf("durable stored result exposed a filesystem path: %#v", stored)
+			}
+			matches, err := filepath.Glob(filepath.Join(manager.SessionDir("session-1"), stored.Attachment.ID+".*"))
+			if err != nil || len(matches) != 1 {
+				t.Fatalf("locate durable media copy: %v, %v", matches, err)
+			}
+			if _, err := os.Stat(matches[0]); err != nil {
+				t.Fatalf("durable media copy: %v", err)
+			}
+		})
+	}
+}
+
+func TestLegacyShowImageRejectsAudio(t *testing.T) {
 	workspace := t.TempDir()
-	target := filepath.Join(workspace, "note.txt")
-	if err := os.WriteFile(target, []byte("plain text"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "sound.mp3"), []byte("audio"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
-		Args: map[string]string{"path": "note.txt"},
-	}})
+	_, err := (legacyImageTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{Args: map[string]string{"path": "sound.mp3"}}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported image type") {
-		t.Fatalf("expected non-image rejection, got %v", err)
+		t.Fatalf("expected legacy image rejection, got %v", err)
+	}
+}
+
+func TestExecuteRejectsNonMediaFile(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "note.txt"), []byte("plain text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (mediaTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{Args: map[string]string{"path": "note.txt"}}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported media type") {
+		t.Fatalf("expected non-media rejection, got %v", err)
 	}
 }

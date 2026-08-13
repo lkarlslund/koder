@@ -1792,6 +1792,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
+	if !strings.Contains(fullPage, `kind === 'show_media' || kind === 'show_image'`) ||
+		!strings.Contains(fullPage, `<audio class="tool-media-audio" controls preload="metadata"`) ||
+		!strings.Contains(fullPage, `<video class="tool-media-video" controls preload="metadata" playsinline`) ||
+		strings.Contains(fullPage, `<video class="tool-media-video" autoplay`) {
+		t.Fatalf("expected user-controlled image, audio, and video rendering")
+	}
 	if !strings.Contains(fullPage, `renderedTimeline()`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||
 		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) ||

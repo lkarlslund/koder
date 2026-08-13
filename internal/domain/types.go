@@ -44,6 +44,7 @@ const (
 	ToolKindFileRead            ToolKind = "file_read"
 	ToolKindViewImage           ToolKind = "view_image"
 	ToolKindShowImage           ToolKind = "show_image"
+	ToolKindShowMedia           ToolKind = "show_media"
 	ToolKindFileGlob            ToolKind = "file_glob"
 	ToolKindFileGrep            ToolKind = "file_grep"
 	ToolKindCodeSearch          ToolKind = "code_search"
@@ -128,7 +129,7 @@ type ToolStates map[ToolKind]bool
 var builtinToolKinds = []ToolKind{
 	ToolKindFileRead,
 	ToolKindViewImage,
-	ToolKindShowImage,
+	ToolKindShowMedia,
 	ToolKindFileGlob,
 	ToolKindFileGrep,
 	ToolKindCodeSearch,

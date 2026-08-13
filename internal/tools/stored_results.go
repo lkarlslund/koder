@@ -287,12 +287,19 @@ type ViewImageStoredResult struct {
 	Summary    string `json:"summary,omitempty"`
 }
 
-type ShowImageStoredResult struct {
-	Path       string `json:"path"`
-	SourcePath string `json:"source_path"`
-	MIMEType   string `json:"mime_type"`
-	Summary    string `json:"summary,omitempty"`
+type ShowMediaStoredResult struct {
+	Path       string               `json:"path"`
+	SourcePath string               `json:"source_path,omitempty"`
+	MIMEType   string               `json:"mime_type"`
+	MediaKind  string               `json:"media_kind,omitempty"`
+	Title      string               `json:"title,omitempty"`
+	SessionID  string               `json:"session_id,omitempty"`
+	Attachment *attachment.Metadata `json:"attachment,omitempty"`
+	Summary    string               `json:"summary,omitempty"`
 }
+
+// ShowImageStoredResult is retained for decoding old show_image results.
+type ShowImageStoredResult = ShowMediaStoredResult
 
 type BrowserStoredResult struct {
 	Kind       string               `json:"kind"`
@@ -346,7 +353,7 @@ func (SkillStoredResult) storedResultPayload()         {}
 func (WebFetchStoredResult) storedResultPayload()      {}
 func (WebSearchStoredResult) storedResultPayload()     {}
 func (ViewImageStoredResult) storedResultPayload()     {}
-func (ShowImageStoredResult) storedResultPayload()     {}
+func (ShowMediaStoredResult) storedResultPayload()     {}
 func (BrowserStoredResult) storedResultPayload()       {}
 func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
@@ -449,8 +456,8 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		})
 	case ViewImage:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
-	case ShowImage:
-		return decodeAndFormat[ShowImageStoredResult](env.Payload, compactShowImageStoredResult)
+	case ShowImage, ShowMedia:
+		return decodeAndFormat[ShowMediaStoredResult](env.Payload, compactShowMediaStoredResult)
 	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
@@ -571,8 +578,12 @@ func compactViewImageStoredResult(result ViewImageStoredResult) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func compactShowImageStoredResult(result ShowImageStoredResult) string {
-	lines := []string{"Showed image; image bytes omitted for text-only compaction."}
+func compactShowMediaStoredResult(result ShowMediaStoredResult) string {
+	kind := strings.TrimSpace(result.MediaKind)
+	if kind == "" {
+		kind = "image"
+	}
+	lines := []string{"Showed " + kind + "; media bytes omitted for text-only compaction."}
 	if summary := strings.TrimSpace(result.Summary); summary != "" {
 		lines = append(lines, "summary: "+summary)
 	}
@@ -705,6 +716,18 @@ func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool
 	var result ShowImageStoredResult
 	if err := json.Unmarshal(env.Payload, &result); err != nil {
 		return ShowImageStoredResult{}, false
+	}
+	return result, true
+}
+
+func ShowMediaStoredResultForPart(part domain.Part) (ShowMediaStoredResult, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ShowMedia {
+		return ShowMediaStoredResult{}, false
+	}
+	var result ShowMediaStoredResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil {
+		return ShowMediaStoredResult{}, false
 	}
 	return result, true
 }
@@ -864,8 +887,8 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
 	case ViewImage:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
-	case ShowImage:
-		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
+	case ShowImage, ShowMedia:
+		return decodeAndFormat[ShowMediaStoredResult](env.Payload, formatShowMediaStoredResult)
 	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
@@ -1354,7 +1377,7 @@ func formatViewImageStoredResult(result ViewImageStoredResult) string {
 	return "Viewed image " + path
 }
 
-func formatShowImageStoredResult(result ShowImageStoredResult) string {
+func formatShowMediaStoredResult(result ShowMediaStoredResult) string {
 	if summary := strings.TrimSpace(result.Summary); summary != "" {
 		return summary
 	}
@@ -1363,9 +1386,9 @@ func formatShowImageStoredResult(result ShowImageStoredResult) string {
 		path = strings.TrimSpace(result.SourcePath)
 	}
 	if path == "" {
-		return "Showed image"
+		return "Showed media"
 	}
-	return "Showed image " + path
+	return "Showed media " + path
 }
 
 func ParseReadStoredLines(output string) ([]ReadStoredLine, string) {

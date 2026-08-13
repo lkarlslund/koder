@@ -767,6 +767,16 @@
       if (!sourcePath) return {path, sourcePath: '', src: ''};
       return {path, sourcePath, src: '/api/show-image?path=' + encodeURIComponent(sourcePath)};
     }
+    function mediaResultSource(data) {
+	  const attachment = firstValue(data, ['attachment', 'Attachment']);
+	  const attachmentID = firstValue(attachment, ['id', 'ID']);
+	  const sessionID = firstValue(data, ['session_id', 'SessionID']);
+	  const path = firstValue(data, ['path', 'Path']) || firstValue(attachment, ['name', 'Name']);
+	  if (attachmentID && sessionID) return {path, src: '/api/attachments/session/' + encodeURIComponent(sessionID) + '/' + encodeURIComponent(attachmentID)};
+	  const mime = firstValue(data, ['mime_type', 'MIMEType']);
+	  const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
+	  return {path, src: sourcePath && String(mime).startsWith('image/') ? '/api/show-image?path=' + encodeURIComponent(sourcePath) : ''};
+    }
     function renderImagePreviewBlock(title, data, fallbackText, compact) {
       const image = imageResultSource(data);
       const mime = firstValue(data, ['mime_type', 'MIMEType']);
@@ -784,8 +794,19 @@
           (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') +
         '</div>';
     }
-    function renderShowImageBlock(data, fallbackText) {
-      return renderImagePreviewBlock('Showed image', data, fallbackText, false);
+    function renderShowMediaBlock(data, fallbackText) {
+	  const media = mediaResultSource(data);
+	  const mime = firstValue(data, ['mime_type', 'MIMEType']);
+	  const kind = firstValue(data, ['media_kind', 'MediaKind']) || (String(mime).startsWith('audio/') ? 'audio' : String(mime).startsWith('video/') ? 'video' : 'image');
+	  const title = firstValue(data, ['title', 'Title']);
+	  const summary = title || firstValue(data, ['summary', 'Summary']) || fallbackText || 'Showed media';
+	  const meta = [media.path, mime].filter(Boolean).join(' · ');
+	  if (!media.src) return renderCompactBlock('Showed media', summary);
+	  if (kind === 'image') return renderImagePreviewBlock('Showed image', data, fallbackText, false);
+	  const element = kind === 'audio'
+	    ? '<audio class="tool-media-audio" controls preload="metadata" src="' + escapeHTML(media.src) + '"></audio>'
+	    : '<video class="tool-media-video" controls preload="metadata" playsinline src="' + escapeHTML(media.src) + '"></video>';
+	  return toolResultHeader(summary) + '<div class="tool-result-body tool-media-result">' + element + (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') + '</div>';
     }
     function readRangeLabel(args, data) {
       const requestedStart = firstValue(args, ['start_line', 'StartLine']);
@@ -841,7 +862,8 @@
         case 'file_glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
         case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
-        case 'show_image': return path ? 'Show image ' + path : 'Show image';
+		case 'show_media': return path ? 'Show media ' + path : 'Show media';
+		case 'show_image': return path ? 'Show image ' + path : 'Show image';
         case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
         default: return kind || 'Tool';
       }
@@ -952,7 +974,7 @@
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
-      if (kind === 'show_image') return renderShowImageBlock(data, toolResultText(tool));
+	  if (kind === 'show_media' || kind === 'show_image') return renderShowMediaBlock(data, toolResultText(tool));
 	  if (kind === 'browser_screenshot' || kind === 'browser_image') return renderImagePreviewBlock('Browser image', data, toolResultText(tool), false);
 	  if (kind.startsWith('browser_')) return renderCompactBlock(firstValue(data, ['summary', 'Summary']) || kind.replaceAll('_', ' '), firstValue(data, ['text', 'Text']) || toolResultText(tool), 'tool-result-body-mono');
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
@@ -3544,7 +3566,8 @@
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
           if (kind === 'file_grep' || kind === 'file_glob' || kind === 'websearch') return 'bi-search';
           if (kind === 'webfetch') return 'bi-globe';
-          if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
+		  if (kind === 'show_media') return 'bi-play-btn';
+		  if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
           return 'bi-wrench-adjustable';
         },
         toolTitle(tool) { return toolTitleText(tool); },

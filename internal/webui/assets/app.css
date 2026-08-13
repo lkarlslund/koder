@@ -178,6 +178,9 @@
     .markdown-body svg { max-width: 100%; height: auto; }
     .markdown-media-preview { position: relative; display: inline-block; max-width: 100%; vertical-align: top; }
     .markdown-media-preview > img, .markdown-media-preview > svg { display: block; max-width: 100%; height: auto; }
+    .tool-media-result { display: grid; gap: .35rem; }
+    .tool-media-audio { width: min(100%, 42rem); }
+    .tool-media-video { display: block; width: min(100%, 60rem); max-height: 70vh; background: #000; border-radius: .35rem; }
     .mermaid-diagram { position: relative; margin: .75rem 0; max-width: 100%; overflow: auto; border: 1px solid var(--bs-border-color); border-radius: .45rem; padding: .75rem; background: var(--bs-body-bg); }
     .mermaid-diagram svg { display: block; width: 100%; max-width: 100%; min-width: 0; height: auto; margin: 0 auto; font-size: 16px; }
     .mermaid-diagram svg text { font-size: 16px; }

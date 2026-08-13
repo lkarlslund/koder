@@ -65,6 +65,38 @@ func (m *Manager) ImportSessionData(sessionID id.ID, data []byte, name, mimeType
 	return Metadata{ID: attachmentID, Name: name, MIME: mimeType, Path: dst, Size: int64(len(data)), Source: strings.TrimSpace(source)}, nil
 }
 
+// ImportSessionFile copies a local file into durable session attachment storage.
+func (m *Manager) ImportSessionFile(sessionID id.ID, path, mimeType, source string) (Metadata, error) {
+	if m == nil || sessionID == "" {
+		return Metadata{}, fmt.Errorf("session attachment destination is required")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return Metadata{}, fmt.Errorf("attachment path is empty")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Metadata{}, fmt.Errorf("stat attachment: %w", err)
+	}
+	if info.IsDir() {
+		return Metadata{}, fmt.Errorf("attachment path %q is a directory", path)
+	}
+	mimeType = strings.TrimSpace(strings.Split(mimeType, ";")[0])
+	if ClassifyMIME(mimeType) == KindUnsupported {
+		return Metadata{}, fmt.Errorf("unsupported attachment type %q", mimeType)
+	}
+	attachmentID, err := newID()
+	if err != nil {
+		return Metadata{}, err
+	}
+	dst := filepath.Join(m.SessionDir(sessionID), attachmentID+strings.ToLower(filepath.Ext(path)))
+	size, err := copyFile(path, dst)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return Metadata{ID: attachmentID, Name: filepath.Base(path), MIME: mimeType, Path: dst, Size: size, Source: strings.TrimSpace(source), Original: path}, nil
+}
+
 type Draft struct {
 	Metadata
 	Token string
@@ -310,6 +342,8 @@ type Kind string
 
 const (
 	KindImage       Kind = "image"
+	KindAudio       Kind = "audio"
+	KindVideo       Kind = "video"
 	KindPDF         Kind = "pdf"
 	KindText        Kind = "text"
 	KindUnsupported Kind = "unsupported"
@@ -320,6 +354,10 @@ func ClassifyMIME(mimeType string) Kind {
 	switch {
 	case strings.HasPrefix(normalized, "image/"):
 		return KindImage
+	case strings.HasPrefix(normalized, "audio/"):
+		return KindAudio
+	case strings.HasPrefix(normalized, "video/"):
+		return KindVideo
 	case normalized == "application/pdf":
 		return KindPDF
 	case strings.HasPrefix(normalized, "text/"):
