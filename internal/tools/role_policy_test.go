@@ -46,6 +46,23 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	}
 }
 
+func TestExecutionRoleRejectsRequestUserInput(t *testing.T) {
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		ChatRole:  chatrole.Execution,
+	}, Request: tools.Request{
+		Tool: domain.ToolKindRequestUserInput,
+		Args: map[string]string{"questions": `[{"id":"choice","header":"Choice","question":"Which?","options":[{"label":"A","description":"A"},{"label":"B","description":"B"}]}]`},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "not available to execution chats") {
+		t.Fatalf("expected role denial, got %v", err)
+	}
+	if !tools.IsDenied(err) {
+		t.Fatalf("expected denied error, got %T %[1]v", err)
+	}
+}
+
 func TestExecuteWithChatRejectsAllChatToolsForExecutionRole(t *testing.T) {
 	for _, kind := range executionForbiddenChatTools() {
 		t.Run(kind.String(), func(t *testing.T) {
@@ -139,6 +156,7 @@ func TestBypassPermissionToolStillObeysDisabledState(t *testing.T) {
 
 func executionForbiddenToolNames() []string {
 	names := []string{
+		domain.ToolKindRequestUserInput.String(),
 		domain.ToolKindMilestoneAdd.String(),
 		domain.ToolKindMilestonePlan.String(),
 	}

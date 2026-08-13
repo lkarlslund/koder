@@ -45,6 +45,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		want bool
 	}{
 		{"execution allows edit", Execution, testTool("file_edit"), true},
+		{"execution rejects user input request", Execution, testTool("request_user_input"), false},
 		{"execution rejects chat start", Execution, testTool("chat_start"), false},
 		{"execution rejects chat send", Execution, testTool("chat_send"), false},
 		{"execution rejects chat cleanup", Execution, testTool("chat_cleanup"), false},

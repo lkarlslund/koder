@@ -94,6 +94,7 @@ Focus only on the assigned milestone and task list.
 - Keep task status updated as you progress.
 			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
+				"request_user_input",
 				"chat_list",
 				"chat_start",
 				"chat_send",
