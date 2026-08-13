@@ -205,6 +205,67 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 	}
 }
 
+func TestControllerSelectedStateHydratesAndKicksStoredChat(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	first := New(cfg, agent.New(cfg, st, nil, nil))
+	if err := first.Start(context.Background(), StartupModeNew, t.TempDir()); err != nil {
+		t.Fatalf("start first controller: %v", err)
+	}
+	session := activateTestSession(t, first, t.TempDir())
+	selection := controllerSelection(first)
+	if err := first.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown first controller: %v", err)
+	}
+	if err := testSetChatQueuedInputs(context.Background(), st, selection.ChatID, []domain.QueuedInput{{
+		ID:       id.New(),
+		Kind:     domain.QueuedInputKindContinue,
+		Delivery: domain.QueuedInputDeliveryContinue,
+		Origin:   domain.QueuedInputOriginAutoResume,
+		Source:   domain.UserMessageSourceAutoResume,
+	}}); err != nil {
+		t.Fatalf("persist queued continuation: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil)
+	next := New(cfg, engine)
+	if err := next.Start(context.Background(), StartupModeNew, session.ProjectRoot); err != nil {
+		t.Fatalf("start next controller: %v", err)
+	}
+	t.Cleanup(func() { _ = next.Shutdown(context.Background()) })
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("load session owner: %v", err)
+	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected stored chats before browser selection, got %d live runtimes", got)
+	}
+
+	if _, err := next.StateForSelection(context.Background(), selection); err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		snapshot, ok := owner.Snapshot().Snapshots[selection.ChatID]
+		if ok && snapshot.TimelineLoadedAll {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("selected stored chat was not hydrated and kicked")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	ctrl, _, execManager := newTestControllerWithExec(t)
 	selection := controllerSelection(ctrl)

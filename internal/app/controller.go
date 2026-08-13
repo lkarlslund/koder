@@ -579,7 +579,12 @@ func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selectio
 	if chatRecord.ID == "" {
 		return owner, session, domain.Chat{}, nil, nil
 	}
-	return owner, session, chatRecord, nil, nil
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, err
+	}
+	rt.Kick()
+	return owner, session, chatRecord, rt, nil
 }
 
 // TimelinePage returns a transcript page for a chat in an explicitly selected session.
