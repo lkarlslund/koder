@@ -883,16 +883,20 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	close(events)
 
 	deadline = time.After(2 * time.Second)
+	sawMessageDone := false
 	for {
 		select {
 		case update := <-updates:
 			if update.Event != nil && update.Event.Kind == domain.EventKindMessageDone {
+				sawMessageDone = true
 				if got := runner.promptCallCount(); got != 1 {
 					t.Fatalf("prompt calls = %d", got)
 				}
 				if got := runner.promptAt(0); got != "first prompt" {
 					t.Fatalf("prompt = %q", got)
 				}
+			}
+			if sawMessageDone && update.Status == StatusIdle {
 				return
 			}
 		case <-deadline:
