@@ -29,6 +29,25 @@ type APIError struct {
 	RetryAfter time.Duration
 }
 
+// StreamInterruptedError reports a provider event stream that closed without
+// either the [DONE] sentinel or an explicit finish reason.
+type StreamInterruptedError struct {
+	Detail string
+}
+
+func (e *StreamInterruptedError) Error() string {
+	if e == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" {
+		return "provider stream ended before completion"
+	}
+	return "provider stream ended before completion: " + detail
+}
+
+func (e *StreamInterruptedError) Unwrap() error { return io.ErrUnexpectedEOF }
+
 func (e *APIError) Error() string {
 	if e == nil {
 		return ""
@@ -1016,6 +1035,8 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	reader := bufio.NewReader(resp.Body)
 	chunkCount := 0
 	lastPayload := ""
+	lastStreamMessage := ""
+	sawFinishReason := false
 	capture := newDebugStreamCapture(8192)
 	updateActiveStream := func(meta map[string]string) {
 		c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
@@ -1113,6 +1134,12 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
 			}
 			chunkCount++
+			for _, choice := range chunk.Choices {
+				if strings.TrimSpace(choice.FinishReason) != "" {
+					sawFinishReason = true
+					break
+				}
+			}
 			aggregated.Apply(chunk)
 			if toolCallErr, ok := aggregated.TakeOversizedToolCall(input.ToolArgumentLimits); ok {
 				if onEvent != nil {
@@ -1132,16 +1159,35 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			if onEvent != nil {
 				c.emitChunk(onEvent, chunk, payload, aggregated.toolCalls)
 			}
+		} else if line != "" && !strings.HasPrefix(line, ":") &&
+			!strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:") {
+			lastStreamMessage = debugTruncate(line, 1024)
 		}
 
 		if errors.Is(err, io.EOF) {
+			if sawFinishReason {
+				if onEvent != nil {
+					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
+				}
+				meta := map[string]string{
+					"phase":       "stream_complete_eof",
+					"chunk_count": strconv.Itoa(chunkCount),
+				}
+				aggregated.addPromptProgressMeta(meta)
+				recordTrace("", meta)
+				return aggregated.Response(), nil
+			}
+			streamErr := &StreamInterruptedError{Detail: lastStreamMessage}
 			meta := map[string]string{
-				"phase":       "stream_eof",
+				"phase":       "stream_incomplete",
 				"chunk_count": strconv.Itoa(chunkCount),
 			}
+			if lastStreamMessage != "" {
+				meta["backend_message"] = lastStreamMessage
+			}
 			aggregated.addPromptProgressMeta(meta)
-			recordTrace("", meta)
-			return aggregated.Response(), nil
+			recordTrace(streamErr.Error(), meta)
+			return ChatResponse{}, streamErr
 		}
 	}
 }

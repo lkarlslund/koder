@@ -707,6 +707,53 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamChatResponseReportsIncompleteStreamBackendMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null}}]}\n\n"))
+		_, _ = w.Write([]byte("proxy error: Failed to read connection"))
+	}))
+	defer server.Close()
+
+	recorder := debugsrv.NewRecorder()
+	client, err := New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected interrupted stream error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "provider stream ended before completion") || !strings.Contains(err.Error(), "Failed to read connection") {
+		t.Fatalf("unexpected interrupted stream message: %q", err)
+	}
+	traces := recorder.HTTPTraces()
+	if len(traces) != 1 || traces[0].Meta["phase"] != "stream_incomplete" || !strings.Contains(traces[0].Error, "Failed to read connection") {
+		t.Fatalf("unexpected interrupted stream trace: %#v", traces)
+	}
+}
+
+func TestStreamChatResponseAcceptsEOFWithFinishReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Text != "done" {
+		t.Fatalf("response text = %q, want done", resp.Text)
+	}
+}
+
 func TestStreamChatResponseStopsOnToolArgumentLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

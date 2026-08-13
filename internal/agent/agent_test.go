@@ -6816,7 +6816,7 @@ func TestToolLoopTrackerAllowsRepeatedExecWriteStdinWaits(t *testing.T) {
 	}
 }
 
-func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
+func TestRunPromptPausesOnEmptyProviderResponseAfterToolResult(t *testing.T) {
 	t.Parallel()
 
 	workdir := t.TempDir()
@@ -6858,17 +6858,20 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 	events := runLivePromptDefault(t, engine, st, session, "loop")
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
-			t.Fatalf("expected provider-refusal pause instead of error, got %#v", evt)
+			t.Fatalf("expected empty-response pause instead of error, got %#v", evt)
 		}
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
-		if notice.Kind == "loop_pause" && notice.Reason == string(chatpkg.ContinuationPauseReasonProviderRefusal) {
+		if notice.Kind == "loop_pause" && notice.Reason == string(chatpkg.ContinuationPauseReasonEmptyResponse) {
+			if !strings.Contains(notice.Text, "after the tool result") {
+				t.Fatalf("unexpected continuation pause message: %q", notice.Text)
+			}
 			return
 		}
 	}
-	t.Fatal("expected persisted provider-refusal pause notice")
+	t.Fatal("expected persisted empty-response pause notice")
 }
 
 func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {

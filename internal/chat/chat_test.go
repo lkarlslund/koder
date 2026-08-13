@@ -930,8 +930,11 @@ func TestRuntimePausesOnInitialEmptyProviderResponse(t *testing.T) {
 			if !ok {
 				t.Fatalf("last item content = %T, want notice", timeline[len(timeline)-1].Content)
 			}
-			if notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonProviderRefusal) {
+			if notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonEmptyResponse) {
 				t.Fatalf("notice = %#v", notice)
+			}
+			if notice.Text != "The provider completed the request without returning assistant text or a tool call." {
+				t.Fatalf("unexpected empty-response message: %q", notice.Text)
 			}
 			if strings.Contains(notice.Text, "assistant item needs text or reasoning") {
 				t.Fatalf("provider refusal leaked storage validation error: %q", notice.Text)
@@ -965,7 +968,7 @@ func TestRuntimePausesOnRepeatedReasoningOnlyContinuation(t *testing.T) {
 				t.Fatal("expected timeline items")
 			}
 			notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
-			if !ok || notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonProviderRefusal) {
+			if !ok || notice.Kind != "loop_pause" || notice.Reason != string(ContinuationPauseReasonEmptyResponse) {
 				continue
 			}
 

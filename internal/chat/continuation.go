@@ -15,9 +15,9 @@ import (
 type ContinuationPauseReason string
 
 const (
-	ContinuationPauseReasonRepeatedTool    ContinuationPauseReason = "repeated_tool"
-	ContinuationPauseReasonTurnLimit       ContinuationPauseReason = "turn_limit"
-	ContinuationPauseReasonProviderRefusal ContinuationPauseReason = "provider_refusal"
+	ContinuationPauseReasonRepeatedTool  ContinuationPauseReason = "repeated_tool"
+	ContinuationPauseReasonTurnLimit     ContinuationPauseReason = "turn_limit"
+	ContinuationPauseReasonEmptyResponse ContinuationPauseReason = "empty_provider_response"
 )
 
 const RepeatedToolLoopThreshold = 3
@@ -165,8 +165,11 @@ func cloneToolLoopArgs(args map[string]string) map[string]string {
 	return out
 }
 
-func ProviderRefusalPauseBody(reasoning string) string {
-	body := "Paused continuation because the provider ended the turn without any text or tool call after tool results."
+func EmptyProviderResponsePauseBody(reasoning string, afterToolResults bool) string {
+	body := "The provider completed the request without returning assistant text or a tool call."
+	if afterToolResults {
+		body = "The provider completed the continuation without returning assistant text or a tool call after the tool result."
+	}
 	if strings.TrimSpace(reasoning) == "" {
 		return body
 	}
@@ -252,8 +255,8 @@ func continuationPauseSubtitle(pause ContinuationPause) string {
 			return fmt.Sprintf("Turn limit reached (%d)", pause.Limit)
 		}
 		return "Turn limit reached"
-	case ContinuationPauseReasonProviderRefusal:
-		return "Provider stopped continuation"
+	case ContinuationPauseReasonEmptyResponse:
+		return "Provider returned an empty response"
 	default:
 		return "Continuation stopped"
 	}

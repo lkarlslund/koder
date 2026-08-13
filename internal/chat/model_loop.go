@@ -220,14 +220,14 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 				}, nil
 			}
 			l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
-				Reason: ContinuationPauseReasonProviderRefusal,
-				Body:   ProviderRefusalPauseBody(resp.RawReasoning),
+				Reason: ContinuationPauseReasonEmptyResponse,
+				Body:   EmptyProviderResponsePauseBody(resp.RawReasoning, step > 0),
 			}, out)
 			return TurnStepResult{Done: true}, nil
 		}
 		l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
-			Reason: ContinuationPauseReasonProviderRefusal,
-			Body:   ProviderRefusalPauseBody(resp.RawReasoning),
+			Reason: ContinuationPauseReasonEmptyResponse,
+			Body:   EmptyProviderResponsePauseBody(resp.RawReasoning, step > 0),
 		}, out)
 		return TurnStepResult{Done: true}, nil
 	}
