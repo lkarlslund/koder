@@ -1795,8 +1795,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `renderedTimeline()`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||
 		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) ||
-		!strings.Contains(fullPage, `const transcriptTailWindowSize = 120`) ||
-		!strings.Contains(fullPage, `const transcriptWindowOverscan = 30`) ||
+		!strings.Contains(fullPage, `const timelinePageSize = 10`) ||
+		!strings.Contains(fullPage, `const timelineMemoryWindowSize = 30`) ||
+		!strings.Contains(fullPage, `const timelineCachedChatLimit = 12`) ||
+		!strings.Contains(fullPage, `const transcriptTailWindowSize = 20`) ||
+		!strings.Contains(fullPage, `const transcriptWindowOverscan = 5`) ||
+		!strings.Contains(fullPage, `loadNewerTimeline()`) ||
 		!strings.Contains(fullPage, `timelineTopSpacerHeight()`) ||
 		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
 		!strings.Contains(fullPage, `const timelineStore = new Map()`) ||

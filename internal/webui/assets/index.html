@@ -122,7 +122,7 @@
       </template>
       <div class="timeline-load-indicator" x-show="timelineLoadingActive()" style="display: none;">
         <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-        <span x-text="timelineLoadingAll[activeChatID()] ? 'Loading full chat' : 'Loading earlier messages'"></span>
+        <span x-text="timelineHasNewer() ? 'Loading messages' : 'Loading earlier messages'"></span>
       </div>
       <div class="timeline-spacer" aria-hidden="true" x-show="timelineTopSpacerHeight() > 0" :style="{height: timelineTopSpacerHeight() + 'px'}"></div>
       <template x-for="item in renderedTimeline()" :key="item.id || item.ID">

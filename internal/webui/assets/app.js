@@ -446,8 +446,11 @@
     function isReceivingAssistantDeltasStatus(status) {
       return status === 'streaming_response' || status === 'streaming_thoughts';
     }
-    const transcriptTailWindowSize = 120;
-    const transcriptWindowOverscan = 30;
+    const timelinePageSize = 10;
+    const timelineMemoryWindowSize = 30;
+    const timelineCachedChatLimit = 12;
+    const transcriptTailWindowSize = 20;
+    const transcriptWindowOverscan = 5;
     const estimatedTimelineItemHeight = 160;
     const timelineStore = new Map();
     function renderMarkdown(text, options = {}) {
@@ -983,7 +986,7 @@
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
 		browserStatus: {state: 'unknown', owned_tabs: 0},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, timelineLoadingAll: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.clampSidebarRatio();
@@ -1656,12 +1659,26 @@
           if (delta.active !== undefined) next.Active = delta.active;
           if (delta.replace_timeline || delta.ReplaceTimeline) {
             const timeline = Array.isArray(delta.timeline || delta.Timeline) ? (delta.timeline || delta.Timeline) : [];
-            this.storeTimeline(id, timeline);
-            next.TimelineHasMore = false;
-            next.TimelineLoadedAll = true;
-            next.TimelineBefore = timeline.length ? this.timelineItemID(timeline[0]) : '';
+            const stored = this.storeTimeline(id, timeline);
+            next.TimelineHasMore = timeline.length > stored.length;
+            next.TimelineHasNewer = false;
+            next.TimelineLoadedAll = timeline.length === stored.length;
+            next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
+            next.TimelineAfter = stored.length ? this.timelineItemID(stored[stored.length - 1]) : '';
           } else if (delta.item) {
-            this.storeTimeline(id, this.patchTimelineItem(this.timelineForChat(id, next), delta.item));
+            const currentTimeline = this.timelineForChat(id, next);
+            const itemID = this.timelineItemID(delta.item);
+            const itemLoaded = currentTimeline.some(item => this.timelineItemID(item) === itemID);
+            if ((!next.TimelineHasNewer && !next.timeline_has_newer) || itemLoaded) {
+              const patched = this.patchTimelineItem(currentTimeline, delta.item);
+              const stored = this.storeTimeline(id, patched);
+              if (patched.length > stored.length) next.TimelineHasMore = true;
+              next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
+              next.TimelineAfter = stored.length ? this.timelineItemID(stored[stored.length - 1]) : '';
+            } else {
+              next.TimelineHasNewer = true;
+              next.TimelineLoadedAll = false;
+            }
           }
           snapshots[id] = next;
           snapshots[String(id)] = next;
@@ -1759,8 +1776,9 @@
           }
           this.scheduleTimelineRenderWindowRecalculation();
           const el = this.transcriptElement();
-          if (!el || el.scrollTop > 96) return;
-          this.loadOlderTimeline();
+          if (!el) return;
+          if (el.scrollTop <= 96) this.loadOlderTimeline();
+          if (this.transcriptBottomDistance(el) <= 96) this.loadNewerTimeline();
         },
         markTranscriptUserScrollIntent() {
           this.transcriptUserScrollActive = true;
@@ -1787,7 +1805,8 @@
             event.preventDefault();
             this.scrollRestoreSeq++;
             this.setTranscriptStickToBottom(false);
-            this.loadAllTimeline();
+            this.restoreTranscriptTop(0);
+            this.loadOlderTimeline();
             return;
           }
           const scrollKeys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', ' '];
@@ -1818,12 +1837,16 @@
             this.reportClientStateSoon();
             return true;
           }
-          this.setTranscriptStickToBottom(this.transcriptNearBottom(el));
+          this.setTranscriptStickToBottom(!this.timelineHasNewer() && this.transcriptNearBottom(el));
           return this.transcriptStickToBottom;
         },
         scrollTranscriptToBottom() {
           const el = this.transcriptElement();
           if (!el) return;
+          if (this.timelineHasNewer()) {
+            this.loadLatestTimeline();
+            return;
+          }
           this.setTranscriptStickToBottom(true);
           this.transcriptProgrammaticScroll = true;
           this.recalculateTimelineRenderWindow();
@@ -1846,9 +1869,9 @@
           const snapshot = this.activeSnapshot();
           return !!(snapshot.TimelineHasMore || snapshot.timeline_has_more);
         },
-        timelineLoadedAll() {
+        timelineHasNewer() {
           const snapshot = this.activeSnapshot();
-          return !!(snapshot.TimelineLoadedAll || snapshot.timeline_loaded_all);
+          return !!(snapshot.TimelineHasNewer || snapshot.timeline_has_newer);
         },
         timelineBefore() {
           const snapshot = this.activeSnapshot();
@@ -1857,20 +1880,27 @@
           const timeline = this.timeline();
           return timeline.length ? this.timelineItemID(timeline[0]) : '';
         },
+        timelineAfter() {
+          const snapshot = this.activeSnapshot();
+          const explicit = String(snapshot.TimelineAfter || snapshot.timeline_after || '').trim();
+          if (explicit) return explicit;
+          const timeline = this.timeline();
+          return timeline.length ? this.timelineItemID(timeline[timeline.length - 1]) : '';
+        },
         timelineLoadingActive() {
           const id = this.activeChatID();
-          return !!(id && (this.timelineLoading[id] || this.timelineLoadingAll[id]));
+          return !!(id && this.timelineLoading[id]);
         },
         loadOlderTimeline() {
           const chatID = this.activeChatID();
-          if (!chatID || this.timelineLoading[chatID] || this.timelineLoadingAll[chatID] || !this.timelineHasMore()) return;
+          if (!chatID || this.timelineLoading[chatID] || !this.timelineHasMore()) return;
           const before = this.timelineBefore();
           if (!before) return;
           const el = this.transcriptElement();
           const scrollHeight = el ? el.scrollHeight : 0;
           const scrollTop = el ? el.scrollTop : 0;
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
-          this.rpc('load_timeline', {chat_id: chatID, before, limit: 80})
+          this.rpc('load_timeline', {chat_id: chatID, before, limit: timelinePageSize})
             .then(page => this.mergeTimelinePage(page, {prepend: true, scrollHeight, scrollTop}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
@@ -1879,17 +1909,34 @@
               this.timelineLoading = next;
             });
         },
-        loadAllTimeline() {
+        loadNewerTimeline() {
           const chatID = this.activeChatID();
-          if (!chatID || this.timelineLoadingAll[chatID] || this.timelineLoadedAll()) return;
-          this.timelineLoadingAll = {...this.timelineLoadingAll, [chatID]: true};
-          this.rpc('load_timeline', {chat_id: chatID, all: true})
-            .then(page => this.mergeTimelinePage(page, {replace: true, scrollTop: 0}))
+          if (!chatID || this.timelineLoading[chatID] || !this.timelineHasNewer()) return;
+          const after = this.timelineAfter();
+          if (!after) return;
+          const el = this.transcriptElement();
+          const scrollTop = el ? el.scrollTop : 0;
+          this.timelineLoading = {...this.timelineLoading, [chatID]: true};
+          this.rpc('load_timeline', {chat_id: chatID, after, limit: timelinePageSize})
+            .then(page => this.mergeTimelinePage(page, {append: true, scrollTop}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
-              const next = {...this.timelineLoadingAll};
+              const next = {...this.timelineLoading};
               delete next[chatID];
-              this.timelineLoadingAll = next;
+              this.timelineLoading = next;
+            });
+        },
+        loadLatestTimeline() {
+          const chatID = this.activeChatID();
+          if (!chatID || this.timelineLoading[chatID]) return;
+          this.timelineLoading = {...this.timelineLoading, [chatID]: true};
+          this.rpc('load_timeline', {chat_id: chatID, limit: timelinePageSize})
+            .then(page => this.mergeTimelinePage(page, {replace: true, scrollToBottom: true}))
+            .catch(err => this.showToast(err.message))
+            .finally(() => {
+              const next = {...this.timelineLoading};
+              delete next[chatID];
+              this.timelineLoading = next;
             });
         },
         mergeTimelinePage(page, options = {}) {
@@ -1901,22 +1948,46 @@
           const current = snapshots[chatID] || snapshots[String(chatID)] || {};
           const existing = this.timelineForChat(chatID, current);
           let timeline = [];
+          let addedHeight = 0;
+          let removedHeadHeight = 0;
           if (options.replace) {
             timeline = items.slice();
           } else if (options.prepend) {
             const seen = new Set(items.map(item => this.timelineItemID(item)).filter(Boolean));
+            const added = items.filter(item => !existing.some(existingItem => this.timelineItemID(existingItem) === this.timelineItemID(item)));
+            addedHeight = this.timelineSpacerHeight(added);
             timeline = items.concat(existing.filter(item => !seen.has(this.timelineItemID(item))));
+          } else if (options.append) {
+            const seen = new Set(existing.map(item => this.timelineItemID(item)).filter(Boolean));
+            timeline = existing.concat(items.filter(item => !seen.has(this.timelineItemID(item))));
           } else {
             timeline = existing.slice();
             items.forEach(item => { timeline = this.patchTimelineItem(timeline, item); });
           }
+          if (timeline.length > timelineMemoryWindowSize) {
+            if (options.prepend) {
+              timeline = timeline.slice(0, timelineMemoryWindowSize);
+            } else {
+              const removed = timeline.slice(0, timeline.length - timelineMemoryWindowSize);
+              removedHeadHeight = this.timelineSpacerHeight(removed);
+              timeline = timeline.slice(-timelineMemoryWindowSize);
+            }
+          }
+          const pageHasMore = !!(page.has_more || page.HasMore);
+          const pageHasNewer = !!(page.has_newer || page.HasNewer);
+          const currentHasMore = !!(current.TimelineHasMore || current.timeline_has_more);
+          const currentHasNewer = !!(current.TimelineHasNewer || current.timeline_has_newer);
+          const hasMore = options.append ? (currentHasMore || pageHasMore || removedHeadHeight > 0) : pageHasMore;
+          const hasNewer = options.prepend ? (currentHasNewer || pageHasNewer || existing.length + items.length > timeline.length) : pageHasNewer;
           const next = {
             ...current,
-            TimelineHasMore: !!(page.has_more || page.HasMore),
-            TimelineLoadedAll: !!(page.loaded_all || page.LoadedAll),
-            TimelineBefore: String(page.before || page.Before || (timeline[0] && this.timelineItemID(timeline[0])) || '').trim(),
+            TimelineHasMore: hasMore,
+            TimelineHasNewer: hasNewer,
+            TimelineLoadedAll: !hasMore && !hasNewer,
+            TimelineBefore: String((timeline[0] && this.timelineItemID(timeline[0])) || '').trim(),
+            TimelineAfter: String((timeline[timeline.length - 1] && this.timelineItemID(timeline[timeline.length - 1])) || '').trim(),
           };
-          this.storeTimeline(chatID, timeline);
+          this.storeTimeline(chatID, timeline, options.prepend ? 'head' : 'tail');
           snapshots[chatID] = next;
           snapshots[String(chatID)] = next;
           this.state.snapshots = snapshots;
@@ -1929,14 +2000,15 @@
             const el = this.transcriptElement();
             if (!el) return;
             if (options.replace) {
-              this.setTranscriptStickToBottom(false);
-              this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
+              if (options.scrollToBottom) this.scrollTranscriptToBottom();
+              else {
+                this.setTranscriptStickToBottom(false);
+                this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
+              }
               return;
             }
-            const previousHeight = Number(options.scrollHeight || 0);
-            if (previousHeight > 0) {
-              this.restoreTranscriptTop(el.scrollHeight - previousHeight + Number(options.scrollTop || 0));
-            }
+            if (options.prepend) this.restoreTranscriptTop(Number(options.scrollTop || 0) + addedHeight);
+            if (options.append) this.restoreTranscriptTop(Math.max(0, Number(options.scrollTop || 0) - removedHeadHeight));
           });
         },
         transcriptScrollState() {
@@ -2073,6 +2145,9 @@
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
+          const incomingSessionID = String(s?.session?.id || s?.session?.ID || s?.Session?.id || s?.Session?.ID || '').trim();
+          const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
+          if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
           this.hydratingSession = {active: false, id: '', title: '', error: ''};
           this.clearSwitchingChat();
@@ -2354,16 +2429,68 @@
         },
         timelineForChat(chatID, snapshot = {}) {
           const id = String(chatID || snapshot?.Chat?.ID || snapshot?.Chat?.id || snapshot?.chat?.id || snapshot?.chat?.ID || '').trim();
-          if (id && timelineStore.has(id)) return timelineStore.get(id);
+          if (id && timelineStore.has(id)) {
+            const cached = timelineStore.get(id);
+            timelineStore.delete(id);
+            timelineStore.set(id, cached);
+            return cached;
+          }
           const timeline = snapshot?.Timeline || snapshot?.timeline || [];
           return Array.isArray(timeline) ? timeline : [];
         },
-        storeTimeline(chatID, timeline) {
+        storeTimeline(chatID, timeline, keep = 'tail') {
           const id = String(chatID || '').trim();
           if (!id || !Array.isArray(timeline)) return [];
-          const stored = timeline.slice();
+          const stored = timeline.length <= timelineMemoryWindowSize
+            ? timeline.slice()
+            : keep === 'head' ? timeline.slice(0, timelineMemoryWindowSize) : timeline.slice(-timelineMemoryWindowSize);
+          const retained = new Set(stored.map(item => this.timelineItemID(item)).filter(Boolean));
+          const prior = timelineStore.get(id) || [];
+          const removed = prior.concat(timeline).map(item => this.timelineItemID(item)).filter(itemID => itemID && !retained.has(itemID));
+          const heights = {...(this.timelineItemHeights || {})};
+          let changed = false;
+          for (const key of Object.keys(heights)) {
+            if (!key.startsWith(id + ':')) continue;
+            if (retained.has(key.slice(id.length + 1))) continue;
+            delete heights[key];
+            changed = true;
+          }
+          if (changed) this.timelineItemHeights = heights;
+          if (removed.length > 0) {
+            const reasoning = {...(this.reasoningViews || {})};
+            removed.forEach(itemID => { delete reasoning[itemID]; });
+            this.reasoningViews = reasoning;
+          }
+          timelineStore.delete(id);
           timelineStore.set(id, stored);
+          while (timelineStore.size > timelineCachedChatLimit) {
+            const oldest = timelineStore.keys().next().value;
+            if (!oldest) break;
+            this.dropTimelineCache(oldest);
+          }
           return stored;
+        },
+        dropTimelineCache(chatID) {
+          const id = String(chatID || '').trim();
+          if (!id) return;
+          const items = timelineStore.get(id) || [];
+          timelineStore.delete(id);
+          const heights = {...(this.timelineItemHeights || {})};
+          for (const key of Object.keys(heights)) {
+            if (key.startsWith(id + ':')) delete heights[key];
+          }
+          this.timelineItemHeights = heights;
+          if (items.length > 0) {
+            const reasoning = {...(this.reasoningViews || {})};
+            items.forEach(item => { delete reasoning[this.timelineItemID(item)]; });
+            this.reasoningViews = reasoning;
+          }
+        },
+        clearTimelineCaches() {
+          timelineStore.clear();
+          this.timelineItemHeights = {};
+          this.reasoningViews = {};
+          this.timelineRenderWindow = {chatID: '', start: 0, end: 0, overscan: 0};
         },
         stripSnapshotTimeline(chatID, snapshot) {
           if (!snapshot || typeof snapshot !== 'object') return snapshot;
@@ -2392,6 +2519,13 @@
             });
             next.snapshots = cached;
             next.Snapshots = cached;
+          }
+          const chats = next.chats || next.Chats;
+          if (Array.isArray(chats)) {
+            const valid = new Set(chats.map(chat => String(chat.id || chat.ID || '')).filter(Boolean));
+            for (const chatID of Array.from(timelineStore.keys())) {
+              if (!valid.has(chatID)) this.dropTimelineCache(chatID);
+            }
           }
           return next;
         },

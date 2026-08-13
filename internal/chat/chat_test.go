@@ -2044,6 +2044,17 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 	if older.Items[0].Seq != 2 || !older.HasMore || older.LoadedAll {
 		t.Fatalf("unexpected older page: %#v", older)
 	}
+	allItems, err := timelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := timelinePageAfter(allItems, older.After, 2)
+	if got, want := len(newer.Items), 2; got != want {
+		t.Fatalf("newer length = %d, want %d", got, want)
+	}
+	if newer.Items[0].Seq != 4 || !newer.HasMore || !newer.HasNewer || newer.LoadedAll {
+		t.Fatalf("unexpected newer page: %#v", newer)
+	}
 
 	all, err := timelinePageForChat(ctx, st, chatRecord.ID, "", 2, true)
 	if err != nil {

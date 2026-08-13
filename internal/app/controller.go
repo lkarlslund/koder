@@ -607,6 +607,24 @@ func (c *Controller) TimelinePage(ctx context.Context, sessionID, chatID, before
 	return owner.TimelinePage(ctx, chatID, before, limit, all)
 }
 
+// TimelinePageAfter returns transcript items immediately newer than after.
+func (c *Controller) TimelinePageAfter(ctx context.Context, sessionID, chatID, after id.ID, limit int) (chat.TimelinePage, error) {
+	if sessionID == "" {
+		return chat.TimelinePage{}, fmt.Errorf("session id is required")
+	}
+	if chatID == "" {
+		return chat.TimelinePage{}, fmt.Errorf("chat id is required")
+	}
+	if c.agent == nil {
+		return chat.TimelinePage{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return chat.TimelinePage{}, err
+	}
+	return owner.TimelinePageAfter(ctx, chatID, after, limit)
+}
+
 func (c *Controller) RewindLiveChat(ctx context.Context, sessionID, chatID, anchorItemID id.ID) (any, error) {
 	if c == nil {
 		return nil, fmt.Errorf("controller is nil")

@@ -124,6 +124,19 @@ func (s *Source) TimelinePage(ctx context.Context, chatID, before id.ID, limit i
 	return timelinePageForChat(ctx, deps.Store, chatID, before, limit, all)
 }
 
+// TimelinePageAfter returns the page immediately newer than after.
+func (s *Source) TimelinePageAfter(ctx context.Context, chatID, after id.ID, limit int) (TimelinePage, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	items, err := timelineForChat(ctx, deps.Store, chatID)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	return timelinePageAfter(items, after, limit), nil
+}
+
 func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
 		Namespace: "timeline",
@@ -439,7 +452,9 @@ func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]doma
 type TimelinePage struct {
 	Items     []domain.TimelineItem
 	HasMore   bool
+	HasNewer  bool
 	Before    id.ID
+	After     id.ID
 	LoadedAll bool
 	Total     int
 }
@@ -451,7 +466,7 @@ func timelinePageForChat(ctx context.Context, st *store.Store, chatID, before id
 	}
 	total := len(items)
 	if all || limit <= 0 || total <= limit {
-		return timelinePage(items, false, true, total), nil
+		return timelinePage(items, false, false, total), nil
 	}
 	end := total
 	if before != "" {
@@ -466,18 +481,39 @@ func timelinePageForChat(ctx context.Context, st *store.Store, chatID, before id
 		return TimelinePage{LoadedAll: true, Total: total}, nil
 	}
 	start := max(0, end-limit)
-	return timelinePage(items[start:end], start > 0, false, total), nil
+	return timelinePage(items[start:end], start > 0, end < total, total), nil
 }
 
-func timelinePage(items []domain.TimelineItem, hasMore, loadedAll bool, total int) TimelinePage {
+func timelinePageAfter(items []domain.TimelineItem, after id.ID, limit int) TimelinePage {
+	total := len(items)
+	start := 0
+	if after != "" {
+		idx := slices.IndexFunc(items, func(item domain.TimelineItem) bool { return item.ID == after })
+		if idx >= 0 {
+			start = idx + 1
+		}
+	}
+	if start >= total {
+		return TimelinePage{HasMore: total > 0, LoadedAll: total == 0, Total: total}
+	}
+	if limit <= 0 {
+		limit = total
+	}
+	end := min(total, start+limit)
+	return timelinePage(items[start:end], start > 0, end < total, total)
+}
+
+func timelinePage(items []domain.TimelineItem, hasMore, hasNewer bool, total int) TimelinePage {
 	page := TimelinePage{
 		Items:     slices.Clone(items),
 		HasMore:   hasMore,
-		LoadedAll: loadedAll,
+		HasNewer:  hasNewer,
+		LoadedAll: !hasMore && !hasNewer,
 		Total:     total,
 	}
 	if len(page.Items) > 0 {
 		page.Before = page.Items[0].ID
+		page.After = page.Items[len(page.Items)-1].ID
 	}
 	return page
 }

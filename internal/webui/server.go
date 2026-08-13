@@ -41,7 +41,7 @@ import (
 const defaultOpenDelay = 5 * time.Second
 const assetHashPlaceholder = "__KODER_ASSET_HASH__"
 const indexAssetPath = "assets/index.html"
-const defaultTimelinePageSize = 80
+const defaultTimelinePageSize = 10
 
 //go:embed assets
 var webAssets embed.FS
@@ -83,7 +83,9 @@ type timelinePageResponse struct {
 	ChatID    id.ID                 `json:"chat_id"`
 	Items     []domain.TimelineItem `json:"items"`
 	HasMore   bool                  `json:"has_more"`
+	HasNewer  bool                  `json:"has_newer"`
 	Before    id.ID                 `json:"before"`
+	After     id.ID                 `json:"after"`
 	LoadedAll bool                  `json:"loaded_all"`
 	Total     int                   `json:"total"`
 }
@@ -858,6 +860,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		var in struct {
 			ChatID id.ID `json:"chat_id"`
 			Before id.ID `json:"before"`
+			After  id.ID `json:"after"`
 			Limit  int   `json:"limit"`
 			All    bool  `json:"all"`
 		}
@@ -868,7 +871,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if limit <= 0 || limit > defaultTimelinePageSize*4 {
 			limit = defaultTimelinePageSize
 		}
-		page, err := s.controller.TimelinePage(ctx, s.clientSelection(clientID).SessionID, in.ChatID, in.Before, limit, in.All)
+		var page chat.TimelinePage
+		var err error
+		if in.After != "" {
+			page, err = s.controller.TimelinePageAfter(ctx, s.clientSelection(clientID).SessionID, in.ChatID, in.After, limit)
+		} else {
+			page, err = s.controller.TimelinePage(ctx, s.clientSelection(clientID).SessionID, in.ChatID, in.Before, limit, in.All)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -876,7 +885,9 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			ChatID:    in.ChatID,
 			Items:     page.Items,
 			HasMore:   page.HasMore,
+			HasNewer:  page.HasNewer,
 			Before:    page.Before,
+			After:     page.After,
 			LoadedAll: page.LoadedAll,
 			Total:     page.Total,
 		}, nil
@@ -1485,8 +1496,10 @@ func (s *Server) fillActiveTimelineForClient(ctx context.Context, state app.Stat
 	}
 	snapshot.Timeline = page.Items
 	snapshot.TimelineHasMore = page.HasMore
+	snapshot.TimelineHasNewer = page.HasNewer
 	snapshot.TimelineLoadedAll = page.LoadedAll
 	snapshot.TimelineBefore = page.Before
+	snapshot.TimelineAfter = page.After
 	state.Snapshots[chatID] = snapshot
 	state.Snapshot = snapshot
 	return state, nil
@@ -1496,7 +1509,9 @@ func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {
 	total := len(snapshot.Timeline)
 	if total == 0 {
 		snapshot.TimelineHasMore = snapshot.Chat.ID != "" && !snapshot.TimelineLoadedAll
+		snapshot.TimelineHasNewer = false
 		snapshot.TimelineBefore = ""
+		snapshot.TimelineAfter = ""
 		return snapshot
 	}
 	if limit <= 0 || total <= limit {
@@ -1507,13 +1522,16 @@ func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {
 			snapshot.TimelineLoadedAll = true
 		}
 		snapshot.TimelineBefore = snapshot.Timeline[0].ID
+		snapshot.TimelineAfter = snapshot.Timeline[len(snapshot.Timeline)-1].ID
 		return snapshot
 	}
 	start := total - limit
 	snapshot.Timeline = slices.Clone(snapshot.Timeline[start:])
 	snapshot.TimelineHasMore = true
+	snapshot.TimelineHasNewer = false
 	snapshot.TimelineLoadedAll = false
 	snapshot.TimelineBefore = snapshot.Timeline[0].ID
+	snapshot.TimelineAfter = snapshot.Timeline[len(snapshot.Timeline)-1].ID
 	return snapshot
 }
 

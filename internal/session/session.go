@@ -480,6 +480,26 @@ func (s *Session) TimelinePage(ctx context.Context, chatID, before id.ID, limit 
 	return s.chatsSrc.TimelinePage(ctx, chatID, before, limit, all)
 }
 
+// TimelinePageAfter returns the page immediately newer than after.
+func (s *Session) TimelinePageAfter(ctx context.Context, chatID, after id.ID, limit int) (chatpkg.TimelinePage, error) {
+	if s == nil {
+		return chatpkg.TimelinePage{}, fmt.Errorf("session is required")
+	}
+	if chatID == "" {
+		return chatpkg.TimelinePage{}, fmt.Errorf("chat id is required")
+	}
+	s.mu.RLock()
+	_, ok := chatByID(s.chats, chatID)
+	s.mu.RUnlock()
+	if !ok {
+		return chatpkg.TimelinePage{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	if rt := s.runtime(chatID); rt != nil && rt.HasLoadedTimeline() {
+		return rt.TimelinePageAfter(ctx, after, limit)
+	}
+	return s.chatsSrc.TimelinePageAfter(ctx, chatID, after, limit)
+}
+
 // NewChat creates a new orchestrator chat under parentChatID.
 func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string) (*chatpkg.Chat, error) {
 	if s == nil {

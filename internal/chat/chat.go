@@ -71,8 +71,10 @@ type Snapshot struct {
 	Chat              domain.Chat
 	Timeline          []domain.TimelineItem
 	TimelineHasMore   bool
+	TimelineHasNewer  bool
 	TimelineLoadedAll bool
 	TimelineBefore    id.ID
+	TimelineAfter     id.ID
 	Approvals         []Approval
 	PendingUserInput  int
 	QueuedInputs      []domain.QueuedInput
@@ -1324,7 +1326,7 @@ func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bo
 	}
 	total := len(timeline)
 	if all || limit <= 0 || total <= limit {
-		return timelinePage(timeline, false, true, total), nil
+		return timelinePage(timeline, false, false, total), nil
 	}
 	end := total
 	if before != "" {
@@ -1339,7 +1341,16 @@ func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bo
 		return TimelinePage{LoadedAll: true, Total: total}, nil
 	}
 	start := max(0, end-limit)
-	return timelinePage(timeline[start:end], start > 0, false, total), nil
+	return timelinePage(timeline[start:end], start > 0, end < total, total), nil
+}
+
+// TimelinePageAfter returns the page immediately newer than after.
+func (r *Chat) TimelinePageAfter(ctx context.Context, after id.ID, limit int) (TimelinePage, error) {
+	timeline, err := r.Timeline(ctx)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	return timelinePageAfter(timeline, after, limit), nil
 }
 
 // PendingApprovals returns approval requests derived from the live transcript.
