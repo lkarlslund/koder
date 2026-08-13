@@ -50,6 +50,7 @@ type Event struct {
 type State struct {
 	Session       domain.Session             `json:"session"`
 	Sessions      []domain.Session           `json:"sessions"`
+	QuickChats    []domain.Session           `json:"quick_chats"`
 	Chats         []domain.Chat              `json:"chats"`
 	ChatStatuses  []ChatSidebarStatus        `json:"chat_statuses"`
 	ActiveChatID  id.ID                      `json:"active_chat_id"`
@@ -184,8 +185,6 @@ type ProviderConfigItem struct {
 	PromptProgressMode      string `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool   `json:"prompt_progress_probed"`
 	PromptProgressSupported bool   `json:"prompt_progress_supported"`
-	LlamaSlots              int    `json:"llama_slots"`
-	LlamaSlotScope          string `json:"llama_slot_scope"`
 }
 
 // ProviderDraft is the JSON-friendly provider edit shape used by web clients.
@@ -207,8 +206,6 @@ type ProviderDraft struct {
 	PromptProgressMode      string            `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool              `json:"prompt_progress_probed"`
 	PromptProgressSupported bool              `json:"prompt_progress_supported"`
-	LlamaSlots              int               `json:"llama_slots"`
-	LlamaSlotScope          string            `json:"llama_slot_scope"`
 }
 
 // ProviderProbeResult reports a provider test outcome.
@@ -218,7 +215,6 @@ type ProviderProbeResult struct {
 	SelectedModel           string   `json:"selected_model"`
 	PromptProgressProbed    bool     `json:"prompt_progress_probed"`
 	PromptProgressSupported bool     `json:"prompt_progress_supported"`
-	LlamaSlots              int      `json:"llama_slots"`
 }
 
 type ModelConfigPreference struct {
@@ -374,6 +370,7 @@ type ComposerCompletionItem struct {
 type SessionState struct {
 	ProjectRoot string           `json:"project_root"`
 	Sessions    []domain.Session `json:"sessions"`
+	QuickChats  []domain.Session `json:"quick_chats"`
 }
 
 // Controller owns process-wide configuration and session runtimes.
@@ -443,8 +440,9 @@ func (c *Controller) State() State {
 	}
 	c.mu.RUnlock()
 	ctx := context.Background()
-	if sessions, err := c.workspaceSessions(ctx); err == nil {
-		base.Sessions = sessions
+	if sessionState, err := c.Sessions(ctx); err == nil {
+		base.Sessions = sessionState.Sessions
+		base.QuickChats = sessionState.QuickChats
 	}
 	return base
 }
@@ -485,7 +483,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	}
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
-		base.Sessions = sessions
+		base.Sessions, base.QuickChats = splitSessions(sessions)
 	} else if len(base.Sessions) == 0 {
 		return State{}, err
 	}
@@ -526,6 +524,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	return State{
 		Session:       session,
 		Sessions:      base.Sessions,
+		QuickChats:    base.QuickChats,
 		Chats:         slices.Clone(ownerSnapshot.Chats),
 		ChatStatuses:  chatStatusesForChats(ownerSnapshot.Chats, statuses),
 		ActiveChatID:  chatRecord.ID,
@@ -580,7 +579,12 @@ func (c *Controller) resolveStateRuntime(ctx context.Context, selection Selectio
 	if chatRecord.ID == "" {
 		return owner, session, domain.Chat{}, nil, nil
 	}
-	return owner, session, chatRecord, nil, nil
+	rt, err := owner.Chat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, domain.Session{}, domain.Chat{}, nil, err
+	}
+	rt.Kick()
+	return owner, session, chatRecord, rt, nil
 }
 
 // TimelinePage returns a transcript page for a chat in an explicitly selected session.
@@ -1380,7 +1384,8 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	c.mu.RLock()
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
-	return SessionState{ProjectRoot: projectRoot, Sessions: sessions}, nil
+	regular, quick := splitSessions(sessions)
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick}, nil
 }
 
 // CreateSession creates a new session without changing controller selection.
@@ -1398,12 +1403,33 @@ func (c *Controller) CreateSession(ctx context.Context, title string, projectRoo
 		return domain.Session{}, err
 	}
 	session := owner.Snapshot().Session
-	sessions, err := c.workspaceSessions(ctx)
+	sessionState, err := c.Sessions(ctx)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	c.broadcast("sessions_delta", map[string]any{"sessions": sessions})
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, ""))
 	return session, nil
+}
+
+// CreateQuickChat creates a standalone one-chat session without selecting it.
+func (c *Controller) CreateQuickChat(ctx context.Context) (domain.Session, domain.Chat, error) {
+	if c.agent == nil {
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.CreateQuickSession(ctx)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, err
+	}
+	snapshot := owner.Snapshot()
+	if len(snapshot.Chats) != 1 {
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("quick session must contain exactly one chat")
+	}
+	sessionState, err := c.Sessions(ctx)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, err
+	}
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, ""))
+	return snapshot.Session, snapshot.Chats[0], nil
 }
 
 // RenameSession updates a session title.
@@ -1458,12 +1484,101 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if err := c.agent.DeleteSession(ctx, sessionID); err != nil {
 		return err
 	}
-	sessions, err := c.workspaceSessions(ctx)
+	sessionState, err := c.Sessions(ctx)
 	if err != nil {
 		return err
 	}
-	c.broadcast("sessions_delta", map[string]any{"sessions": sessions, "deleted_session_id": sessionID})
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, sessionID))
 	return nil
+}
+
+// CloseQuickChat deletes a quick chat, optionally cancelling active work first.
+func (c *Controller) CloseQuickChat(ctx context.Context, sessionID id.ID, cancelActive bool) error {
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	snapshot := owner.Snapshot()
+	if snapshot.Session.Kind != domain.SessionKindQuick {
+		return fmt.Errorf("session %s is not a quick session", sessionID)
+	}
+	idleErr := c.ensureSessionIdle(ctx, owner, snapshot.Chats)
+	switch {
+	case idleErr == nil:
+		err = c.agent.DeleteSession(ctx, sessionID)
+	case !cancelActive:
+		return fmt.Errorf("quick chat is active; cancellation confirmation is required")
+	default:
+		err = c.agent.DisposeQuickSession(ctx, sessionID)
+	}
+	if err != nil {
+		return err
+	}
+	sessionState, err := c.Sessions(ctx)
+	if err != nil {
+		return err
+	}
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, sessionID))
+	return nil
+}
+
+// PromoteQuickChat converts an idle quick chat into a regular session.
+func (c *Controller) PromoteQuickChat(ctx context.Context, sessionID id.ID, req agent.PromoteQuickRequest) (domain.Session, error) {
+	if sessionID == "" {
+		return domain.Session{}, fmt.Errorf("session id is required")
+	}
+	if c.agent == nil {
+		return domain.Session{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	snapshot := owner.Snapshot()
+	if snapshot.Session.Kind != domain.SessionKindQuick {
+		return domain.Session{}, fmt.Errorf("session %s is not a quick session", sessionID)
+	}
+	if err := c.ensureSessionIdle(ctx, owner, snapshot.Chats); err != nil {
+		return domain.Session{}, fmt.Errorf("quick chat must be idle before promotion: %w", err)
+	}
+	updated, err := c.agent.PromoteQuickSession(ctx, sessionID, req)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	c.ensureSessionWorkspace(owner)
+	sessionState, err := c.Sessions(ctx)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, ""))
+	return updated, nil
+}
+
+func splitSessions(items []domain.Session) ([]domain.Session, []domain.Session) {
+	regular := make([]domain.Session, 0, len(items))
+	quick := make([]domain.Session, 0)
+	for _, item := range items {
+		if item.Kind == domain.SessionKindQuick {
+			quick = append(quick, item)
+		} else {
+			regular = append(regular, item)
+		}
+	}
+	return regular, quick
+}
+
+func sessionListPayload(state SessionState, deleted id.ID) map[string]any {
+	payload := map[string]any{"sessions": state.Sessions, "quick_chats": state.QuickChats}
+	if deleted != "" {
+		payload["deleted_session_id"] = deleted
+	}
+	return payload
 }
 
 func (c *Controller) ensureSessionIdle(ctx context.Context, owner *sessionpkg.Session, chats []domain.Chat) error {

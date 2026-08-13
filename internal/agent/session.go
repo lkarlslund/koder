@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -77,15 +79,69 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, c
 	return e.registry.Create(ctx, title, projectRoot, createProjectRoot)
 }
 
+// CreateQuickSession creates a standalone one-chat session with a managed workspace.
+func (e *Engine) CreateQuickSession(ctx context.Context) (*sessionpkg.Session, error) {
+	if e == nil || e.registry == nil {
+		return nil, fmt.Errorf("session registry is required")
+	}
+	sessionID := id.New()
+	root := filepath.Join(e.cfg.StateDir(), "quick-chats", string(sessionID))
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("create quick chat project root: %w", err)
+	}
+	owner, err := e.registry.CreateQuick(ctx, sessionID, root)
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return nil, err
+	}
+	return owner, nil
+}
+
 // DeleteSession closes any live runtimes and deletes the persisted session.
 func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if e == nil || e.registry == nil {
 		return fmt.Errorf("session registry is required")
 	}
+	owner, err := e.registry.Load(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	session := owner.Snapshot().Session
+	managedRoot, err := e.managedQuickRoot(session)
+	if err != nil {
+		return err
+	}
 	if e.browser != nil {
 		e.browser.CleanupSession(ctx, sessionID)
 	}
-	return e.registry.Delete(ctx, sessionID)
+	if err := e.registry.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	var cleanupErrs []error
+	if e.files != nil {
+		cleanupErrs = append(cleanupErrs, e.files.DeleteSessionData(sessionID))
+	}
+	if managedRoot != "" {
+		if err := os.RemoveAll(managedRoot); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete managed quick chat root: %w", err))
+		}
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+func (e *Engine) managedQuickRoot(session domain.Session) (string, error) {
+	if !session.ProjectRootManaged {
+		return "", nil
+	}
+	if session.Kind != domain.SessionKindQuick {
+		return "", fmt.Errorf("managed project root is only valid for quick sessions")
+	}
+	expected := filepath.Clean(filepath.Join(e.cfg.StateDir(), "quick-chats", string(session.ID)))
+	actual := filepath.Clean(session.ProjectRoot)
+	if actual != expected {
+		return "", fmt.Errorf("refusing to delete unexpected managed project root %q", session.ProjectRoot)
+	}
+	return expected, nil
 }
 
 func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {

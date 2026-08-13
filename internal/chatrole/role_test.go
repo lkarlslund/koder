@@ -18,6 +18,7 @@ func TestDefaultRegistryRoleSpecs(t *testing.T) {
 	}{
 		{name: "orchestrator", role: Orchestrator, displayName: "Orchestrate", prompt: "main orchestration thread"},
 		{name: "execution", role: Execution, displayName: "Execute", prompt: "execution worker"},
+		{name: "standalone", role: Standalone, displayName: "Standalone", prompt: "standalone chat"},
 		{name: "compaction", role: Compaction, displayName: "Compact", prompt: "summarizes conversation history"},
 	}
 	for _, tt := range tests {
@@ -50,6 +51,8 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"execution rejects milestone add", Execution, testTool("milestone_add"), false},
 		{"execution allows milestone update", Execution, testTool("milestone_update"), true},
 		{"orchestrator allows chat send", Orchestrator, testTool("chat_send"), true},
+		{"standalone rejects chat start", Standalone, testTool("chat_start"), false},
+		{"standalone allows edit", Standalone, testTool("file_edit"), true},
 		{"compaction rejects read", Compaction, testTool("file_read"), false},
 		{"compaction rejects chat send", Compaction, testTool("chat_send"), false},
 		{"unknown rejects read", Role("unknown"), testTool("file_read"), false},

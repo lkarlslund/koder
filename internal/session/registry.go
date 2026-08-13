@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
@@ -170,6 +171,18 @@ func (r *Registry) List(ctx context.Context) ([]domain.Session, error) {
 }
 
 func (r *Registry) Create(ctx context.Context, title, projectRoot string, createProjectRoot bool) (*Session, error) {
+	return r.create(ctx, title, projectRoot, createProjectRoot, "", domain.SessionKindRegular, false, chatrole.Orchestrator)
+}
+
+// CreateQuick creates a one-chat quick session in a caller-owned managed project root.
+func (r *Registry) CreateQuick(ctx context.Context, sessionID id.ID, projectRoot string) (*Session, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	return r.create(ctx, "New Session", projectRoot, false, sessionID, domain.SessionKindQuick, true, chatrole.Standalone)
+}
+
+func (r *Registry) create(ctx context.Context, title, projectRoot string, createProjectRoot bool, sessionID id.ID, kind domain.SessionKind, managed bool, role domain.WorkflowRole) (*Session, error) {
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")
 	}
@@ -200,7 +213,17 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 		}
 	}
 	cfg := r.currentConfig()
-	session, err := createSessionRecord(ctx, r.store, r.chatsSrc, title, cfg.DefaultProvider, cfg.DefaultModel, cfg.PermissionProfile, nil)
+	session, err := createSessionRecordWithOptions(ctx, r.store, r.chatsSrc, createSessionOptions{
+		ID:                 sessionID,
+		Title:              title,
+		ProviderID:         cfg.DefaultProvider,
+		ModelID:            cfg.DefaultModel,
+		PermissionProfile:  cfg.PermissionProfile,
+		Kind:               kind,
+		ProjectRoot:        projectRoot,
+		ProjectRootManaged: managed,
+		InitialChatRole:    role,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +232,6 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 		return nil, err
 	}
 	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
-		session.ProjectRoot = projectRoot
 		session.AccessSettings = cfg.AccessSettings
 	}); err != nil {
 		return nil, err

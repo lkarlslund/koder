@@ -205,6 +205,67 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 	}
 }
 
+func TestControllerSelectedStateHydratesAndKicksStoredChat(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	first := New(cfg, agent.New(cfg, st, nil, nil))
+	if err := first.Start(context.Background(), StartupModeNew, t.TempDir()); err != nil {
+		t.Fatalf("start first controller: %v", err)
+	}
+	session := activateTestSession(t, first, t.TempDir())
+	selection := controllerSelection(first)
+	if err := first.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown first controller: %v", err)
+	}
+	if err := testSetChatQueuedInputs(context.Background(), st, selection.ChatID, []domain.QueuedInput{{
+		ID:       id.New(),
+		Kind:     domain.QueuedInputKindContinue,
+		Delivery: domain.QueuedInputDeliveryContinue,
+		Origin:   domain.QueuedInputOriginAutoResume,
+		Source:   domain.UserMessageSourceAutoResume,
+	}}); err != nil {
+		t.Fatalf("persist queued continuation: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil)
+	next := New(cfg, engine)
+	if err := next.Start(context.Background(), StartupModeNew, session.ProjectRoot); err != nil {
+		t.Fatalf("start next controller: %v", err)
+	}
+	t.Cleanup(func() { _ = next.Shutdown(context.Background()) })
+	owner, err := engine.LoadSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("load session owner: %v", err)
+	}
+	if got := len(owner.Snapshot().Snapshots); got != 0 {
+		t.Fatalf("expected stored chats before browser selection, got %d live runtimes", got)
+	}
+
+	if _, err := next.StateForSelection(context.Background(), selection); err != nil {
+		t.Fatalf("state for selection: %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		snapshot, ok := owner.Snapshot().Snapshots[selection.ChatID]
+		if ok && snapshot.TimelineLoadedAll {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("selected stored chat was not hydrated and kicked")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	ctrl, _, execManager := newTestControllerWithExec(t)
 	selection := controllerSelection(ctrl)
@@ -620,77 +681,6 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 	if options[1].ContextWindow != 49152 || options[2].ContextWindow != 65536 {
 		t.Fatalf("expected detected model context windows, got %#v", options)
-	}
-}
-
-func TestControllerModelOptionsPersistsDetectedLlamaSlots(t *testing.T) {
-	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models", "/models":
-			fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
-		case "/slots":
-			if got := r.URL.Query().Get("model"); got != "live-model" {
-				t.Fatalf("unexpected slot model query %q", got)
-			}
-			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
-		case "/props":
-			http.NotFound(w, r)
-		default:
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer modelServer.Close()
-
-	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
-		cfg.Providers = map[string]config.Provider{
-			"test": {Kind: provider.ProviderKindCompatible, Name: "Local llama.cpp instance", BaseURL: modelServer.URL + "/v1"},
-		}
-		cfg.Defaults.ProviderID = "test"
-		cfg.Defaults.ModelID = "live-model"
-	})
-
-	if _, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{}); err != nil {
-		t.Fatalf("model options: %v", err)
-	}
-	ctrl.mu.RLock()
-	got := ctrl.cfg.Providers["test"]
-	ctrl.mu.RUnlock()
-	if got.LlamaSlots != 2 || got.LlamaSlotScope != "chat" {
-		t.Fatalf("expected detected llama slots to persist, got %#v", got)
-	}
-}
-
-func TestControllerLoadSessionPreparesDetectedLlamaSlots(t *testing.T) {
-	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/slots":
-			if got := r.URL.Query().Get("model"); got != "live-model" {
-				t.Fatalf("unexpected slot model query %q", got)
-			}
-			fmt.Fprint(w, `[{"id":0},{"id":1}]`)
-		case "/props":
-			http.NotFound(w, r)
-		case "/models", "/v1/models":
-			fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
-		default:
-			t.Fatalf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer modelServer.Close()
-
-	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
-		cfg.Providers = map[string]config.Provider{
-			"test": {Kind: provider.ProviderKindCompatible, Name: "Local llama.cpp instance", BaseURL: modelServer.URL + "/v1"},
-		}
-		cfg.Defaults.ProviderID = "test"
-		cfg.Defaults.ModelID = "live-model"
-	})
-
-	ctrl.mu.RLock()
-	got := ctrl.cfg.Providers["test"]
-	ctrl.mu.RUnlock()
-	if got.LlamaSlots != 2 || got.LlamaSlotScope != "chat" {
-		t.Fatalf("expected session load to detect llama slots, got %#v", got)
 	}
 }
 
@@ -2201,6 +2191,68 @@ func activateTestSession(t *testing.T, ctrl *Controller, projectRoot string) dom
 		t.Fatalf("activate test session: %v", err)
 	}
 	return session
+}
+
+func TestQuickChatLifecycleSeparatesListsAndPromotes(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	quick, chatRecord, err := ctrl.CreateQuickChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quick.Kind != domain.SessionKindQuick || chatRecord.WorkflowRole != chatrole.Standalone {
+		t.Fatalf("unexpected quick chat: %#v %#v", quick, chatRecord)
+	}
+	state, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 1 || state.QuickChats[0].ID != quick.ID {
+		t.Fatalf("unexpected quick chat list: %#v", state.QuickChats)
+	}
+	selected, err := ctrl.StateForSelection(ctx, Selection{SessionID: quick.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Session.ID != quick.ID || selected.Session.Kind != domain.SessionKindQuick || selected.ActiveChatID != chatRecord.ID {
+		t.Fatalf("unexpected selected quick chat state: %#v", selected)
+	}
+	if len(selected.QuickChats) != 1 || selected.QuickChats[0].ID != quick.ID {
+		t.Fatalf("selected state lost quick chat list: %#v", selected.QuickChats)
+	}
+	updated, err := ctrl.PromoteQuickChat(ctx, quick.ID, agent.PromoteQuickRequest{Mode: agent.QuickPromotionAssign})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Kind != domain.SessionKindRegular {
+		t.Fatalf("promoted kind = %v", updated.Kind)
+	}
+	state, err = ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 0 {
+		t.Fatalf("promoted chat remained quick: %#v", state.QuickChats)
+	}
+}
+
+func TestCloseQuickChatRemovesItFromQuickList(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	quick, _, err := ctrl.CreateQuickChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.CloseQuickChat(ctx, quick.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.QuickChats) != 0 {
+		t.Fatalf("closed quick chat remained listed: %#v", state.QuickChats)
+	}
 }
 
 func TestNewestSessionUsesUpdatedAtThenID(t *testing.T) {

@@ -1513,6 +1513,26 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `syncActiveChatURL()`) {
 		t.Fatalf("expected app to include welcome screen and opt-in URL sync")
 	}
+	if !strings.Contains(fullPage, `rpc('new_quick_chat', {})`) ||
+		!strings.Contains(fullPage, `@auxclick.stop.prevent="newQuickChat($event)"`) ||
+		!strings.Contains(fullPage, `window.open('', '_blank')`) ||
+		!strings.Contains(fullPage, `Sessions &amp; Chats`) ||
+		!strings.Contains(fullPage, `sessionTab === 'chats'`) ||
+		!strings.Contains(fullPage, `rpc('close_quick_chat'`) ||
+		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) {
+		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, and management")
+	}
+	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && !quickChatMode()`) ||
+		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
+		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||
+		!strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) {
+		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
+	}
+	if !strings.Contains(fullPage, `class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'"`) ||
+		!strings.Contains(fullPage, `x-text="chatStatusLabel(chat)"`) ||
+		!strings.Contains(fullPage, `.chat-status-line { display: flex;`) {
+		t.Fatalf("expected each non-idle chat to show its detailed phase below the chat row")
+	}
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
 	}
@@ -1648,7 +1668,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams with sanitized html labels")
 	}
 	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
-		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) {
+		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) ||
+		!strings.Contains(fullPage, `snapshotIsReceivingAssistantDeltas`) ||
+		!strings.Contains(fullPage, `function isReceivingAssistantDeltasStatus(status)`) ||
+		!strings.Contains(fullPage, `return status === 'streaming_response' || status === 'streaming_thoughts';`) {
 		t.Fatalf("expected streaming markdown renderer to defer Mermaid and SVG rendering")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
@@ -2086,7 +2109,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
-	if !strings.Contains(fullPage, `x-show="milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+	if !strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
 		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
 	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
@@ -2146,7 +2169,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `bi-archive`) {
 		t.Fatalf("expected chat sidebar to archive chats and filter by status")
 	}
-	if !strings.Contains(fullPage, `draggable="true"`) ||
+	if !strings.Contains(fullPage, `:draggable="!quickChatMode()"`) ||
 		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||
 		!strings.Contains(fullPage, `reorder_chats`) ||
 		!strings.Contains(fullPage, `chat_ids: orderedIDs`) {
@@ -2155,13 +2178,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
 		t.Fatalf("expected chat list trash action")
 	}
-	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
-		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
+	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-line`) {
+		t.Fatalf("expected chat sidebar to render detailed per-chat status lines")
 	}
 	statusIdx := strings.Index(fullPage, `chat-status-icon bi`)
 	chatIconIdx := strings.Index(fullPage, `bi-chat-left-text`)
-	if statusIdx < 0 || chatIconIdx < 0 || statusIdx > chatIconIdx {
-		t.Fatalf("expected chat busy indicator to render before the chat icon")
+	if statusIdx < 0 || chatIconIdx < 0 || statusIdx < chatIconIdx {
+		t.Fatalf("expected detailed chat status to render below the chat entry")
 	}
 	if !strings.Contains(fullPage, `chat-list-item`) || !strings.Contains(fullPage, `.sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }`) {
 		t.Fatalf("expected compact chat list row spacing")
@@ -2171,7 +2194,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `chat-title`) ||
 		!strings.Contains(fullPage, `chat-title-edit`) ||
 		!strings.Contains(fullPage, `.sidebar-list .chat-list-main, .sidebar-list .chat-list-content, .sidebar-list .chat-title { min-width: 0; }`) ||
-		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }`) {
+		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .d-flex > .btn:last-child { flex: 0 0 auto; }`) {
 		t.Fatalf("expected chat rows to constrain title overflow inside sidebar")
 	}
 	if !strings.Contains(fullPage, `chatContextLabel(chat)`) ||
@@ -2218,8 +2241,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatPendingApprovals(chat)`) || !strings.Contains(fullPage, `bi-exclamation-triangle-fill`) {
 		t.Fatalf("expected chats with pending approvals to render a warning triangle status")
 	}
-	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) {
-		t.Fatalf("expected idle chat status icon to be static")
+	if !strings.Contains(fullPage, `x-show="chatStatusValue(chat) !== 'idle'"`) {
+		t.Fatalf("expected idle chats to omit the separate status line")
 	}
 	if !strings.Contains(fullPage, `.chat-list-item.active .chat-status-icon.status-running`) || !strings.Contains(fullPage, `drop-shadow(0 0 2px rgba(0, 0, 0, .55))`) {
 		t.Fatalf("expected selected busy chat status icons to stay visible on active row background")
@@ -3034,6 +3057,89 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		if session.ID == newID {
 			t.Fatalf("deleted session still listed: %#v", deleteResp.Result.Sessions)
 		}
+	}
+}
+
+func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
+	ctrl := newTestController(t)
+	selected := selectedTestState(t, ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsURL := fmt.Sprintf("ws://%s/ws?session=%s&chat=%s", srv.Addr(), selected.Session.ID, selected.ActiveChatID)
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"new_quick_chat","params":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var created struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			SessionID id.ID `json:"session_id"`
+			ChatID    id.ID `json:"chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.OK || created.Result.SessionID == "" || created.Result.ChatID == "" {
+		t.Fatalf("unexpected quick chat response: %#v", created)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"get_state","params":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var stateResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session domain.Session `json:"session"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(msg, &stateResp); err != nil {
+		t.Fatal(err)
+	}
+	if !stateResp.OK || stateResp.Result.Session.ID != selected.Session.ID {
+		t.Fatalf("quick creation changed selection: %#v", stateResp.Result.Session)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 3)
+	var switchResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session      domain.Session `json:"session"`
+			ActiveChatID id.ID          `json:"active_chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &switchResp); err != nil {
+		t.Fatal(err)
+	}
+	if !switchResp.OK || switchResp.Result.Session.ID != created.Result.SessionID || switchResp.Result.Session.Kind != domain.SessionKindQuick || switchResp.Result.ActiveChatID != created.Result.ChatID {
+		t.Fatalf("switch quick chat failed: %#v", switchResp)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":4,"method":"close_quick_chat","params":{"session_id":"%s"}}`, created.Result.SessionID))); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 4)
+	var closeResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &closeResp); err != nil {
+		t.Fatal(err)
+	}
+	if !closeResp.OK {
+		t.Fatalf("close quick chat failed: %s", closeResp.Error)
 	}
 }
 

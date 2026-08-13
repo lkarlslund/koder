@@ -494,6 +494,9 @@ func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string)
 	parent, ok := chatByID(s.chats, parentChatID)
 	position := len(s.chats)
 	s.mu.RUnlock()
+	if session.Kind == domain.SessionKindQuick {
+		return nil, fmt.Errorf("quick sessions cannot create additional chats")
+	}
 	if session.ID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
@@ -539,6 +542,9 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 	source, ok := chatByID(s.chats, sourceChatID)
 	position := len(s.chats)
 	s.mu.RUnlock()
+	if session.Kind == domain.SessionKindQuick {
+		return nil, fmt.Errorf("quick sessions cannot fork chats")
+	}
 	if session.ID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
@@ -599,6 +605,12 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	}
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
+	}
+	s.mu.RLock()
+	hasChat := len(s.chats) > 0
+	s.mu.RUnlock()
+	if session.Kind == domain.SessionKindQuick && hasChat {
+		return nil, fmt.Errorf("quick sessions cannot create additional chats")
 	}
 	if err := s.chatsSrc.PutRecord(ctx, chatRecord); err != nil {
 		return nil, err
@@ -870,6 +882,63 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	}
 	slog.Info("session renamed", "session_id", updated.ID, "title", updated.Title)
 	return updated, nil
+}
+
+// PromoteQuick converts a one-chat quick session into a regular orchestrating session.
+func (s *Session) PromoteQuick(ctx context.Context, projectRoot string) (domain.Session, domain.Chat, error) {
+	if s == nil {
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("session is required")
+	}
+	s.mu.Lock()
+	if s.session.Kind != domain.SessionKindQuick {
+		s.mu.Unlock()
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("session %s is not a quick session", s.session.ID)
+	}
+	if len(s.chats) != 1 {
+		s.mu.Unlock()
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("quick session must contain exactly one chat")
+	}
+	previousChat := s.chats[0]
+	updatedChat := previousChat
+	updatedChat.WorkflowRole = chatrole.Orchestrator
+	updatedChat.UpdatedAt = time.Now().UTC()
+	updatedSession := s.session
+	updatedSession.Kind = domain.SessionKindRegular
+	updatedSession.ProjectRoot = strings.TrimSpace(projectRoot)
+	updatedSession.ProjectRootManaged = false
+	updatedSession.UpdatedAt = updatedChat.UpdatedAt
+	if err := s.chatsSrc.UpdateRecord(ctx, updatedChat); err != nil {
+		s.mu.Unlock()
+		return domain.Session{}, domain.Chat{}, err
+	}
+	if err := putSessionRecord(ctx, s.store, updatedSession); err != nil {
+		if rollbackErr := s.chatsSrc.UpdateRecord(ctx, previousChat); rollbackErr != nil {
+			s.mu.Unlock()
+			return domain.Session{}, domain.Chat{}, fmt.Errorf("promote quick session: %w (rollback chat: %v)", err, rollbackErr)
+		}
+		s.mu.Unlock()
+		return domain.Session{}, domain.Chat{}, err
+	}
+	s.session = updatedSession
+	s.chats[0] = updatedChat
+	if s.workspaceWatchCancel != nil {
+		s.workspaceWatchCancel()
+		s.workspaceWatchCancel = nil
+	}
+	s.workspace = workspacepkg.Status{ProjectRoot: updatedSession.ProjectRoot}
+	s.gitDiff = workspacepkg.Diff{ProjectRoot: updatedSession.ProjectRoot}
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(updatedSession)
+		}
+	}
+	if rt := s.runtimes[updatedChat.ID]; rt != nil {
+		rt.SetChat(updatedChat)
+	}
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventSessionChanged, SessionID: updatedSession.ID, Session: updatedSession})
+	s.emit(Event{Kind: EventChatChanged, SessionID: updatedSession.ID, Chat: updatedChat, Snapshot: s.snapshotForChat(updatedChat.ID)})
+	return updatedSession, updatedChat, nil
 }
 
 // SetAccessSettings updates the session access settings and loaded runtimes.

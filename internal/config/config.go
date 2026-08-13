@@ -85,8 +85,6 @@ type Provider struct {
 	PromptProgressMode      string            `toml:"prompt_progress_mode"`
 	PromptProgressProbed    bool              `toml:"prompt_progress_probed"`
 	PromptProgressSupported bool              `toml:"prompt_progress_supported"`
-	LlamaSlots              int               `toml:"llama_slots,omitempty"`
-	LlamaSlotScope          string            `toml:"llama_slot_scope,omitempty"`
 }
 
 // ModelConfig stores settings for one provider/model pair.
@@ -434,14 +432,6 @@ func (c *Config) applyDefaults() {
 			provider.Timeout = fallbackProvider.Timeout
 		}
 		provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
-		if provider.LlamaSlots < 0 {
-			provider.LlamaSlots = 0
-		}
-		if provider.LlamaSlots > 0 {
-			provider.LlamaSlotScope = NormalizeLlamaSlotScope(provider.LlamaSlotScope)
-		} else {
-			provider.LlamaSlotScope = ""
-		}
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
 		}
@@ -718,15 +708,6 @@ func NormalizeCompactionKeepToolCalls(value int) int {
 		return defaultCompactionKeepToolCalls
 	}
 	return min(value, maxCompactionKeepToolCalls)
-}
-
-func NormalizeLlamaSlotScope(value string) string {
-	switch strings.TrimSpace(strings.ToLower(value)) {
-	case "session":
-		return "session"
-	default:
-		return "chat"
-	}
 }
 
 func mcpServerDefaults() MCPServer {

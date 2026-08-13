@@ -161,39 +161,6 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 	}
 }
 
-func TestProbeDetectsLlamaSlots(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
-		case "/v1/chat/completions":
-			http.NotFound(w, r)
-		case "/slots":
-			if got := r.URL.Query().Get("model"); got != "model-a" {
-				t.Fatalf("unexpected model query: %q", got)
-			}
-			_, _ = w.Write([]byte(`[{"id":0},{"id":1}]`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	result, err := Probe(context.Background(), ConnectDraft{
-		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
-		BaseURL:    server.URL + "/v1",
-		Model:      "model-a",
-		Headers:    map[string]string{},
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.LlamaSlots != 2 {
-		t.Fatalf("expected 2 detected llama slots, got %#v", result)
-	}
-}
-
 func TestProbeRejectsProvidersWithoutModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))

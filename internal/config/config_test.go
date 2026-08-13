@@ -176,45 +176,6 @@ func TestOldDefaultCavemanPromptUpgrades(t *testing.T) {
 	}
 }
 
-func TestProviderLlamaSlotSettingsNormalizeAndRoundTrip(t *testing.T) {
-	temp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", temp)
-	t.Setenv("XDG_STATE_HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Providers["local"] = Provider{
-		BaseURL:        "http://127.0.0.1:8000/v1",
-		LlamaSlots:     4,
-		LlamaSlotScope: "SESSION",
-	}
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := loaded.Providers["local"]
-	if provider.LlamaSlots != 4 || provider.LlamaSlotScope != "session" {
-		t.Fatalf("expected normalized llama slot settings, got %#v", provider)
-	}
-}
-
-func TestNormalizeLlamaSlotScopeDefaultsToChat(t *testing.T) {
-	for _, value := range []string{"", "invalid", "CHAT"} {
-		if got := NormalizeLlamaSlotScope(value); got != "chat" {
-			t.Fatalf("expected %q to normalize to chat, got %q", value, got)
-		}
-	}
-	if got := NormalizeLlamaSlotScope("SESSION"); got != "session" {
-		t.Fatalf("expected session scope, got %q", got)
-	}
-}
-
 func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)
@@ -236,6 +197,38 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	}
 	if loaded.Compaction.ProviderID != "fast" || loaded.Compaction.ModelID != "fast-model" {
 		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
+	}
+}
+
+func TestLegacyLlamaSlotSettingsAreIgnoredAndDroppedOnSave(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configDir := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configDir, "config.toml")
+	raw := []byte("[providers.local]\nbase_url = 'http://127.0.0.1:8000/v1'\nllama_slots = 2\nllama_slot_scope = 'chat'\n")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load legacy config: %v", err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save migrated config: %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "llama_slot") {
+		t.Fatalf("legacy llama slot settings survived save:\n%s", saved)
 	}
 }
 

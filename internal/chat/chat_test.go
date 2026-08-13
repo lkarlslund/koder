@@ -883,16 +883,20 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	close(events)
 
 	deadline = time.After(2 * time.Second)
+	sawMessageDone := false
 	for {
 		select {
 		case update := <-updates:
 			if update.Event != nil && update.Event.Kind == domain.EventKindMessageDone {
+				sawMessageDone = true
 				if got := runner.promptCallCount(); got != 1 {
 					t.Fatalf("prompt calls = %d", got)
 				}
 				if got := runner.promptAt(0); got != "first prompt" {
 					t.Fatalf("prompt = %q", got)
 				}
+			}
+			if sawMessageDone && update.Status == StatusIdle {
 				return
 			}
 		case <-deadline:
@@ -1869,6 +1873,54 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 			t.Fatal("timed out waiting for resumed tool event")
 		}
 	}
+}
+
+func TestPendingToolResumeConsumesQueuedAutoResume(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindFileRead,
+		Args:       map[string]string{"path": "README.md"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	chatRecord.QueuedInputs = []domain.QueuedInput{{
+		ID:       id.New(),
+		Kind:     domain.QueuedInputKindContinue,
+		Delivery: domain.QueuedInputDeliveryContinue,
+		Origin:   domain.QueuedInputOriginAutoResume,
+		Source:   domain.UserMessageSourceAutoResume,
+	}}
+	if err := setChatQueuedInputs(context.Background(), st, chatRecord.ID, chatRecord.QueuedInputs); err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event)
+	runner := &pendingToolFakeRunner{resumeEvents: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	deadline := time.After(2 * time.Second)
+	for runner.resumeCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for pending tool resume")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+		t.Fatalf("auto-resume continuation remained queued: %#v", got)
+	}
+	stored, err := getChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.QueuedInputs) != 0 {
+		t.Fatalf("auto-resume continuation remained persisted: %#v", stored.QueuedInputs)
+	}
+	close(events)
 }
 
 func TestResumePendingToolsDispatchesQueuedUserBeforeAutoContinue(t *testing.T) {

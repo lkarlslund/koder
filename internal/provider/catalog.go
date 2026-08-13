@@ -49,8 +49,6 @@ type ConnectDraft struct {
 	PromptProgressMode      string
 	PromptProgressProbed    bool
 	PromptProgressSupported bool
-	LlamaSlots              int
-	LlamaSlotScope          string
 }
 
 type ProbeResult struct {
@@ -58,7 +56,6 @@ type ProbeResult struct {
 	SelectedModel           string
 	PromptProgressProbed    bool
 	PromptProgressSupported bool
-	LlamaSlots              int
 }
 
 var catalog = []Descriptor{
@@ -143,8 +140,6 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		PromptProgressMode:      config.NormalizePromptProgressMode(existing.PromptProgressMode),
 		PromptProgressProbed:    existing.PromptProgressProbed,
 		PromptProgressSupported: existing.PromptProgressSupported,
-		LlamaSlots:              existing.LlamaSlots,
-		LlamaSlotScope:          llamaSlotScopeForDraft(existing),
 	}, nil
 }
 
@@ -164,19 +159,8 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		PromptProgressMode:      config.NormalizePromptProgressMode(d.PromptProgressMode),
 		PromptProgressProbed:    d.PromptProgressProbed,
 		PromptProgressSupported: d.PromptProgressSupported,
-		LlamaSlots:              d.LlamaSlots,
-	}
-	if cfg.LlamaSlots > 0 {
-		cfg.LlamaSlotScope = config.NormalizeLlamaSlotScope(d.LlamaSlotScope)
 	}
 	return cfg
-}
-
-func llamaSlotScopeForDraft(existing config.Provider) string {
-	if existing.LlamaSlots <= 0 && strings.TrimSpace(existing.LlamaSlotScope) == "" {
-		return ""
-	}
-	return config.NormalizeLlamaSlotScope(existing.LlamaSlotScope)
 }
 
 func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder) (ProbeResult, error) {
@@ -196,11 +180,7 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 		return ProbeResult{}, err
 	}
 	probed, supported := probePromptProgress(ctx, draft, selected, recorder)
-	slots, err := DetectLlamaSlots(ctx, draft.ProviderID, draft.ToConfig(), selected, recorder)
-	if err != nil {
-		slots = 0
-	}
-	return ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported, LlamaSlots: slots}, nil
+	return ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported}, nil
 }
 
 func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string, recorder *debugsrv.Recorder) (bool, bool) {
