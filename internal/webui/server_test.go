@@ -1668,7 +1668,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser markdown renderer to render Mermaid diagrams with sanitized html labels")
 	}
 	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
-		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) {
+		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) ||
+		!strings.Contains(fullPage, `snapshotIsReceivingAssistantDeltas`) ||
+		!strings.Contains(fullPage, `function isReceivingAssistantDeltasStatus(status)`) ||
+		!strings.Contains(fullPage, `return status === 'streaming_response' || status === 'streaming_thoughts';`) {
 		t.Fatalf("expected streaming markdown renderer to defer Mermaid and SVG rendering")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {

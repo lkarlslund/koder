@@ -443,6 +443,9 @@
       if (value instanceof Blob) return value.size;
       return 0;
     }
+    function isReceivingAssistantDeltasStatus(status) {
+      return status === 'streaming_response' || status === 'streaming_thoughts';
+    }
     const transcriptTailWindowSize = 120;
     const transcriptWindowOverscan = 30;
     const estimatedTimelineItemHeight = 160;
@@ -2467,6 +2470,9 @@
           const status = this.snapshotStatus(snapshot);
           return status === 'streaming_response' || status === 'streaming_thoughts' || status === 'waiting_llm';
         },
+        snapshotIsReceivingAssistantDeltas(snapshot) {
+          return isReceivingAssistantDeltasStatus(this.snapshotStatus(snapshot));
+        },
         timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
         timelineItemActionLabel(item) {
           const kind = String(item?.kind || item?.Kind || item?.content?.kind || '').trim();
@@ -2556,7 +2562,7 @@
           return this.timelineItemID(latest) === id;
         },
         itemMarkdownOptions(item) {
-          const streaming = this.snapshotIsStreaming(this.activeSnapshot()) && this.timelineItemIsLatest(item);
+          const streaming = this.snapshotIsReceivingAssistantDeltas(this.activeSnapshot()) && this.timelineItemIsLatest(item);
           return {deferDiagrams: streaming, incremental: streaming};
         },
         thinkingLabel(reasoning) {
