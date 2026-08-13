@@ -230,14 +230,11 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 			if err := planning.ValidateTaskProgress(tasks); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"]); err != nil {
-				return tools.Result{}, err
-			}
-			tasks, err = control.ListTasks(ctx, runtime.SessionID, milestoneKey)
+			updated, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"])
 			if err != nil {
 				return tools.Result{}, err
 			}
-			return tools.TaskBucketResultWithTitle(milestoneKey, milestone.Title, tasks, ""), nil
+			return tools.TaskBucketResultWithTitle(milestoneKey, milestone.Title, []planning.Task{updated}, ""), nil
 		}
 	}
 	return tools.Result{}, fmt.Errorf("task %s not found", taskKey)
@@ -366,14 +363,13 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 			if err := planning.ValidateTaskProgress(tasks); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"]); err != nil {
-				return tools.Result{}, err
-			}
-			tasks, err = control.ListTasks(ctx, runtime.SessionID, milestoneKey)
+			updated, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"])
 			if err != nil {
 				return tools.Result{}, err
 			}
-			result.Stored = tools.BuildTaskListStoredResult(plan, milestoneKey, tasks, "")
+			stored := tools.BuildTaskListStoredResult(plan, milestoneKey, []planning.Task{updated}, "")
+			result.Stored = stored
+			result.Output = tools.FormatTaskOutput(stored)
 			return result, nil
 		}
 	}

@@ -273,7 +273,7 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint", "Unrelated follow-up"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,15 +286,30 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 		t.Fatalf("expected missing note error, got %v", err)
 	}
 
-	result, err := executeAndPersist(ctx, t, runtime, tools.Request{
+	req := tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Endpoint was wired and tested."},
-	})
+	}
+	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(result.Output, "note: Endpoint was wired and tested.") {
 		t.Fatalf("expected output to include note, got %q", result.Output)
+	}
+	if strings.Contains(result.Output, "Unrelated follow-up") {
+		t.Fatalf("expected output to include only the updated task, got %q", result.Output)
+	}
+	toolResult, body, err := tools.FinalizeResult(ctx, runtime, req, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "Unrelated follow-up") {
+		t.Fatalf("expected finalized output to include only the updated task, got %q", body)
+	}
+	stored, ok := toolResult.Data.(tools.TaskListStoredResult)
+	if !ok || len(stored.Items) != 1 || stored.Items[0].Key != planning.TaskKey(tasks[0]) {
+		t.Fatalf("expected one updated task in stored result, got %#v", toolResult.Data)
 	}
 	updated, err := modeltest.GetTask(ctx, st, tasks[0].ID)
 	if err != nil {
