@@ -438,7 +438,7 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 func TestModelConfigHelpersNormalizeAndDefault(t *testing.T) {
 	cfg := Default()
 	cfg.Models = []ModelConfig{
-		{ProviderID: " test ", ModelID: " model ", ContextWindow: 12345},
+		{ProviderID: " test ", ModelID: " model ", ContextWindow: 12345, ReasoningEffort: " XHIGH "},
 	}
 
 	cfg.applyDefaults()
@@ -451,6 +451,10 @@ func TestModelConfigHelpersNormalizeAndDefault(t *testing.T) {
 	}
 	if got := cfg.ModelPreset("test", "model"); got != "auto" {
 		t.Fatalf("expected default model preset, got %q", got)
+	}
+	model, ok := cfg.ModelConfig("test", "model")
+	if !ok || model.ReasoningEffort != "xhigh" {
+		t.Fatalf("expected normalized reasoning effort, got %#v", model)
 	}
 }
 

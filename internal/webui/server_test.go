@@ -2055,6 +2055,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `save_model_config`) ||
 		!strings.Contains(fullPage, `modelSettingsDraft.thinking_mode`) ||
+		!strings.Contains(fullPage, `modelSettingsDraft.reasoning_effort`) ||
 		!strings.Contains(fullPage, `modelSettingsDraft.temperature`) ||
 		!strings.Contains(fullPage, `customizeModelSettings()`) ||
 		!strings.Contains(fullPage, `Auto-detected models are read-only`) ||
@@ -2345,6 +2346,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `providerModelOptions`) ||
 		!strings.Contains(fullPage, `defaultModelValue()`) ||
 		!strings.Contains(fullPage, `modelConfigDraft.thinking_mode`) ||
+		!strings.Contains(fullPage, `modelConfigDraft.reasoning_effort`) ||
 		!strings.Contains(fullPage, `source_model_id`) ||
 		!strings.Contains(fullPage, `modelOptionLabel(model)`) {
 		t.Fatalf("expected model settings editor to offer custom model aliases, detected model choices, defaults, and model request settings")

@@ -11,6 +11,7 @@ const (
 	ModelPresetAuto                   = "auto"
 	ModelPresetDefault                = "default"
 	ModelPresetQwen36PreserveThinking = "qwen3.6-preserve-thinking"
+	ModelPresetQwen38PreserveThinking = "qwen3.8-preserve-thinking"
 )
 
 type ModelPreset struct {
@@ -23,6 +24,7 @@ var modelPresets = []ModelPreset{
 	{ID: ModelPresetAuto, Title: "Auto", Description: "Match a preset from the selected model name"},
 	{ID: ModelPresetDefault, Title: "Default", Description: "No model-specific request overrides"},
 	{ID: ModelPresetQwen36PreserveThinking, Title: "Qwen 3.6 No Thinking", Description: "Disable Qwen 3.6 hidden reasoning by default on compatible servers"},
+	{ID: ModelPresetQwen38PreserveThinking, Title: "Qwen 3.8 Thinking", Description: "Preserve Qwen 3.8 reasoning across turns on compatible servers"},
 }
 
 func Presets() []ModelPreset {
@@ -54,7 +56,7 @@ func ResolvePresetID(modelID, selected string) string {
 	switch selected {
 	case ModelPresetAuto:
 		return AutoMatchPresetID(modelID)
-	case ModelPresetDefault, ModelPresetQwen36PreserveThinking:
+	case ModelPresetDefault, ModelPresetQwen36PreserveThinking, ModelPresetQwen38PreserveThinking:
 		return selected
 	default:
 		return ModelPresetDefault
@@ -65,11 +67,15 @@ func AutoMatchPresetID(modelID string) string {
 	if looksLikeQwen36(modelID) {
 		return ModelPresetQwen36PreserveThinking
 	}
+	if looksLikeQwen38(modelID) {
+		return ModelPresetQwen38PreserveThinking
+	}
 	return ModelPresetDefault
 }
 
 func PreserveThinkingEnabled(modelID, selected string) bool {
-	return ResolvePresetID(modelID, selected) == ModelPresetQwen36PreserveThinking
+	resolved := ResolvePresetID(modelID, selected)
+	return resolved == ModelPresetQwen36PreserveThinking || resolved == ModelPresetQwen38PreserveThinking
 }
 
 func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]any {
@@ -79,7 +85,9 @@ func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]
 	}
 	modelID := strings.TrimSpace(model.ModelID)
 	selected := strings.TrimSpace(model.ModelPreset)
-	if PreserveThinkingEnabled(modelID, selected) {
+	resolvedPreset := ResolvePresetID(modelID, selected)
+	switch resolvedPreset {
+	case ModelPresetQwen36PreserveThinking:
 		if isDashScopeBaseURL(cfg.BaseURL) {
 			body["enable_thinking"] = false
 			body["preserve_thinking"] = false
@@ -88,6 +96,12 @@ func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]
 				"enable_thinking":   false,
 				"preserve_thinking": true,
 			}
+		}
+	case ModelPresetQwen38PreserveThinking:
+		if isDashScopeBaseURL(cfg.BaseURL) {
+			body["preserve_thinking"] = true
+		} else {
+			chatTemplateKwargs(body)["preserve_thinking"] = true
 		}
 	}
 	applyModelRequestOptions(body, cfg, model)
@@ -143,6 +157,12 @@ func applyModelRequestOptions(body map[string]any, cfg config.Provider, model co
 	}
 	if model.RepeatPenalty != nil {
 		body["repeat_penalty"] = *model.RepeatPenalty
+	}
+	if effort := strings.TrimSpace(strings.ToLower(model.ReasoningEffort)); effort != "" && effort != "auto" {
+		body["reasoning_effort"] = effort
+		if looksLikeLlamaProvider(cfg) && effort != "none" {
+			chatTemplateKwargs(body)["reasoning_effort"] = effort
+		}
 	}
 	switch strings.TrimSpace(strings.ToLower(model.ThinkingMode)) {
 	case "enabled":
@@ -230,6 +250,14 @@ func looksLikeQwen36(modelID string) bool {
 		return false
 	}
 	return strings.Contains(modelID, "qwen3.6")
+}
+
+func looksLikeQwen38(modelID string) bool {
+	modelID = strings.ToLower(strings.TrimSpace(modelID))
+	if modelID == "" {
+		return false
+	}
+	return strings.Contains(modelID, "qwen3.8")
 }
 
 func isDashScopeBaseURL(raw string) bool {

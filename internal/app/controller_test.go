@@ -949,14 +949,15 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	temperature := 0.7
 	topP := 0.9
 	prefs.ModelConfigs = []ModelConfigPreference{{
-		ProviderID:     "test",
-		ModelID:        "model",
-		ContextWindow:  12345,
-		ModelPreset:    provider.ModelPresetDefault,
-		Temperature:    &temperature,
-		TopP:           &topP,
-		ThinkingMode:   "enabled",
-		ThinkingBudget: 4096,
+		ProviderID:      "test",
+		ModelID:         "model",
+		ContextWindow:   12345,
+		ModelPreset:     provider.ModelPresetDefault,
+		Temperature:     &temperature,
+		TopP:            &topP,
+		ThinkingMode:    "enabled",
+		ThinkingBudget:  4096,
+		ReasoningEffort: "xhigh",
 	}}
 	prefs.MCPServers = []MCPServerPreference{{
 		ID:             "docs",
@@ -998,7 +999,7 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 		t.Fatalf("expected saved model preset, got %q", got)
 	}
 	modelCfg, ok := loaded.ModelConfig("test", "model")
-	if !ok || modelCfg.Temperature == nil || *modelCfg.Temperature != 0.7 || modelCfg.TopP == nil || *modelCfg.TopP != 0.9 || modelCfg.ThinkingMode != "enabled" || modelCfg.ThinkingBudget != 4096 {
+	if !ok || modelCfg.Temperature == nil || *modelCfg.Temperature != 0.7 || modelCfg.TopP == nil || *modelCfg.TopP != 0.9 || modelCfg.ThinkingMode != "enabled" || modelCfg.ThinkingBudget != 4096 || modelCfg.ReasoningEffort != "xhigh" {
 		t.Fatalf("expected saved model request settings, got %#v", modelCfg)
 	}
 	if loaded.MCPServers["docs"].URL != "https://mcp.example.invalid/sse" || loaded.MCPServers["docs"].Headers["X-Test"] != "yes" {

@@ -4483,6 +4483,7 @@
             repeat_penalty: raw.repeat_penalty ?? null,
             thinking_mode: raw.thinking_mode || 'auto',
             thinking_budget: raw.thinking_budget || 0,
+            reasoning_effort: raw.reasoning_effort || '',
             extra_body: raw.extra_body || {},
             extra_body_text: this.formatModelExtraBodyText(raw.extra_body),
           }, raw || {});
@@ -5303,6 +5304,7 @@
             repeat_penalty: null,
             thinking_mode: 'auto',
             thinking_budget: 0,
+            reasoning_effort: '',
             extra_body: {},
             extra_body_text: '{}'
           }, existing || {}, values, {provider_id: providerID, model_id: modelID});
@@ -5387,6 +5389,7 @@
             repeat_penalty: this.blankableNumber(this.modelConfigDraft.repeat_penalty),
             thinking_mode: String(this.modelConfigDraft.thinking_mode || 'auto').trim() || 'auto',
             thinking_budget: Number(this.modelConfigDraft.thinking_budget || 0),
+            reasoning_effort: String(this.modelConfigDraft.reasoning_effort || '').trim().toLowerCase(),
             extra_body: extraBody,
             extra_body_text: this.formatModelExtraBodyText(extraBody)
           }));

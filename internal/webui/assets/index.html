@@ -813,6 +813,7 @@
                   <option value="auto">auto</option>
                   <option value="default">default</option>
                   <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
+                  <option value="qwen3.8-preserve-thinking">qwen3.8-preserve-thinking</option>
                 </select>
               </div>
               <div class="col-6">
@@ -846,6 +847,19 @@
               <div class="col-12">
                 <label class="form-label small text-secondary">Thinking budget</label>
                 <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.thinking_budget" :disabled="!modelSettingsEditable()">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">Reasoning effort</label>
+                <select class="form-select" x-model="modelSettingsDraft.reasoning_effort" :disabled="!modelSettingsEditable()">
+                  <option value="">auto</option>
+                  <option value="none">none</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
               </div>
               <div class="col-12" x-show="modelSettingsStatus">
                 <div class="alert mb-0" :class="modelSettingsStatusKind === 'success' ? 'alert-success' : (modelSettingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="modelSettingsStatus"></div>
@@ -1509,6 +1523,7 @@
                 <option value="auto">auto</option>
                 <option value="default">default</option>
                 <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
+                <option value="qwen3.8-preserve-thinking">qwen3.8-preserve-thinking</option>
               </select></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-temperature">Temperature</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-temperature" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.temperature"></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-top-p">Top P</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-top-p" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.top_p"></div></div>
@@ -1521,6 +1536,7 @@
                 <option value="disabled">disabled</option>
               </select></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-thinking-budget">Thinking budget</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-thinking-budget" class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.thinking_budget"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-reasoning-effort">Reasoning effort</label><div class="settings-field-help">Model-specific reasoning depth; Qwen3.8 supports low, medium, and xhigh.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-reasoning-effort" class="form-select" x-model="modelConfigDraft.reasoning_effort"><option value="">auto</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div></div>
             <div class="settings-field settings-field-top">
               <div class="settings-field-label"><span class="settings-field-title">Custom request JSON</span><div class="settings-field-help">Additional fields merged into provider requests.</div></div>
               <div class="settings-field-control"><button class="btn btn-sm mb-2" :class="modelExtraBodyHasContent(modelConfigDraft.extra_body) || modelConfigExtraBodyOpen ? 'btn-outline-primary' : 'btn-outline-secondary'" type="button" @click="modelConfigExtraBodyOpen = !modelConfigExtraBodyOpen">

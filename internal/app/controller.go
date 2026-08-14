@@ -239,6 +239,7 @@ type ModelConfigPreference struct {
 	RepeatPenalty      *float64       `json:"repeat_penalty,omitempty"`
 	ThinkingMode       string         `json:"thinking_mode"`
 	ThinkingBudget     int            `json:"thinking_budget,omitempty"`
+	ReasoningEffort    string         `json:"reasoning_effort,omitempty"`
 }
 
 // PreferencesState is the complete settings payload exposed to browser clients.

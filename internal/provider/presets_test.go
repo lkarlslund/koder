@@ -16,6 +16,47 @@ func TestAutoMatchPresetIDMatchesQwen36(t *testing.T) {
 	}
 }
 
+func TestAutoMatchPresetIDMatchesQwen38(t *testing.T) {
+	if got := AutoMatchPresetID("ggml-org/Qwen3.8-27B-GGUF"); got != ModelPresetQwen38PreserveThinking {
+		t.Fatalf("expected qwen3.8 preset, got %q", got)
+	}
+}
+
+func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
+	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+		ModelID:         "qwen3.8-27b-q8-mtp",
+		ModelPreset:     ModelPresetAuto,
+		ThinkingMode:    "enabled",
+		ReasoningEffort: "xhigh",
+	})
+	want := map[string]any{
+		"reasoning_effort": "xhigh",
+		"return_progress":  true,
+		"chat_template_kwargs": map[string]any{
+			"enable_thinking":   true,
+			"preserve_thinking": true,
+			"reasoning_effort":  "xhigh",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected qwen3.8 body: %#v", got)
+	}
+}
+
+func TestRequestExtraBodySendsStandardReasoningEffortToRemoteProvider(t *testing.T) {
+	got := RequestExtraBody(config.Provider{BaseURL: "https://api.example.invalid/v1"}, config.ModelConfig{
+		ModelID:         "reasoning-model",
+		ModelPreset:     ModelPresetDefault,
+		ReasoningEffort: "high",
+	})
+	if got["reasoning_effort"] != "high" {
+		t.Fatalf("expected top-level reasoning effort, got %#v", got)
+	}
+	if _, ok := got["chat_template_kwargs"]; ok {
+		t.Fatalf("remote provider must not receive llama.cpp template kwargs: %#v", got)
+	}
+}
+
 func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
 	got := RequestExtraBody(config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, config.ModelConfig{ModelID: "qwen3.6-plus", ModelPreset: ModelPresetQwen36PreserveThinking})
 	want := map[string]any{

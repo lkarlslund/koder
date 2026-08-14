@@ -1177,6 +1177,7 @@ func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPrefer
 		RepeatPenalty:      model.RepeatPenalty,
 		ThinkingMode:       strings.TrimSpace(model.ThinkingMode),
 		ThinkingBudget:     model.ThinkingBudget,
+		ReasoningEffort:    strings.TrimSpace(model.ReasoningEffort),
 	}
 }
 
@@ -1624,6 +1625,7 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		RepeatPenalty:    pref.RepeatPenalty,
 		ThinkingMode:     strings.TrimSpace(pref.ThinkingMode),
 		ThinkingBudget:   pref.ThinkingBudget,
+		ReasoningEffort:  strings.TrimSpace(pref.ReasoningEffort),
 	}, nil
 }
 

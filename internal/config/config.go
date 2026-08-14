@@ -103,6 +103,7 @@ type ModelConfig struct {
 	RepeatPenalty    *float64       `toml:"repeat_penalty,omitempty"`
 	ThinkingMode     string         `toml:"thinking_mode,omitempty"`
 	ThinkingBudget   int            `toml:"thinking_budget,omitempty"`
+	ReasoningEffort  string         `toml:"reasoning_effort,omitempty"`
 }
 
 type MCPServer struct {
@@ -672,6 +673,7 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 	if model.ThinkingBudget < 0 {
 		model.ThinkingBudget = 0
 	}
+	model.ReasoningEffort = normalizeReasoningEffort(model.ReasoningEffort)
 	return model
 }
 
@@ -682,6 +684,14 @@ func normalizeThinkingMode(mode string) string {
 	default:
 		return "auto"
 	}
+}
+
+func normalizeReasoningEffort(effort string) string {
+	effort = strings.TrimSpace(strings.ToLower(effort))
+	if effort == "auto" {
+		return ""
+	}
+	return effort
 }
 
 func providerDefaults() Provider {
