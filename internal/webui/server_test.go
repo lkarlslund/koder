@@ -1610,6 +1610,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap:`) {
 		t.Fatalf("expected settings tabs to render as block buttons with primary active background")
 	}
+	if !strings.Contains(fullPage, `.settings-field { min-width: 0; display: grid; grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);`) ||
+		!strings.Contains(fullPage, `.settings-field-control-sm { max-width: 12rem; }`) ||
+		!strings.Contains(fullPage, `class="settings-section" x-show="settingsTab === 'compaction'"`) ||
+		!strings.Contains(fullPage, `:title="compactionModelLabel()"`) {
+		t.Fatalf("expected settings forms to use labeled rows with compact scalar controls and full-width model selectors")
+	}
 	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
 		t.Fatalf("expected assistant text to render through status-aware timeline markdown element renderer")
 	}

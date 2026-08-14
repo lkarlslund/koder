@@ -4989,6 +4989,21 @@
         settingsTabLabel(tab) {
           return {general: 'General', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
+        settingsTabDescription(tab) {
+          return {
+            general: 'Defaults for new chats and the interface',
+            browser: 'Managed Chromium used by browser tools',
+            tts: 'Speech output and playback testing',
+            access: 'Default sandbox access for new sessions',
+            tools: 'Tool availability for new turns',
+            compaction: this.settings?.compaction?.current_selection_text || 'Long-chat context management',
+            thinking: 'Optional helper model for extended reasoning',
+            prompts: 'System prompt overrides',
+            providers: 'Model provider connections',
+            models: 'Configured and detected models',
+            mcp: 'Model Context Protocol servers',
+          }[tab] || '';
+        },
 		browserStatusBadgeClass(status) {
 		  const state = String(status?.state || 'unknown');
 		  return state === 'running' ? 'text-bg-success' : state === 'error' ? 'text-bg-danger' : state === 'starting' ? 'text-bg-warning' : 'text-bg-secondary';

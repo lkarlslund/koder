@@ -1079,7 +1079,7 @@
             <i class="bi bi-gear me-1"></i> Settings
             <span class="badge text-bg-warning ms-2" x-show="settingsDirty()">Unsaved</span>
           </div>
-          <div class="small text-secondary" x-text="settings?.compaction?.current_selection_text || ''"></div>
+          <div class="small text-secondary" x-text="settingsTabDescription(settingsTab)"></div>
         </div>
         <div class="d-flex align-items-center gap-2">
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Discard unsaved changes" x-show="settingsDirty()" @click="discardSettingsChanges()" :disabled="settingsLoading || settingsSaving">
@@ -1104,103 +1104,83 @@
           </template>
           <template x-if="!settingsLoading && settings">
             <div>
-              <div class="row g-3" x-show="settingsTab === 'general'">
-                <div class="col-md-6">
-                  <label class="form-label small text-secondary">Default model</label>
-                  <div class="input-group">
-                    <input class="form-control" :value="defaultModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button>
+              <div class="settings-section" x-show="settingsTab === 'general'">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title">Default model</label><div class="settings-field-help">Used when a new chat does not choose a model.</div></div>
+                  <div class="settings-field-control">
+                    <div class="input-group">
+                      <input class="form-control" :value="defaultModelLabel()" :title="defaultModelLabel()" readonly>
+                      <button class="btn btn-outline-secondary" type="button" title="Choose default model" aria-label="Choose default model" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button>
+                    </div>
                   </div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Theme</label>
-                  <select class="form-select" x-model="settings.ui.theme">
-                    <option value="auto">auto</option>
-                    <option value="dark">dark</option>
-                    <option value="light">light</option>
-                  </select>
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-theme">Theme</label></div>
+                  <div class="settings-field-control settings-field-control-sm">
+                    <select id="settings-theme" class="form-select" x-model="settings.ui.theme">
+                      <option value="auto">auto</option><option value="dark">dark</option><option value="light">light</option>
+                    </select>
+                  </div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Max tool loop steps</label>
-                  <input class="form-control" type="number" min="1" x-model.number="settings.general.max_tool_loop_steps">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-max-tool-steps">Max tool loop steps</label><div class="settings-field-help">Maximum tool calls before a model turn must stop.</div></div>
+                  <div class="settings-field-control settings-field-control-sm"><input id="settings-max-tool-steps" class="form-control" type="number" min="1" x-model.number="settings.general.max_tool_loop_steps"></div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Max active sub chats</label>
-                  <input class="form-control" type="number" min="1" x-model.number="settings.general.max_child_chats">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-max-child-chats">Max active sub chats</label><div class="settings-field-help">Concurrent implementation chats allowed per parent chat.</div></div>
+                  <div class="settings-field-control settings-field-control-sm"><input id="settings-max-child-chats" class="form-control" type="number" min="1" x-model.number="settings.general.max_child_chats"></div>
                 </div>
-                <div class="col-12 settings-toggles">
-                  <label class="toggle-switch">
-                    <input class="toggle-switch-input" type="checkbox" x-model="settings.ui.auto_continue">
-                    <span class="toggle-switch-track" aria-hidden="true"></span>
-                    <span class="toggle-switch-label">Auto continue</span>
-                  </label>
+                <div class="settings-field">
+                  <div class="settings-field-label"><span class="settings-field-title">Auto continue</span><div class="settings-field-help">Resume automatically when an interrupted operation can continue.</div></div>
+                  <div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.ui.auto_continue"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div>
                 </div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'tts'">
-                <div class="col-12 settings-toggles">
-                  <label class="toggle-switch">
-                    <input class="toggle-switch-input" type="checkbox" x-model="settings.ui.tts.enabled">
-                    <span class="toggle-switch-track" aria-hidden="true"></span>
-                    <span class="toggle-switch-label">TTS output</span>
-                  </label>
+              <div class="settings-section" x-show="settingsTab === 'tts'">
+                <div class="settings-field">
+                  <div class="settings-field-label"><span class="settings-field-title">TTS output</span></div>
+                  <div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.ui.tts.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div>
                 </div>
-                <div class="col-md-8">
-                  <label class="form-label small text-secondary">TTS model</label>
-                  <div class="input-group">
-                    <input class="form-control" :value="ttsModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'tts', title: 'TTS model', subtitle: 'Speech output'})"><i class="bi bi-search"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" @click="setTTSModelValue('')"><i class="bi bi-stars"></i></button>
-                  </div>
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title">TTS model</label><div class="settings-field-help">Speech-capable model used for playback.</div></div>
+                  <div class="settings-field-control"><div class="input-group"><input class="form-control" :value="ttsModelLabel()" :title="ttsModelLabel()" readonly><button class="btn btn-outline-secondary" type="button" title="Choose TTS model" aria-label="Choose TTS model" @click="openSettingsModelPicker({kind: 'tts', title: 'TTS model', subtitle: 'Speech output'})"><i class="bi bi-search"></i></button><button class="btn btn-outline-secondary" type="button" title="Use automatically detected TTS model" aria-label="Use automatically detected TTS model" @click="setTTSModelValue('')"><i class="bi bi-stars"></i></button></div></div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Voice</label>
-                  <input class="form-control" x-model="settings.ui.tts.voice" autocomplete="off">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-tts-voice">Voice</label></div>
+                  <div class="settings-field-control settings-field-control-md"><input id="settings-tts-voice" class="form-control" x-model="settings.ui.tts.voice" autocomplete="off"></div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Response format</label>
-                  <select class="form-select" x-model="settings.ui.tts.response_format">
-                    <option value="wav">wav</option>
-                    <option value="pcm">pcm</option>
-                    <option value="mp3">mp3</option>
-                    <option value="opus">opus</option>
-                    <option value="aac">aac</option>
-                    <option value="flac">flac</option>
-                  </select>
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-tts-format">Response format</label></div>
+                  <div class="settings-field-control settings-field-control-sm"><select id="settings-tts-format" class="form-select" x-model="settings.ui.tts.response_format"><option value="wav">wav</option><option value="pcm">pcm</option><option value="mp3">mp3</option><option value="opus">opus</option><option value="aac">aac</option><option value="flac">flac</option></select></div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Speed</label>
-                  <input class="form-control" type="number" min="0.25" max="4" step="0.05" x-model.number="settings.ui.tts.speed">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-tts-speed">Speed</label></div>
+                  <div class="settings-field-control settings-field-control-sm"><input id="settings-tts-speed" class="form-control" type="number" min="0.25" max="4" step="0.05" x-model.number="settings.ui.tts.speed"></div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">PCM sample rate</label>
-                  <input class="form-control" type="number" min="8000" max="192000" step="1000" x-model.number="settings.ui.tts.pcm_sample_rate">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-tts-sample-rate">PCM sample rate</label><div class="settings-field-help">Only used for raw PCM output.</div></div>
+                  <div class="settings-field-control settings-field-control-sm"><input id="settings-tts-sample-rate" class="form-control" type="number" min="8000" max="192000" step="1000" x-model.number="settings.ui.tts.pcm_sample_rate"></div>
                 </div>
-                <div class="col-md-9">
-                  <label class="form-label small text-secondary">Test text</label>
-                  <input class="form-control" x-model="ttsTestText" autocomplete="off">
-                </div>
-                <div class="col-md-3 d-flex align-items-end">
-                  <button class="btn btn-outline-primary w-100" type="button" @click="testTTSOutput()" :disabled="ttsTestBusy || !String(ttsTestText || '').trim()">
-                    <i class="bi bi-play-fill me-1"></i><span x-text="ttsTestBusy ? 'Testing...' : 'Test'"></span>
-                  </button>
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-tts-test">Test text</label></div>
+                  <div class="settings-field-control"><div class="input-group"><input id="settings-tts-test" class="form-control" x-model="ttsTestText" autocomplete="off"><button class="btn btn-outline-primary" type="button" @click="testTTSOutput()" :disabled="ttsTestBusy || !String(ttsTestText || '').trim()"><i class="bi bi-play-fill me-1"></i><span x-text="ttsTestBusy ? 'Testing...' : 'Test'"></span></button></div></div>
                 </div>
               </div>
 
-			  <div class="row g-3" x-show="settingsTab === 'browser'">
-				<div class="col-12 d-flex align-items-center justify-content-between gap-3">
+			  <div x-show="settingsTab === 'browser'">
+				<div class="settings-section-header">
 				  <div><div class="fw-semibold">Managed browser</div><div class="small text-secondary" x-text="browserStatusDescription(browserStatus)"></div></div>
 				  <span class="badge" :class="browserStatusBadgeClass(browserStatus)" x-text="browserStatus?.state || 'unknown'"></span>
 				</div>
-				<div class="col-12 settings-toggles">
-				  <label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Browser tools enabled</span></label>
-				  <label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.headed"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Visible browser window</span></label>
+				<div class="settings-section">
+				  <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Browser tools</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+				  <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Visible browser window</span><div class="settings-field-help">Show the managed browser while tools operate.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.headed"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-executable">Chrome/Chromium executable</label><div class="settings-field-help">Leave empty to auto-detect.</div></div><div class="settings-field-control"><input id="settings-browser-executable" class="form-control font-monospace" x-model="settings.browser.executable" placeholder="auto-detect"></div></div>
+				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-timeout">Operation timeout</label><div class="settings-field-help">Maximum duration of a browser operation, in seconds.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-timeout" class="form-control" type="number" min="1" max="120" x-model.number="settings.browser.operation_timeout_seconds"></div></div>
+				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-chat-tabs">Tabs per chat</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-chat-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div></div>
+				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-global-tabs">Global owned tabs</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-global-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div></div>
 				</div>
-				<div class="col-md-8"><label class="form-label small text-secondary">Chrome/Chromium executable</label><input class="form-control font-monospace" x-model="settings.browser.executable" placeholder="auto-detect"></div>
-				<div class="col-md-4"><label class="form-label small text-secondary">Operation timeout (seconds)</label><input class="form-control" type="number" min="1" max="120" x-model.number="settings.browser.operation_timeout_seconds"></div>
-				<div class="col-md-4"><label class="form-label small text-secondary">Tabs per chat</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div>
-				<div class="col-md-4"><label class="form-label small text-secondary">Global owned tabs</label><input class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div>
-				<div class="col-12 d-flex flex-wrap gap-2">
+				<div class="settings-actions">
 				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('show')"><i class="bi bi-window me-1"></i>Show</button>
 				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button>
 				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button>
@@ -1208,57 +1188,25 @@
 				</div>
 			  </div>
 
-			  <div class="row g-3" x-show="settingsTab === 'compaction'">
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Auto compact at percent</label>
-                  <input class="form-control" type="number" min="1" x-model.number="settings.compaction.auto_compact_at">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Keep tool calls</label>
-                  <input class="form-control" type="number" min="1" max="10" x-model.number="settings.compaction.keep_tool_calls">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Compaction model</label>
-                  <div class="input-group">
-                    <input class="form-control" :value="compactionModelLabel()" :title="compactionModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" title="Choose compaction model" aria-label="Choose compaction model" @click="openSettingsModelPicker({kind: 'compaction', title: 'Compaction model', subtitle: 'Chat compaction', chatOnly: true})"><i class="bi bi-search"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" title="Use each chat's model" aria-label="Use each chat's model" @click="setCompactionModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
-                  </div>
-                </div>
+			  <div class="settings-section" x-show="settingsTab === 'compaction'">
+                <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-auto-compact">Auto compact at</label><div class="settings-field-help">Percentage of the context window that triggers compaction.</div></div><div class="settings-field-control settings-field-control-sm"><div class="input-group"><input id="settings-auto-compact" class="form-control" type="number" min="1" max="100" x-model.number="settings.compaction.auto_compact_at"><span class="input-group-text">%</span></div></div></div>
+                <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-keep-tool-calls">Keep recent tool calls</label><div class="settings-field-help">Full tool exchanges preserved after older context is summarized.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-keep-tool-calls" class="form-control" type="number" min="1" max="10" x-model.number="settings.compaction.keep_tool_calls"></div></div>
+                <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title">Compaction model</label><div class="settings-field-help">Use a dedicated summarizer or each chat's current model.</div></div><div class="settings-field-control"><div class="input-group"><input class="form-control" :value="compactionModelLabel()" :title="compactionModelLabel()" readonly><button class="btn btn-outline-secondary" type="button" title="Choose compaction model" aria-label="Choose compaction model" @click="openSettingsModelPicker({kind: 'compaction', title: 'Compaction model', subtitle: 'Chat compaction', chatOnly: true})"><i class="bi bi-search"></i></button><button class="btn btn-outline-secondary" type="button" title="Use each chat's model" aria-label="Use each chat's model" @click="setCompactionModelValue('chat')"><i class="bi bi-chat-left-text"></i></button></div></div></div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'thinking'">
-                <div class="col-12 settings-toggles">
-                  <label class="toggle-switch">
-                    <input class="toggle-switch-input" type="checkbox" x-model="settings.thinking.caveman_enabled">
-                    <span class="toggle-switch-track" aria-hidden="true"></span>
-                    <span class="toggle-switch-label">Caveman thinking</span>
-                  </label>
-                </div>
-                <div class="col-md-8">
-                  <label class="form-label small text-secondary">Caveman model</label>
-                  <div class="input-group">
-                    <input class="form-control" :value="thinkingModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'thinking', title: 'Caveman model', subtitle: 'Thinking helper', chatOnly: true})"><i class="bi bi-search"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" @click="setThinkingModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
-                  </div>
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Minimum thinking tokens</label>
-                  <input class="form-control" type="number" min="1" step="1" x-model.number="settings.thinking.caveman_min_tokens">
-                </div>
-                <div class="col-12">
-                  <label class="form-label small text-secondary">Caveman prompt</label>
-                  <textarea class="form-control font-monospace settings-prompt" rows="10" x-model="settings.thinking.caveman_prompt" spellcheck="false"></textarea>
-                </div>
+              <div class="settings-section" x-show="settingsTab === 'thinking'">
+                <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Caveman thinking</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.thinking.caveman_enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+                <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title">Caveman model</label><div class="settings-field-help">Helper model used to extend short reasoning traces.</div></div><div class="settings-field-control"><div class="input-group"><input class="form-control" :value="thinkingModelLabel()" :title="thinkingModelLabel()" readonly><button class="btn btn-outline-secondary" type="button" title="Choose thinking model" aria-label="Choose thinking model" @click="openSettingsModelPicker({kind: 'thinking', title: 'Caveman model', subtitle: 'Thinking helper', chatOnly: true})"><i class="bi bi-search"></i></button><button class="btn btn-outline-secondary" type="button" title="Use each chat's model" aria-label="Use each chat's model" @click="setThinkingModelValue('chat')"><i class="bi bi-chat-left-text"></i></button></div></div></div>
+                <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-thinking-min-tokens">Minimum thinking tokens</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-thinking-min-tokens" class="form-control" type="number" min="1" step="1" x-model.number="settings.thinking.caveman_min_tokens"></div></div>
+                <div class="settings-field settings-field-top"><div class="settings-field-label"><label class="settings-field-title" for="settings-thinking-prompt">Caveman prompt</label><div class="settings-field-help">Instruction given to the thinking helper.</div></div><div class="settings-field-control"><textarea id="settings-thinking-prompt" class="form-control font-monospace settings-prompt" rows="10" x-model="settings.thinking.caveman_prompt" spellcheck="false"></textarea></div></div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'prompts'">
+              <div x-show="settingsTab === 'prompts'">
                 <template x-for="prompt in settings.prompts || []" :key="prompt.target">
-                  <div class="col-12">
+                  <div class="settings-prompt-item">
                     <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
-                      <label class="form-label small text-secondary mb-0" x-text="prompt.target"></label>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" @click="resetPrompt(prompt.target)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                      <label class="settings-field-title" x-text="prompt.target"></label>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Reset prompt" aria-label="Reset prompt" @click="resetPrompt(prompt.target)"><i class="bi bi-arrow-counterclockwise"></i></button>
                     </div>
                     <div class="small text-secondary text-truncate mb-1" x-text="prompt.path"></div>
                     <textarea class="form-control font-monospace settings-prompt" rows="12" x-model="prompt.content" spellcheck="false"></textarea>
@@ -1272,7 +1220,7 @@
                     <div class="fw-semibold">Providers</div>
                     <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('providers')"><i class="bi bi-plus-lg"></i></button>
+                  <button type="button" class="btn btn-sm btn-outline-primary" title="Add provider" aria-label="Add provider" @click="addSettingsItem('providers')"><i class="bi bi-plus-lg"></i></button>
                 </div>
                 <div class="settings-item-list">
                   <template x-if="settingsListRows('providers').length === 0">
@@ -1301,11 +1249,10 @@
               </div>
 
               <div x-show="settingsTab === 'models'">
-                <div class="mb-3">
-                  <label class="form-label small text-secondary">Default model for new sessions</label>
-                  <div class="input-group">
-                    <input class="form-control" :value="defaultModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button>
+                <div class="settings-section mb-3">
+                  <div class="settings-field">
+                    <div class="settings-field-label"><label class="settings-field-title">Default model</label><div class="settings-field-help">Used for new sessions and chats.</div></div>
+                    <div class="settings-field-control"><div class="input-group"><input class="form-control" :value="defaultModelLabel()" :title="defaultModelLabel()" readonly><button class="btn btn-outline-secondary" type="button" title="Choose default model" aria-label="Choose default model" @click="openSettingsModelPicker({kind: 'default', title: 'Default model', subtitle: 'New sessions', chatOnly: true})"><i class="bi bi-search"></i></button></div></div>
                   </div>
                 </div>
                 <div class="settings-list-header">
@@ -1313,7 +1260,7 @@
                     <div class="fw-semibold">Models</div>
                     <div class="small text-secondary" x-text="String(settingsListRows('models').length) + ' configured'"></div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('models')"><i class="bi bi-plus-lg"></i></button>
+                  <button type="button" class="btn btn-sm btn-outline-primary" title="Add model" aria-label="Add model" @click="addSettingsItem('models')"><i class="bi bi-plus-lg"></i></button>
                 </div>
                 <div class="settings-item-list">
                   <template x-if="settingsListRows('models').length === 0">
@@ -1345,7 +1292,7 @@
                     <div class="fw-semibold">MCP servers</div>
                     <div class="small text-secondary" x-text="String(settingsListRows('mcp').length) + ' configured'"></div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('mcp')"><i class="bi bi-plus-lg"></i></button>
+                  <button type="button" class="btn btn-sm btn-outline-primary" title="Add MCP server" aria-label="Add MCP server" @click="addSettingsItem('mcp')"><i class="bi bi-plus-lg"></i></button>
                 </div>
                 <div class="settings-item-list">
                   <template x-if="settingsListRows('mcp').length === 0">
@@ -1412,49 +1359,16 @@
                 </div>
                 <template x-if="settings?.access?.settings">
                   <div>
-                    <div class="row g-3 mb-3">
-                      <div class="col-md-4">
-                        <label class="form-label small text-secondary">Network</label>
-                        <select class="form-select" x-model="settings.access.settings.network">
-                          <option :value="false">disabled</option>
-                          <option :value="true">enabled</option>
-                        </select>
-                      </div>
-                      <div class="col-md-4">
-                        <label class="form-label small text-secondary">Project folder</label>
-                        <select class="form-select" x-model="settings.access.settings.project">
-                          <option value="none">none</option>
-                          <option value="readonly">readonly</option>
-                          <option value="readwrite">readwrite</option>
-                        </select>
-                      </div>
-                      <div class="col-md-4">
-                        <label class="form-label small text-secondary">/tmp</label>
-                        <select class="form-select" x-model="settings.access.settings.tmp">
-                          <option value="ephemeral">fresh each call</option>
-                          <option value="session">persistent per session</option>
-                          <option value="host">real /tmp</option>
-                        </select>
-                      </div>
-                      <div class="col-md-6">
-                        <label class="form-label small text-secondary">Home folder</label>
-                        <select class="form-select" x-model="settings.access.settings.home">
-                          <option value="none">none</option>
-                          <option value="readonly">readonly</option>
-                          <option value="readwrite">readwrite</option>
-                        </select>
-                      </div>
-                      <div class="col-md-6">
-                        <label class="form-label small text-secondary">System root</label>
-                        <select class="form-select" x-model="settings.access.settings.root">
-                          <option value="readonly">readonly</option>
-                          <option value="readwrite">readwrite</option>
-                        </select>
-                      </div>
+                    <div class="settings-section mb-3">
+                      <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-network">Network</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-network" class="form-select" x-model="settings.access.settings.network"><option :value="false">disabled</option><option :value="true">enabled</option></select></div></div>
+                      <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-project">Project folder</label><div class="settings-field-help">Access to the session's project workspace.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-project" class="form-select" x-model="settings.access.settings.project"><option value="none">none</option><option value="readonly">readonly</option><option value="readwrite">readwrite</option></select></div></div>
+                      <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-tmp">/tmp</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-tmp" class="form-select" x-model="settings.access.settings.tmp"><option value="ephemeral">fresh each call</option><option value="session">persistent per session</option><option value="host">real /tmp</option></select></div></div>
+                      <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-home">Home folder</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-home" class="form-select" x-model="settings.access.settings.home"><option value="none">none</option><option value="readonly">readonly</option><option value="readwrite">readwrite</option></select></div></div>
+                      <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-root">System root</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-root" class="form-select" x-model="settings.access.settings.root"><option value="readonly">readonly</option><option value="readwrite">readwrite</option></select></div></div>
                     </div>
                     <div class="settings-list-header">
                       <div class="fw-semibold">Extra folders</div>
-                      <button type="button" class="btn btn-sm btn-outline-primary" @click="addAccessMount(settings.access.settings)"><i class="bi bi-plus-lg"></i></button>
+                      <button type="button" class="btn btn-sm btn-outline-primary" title="Add extra folder" aria-label="Add extra folder" @click="addAccessMount(settings.access.settings)"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <div class="settings-rule-list">
                       <template x-if="(settings.access.settings.mounts || []).length === 0">
@@ -1504,65 +1418,50 @@
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveProvider()">
         <template x-if="providerDraft">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Template</label>
-              <select class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
+          <div class="settings-section">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-template">Template</label></div>
+              <div class="settings-field-control settings-field-control-md"><select id="settings-provider-template" class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
                 <template x-for="template in providerTemplates()" :key="template.id">
                   <option :value="template.id" x-text="template.title"></option>
                 </template>
-              </select>
+              </select></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Provider ID</label>
-              <input class="form-control" x-model="providerDraft.provider_id" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-id">Provider ID</label></div>
+              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-id" class="form-control" x-model="providerDraft.provider_id" autocomplete="off"></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Name</label>
-              <input class="form-control" x-model="providerDraft.name" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-name">Name</label></div>
+              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-name" class="form-control" x-model="providerDraft.name" autocomplete="off"></div>
             </div>
-            <div class="col-12">
-              <label class="form-label small text-secondary">Base URL</label>
-              <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-url">Base URL</label></div>
+              <div class="settings-field-control"><input id="settings-provider-url" class="form-control" x-model="providerDraft.base_url" autocomplete="off"></div>
             </div>
-            <div class="col-12">
-              <label class="form-label small text-secondary">API key</label>
-              <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-key">API key</label></div>
+              <div class="settings-field-control"><input id="settings-provider-api-key" class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off"></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">API key env</label>
-              <input class="form-control" x-model="providerDraft.api_key_env" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-env">API key env</label></div>
+              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-api-env" class="form-control" x-model="providerDraft.api_key_env" autocomplete="off"></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Timeout</label>
-              <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
+            <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-timeout">Timeout</label></div>
+              <div class="settings-field-control settings-field-control-sm"><input id="settings-provider-timeout" class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off"></div>
             </div>
-            <div class="col-12 settings-toggles">
-              <label class="toggle-switch">
-                <input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream">
-                <span class="toggle-switch-track" aria-hidden="true"></span>
-                <span class="toggle-switch-label">Stream</span>
-              </label>
-              <label class="toggle-switch">
-                <input class="toggle-switch-input" type="checkbox" x-model="providerDraft.disabled">
-                <span class="toggle-switch-track" aria-hidden="true"></span>
-                <span class="toggle-switch-label">Disabled</span>
-              </label>
+            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Streaming responses</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Provider disabled</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.disabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
+            <div class="settings-field">
+              <div class="settings-field-label"><span class="settings-field-title">Prompt progress</span><div class="settings-field-help" x-text="promptProgressState(providerDraft).label"></div></div>
+              <div class="settings-field-control small text-secondary" x-text="promptProgressState(providerDraft).detail"></div>
             </div>
-            <div class="col-12">
-              <div class="settings-inline-status">
-                <div>
-                  <div class="small text-secondary">Prompt progress</div>
-                  <div class="fw-semibold" x-text="promptProgressState(providerDraft).label"></div>
-                </div>
-                <div class="small text-secondary text-end" x-text="promptProgressState(providerDraft).detail"></div>
-              </div>
+            <div class="settings-field settings-field-top">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-headers">Headers JSON</label></div>
+              <div class="settings-field-control"><textarea id="settings-provider-headers" class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea></div>
             </div>
-            <div class="col-12">
-              <label class="form-label small text-secondary">Headers JSON</label>
-              <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
-            </div>
-            <div class="col-12" x-show="providerStatus">
+            <div x-show="providerStatus">
               <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
             </div>
           </div>
@@ -1585,89 +1484,51 @@
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveModelConfig()">
         <template x-if="modelConfigDraft">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Provider</label>
-              <select class="form-select" x-model="modelConfigDraft.provider_id">
+          <div class="settings-section">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-provider">Provider</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-provider" class="form-select" x-model="modelConfigDraft.provider_id">
                 <template x-for="providerID in providerIDOptions()" :key="providerID">
                   <option :value="providerID" x-text="providerID"></option>
                 </template>
-              </select>
+              </select></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Custom name</label>
-              <input class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Uses provider</label>
-              <select class="form-select" x-model="modelConfigDraft.source_provider_id">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-name">Custom name</label></div><div class="settings-field-control"><input id="settings-model-name" class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source-provider">Uses provider</label><div class="settings-field-help">Provider that serves the underlying model.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-source-provider" class="form-select" x-model="modelConfigDraft.source_provider_id">
                 <template x-for="providerID in providerIDOptions()" :key="providerID">
                   <option :value="providerID" x-text="providerID"></option>
                 </template>
-              </select>
+              </select></div>
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Uses detected model</label>
-              <input class="form-control" x-model="modelConfigDraft.source_model_id" list="model-config-options" autocomplete="off">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source">Uses detected model</label></div><div class="settings-field-control"><input id="settings-model-source" class="form-control" x-model="modelConfigDraft.source_model_id" list="model-config-options" autocomplete="off">
               <datalist id="model-config-options">
                 <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.source_provider_id || modelConfigDraft.provider_id)" :key="model">
                   <option :value="model"></option>
                 </template>
-              </datalist>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Context window</label>
-              <input class="form-control" type="number" min="1" x-model.number="modelConfigDraft.context_window">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Model preset</label>
-              <select class="form-select" x-model="modelConfigDraft.model_preset">
+              </datalist></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-context">Context window</label><div class="settings-field-help">Maximum context tokens advertised to Koder.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-context" class="form-control" type="number" min="1" x-model.number="modelConfigDraft.context_window"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-preset">Model preset</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-preset" class="form-select" x-model="modelConfigDraft.model_preset">
                 <option value="auto">auto</option>
                 <option value="default">default</option>
                 <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Temperature</label>
-              <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.temperature">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Top P</label>
-              <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.top_p">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Min P</label>
-              <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.min_p">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Top K</label>
-              <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.top_k">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Repeat penalty</label>
-              <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.repeat_penalty">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Thinking</label>
-              <select class="form-select" x-model="modelConfigDraft.thinking_mode">
+              </select></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-temperature">Temperature</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-temperature" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.temperature"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-top-p">Top P</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-top-p" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.top_p"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-min-p">Min P</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-min-p" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.min_p"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-top-k">Top K</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-top-k" class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.top_k"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-repeat-penalty">Repeat penalty</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-repeat-penalty" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.repeat_penalty"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-thinking">Thinking</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-thinking" class="form-select" x-model="modelConfigDraft.thinking_mode">
                 <option value="auto">auto</option>
                 <option value="enabled">enabled</option>
                 <option value="disabled">disabled</option>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Thinking budget</label>
-              <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.thinking_budget">
-            </div>
-            <div class="col-12">
-              <button class="btn btn-sm" :class="modelExtraBodyHasContent(modelConfigDraft.extra_body) || modelConfigExtraBodyOpen ? 'btn-outline-primary' : 'btn-outline-secondary'" type="button" @click="modelConfigExtraBodyOpen = !modelConfigExtraBodyOpen">
+              </select></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-thinking-budget">Thinking budget</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-thinking-budget" class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.thinking_budget"></div></div>
+            <div class="settings-field settings-field-top">
+              <div class="settings-field-label"><span class="settings-field-title">Custom request JSON</span><div class="settings-field-help">Additional fields merged into provider requests.</div></div>
+              <div class="settings-field-control"><button class="btn btn-sm mb-2" :class="modelExtraBodyHasContent(modelConfigDraft.extra_body) || modelConfigExtraBodyOpen ? 'btn-outline-primary' : 'btn-outline-secondary'" type="button" @click="modelConfigExtraBodyOpen = !modelConfigExtraBodyOpen">
                 <i class="bi bi-braces me-1"></i> Custom request JSON
               </button>
+              <textarea class="form-control font-monospace" rows="8" x-show="modelConfigExtraBodyOpen" x-model="modelConfigDraft.extra_body_text" spellcheck="false"></textarea></div>
             </div>
-            <div class="col-12" x-show="modelConfigExtraBodyOpen">
-              <textarea class="form-control font-monospace" rows="8" x-model="modelConfigDraft.extra_body_text" spellcheck="false"></textarea>
-            </div>
-            <div class="col-12" x-show="modelConfigStatus">
+            <div x-show="modelConfigStatus">
               <div class="alert mb-0" :class="modelConfigStatusKind === 'success' ? 'alert-success' : (modelConfigStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="modelConfigStatus"></div>
             </div>
           </div>
@@ -1690,54 +1551,18 @@
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveMCPServer()">
         <template x-if="mcpDraft">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Server ID</label>
-              <input class="form-control" x-model="mcpDraft.id" autocomplete="off">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Name</label>
-              <input class="form-control" x-model="mcpDraft.name" autocomplete="off">
-            </div>
-            <div class="col-12">
-              <label class="form-label small text-secondary">URL</label>
-              <input class="form-control" x-model="mcpDraft.url" placeholder="https://mcp.example/sse or stdio://uvx?arg=mcp-server-git" autocomplete="off">
-              <div class="form-text">Use repeated <code>arg</code> query parameters for stdio command arguments. Optional stdio query fields: <code>cwd</code> and <code>env.NAME</code>.</div>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Startup timeout</label>
-              <input class="form-control" x-model="mcpDraft.startup_timeout" placeholder="10s" autocomplete="off">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Request timeout</label>
-              <input class="form-control" x-model="mcpDraft.request_timeout" placeholder="30s" autocomplete="off">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Bearer token</label>
-              <input class="form-control" type="password" x-model="mcpDraft.bearer_token" autocomplete="off">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Bearer token env</label>
-              <input class="form-control" x-model="mcpDraft.bearer_token_env" autocomplete="off">
-            </div>
-            <div class="col-12 settings-toggles">
-              <label class="toggle-switch">
-                <input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disabled">
-                <span class="toggle-switch-track" aria-hidden="true"></span>
-                <span class="toggle-switch-label">Disabled</span>
-              </label>
-              <label class="toggle-switch">
-                <input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse">
-                <span class="toggle-switch-track" aria-hidden="true"></span>
-                <span class="toggle-switch-label">Disable standalone SSE</span>
-              </label>
-            </div>
-            <div class="col-12">
-              <label class="form-label small text-secondary">Headers JSON</label>
-              <textarea class="form-control font-monospace" rows="4" x-model="mcpHeadersText" spellcheck="false"></textarea>
-              <div class="form-text">Headers and bearer token auth only apply to HTTP MCP servers.</div>
-            </div>
-            <div class="col-12" x-show="mcpStatus">
+          <div class="settings-section">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-id">Server ID</label></div><div class="settings-field-control settings-field-control-md"><input id="settings-mcp-id" class="form-control" x-model="mcpDraft.id" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-name">Name</label></div><div class="settings-field-control settings-field-control-md"><input id="settings-mcp-name" class="form-control" x-model="mcpDraft.name" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-url">URL</label><div class="settings-field-help">HTTP endpoint or stdio URL. Stdio URLs can repeat <code>arg</code> and include <code>cwd</code> or <code>env.NAME</code>.</div></div><div class="settings-field-control"><input id="settings-mcp-url" class="form-control" x-model="mcpDraft.url" placeholder="https://mcp.example/sse or stdio://uvx?arg=mcp-server-git" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-startup-timeout">Startup timeout</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-mcp-startup-timeout" class="form-control" x-model="mcpDraft.startup_timeout" placeholder="10s" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-request-timeout">Request timeout</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-mcp-request-timeout" class="form-control" x-model="mcpDraft.request_timeout" placeholder="30s" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-token">Bearer token</label><div class="settings-field-help">Only used by HTTP MCP servers.</div></div><div class="settings-field-control"><input id="settings-mcp-token" class="form-control" type="password" x-model="mcpDraft.bearer_token" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-token-env">Bearer token env</label></div><div class="settings-field-control settings-field-control-md"><input id="settings-mcp-token-env" class="form-control" x-model="mcpDraft.bearer_token_env" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Server disabled</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
+            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Standalone SSE</span><div class="settings-field-help">Disable the legacy standalone SSE transport.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
+            <div class="settings-field settings-field-top"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-headers">Headers JSON</label><div class="settings-field-help">Only used by HTTP MCP servers.</div></div><div class="settings-field-control"><textarea id="settings-mcp-headers" class="form-control font-monospace" rows="4" x-model="mcpHeadersText" spellcheck="false"></textarea></div></div>
+            <div x-show="mcpStatus">
               <div class="alert mb-0" :class="mcpStatusKind === 'success' ? 'alert-success' : (mcpStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="mcpStatus"></div>
             </div>
           </div>
