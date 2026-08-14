@@ -752,6 +752,9 @@ func TestStreamChatResponseAcceptsEOFWithFinishReason(t *testing.T) {
 	if resp.Text != "done" {
 		t.Fatalf("response text = %q, want done", resp.Text)
 	}
+	if resp.FinishReason != "stop" {
+		t.Fatalf("finish reason = %q, want stop", resp.FinishReason)
+	}
 }
 
 func TestStreamChatResponseStopsOnToolArgumentLimit(t *testing.T) {

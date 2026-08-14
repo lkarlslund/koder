@@ -59,6 +59,11 @@ type Engine struct {
 	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
 
+const (
+	compactionMaxTokens = 8 * 1024
+	compactionMaxBytes  = 64 * 1024
+)
+
 func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
 	var mcpManager *mcp.Manager
 	if len(mcpManagers) > 0 {
@@ -1586,15 +1591,16 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 		_ = updateCompactionState("", "failed", 0)
 		return err
 	}
-	summary := strings.TrimSpace(resp.Text)
-	if summary == "" {
-		summary = strings.TrimSpace(resp.Reasoning)
+	responseText := strings.TrimSpace(resp.Text)
+	if responseText == "" {
+		responseText = strings.TrimSpace(resp.Reasoning)
 	}
-	if summary == "" {
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, responseText)
+	summary, err := validateCompactionResponse(resp, beforeContextTokens, afterContextTokens)
+	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
-		return fmt.Errorf("empty compaction summary")
+		return err
 	}
-	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
 	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
@@ -1675,15 +1681,16 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 		_ = updateCompactionState("", "failed", 0)
 		return err
 	}
-	summary := strings.TrimSpace(resp.Text)
-	if summary == "" {
-		summary = strings.TrimSpace(resp.Reasoning)
+	responseText := strings.TrimSpace(resp.Text)
+	if responseText == "" {
+		responseText = strings.TrimSpace(resp.Reasoning)
 	}
-	if summary == "" {
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, responseText)
+	summary, err := validateCompactionResponse(resp, beforeContextTokens, afterContextTokens)
+	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
-		return fmt.Errorf("empty compaction summary")
+		return err
 	}
-	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
 	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
@@ -1740,10 +1747,15 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 }
 
 func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
-	return e.chatRequest(session, chat, append(messages, provider.Message{
+	req := e.chatRequest(session, chat, append(messages, provider.Message{
 		Role:    provider.RoleUser,
 		Content: e.compactPromptWithInstructions(instructions),
 	}), stream)
+	if req.ExtraBody == nil {
+		req.ExtraBody = map[string]any{}
+	}
+	req.ExtraBody["max_tokens"] = compactionMaxTokens
+	return req
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
@@ -2109,13 +2121,20 @@ func compactTextForCompaction(text string, label string) string {
 func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
 	streamedBytes := 0
+	streamLimitExceeded := false
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
 	onEvent := func(evt domain.Event) {
-		if out == nil {
-			return
-		}
 		switch evt.Kind {
 		case domain.EventKindMessageDelta, domain.EventKindReasoning:
 			streamedBytes += len(evt.Text)
+			if streamedBytes > compactionMaxBytes && !streamLimitExceeded {
+				streamLimitExceeded = true
+				cancelStream()
+			}
+			if out == nil {
+				return
+			}
 			if streamedBytes <= 0 {
 				return
 			}
@@ -2125,6 +2144,9 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 				Meta: map[string]string{"compaction": "streaming"},
 			}
 		case domain.EventKindStatus:
+			if out == nil {
+				return
+			}
 			if evt.Meta[domain.EventMetaPromptProgress] != "true" {
 				return
 			}
@@ -2137,7 +2159,10 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 		}
 	}
 	if req.Stream {
-		resp, err := client.StreamChatResponse(ctx, req, onEvent)
+		resp, err := client.StreamChatResponse(streamCtx, req, onEvent)
+		if streamLimitExceeded {
+			return provider.ChatResponse{}, fmt.Errorf("compaction output exceeded %s", formatCompactionBytes(compactionMaxBytes))
+		}
 		if err == nil {
 			if promptProgressPending {
 				e.setPromptProgressSupport(chat.ProviderID, true)
@@ -2146,7 +2171,7 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 		}
 		if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
 			e.setPromptProgressSupport(chat.ProviderID, false)
-			return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), onEvent)
+			return client.StreamChatResponse(streamCtx, provider.WithoutPromptProgress(req), onEvent)
 		}
 		return resp, err
 	}
@@ -2162,6 +2187,26 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 		return client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
 	}
 	return resp, err
+}
+
+func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens, afterContextTokens int) (string, error) {
+	if strings.EqualFold(strings.TrimSpace(resp.FinishReason), "length") {
+		return "", fmt.Errorf("compaction reached its %d-token output limit", compactionMaxTokens)
+	}
+	summary := strings.TrimSpace(resp.Text)
+	if summary == "" {
+		summary = strings.TrimSpace(resp.Reasoning)
+	}
+	if summary == "" {
+		return "", fmt.Errorf("empty compaction summary")
+	}
+	if len(summary) > compactionMaxBytes {
+		return "", fmt.Errorf("compaction output exceeded %s", formatCompactionBytes(compactionMaxBytes))
+	}
+	if beforeContextTokens > compactionMaxTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens) {
+		return "", fmt.Errorf("compaction did not reduce context (%d tokens before, %d after)", beforeContextTokens, afterContextTokens)
+	}
+	return summary, nil
 }
 
 func compactionPromptProgressText(meta map[string]string) string {
@@ -2204,16 +2249,10 @@ func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat d
 }
 
 func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID string, summary string) int {
-	firstKeptIdx := firstKeptTimelineIndex(timeline, firstKeptItemID)
-	if firstKeptIdx < 0 {
-		firstKeptIdx = len(timeline)
-	}
-	simulated := make([]domain.TimelineItem, 0, 1+max(0, len(timeline)-firstKeptIdx))
+	simulated := make([]domain.TimelineItem, 0, len(timeline)+1)
+	simulated = append(simulated, timeline...)
 	compactionItem.Content = domain.Compaction{Summary: summary, Status: "completed", FirstKeptItemID: firstKeptItemID}
 	simulated = append(simulated, compactionItem)
-	if firstKeptIdx < len(timeline) {
-		simulated = append(simulated, timeline[firstKeptIdx:]...)
-	}
 	estimated := e.estimateContextTokensForTimeline(session, chat, simulated)
 	if estimated <= 0 {
 		return tokenestimate.Text(summary)

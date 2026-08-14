@@ -388,6 +388,7 @@ type Client struct {
 type ChatResponse struct {
 	Text               string
 	Reasoning          string
+	FinishReason       string
 	Usage              domain.Usage
 	ToolCalls          []ToolCall
 	ToolCallErrors     []ToolCallError
@@ -777,10 +778,11 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 		TotalTokens:      payload.Usage.TotalTokens,
 	}.Normalized()
 	return ChatResponse{
-		Text:      choice.Message.Content,
-		Reasoning: firstPresentString(choice.Message.ReasoningContent, choice.Message.Reasoning),
-		Usage:     usage,
-		ToolCalls: convertToolCalls(choice.Message.ToolCalls),
+		Text:         choice.Message.Content,
+		Reasoning:    firstPresentString(choice.Message.ReasoningContent, choice.Message.Reasoning),
+		FinishReason: strings.TrimSpace(choice.FinishReason),
+		Usage:        usage,
+		ToolCalls:    convertToolCalls(choice.Message.ToolCalls),
 	}, nil
 }
 
@@ -1350,6 +1352,7 @@ func convertToolCalls(raw []rawToolCall) []ToolCall {
 type streamedChatResponse struct {
 	text               strings.Builder
 	reasoning          strings.Builder
+	finishReason       string
 	usage              domain.Usage
 	toolCalls          []ToolCall
 	promptProgressSeen bool
@@ -1364,6 +1367,9 @@ type streamedChatResponse struct {
 func (r *streamedChatResponse) Apply(chunk chatChunk) {
 	if len(chunk.Choices) > 0 {
 		choice := chunk.Choices[0]
+		if reason := strings.TrimSpace(choice.FinishReason); reason != "" {
+			r.finishReason = reason
+		}
 		if choice.Delta.Content != "" {
 			r.text.WriteString(choice.Delta.Content)
 		} else if choice.Message.Content != "" {
@@ -1418,6 +1424,7 @@ func (r streamedChatResponse) Response() ChatResponse {
 	return ChatResponse{
 		Text:               r.text.String(),
 		Reasoning:          r.reasoning.String(),
+		FinishReason:       r.finishReason,
 		Usage:              r.usage,
 		ToolCalls:          r.toolCalls,
 		PromptProgressSeen: r.promptProgressSeen,

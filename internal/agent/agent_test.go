@@ -1813,9 +1813,9 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	attachToolResultTimelineItem(t, st, chat.ID, previousReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 	appendCompactionTimelineItem(t, st, chat.ID, "previous compact summary", previousToolItem.ID)
 	appendUserTimelineItem(t, st, chat.ID, "new raw history")
-	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "go test"}}
+	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "latest-retained-tool-marker"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", tools.BashStoredResult{Command: "go test", Output: "ok"})
+	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "latest-retained-result-marker", tools.BashStoredResult{Command: "latest-retained-tool-marker", Output: "latest-retained-result-marker"})
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
@@ -1840,7 +1840,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
 		}
 	}
-	if strings.Contains(rendered, "go test") || strings.Contains(rendered, "ok") {
+	if strings.Contains(rendered, "latest-retained-tool-marker") || strings.Contains(rendered, "latest-retained-result-marker") {
 		t.Fatalf("expected retained latest tool call to be left out of compaction source, got %q", rendered)
 	}
 	if strings.Contains(rendered, "call_latest") {
@@ -5062,12 +5062,19 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	t.Parallel()
 
 	var requests int
+	var maxTokens int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
 		requests++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode compaction request: %v", err)
+			return
+		}
+		maxTokens = int(body["max_tokens"].(float64))
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"short compact summary"}}],"usage":{"prompt_tokens":1200,"completion_tokens":300}}`))
 	}))
 	defer server.Close()
@@ -5160,6 +5167,76 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("expected one compaction request, got %d", requests)
+	}
+	if maxTokens != compactionMaxTokens {
+		t.Fatalf("compaction max_tokens = %d, want %d", maxTokens, compactionMaxTokens)
+	}
+}
+
+func TestValidateCompactionResponseRejectsUnsafeResults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		resp   provider.ChatResponse
+		before int
+		after  int
+		want   string
+	}{
+		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "output limit"},
+		{name: "byte limit", resp: provider.ChatResponse{Text: strings.Repeat("x", compactionMaxBytes+1)}, before: 100_000, after: 10_000, want: "exceeded"},
+		{name: "no reduction", resp: provider.ChatResponse{Text: "summary"}, before: 100_000, after: 100_000, want: "did not reduce"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := validateCompactionResponse(test.resp, test.before, test.after)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCompleteCompactionChatStopsOversizedStream(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		payload, err := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": strings.Repeat("x", compactionMaxBytes+1)}}},
+		})
+		if err != nil {
+			t.Errorf("marshal stream payload: %v", err)
+			return
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(testConfig(t), nil, nil)
+	_, err = engine.completeCompactionChat(context.Background(), domain.Chat{ProviderID: "test"}, client, provider.ChatRequest{Model: "test", Stream: true}, nil)
+	if err == nil || !strings.Contains(err.Error(), "exceeded 64 KB") {
+		t.Fatalf("error = %v, want oversized compaction error", err)
+	}
+}
+
+func TestEstimateCompactedTimelineIncludesSummary(t *testing.T) {
+	t.Parallel()
+
+	engine := New(testConfig(t), nil, nil)
+	summary := strings.Repeat("durable summary detail ", 10_000)
+	timeline := []domain.TimelineItem{
+		{ID: "old", Seq: 1, Content: domain.UserMessage{Text: strings.Repeat("old history ", 20_000)}},
+		{ID: "kept", Seq: 2, Content: domain.UserMessage{Text: "retained tail"}},
+	}
+	got := engine.estimateCompactedTimelineContextTokens(domain.Session{}, domain.Chat{}, timeline, domain.TimelineItem{ID: "compact", Seq: 3}, "kept", summary)
+	if minimum := len(summary) / 4; got < minimum {
+		t.Fatalf("estimated context = %d, want at least summary estimate %d", got, minimum)
 	}
 }
 
