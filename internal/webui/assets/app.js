@@ -996,6 +996,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
+        tabActivityTimer: null, tabActivityFrame: 0, tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
@@ -1011,6 +1012,7 @@
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
+          this.syncBrowserTabActivity();
           this.clampSidebarRatio();
           this.applyTheme();
           this.$watch('draft', () => this.writeComposerDraft());
@@ -1026,6 +1028,10 @@
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); this.observeLastTranscriptItem(); });
+        },
+        destroy() {
+          if (this.tabActivityTimer) clearInterval(this.tabActivityTimer);
+          this.tabActivityTimer = null;
         },
         initializeRouteHydration() {
           const route = this.selectionFromLocation();
@@ -1596,6 +1602,7 @@
             this.state.session = delta.session;
             this.state.Session = delta.session;
           }
+          this.syncBrowserTabActivity();
           this.reportClientStateSoon();
         },
         applySessionsDelta(delta) {
@@ -1762,6 +1769,7 @@
           if (idx >= 0) statuses[idx] = {...statuses[idx], ...status}; else statuses.push(status);
           this.state.chat_statuses = statuses;
           this.state.ChatStatuses = statuses;
+          this.syncBrowserTabActivity();
         },
         rpc(method, params) {
           return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
@@ -2171,6 +2179,7 @@
           const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
+          this.syncBrowserTabActivity();
           this.hydratingSession = {active: false, id: '', title: '', error: ''};
           this.clearSwitchingChat();
           if (!this.restartNeeded()) {
@@ -3367,6 +3376,81 @@
           const id = this.chatID(chat);
           const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];
           return statuses.find(status => (status.chat_id || status.ChatID) === id) || {chat_id: id, status: 'idle', status_text: 'Idle'};
+        },
+        chatStatusBusy(status) {
+          if (!status) return false;
+          if (status.busy || status.Busy) return true;
+          if (Number(status.pending_approvals ?? status.PendingApprovals ?? 0) > 0) return true;
+          if (Number(status.pending_user_input ?? status.PendingUserInput ?? 0) > 0) return true;
+          const value = String(status.status || status.Status || 'idle');
+          return ['running', 'waiting_llm', 'streaming_thoughts', 'streaming_response', 'running_tools', 'waiting_approval', 'waiting_input'].includes(value);
+        },
+        sessionBusyChatCount() {
+          const chatIDs = new Set((this.state.chats || this.state.Chats || []).map(chat => this.chatID(chat)).filter(Boolean));
+          const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];
+          return statuses.filter(status => {
+            const id = String(status.chat_id || status.ChatID || '').trim();
+            return chatIDs.has(id) && this.chatStatusBusy(status);
+          }).length;
+        },
+        syncBrowserTabActivity() {
+          const sessionID = this.currentSessionID();
+          const busy = !!sessionID && this.sessionBusyChatCount() > 0;
+          const sessionTitle = sessionID ? this.sessionTitle(this.currentSession()) : '';
+          document.title = sessionTitle ? (busy ? '● ' : '') + sessionTitle + ' · koder' : 'koder';
+          if (!busy) {
+            if (this.tabActivityTimer) clearInterval(this.tabActivityTimer);
+            this.tabActivityTimer = null;
+            this.renderTabActivityIcon(false);
+            return;
+          }
+          this.renderTabActivityIcon(true);
+          if (!this.tabActivityTimer) {
+            this.tabActivityTimer = setInterval(() => this.renderTabActivityIcon(true), 250);
+          }
+        },
+        renderTabActivityIcon(busy) {
+          let icon = this.tabActivityIcon;
+          if (!icon || !icon.isConnected) {
+            icon = document.getElementById('koder-tab-activity-icon');
+            if (!icon) {
+              icon = document.createElement('link');
+              icon.id = 'koder-tab-activity-icon';
+              icon.rel = 'icon';
+              document.head.appendChild(icon);
+            }
+            this.tabActivityIcon = icon;
+          }
+          if (!busy) {
+            this.tabActivityFrame = 0;
+            icon.type = 'image/svg+xml';
+            icon.sizes = 'any';
+            icon.href = '/assets/koder-logo.svg';
+            return;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = 32;
+          canvas.height = 32;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          const angle = (this.tabActivityFrame++ % 16) * Math.PI / 8;
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = 'rgba(108, 117, 125, .45)';
+          ctx.beginPath();
+          ctx.arc(16, 16, 11, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = '#0d6efd';
+          ctx.beginPath();
+          ctx.arc(16, 16, 11, angle, angle + Math.PI * 1.25);
+          ctx.stroke();
+          ctx.fillStyle = '#6ea8fe';
+          ctx.beginPath();
+          ctx.arc(16, 16, 3, 0, Math.PI * 2);
+          ctx.fill();
+          icon.type = 'image/png';
+          icon.sizes = '32x32';
+          icon.href = canvas.toDataURL('image/png');
         },
         chatPendingApprovals(chat) {
           const status = this.chatStatus(chat);
@@ -4655,6 +4739,7 @@
           this.state.Snapshot = {};
           this.state.active_chat_id = '';
           this.state.ActiveChatID = '';
+          this.syncBrowserTabActivity();
           history.pushState(null, '', this.sessionURL(id));
           this.reportClientStateSoon();
         },

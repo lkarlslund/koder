@@ -2278,6 +2278,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keyframes chat-status-spin`) || !strings.Contains(fullPage, `chatStatusIcon(chat)`) {
 		t.Fatalf("expected chat status icons to animate per state")
 	}
+	if !strings.Contains(fullPage, `sessionBusyChatCount()`) ||
+		!strings.Contains(fullPage, `syncBrowserTabActivity()`) ||
+		!strings.Contains(fullPage, `renderTabActivityIcon(true)`) ||
+		!strings.Contains(fullPage, `koder-tab-activity-icon`) ||
+		!strings.Contains(fullPage, `canvas.toDataURL('image/png')`) {
+		t.Fatalf("expected browser tab title and favicon to reflect session-wide chat activity")
+	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
 	}
