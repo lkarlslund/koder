@@ -1000,25 +1000,36 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 		t.Fatalf("expected restart build id, got %q", got)
 	}
 
-	msg := readMessage(t, ctx, conn)
-	var event struct {
-		Type    string `json:"type"`
-		Payload struct {
-			RestartNeeded bool `json:"restart_needed"`
-			RestartBuild  struct {
-				Commit  string `json:"commit"`
-				BuildID string `json:"build_id"`
-			} `json:"restart_build"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal(msg, &event); err != nil {
-		t.Fatalf("decode restart event: %v", err)
-	}
-	if event.Type != "restart_delta" || !event.Payload.RestartNeeded {
-		t.Fatalf("expected restart_delta with restart_needed=true, got %s", string(msg))
-	}
-	if event.Payload.RestartBuild.Commit != "abc123" || event.Payload.RestartBuild.BuildID == "" {
-		t.Fatalf("expected restart build metadata, got %s", string(msg))
+	deadline, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	for {
+		_, msg, err := conn.Read(deadline)
+		if err != nil {
+			t.Fatalf("expected restart_delta with restart_needed=true: %v", err)
+		}
+		var event struct {
+			Type    string `json:"type"`
+			Payload struct {
+				RestartNeeded bool `json:"restart_needed"`
+				RestartBuild  struct {
+					Commit  string `json:"commit"`
+					BuildID string `json:"build_id"`
+				} `json:"restart_build"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(msg, &event); err != nil {
+			t.Fatalf("decode websocket event: %v", err)
+		}
+		if event.Type != "restart_delta" {
+			continue
+		}
+		if !event.Payload.RestartNeeded {
+			t.Fatalf("expected restart_needed=true, got %s", string(msg))
+		}
+		if event.Payload.RestartBuild.Commit != "abc123" || event.Payload.RestartBuild.BuildID == "" {
+			t.Fatalf("expected restart build metadata, got %s", string(msg))
+		}
+		break
 	}
 }
 
