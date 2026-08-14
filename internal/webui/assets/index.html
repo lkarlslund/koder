@@ -1220,9 +1220,9 @@
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Compaction model</label>
                   <div class="input-group">
-                    <input class="form-control" :value="compactionModelLabel()" readonly>
-                    <button class="btn btn-outline-secondary" type="button" @click="openSettingsModelPicker({kind: 'compaction', title: 'Compaction model', subtitle: 'Chat compaction', chatOnly: true})"><i class="bi bi-search"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" @click="setCompactionModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
+                    <input class="form-control" :value="compactionModelLabel()" :title="compactionModelLabel()" readonly>
+                    <button class="btn btn-outline-secondary" type="button" title="Choose compaction model" aria-label="Choose compaction model" @click="openSettingsModelPicker({kind: 'compaction', title: 'Compaction model', subtitle: 'Chat compaction', chatOnly: true})"><i class="bi bi-search"></i></button>
+                    <button class="btn btn-outline-secondary" type="button" title="Use each chat's model" aria-label="Use each chat's model" @click="setCompactionModelValue('chat')"><i class="bi bi-chat-left-text"></i></button>
                   </div>
                 </div>
               </div>

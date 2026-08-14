@@ -5105,7 +5105,18 @@
           return parts[0] || parts[1] ? (parts[0] || '-') + ' / ' + (parts[1] || '-') : fallback;
         },
         ttsModelLabel() { return this.labelForModelValue(this.ttsModelValue(), 'First detected TTS model'); },
-        compactionModelLabel() { return this.compactionModelValue() === 'chat' ? 'Chat model' : this.labelForModelValue(this.compactionModelValue(), 'Chat model'); },
+        compactionModelLabel() {
+          const value = this.compactionModelValue();
+          if (value === 'chat') return 'Chat model';
+          const model = (this.settings?.models || this.modelOptions || []).find(item => this.modelOptionValue(item) === value);
+          if (model) {
+            const provider = model.provider_label || model.provider_id || '';
+            return (model.model_id || '') + (provider ? ' · ' + provider : '');
+          }
+          let parts = [];
+          try { parts = JSON.parse(String(value || '[]')); } catch (_) { parts = []; }
+          return (parts[1] || '-') + (parts[0] ? ' · ' + parts[0] : '');
+        },
         thinkingModelLabel() { return this.thinkingModelValue() === 'chat' ? 'Chat model' : this.labelForModelValue(this.thinkingModelValue(), 'Chat model'); },
         defaultModelLabel() { return this.labelForModelValue(this.defaultModelValue(), 'No default model'); },
         setCompactionModelValue(value) {
