@@ -996,7 +996,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
-        tabActivityTimer: null, tabActivityFrame: 0, tabActivityIcon: null,
+        tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
@@ -1028,10 +1028,6 @@
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); this.observeLastTranscriptItem(); });
-        },
-        destroy() {
-          if (this.tabActivityTimer) clearInterval(this.tabActivityTimer);
-          this.tabActivityTimer = null;
         },
         initializeRouteHydration() {
           const route = this.selectionFromLocation();
@@ -3398,16 +3394,7 @@
           const busy = !!sessionID && this.sessionBusyChatCount() > 0;
           const sessionTitle = sessionID ? this.sessionTitle(this.currentSession()) : '';
           document.title = sessionTitle ? (busy ? '● ' : '') + sessionTitle + ' · koder' : 'koder';
-          if (!busy) {
-            if (this.tabActivityTimer) clearInterval(this.tabActivityTimer);
-            this.tabActivityTimer = null;
-            this.renderTabActivityIcon(false);
-            return;
-          }
-          this.renderTabActivityIcon(true);
-          if (!this.tabActivityTimer) {
-            this.tabActivityTimer = setInterval(() => this.renderTabActivityIcon(true), 250);
-          }
+          this.renderTabActivityIcon(busy);
         },
         renderTabActivityIcon(busy) {
           let icon = this.tabActivityIcon;
@@ -3422,7 +3409,6 @@
             this.tabActivityIcon = icon;
           }
           if (!busy) {
-            this.tabActivityFrame = 0;
             icon.type = 'image/svg+xml';
             icon.sizes = 'any';
             icon.href = '/assets/koder-logo.svg';
@@ -3433,7 +3419,6 @@
           canvas.height = 32;
           const ctx = canvas.getContext('2d');
           if (!ctx) return;
-          const angle = (this.tabActivityFrame++ % 16) * Math.PI / 8;
           ctx.lineCap = 'round';
           ctx.lineWidth = 4;
           ctx.strokeStyle = 'rgba(108, 117, 125, .45)';
@@ -3442,7 +3427,7 @@
           ctx.stroke();
           ctx.strokeStyle = '#0d6efd';
           ctx.beginPath();
-          ctx.arc(16, 16, 11, angle, angle + Math.PI * 1.25);
+          ctx.arc(16, 16, 11, 0, Math.PI * 1.25);
           ctx.stroke();
           ctx.fillStyle = '#6ea8fe';
           ctx.beginPath();

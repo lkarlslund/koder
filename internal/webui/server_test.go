@@ -2280,10 +2280,13 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `sessionBusyChatCount()`) ||
 		!strings.Contains(fullPage, `syncBrowserTabActivity()`) ||
-		!strings.Contains(fullPage, `renderTabActivityIcon(true)`) ||
+		!strings.Contains(fullPage, `renderTabActivityIcon(busy)`) ||
 		!strings.Contains(fullPage, `koder-tab-activity-icon`) ||
 		!strings.Contains(fullPage, `canvas.toDataURL('image/png')`) {
 		t.Fatalf("expected browser tab title and favicon to reflect session-wide chat activity")
+	}
+	if strings.Contains(fullPage, `setInterval(() => this.renderTabActivityIcon(true)`) {
+		t.Fatalf("expected the busy favicon to remain static because browsers do not reliably repaint animated favicons")
 	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
