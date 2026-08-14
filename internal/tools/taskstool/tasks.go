@@ -186,58 +186,11 @@ func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result,
 }
 
 func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
-	runtime, req := opts.Runtime, opts.Request
-	control, err := tools.RequireSessionControl(runtime)
+	update, err := prepareTaskUpdate(ctx, opts.Runtime, opts.Request)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	taskKey, _ := planning.ParseTaskKey(req.Args["task_key"])
-	if err := tools.TaskScopeAllows(runtime, taskKey); err != nil {
-		return tools.Result{}, err
-	}
-	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	allowedRef, err := tools.AllowedMilestoneKey(runtime, "")
-	if err != nil {
-		return tools.Result{}, err
-	}
-	for _, milestone := range plan.Milestones {
-		milestoneKey := planning.MilestoneKey(milestone)
-		if allowedRef != "" && milestoneKey != allowedRef {
-			continue
-		}
-		tasks, err := control.ListTasks(ctx, runtime.SessionID, milestoneKey)
-		if err != nil {
-			return tools.Result{}, err
-		}
-		for idx := range tasks {
-			if planning.TaskKey(tasks[idx]) != taskKey {
-				continue
-			}
-			if err := ensureTaskUpdateAllowed(runtime, milestone, tasks[idx]); err != nil {
-				return tools.Result{}, err
-			}
-			taskStatus, err := planning.ParseTaskStatus(req.Args["status"])
-			if err != nil {
-				return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
-			}
-			tasks[idx].Status = taskStatus
-			if content := strings.TrimSpace(req.Args["content"]); content != "" {
-				tasks[idx].Content = content
-			}
-			if err := planning.ValidateTaskProgress(tasks); err != nil {
-				return tools.Result{}, err
-			}
-			updated, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"])
-			if err != nil {
-				return tools.Result{}, err
-			}
-			return tools.TaskBucketResultWithTitle(milestoneKey, milestone.Title, []planning.Task{updated}, ""), nil
-		}
-	}
-	return tools.Result{}, fmt.Errorf("task %s not found", taskKey)
+	return tools.TaskBucketResultWithTitle(update.milestoneKey, update.milestoneTitle, []planning.Task{update.task}, ""), nil
 }
 
 func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -330,50 +283,90 @@ func (addItemsTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, r
 	return result, nil
 }
 func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
-	control, err := tools.RequireSessionControl(runtime)
+	update, err := prepareTaskUpdate(ctx, runtime, req)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	taskKey, _ := planning.ParseTaskKey(req.Args["task_key"])
-	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
+	updated, err := update.control.UpdateTask(ctx, update.taskKey, update.status, req.Args["content"], req.Args["note"])
 	if err != nil {
 		return tools.Result{}, err
+	}
+	stored := tools.BuildTaskListStoredResult(update.plan, update.milestoneKey, []planning.Task{updated}, "")
+	result.Stored = stored
+	result.Output = tools.FormatTaskOutput(stored)
+	return result, nil
+}
+
+type preparedTaskUpdate struct {
+	control        tools.SessionControl
+	plan           planning.Plan
+	taskKey        string
+	status         planning.TaskStatus
+	milestoneKey   string
+	milestoneTitle string
+	task           planning.Task
+}
+
+func prepareTaskUpdate(ctx context.Context, runtime tools.Runtime, req tools.Request) (preparedTaskUpdate, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return preparedTaskUpdate{}, err
+	}
+	taskKey, err := planning.ParseTaskKey(req.Args["task_key"])
+	if err != nil {
+		return preparedTaskUpdate{}, err
+	}
+	if err := tools.TaskScopeAllows(runtime, taskKey); err != nil {
+		return preparedTaskUpdate{}, err
+	}
+	status, err := planning.ParseTaskStatus(req.Args["status"])
+	if err != nil {
+		return preparedTaskUpdate{}, fmt.Errorf("invalid task status %q", req.Args["status"])
+	}
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return preparedTaskUpdate{}, err
+	}
+	allowedRef, err := tools.AllowedMilestoneKey(runtime, "")
+	if err != nil {
+		return preparedTaskUpdate{}, err
 	}
 	for _, milestone := range plan.Milestones {
 		milestoneKey := planning.MilestoneKey(milestone)
+		if allowedRef != "" && milestoneKey != allowedRef {
+			continue
+		}
 		tasks, err := control.ListTasks(ctx, runtime.SessionID, milestoneKey)
 		if err != nil {
-			return tools.Result{}, err
-		}
-		taskStatus, err := planning.ParseTaskStatus(req.Args["status"])
-		if err != nil {
-			return tools.Result{}, fmt.Errorf("invalid task status %q", req.Args["status"])
+			return preparedTaskUpdate{}, err
 		}
 		for idx := range tasks {
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
 			if err := ensureTaskUpdateAllowed(runtime, milestone, tasks[idx]); err != nil {
-				return tools.Result{}, err
+				return preparedTaskUpdate{}, err
 			}
-			tasks[idx].Status = taskStatus
+			tasks[idx].Status = status
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				tasks[idx].Content = content
 			}
+			tasks[idx].Note = strings.TrimSpace(req.Args["note"])
 			if err := planning.ValidateTaskProgress(tasks); err != nil {
-				return tools.Result{}, err
+				return preparedTaskUpdate{}, err
 			}
-			updated, err := control.UpdateTask(ctx, taskKey, taskStatus, req.Args["content"], req.Args["note"])
-			if err != nil {
-				return tools.Result{}, err
-			}
-			stored := tools.BuildTaskListStoredResult(plan, milestoneKey, []planning.Task{updated}, "")
-			result.Stored = stored
-			result.Output = tools.FormatTaskOutput(stored)
-			return result, nil
+			return preparedTaskUpdate{
+				control:        control,
+				plan:           plan,
+				taskKey:        taskKey,
+				status:         status,
+				milestoneKey:   milestoneKey,
+				milestoneTitle: milestone.Title,
+				task:           tasks[idx],
+			}, nil
 		}
 	}
-	return tools.Result{}, fmt.Errorf("task %s not found", taskKey)
+	return preparedTaskUpdate{}, fmt.Errorf("task %s not found", taskKey)
 }
 func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)

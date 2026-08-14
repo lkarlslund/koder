@@ -300,6 +300,13 @@ func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	if strings.Contains(result.Output, "Unrelated follow-up") {
 		t.Fatalf("expected output to include only the updated task, got %q", result.Output)
 	}
+	beforeFinalize, err := modeltest.GetTask(ctx, st, tasks[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeFinalize.Status == planning.TaskStatusCompleted || beforeFinalize.Note != "" {
+		t.Fatalf("tasks_update persisted before result finalization: %#v", beforeFinalize)
+	}
 	toolResult, body, err := tools.FinalizeResult(ctx, runtime, req, result)
 	if err != nil {
 		t.Fatal(err)
@@ -339,10 +346,10 @@ func TestOrchestratorCanMutateOwnInProgressTask(t *testing.T) {
 	}
 	runtime := tools.Runtime{SessionID: session.ID, ChatID: "orchestrator-chat", ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
 
-	if _, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{
+	if _, err = executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator completed its own running task."},
-	}}); err != nil {
+	}); err != nil {
 		t.Fatalf("expected orchestrator to mutate unowned in-progress task, got %v", err)
 	}
 }
@@ -373,6 +380,45 @@ func TestOrchestratorCannotMutateWorkerOwnedInProgressTask(t *testing.T) {
 	}})
 	if err == nil || !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "chat_send") {
 		t.Fatalf("expected running task steering error, got %v", err)
+	}
+}
+
+func TestTaskUpdateDetectsWorkerClaimBetweenCallAndFinalize(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerID := id.ID("worker-chat")
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting, OwnerChatID: &workerID}}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Wire endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, ChatID: "orchestrator-chat", ChatRole: chatrole.Orchestrator, SessionControl: tooltest.NewSessionControl(st)}
+	req := tools.Request{
+		Tool: domain.ToolKindTasksUpdate,
+		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "in_progress", "note": "Orchestrator started work."},
+	}
+	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
+	if err != nil {
+		t.Fatalf("initial validation failed: %v", err)
+	}
+	if _, err := modeltest.UpdateTask(ctx, st, tasks[0].ID, planning.TaskStatusInProgress, tasks[0].Content, "worker claimed task"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tools.FinalizeResult(ctx, runtime, req, result); err == nil || !strings.Contains(err.Error(), "chat_send") {
+		t.Fatalf("expected ownership recovery guidance, got %v", err)
+	}
+	stored, err := modeltest.GetTask(ctx, st, tasks[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Note != "worker claimed task" {
+		t.Fatalf("finalizer overwrote worker-owned task: %#v", stored)
 	}
 }
 

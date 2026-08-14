@@ -194,7 +194,14 @@ func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools
 	}
 	evt, err := r.FinalizeToolResult(ctx, runtime, req, result)
 	if err != nil {
-		return nil, err
+		if isInterruptedToolError(err) {
+			return nil, err
+		}
+		errorEvent, recordErr := r.RecordToolError(ctx, req, err)
+		if recordErr != nil {
+			return nil, recordErr
+		}
+		return []domain.Event{errorEvent}, nil
 	}
 	return []domain.Event{evt}, nil
 }
