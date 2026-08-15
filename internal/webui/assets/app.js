@@ -997,7 +997,7 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         tabActivityIcon: null,
-        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
+        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null,
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -4416,16 +4416,15 @@
         },
         openModelDialog() {
           this.modelPickerTarget = null;
-          this.showModels = true; this.modelQuery = ''; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.showModels = true; this.modelQuery = '';
           this.closeMobileSidebar();
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.refreshModelOptions();
-          this.loadActiveModelSettings();
         },
         openSettingsModelPicker(target) {
           this.modelPickerTarget = Object.assign({kind: ''}, target || {});
-          this.showModels = true; this.modelQuery = ''; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
+          this.showModels = true; this.modelQuery = '';
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.refreshModelOptions();
@@ -4457,7 +4456,7 @@
             });
           }
         },
-        closeModelDialog() { this.showModels = false; this.modelPickerTarget = null; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
+        closeModelDialog() { this.showModels = false; this.modelPickerTarget = null; this.reportClientStateSoon(); },
         filteredModels() {
           const q = this.modelQuery.trim().toLowerCase();
           const models = this.modelPickerModels();
@@ -4485,8 +4484,8 @@
               this.state.ModelInfo = result.model_info;
             }
             this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {current: item.provider_id === model.provider_id && item.model_id === model.model_id}));
-            this.loadModelSettings(model.provider_id, model.model_id);
-          });
+            this.closeModelDialog();
+          }).catch(err => this.showToast(err.message));
         },
         modelPickerTitle() {
           if (!this.modelPickerTarget) return 'Select model';
@@ -4631,17 +4630,6 @@
           }
           return out;
         },
-        modelSettingsEditable() {
-          return !!(this.modelSettingsDraft && (this.modelSettingsDraft.editable || this.modelSettingsDraft.custom));
-        },
-        modelSettingsPersistedCustom() {
-          return !!(this.modelSettingsDraft && this.modelSettingsDraft.custom && this.modelSettingsDraft.original_provider_id && this.modelSettingsDraft.original_model_id);
-        },
-        modelSettingsIsDefault() {
-          const draft = this.modelSettingsDraft;
-          if (!draft) return false;
-          return (this.modelOptions || []).some(item => item.provider_id === draft.provider_id && item.model_id === draft.model_id && item.default);
-        },
         uniqueCustomModelID(providerID, sourceModelID) {
           const base = String(sourceModelID || 'model').trim() + ' custom';
           const used = new Set([...(this.modelOptions || []), ...(this.settings?.models || []), ...(this.modelConfigRows() || [])]
@@ -4654,13 +4642,6 @@
             if (!used.has(next)) return next;
           }
           return base + ' ' + Date.now();
-        },
-        customizeModelSettings() {
-          if (!this.modelSettingsDraft) return;
-          const sourceProviderID = String(this.modelSettingsDraft.source_provider_id || this.modelSettingsDraft.provider_id || '').trim();
-          const sourceModelID = String(this.modelSettingsDraft.source_model_id || this.modelSettingsDraft.model_id || '').trim();
-          this.modelSettingsDraft = this.duplicateModelDraft(this.modelSettingsDraft, sourceProviderID, sourceModelID);
-          this.modelSettingsStatus = 'Customize this model under a new name, then save.'; this.modelSettingsStatusKind = 'secondary';
         },
         duplicateModelDraft(source, providerID = '', sourceModelID = '') {
           const raw = JSON.parse(JSON.stringify(source || {}));
@@ -4677,68 +4658,6 @@
             custom: true,
             editable: true,
           }));
-        },
-        duplicateActiveModelSettings() {
-          if (!this.modelSettingsDraft) return;
-          this.modelSettingsDraft = this.duplicateModelDraft(this.modelSettingsDraft);
-          this.modelSettingsStatus = 'Duplicated model settings under a new name. Save to keep it.'; this.modelSettingsStatusKind = 'secondary';
-        },
-        activeModelSettingsKey() {
-          const info = this.activeModelInfo();
-          return {provider_id: info.provider_id || this.activeProvider(), model_id: info.model_id || this.activeModel()};
-        },
-        loadActiveModelSettings() {
-          const key = this.activeModelSettingsKey();
-          if (!key.provider_id || !key.model_id) return;
-          this.loadModelSettings(key.provider_id, key.model_id);
-        },
-        loadModelSettings(providerID, modelID) {
-          providerID = String(providerID || '').trim(); modelID = String(modelID || '').trim();
-          if (!providerID || !modelID) return;
-          this.rpc('model_config', {provider_id: providerID, model_id: modelID})
-            .then(result => { this.modelSettingsDraft = this.normalizeModelSettingsDraft(result); })
-            .catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; });
-        },
-        saveActiveModelSettings() {
-          if (!this.modelSettingsDraft) return;
-          const payload = Object.assign({}, this.modelSettingsDraft, {
-            context_window: Number(this.modelSettingsDraft.context_window || 0),
-            temperature: this.blankableNumber(this.modelSettingsDraft.temperature),
-            top_p: this.blankableNumber(this.modelSettingsDraft.top_p),
-            min_p: this.blankableNumber(this.modelSettingsDraft.min_p),
-            top_k: Number(this.modelSettingsDraft.top_k || 0),
-            repeat_penalty: this.blankableNumber(this.modelSettingsDraft.repeat_penalty),
-            thinking_budget: Number(this.modelSettingsDraft.thinking_budget || 0),
-            model_options: this.normalizedModelOverlayOptions(this.modelSettingsDraft),
-          });
-          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
-          this.rpc('save_model_config', payload).then(result => {
-            this.modelSettingsDraft = this.normalizeModelSettingsDraft(result);
-            this.modelSettingsStatus = 'Saved model settings'; this.modelSettingsStatusKind = 'success';
-            return this.rpc('set_model', {provider_id: result.provider_id, model_id: result.model_id}).then(() => this.refreshModelOptions());
-          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
-        },
-        setActiveModelAsDefault() {
-          const draft = this.modelSettingsDraft;
-          if (!draft?.provider_id || !draft?.model_id) return;
-          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
-          this.rpc('set_default_model', {provider_id: draft.provider_id, model_id: draft.model_id}).then(result => {
-            this.setSettingsState(result);
-            this.modelOptions = (this.modelOptions || []).map(item => Object.assign({}, item, {default: item.provider_id === draft.provider_id && item.model_id === draft.model_id}));
-            this.modelSettingsStatus = 'Set as default model'; this.modelSettingsStatusKind = 'success';
-          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
-        },
-        deleteActiveModelConfig() {
-          const draft = this.modelSettingsDraft;
-          if (!draft?.provider_id || !draft?.model_id || !this.modelSettingsPersistedCustom()) return;
-          if (!confirm('Delete custom model "' + draft.model_id + '"?')) return;
-          this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
-          this.rpc('delete_model_config', {provider_id: draft.provider_id, model_id: draft.model_id}).then(result => {
-            this.setSettingsState(result);
-            this.modelSettingsDraft = null;
-            this.modelSettingsStatus = 'Deleted custom model'; this.modelSettingsStatusKind = 'success';
-            return this.refreshModelOptions();
-          }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
           this.sessionTab = this.quickChatMode() ? 'chats' : 'sessions';

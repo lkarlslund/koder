@@ -744,8 +744,29 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	if modelID == "" {
 		return fmt.Errorf("model id is required")
 	}
-	if !c.cfg.HasUsableProvider(providerID) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	if !cfg.HasUsableProvider(providerID) {
 		return fmt.Errorf("provider %q is not configured", providerID)
+	}
+	options, err := modelOptionsForConfig(ctx, cfg, "", "")
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, option := range options {
+		if option.ProviderID != providerID || option.ModelID != modelID {
+			continue
+		}
+		if !option.SupportsChat {
+			return fmt.Errorf("model %s/%s does not support chat completions", providerID, modelID)
+		}
+		found = true
+		break
+	}
+	if !found {
+		return fmt.Errorf("model %s/%s is not detected or customized", providerID, modelID)
 	}
 	c.ensureModelConfig(ctx, providerID, modelID)
 	owner, _, chatRecord, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
@@ -840,6 +861,26 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 	c.mu.RUnlock()
 	if !providerOK {
 		return
+	}
+	if !existingOK {
+		client, err := provider.New(sourceProviderID, providerCfg, nil)
+		if err != nil {
+			return
+		}
+		models, err := client.ListModels(ctx)
+		if err != nil {
+			return
+		}
+		detected := false
+		for _, model := range models {
+			if strings.TrimSpace(model.ID) == sourceModelID {
+				detected = true
+				break
+			}
+		}
+		if !detected {
+			return
+		}
 	}
 	contextWindow := existing.ContextWindow
 	if provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing)) {

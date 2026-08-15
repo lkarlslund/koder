@@ -2078,14 +2078,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
-	if !strings.Contains(fullPage, `save_model_config`) ||
-		!strings.Contains(fullPage, `modelOverlayControls(modelSettingsDraft)`) ||
-		!strings.Contains(fullPage, `modelSettingsDraft.model_options[control.id]`) ||
-		!strings.Contains(fullPage, `modelOverlayChoices(modelSettingsDraft)`) ||
-		!strings.Contains(fullPage, `customizeModelSettings()`) ||
-		!strings.Contains(fullPage, `Auto-detected models are read-only`) ||
-		!strings.Contains(fullPage, `modelSettingsEditable()`) {
-		t.Fatalf("expected model dialog to edit chat model settings")
+	if strings.Contains(fullPage, `Chat settings`) || strings.Contains(fullPage, `saveActiveModelSettings()`) {
+		t.Fatalf("expected chat model dialog to select catalog models without defining chat-specific models")
 	}
 	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
@@ -2628,6 +2622,16 @@ func TestWebSocketHelloPushesGitDiffSeparately(t *testing.T) {
 
 func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	ctrl := newTestController(t)
+	if _, err := ctrl.SaveModelConfig(context.Background(), app.ModelConfigPreference{
+		ProviderID:       "test",
+		ModelID:          "next-model",
+		SourceProviderID: "test",
+		SourceModelID:    "model",
+		ContextWindow:    32768,
+		ModelPreset:      "auto",
+	}); err != nil {
+		t.Fatalf("save customized model: %v", err)
+	}
 	sessionID := selectedTestState(t, ctrl).Session.ID
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

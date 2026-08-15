@@ -1208,7 +1208,13 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 		cfg.Providers = map[string]config.Provider{
 			"test": {BaseURL: "https://example.invalid/v1"},
 		}
-		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "next-model", ContextWindow: 12345})
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:       "test",
+			ModelID:          "next-model",
+			SourceProviderID: "test",
+			SourceModelID:    "base-model",
+			ContextWindow:    12345,
+		})
 	})
 	ctx := context.Background()
 	selection := controllerSelection(ctrl)
@@ -1235,6 +1241,34 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 	if chatRecord.ModelID != "next-model" {
 		t.Fatalf("expected stored chat model next-model, got %q", chatRecord.ModelID)
+	}
+}
+
+func TestControllerSetModelRejectsModelOutsideCatalog(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"catalog-model"}]}`)
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {BaseURL: modelServer.URL + "/v1"},
+		}
+	})
+	before := len(ctrl.cfg.Models)
+	err := ctrl.SetModelForSelection(context.Background(), controllerSelection(ctrl), "test", "chat-only-model")
+	if err == nil || !strings.Contains(err.Error(), "not detected or customized") {
+		t.Fatalf("expected uncatalogued model to be rejected, got %v", err)
+	}
+	if got := len(ctrl.cfg.Models); got != before {
+		t.Fatalf("expected rejected chat selection not to create a model definition, got %d configs from %d", got, before)
 	}
 }
 
