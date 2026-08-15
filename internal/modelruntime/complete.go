@@ -41,6 +41,7 @@ func (r *Runtime) CompleteModelRequest(ctx context.Context, session domain.Sessi
 		RawReasoning:   resp.Reasoning,
 		Reasoning:      reasoning,
 		Usage:          resp.Usage,
+		Performance:    resp.Performance,
 		ToolCalls:      resp.ToolCalls,
 		ToolCallErrors: resp.ToolCallErrors,
 		Streamed:       streamed,

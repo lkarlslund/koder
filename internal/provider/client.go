@@ -356,12 +356,25 @@ type chatChunk struct {
 		} `json:"input_tokens_details"`
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
-	PromptProgress struct {
-		Total     int   `json:"total"`
-		Cache     int   `json:"cache"`
-		Processed int   `json:"processed"`
-		TimeMS    int64 `json:"time_ms"`
-	} `json:"prompt_progress"`
+	PromptProgress chatPromptProgress `json:"prompt_progress"`
+	Timings        chatTimings        `json:"timings"`
+}
+
+type chatPromptProgress struct {
+	Total     int   `json:"total"`
+	Cache     int   `json:"cache"`
+	Processed int   `json:"processed"`
+	TimeMS    int64 `json:"time_ms"`
+}
+
+type chatTimings struct {
+	CacheN             int     `json:"cache_n"`
+	PromptN            int     `json:"prompt_n"`
+	PromptMS           float64 `json:"prompt_ms"`
+	PromptPerSecond    float64 `json:"prompt_per_second"`
+	PredictedN         int     `json:"predicted_n"`
+	PredictedMS        float64 `json:"predicted_ms"`
+	PredictedPerSecond float64 `json:"predicted_per_second"`
 }
 
 type rawToolCall struct {
@@ -393,6 +406,7 @@ type ChatResponse struct {
 	ToolCalls          []ToolCall
 	ToolCallErrors     []ToolCallError
 	PromptProgressSeen bool
+	Performance        domain.ModelPerformance
 }
 
 func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, error) {
@@ -728,6 +742,7 @@ func (c *Client) Health(ctx context.Context) error {
 }
 
 func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatResponse, error) {
+	start := time.Now()
 	ctx = context.WithValue(ctx, requestDebugContextKey{}, requestDebugContext{SessionID: input.SessionID, ChatID: input.ChatID})
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
@@ -777,12 +792,14 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 		CachedTokens:     cachedTokensFromUsage(payload.Usage.PromptTokensDetails.CachedTokens, payload.Usage.InputTokensDetails.CachedTokens),
 		TotalTokens:      payload.Usage.TotalTokens,
 	}.Normalized()
+	completedAt := time.Now()
 	return ChatResponse{
 		Text:         choice.Message.Content,
 		Reasoning:    firstPresentString(choice.Message.ReasoningContent, choice.Message.Reasoning),
 		FinishReason: strings.TrimSpace(choice.FinishReason),
 		Usage:        usage,
 		ToolCalls:    convertToolCalls(choice.Message.ToolCalls),
+		Performance:  modelPerformance(start, completedAt, completedAt, usage, payload.PromptProgress, payload.Timings),
 	}, nil
 }
 
@@ -1030,10 +1047,12 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			}
 			onEvent(domain.Event{Kind: domain.EventKindMessageDone})
 		}
-		return result.Response(), nil
+		completedAt := time.Now()
+		return result.responseWithPerformance(start, completedAt, completedAt), nil
 	}
 
 	var aggregated streamedChatResponse
+	var firstResponseAt time.Time
 	reader := bufio.NewReader(resp.Body)
 	chunkCount := 0
 	lastPayload := ""
@@ -1121,7 +1140,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				}
 				aggregated.addPromptProgressMeta(meta)
 				recordTrace("", meta)
-				return aggregated.Response(), nil
+				return aggregated.responseWithPerformance(start, firstResponseAt, time.Now()), nil
 			}
 			var chunk chatChunk
 			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -1136,6 +1155,9 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
 			}
 			chunkCount++
+			if firstResponseAt.IsZero() && chunkHasAssistantResponse(chunk) {
+				firstResponseAt = time.Now()
+			}
 			for _, choice := range chunk.Choices {
 				if strings.TrimSpace(choice.FinishReason) != "" {
 					sawFinishReason = true
@@ -1154,7 +1176,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 					"tool":         strings.TrimSpace(toolCallErr.ToolCall.Function.Name),
 					"tool_call_id": strings.TrimSpace(toolCallErr.ToolCall.ID),
 				})
-				response := aggregated.Response()
+				response := aggregated.responseWithPerformance(start, firstResponseAt, time.Now())
 				response.ToolCallErrors = append(response.ToolCallErrors, toolCallErr)
 				return response, nil
 			}
@@ -1177,7 +1199,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				}
 				aggregated.addPromptProgressMeta(meta)
 				recordTrace("", meta)
-				return aggregated.Response(), nil
+				return aggregated.responseWithPerformance(start, firstResponseAt, time.Now()), nil
 			}
 			streamErr := &StreamInterruptedError{Detail: lastStreamMessage}
 			meta := map[string]string{
@@ -1362,6 +1384,7 @@ type streamedChatResponse struct {
 		processed int
 		timeMS    int64
 	}
+	timings chatTimings
 }
 
 func (r *streamedChatResponse) Apply(chunk chatChunk) {
@@ -1399,6 +1422,10 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 		r.promptProgress.processed = chunk.PromptProgress.Processed
 		r.promptProgress.timeMS = chunk.PromptProgress.TimeMS
 	}
+	if chunk.Timings.CacheN > 0 || chunk.Timings.PromptN > 0 || chunk.Timings.PromptMS > 0 ||
+		chunk.Timings.PredictedN > 0 || chunk.Timings.PredictedMS > 0 {
+		r.timings = chunk.Timings
+	}
 }
 
 func (r streamedChatResponse) addPromptProgressMeta(meta map[string]string) {
@@ -1429,6 +1456,75 @@ func (r streamedChatResponse) Response() ChatResponse {
 		ToolCalls:          r.toolCalls,
 		PromptProgressSeen: r.promptProgressSeen,
 	}
+}
+
+func (r streamedChatResponse) responseWithPerformance(start, firstResponse, completed time.Time) ChatResponse {
+	response := r.Response()
+	progress := chatPromptProgress{
+		Total:     r.promptProgress.total,
+		Cache:     r.promptProgress.cache,
+		Processed: r.promptProgress.processed,
+		TimeMS:    r.promptProgress.timeMS,
+	}
+	response.Performance = modelPerformance(start, firstResponse, completed, r.usage, progress, r.timings)
+	return response
+}
+
+func chunkHasAssistantResponse(chunk chatChunk) bool {
+	for _, choice := range chunk.Choices {
+		if choice.Delta.Content != "" || choice.Delta.Reasoning != "" || choice.Delta.ReasoningContent != "" ||
+			choice.Message.Content != "" || choice.Message.Reasoning != "" || choice.Message.ReasoningContent != "" ||
+			len(choice.Delta.ToolCalls) > 0 || len(choice.Message.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func modelPerformance(start, firstResponse, completed time.Time, usage domain.Usage, progress chatPromptProgress, timings chatTimings) domain.ModelPerformance {
+	performance := domain.ModelPerformance{}
+	if !start.IsZero() && !firstResponse.IsZero() && !firstResponse.Before(start) {
+		performance.TimeToFirstResponseMS = float64(firstResponse.Sub(start)) / float64(time.Millisecond)
+	}
+
+	switch {
+	case timings.CacheN > 0 || timings.PromptN > 0:
+		performance.CachedPromptTokens = timings.CacheN
+		performance.ProcessedPromptTokens = timings.PromptN
+	case progress.Total > 0 || progress.Processed > 0 || progress.Cache > 0:
+		performance.CachedPromptTokens = progress.Cache
+		performance.ProcessedPromptTokens = max(0, max(progress.Total, progress.Processed)-progress.Cache)
+	default:
+		performance.CachedPromptTokens = usage.CachedTokens
+		performance.ProcessedPromptTokens = max(0, usage.PromptTokens-usage.CachedTokens)
+	}
+
+	performance.PromptProcessingMS = timings.PromptMS
+	performance.PromptTokensPerSecond = timings.PromptPerSecond
+	if performance.PromptProcessingMS <= 0 && progress.TimeMS > 0 {
+		performance.PromptProcessingMS = float64(progress.TimeMS)
+	}
+	timedPromptTokens := performance.ProcessedPromptTokens
+	if progress.Processed > 0 {
+		timedPromptTokens = max(0, progress.Processed-progress.Cache)
+	}
+	if performance.PromptTokensPerSecond <= 0 && performance.PromptProcessingMS > 0 && timedPromptTokens > 0 {
+		performance.PromptTokensPerSecond = float64(timedPromptTokens) * 1000 / performance.PromptProcessingMS
+	}
+
+	performance.GeneratedTokens = timings.PredictedN
+	if performance.GeneratedTokens <= 0 {
+		performance.GeneratedTokens = usage.CompletionTokens
+	}
+	performance.GenerationMS = timings.PredictedMS
+	performance.GenerationTokensPerSecond = timings.PredictedPerSecond
+	if performance.GenerationMS <= 0 && !firstResponse.IsZero() && !completed.IsZero() && completed.After(firstResponse) {
+		performance.GenerationMS = float64(completed.Sub(firstResponse)) / float64(time.Millisecond)
+	}
+	if performance.GenerationTokensPerSecond <= 0 && performance.GenerationMS > 0 && performance.GeneratedTokens > 0 {
+		performance.GenerationTokensPerSecond = float64(performance.GeneratedTokens) * 1000 / performance.GenerationMS
+	}
+	return performance
 }
 
 func (r *streamedChatResponse) TakeOversizedToolCall(limits map[string]int) (ToolCallError, bool) {

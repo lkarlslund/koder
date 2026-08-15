@@ -251,6 +251,7 @@ type ModelResponse struct {
 	RawReasoning   string
 	Reasoning      domain.ReasoningContent
 	Usage          domain.Usage
+	Performance    domain.ModelPerformance
 	ToolCalls      []provider.ToolCall
 	ToolCallErrors []provider.ToolCallError
 	Streamed       bool
@@ -1788,7 +1789,7 @@ func (r *Chat) UpdateCompaction(ctx context.Context, item domain.TimelineItem, c
 }
 
 // AppendAssistantToolCalls appends or updates one sealed assistant message through the live chat owner.
-func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage, performance domain.ModelPerformance) (domain.TimelineItem, error) {
 	if r == nil {
 		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
@@ -1807,6 +1808,9 @@ func (r *Chat) AppendAssistantToolCalls(ctx context.Context, item domain.Timelin
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage
+	}
+	if performance.HasAny() {
+		assistant.Performance = &performance
 	}
 	return r.appendAssistantItem(ctx, item, assistant)
 }

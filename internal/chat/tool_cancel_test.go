@@ -64,7 +64,7 @@ func TestCancelToolStopsOnlySelectedToolAndRecordsCanceledOutcome(t *testing.T) 
 	t.Cleanup(rt.Close)
 
 	req := tools.Request{Tool: cancelTestToolID, ToolCallID: "call_cancel_me"}
-	if _, err := rt.AppendAssistantToolRequests(context.Background(), domain.TimelineItem{}, []tools.Request{req}, "", domain.ReasoningContent{}, domain.Usage{}); err != nil {
+	if _, err := rt.AppendAssistantToolRequests(context.Background(), domain.TimelineItem{}, []tools.Request{req}, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{}); err != nil {
 		t.Fatal(err)
 	}
 	parentCtx, parentCancel := context.WithCancel(context.Background())

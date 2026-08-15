@@ -254,12 +254,12 @@ func (r *Chat) toolRuntime(runtime tools.Runtime) tools.Runtime {
 	return runtime
 }
 
-func (r *Chat) AppendAssistantToolRequests(ctx context.Context, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
+func (r *Chat) AppendAssistantToolRequests(ctx context.Context, item domain.TimelineItem, calls []tools.Request, text string, reasoning domain.ReasoningContent, usage domain.Usage, performance domain.ModelPerformance) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, toolCallRecord(call))
 	}
-	return r.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage)
+	return r.AppendAssistantToolCalls(ctx, item, toolCalls, text, reasoning, usage, performance)
 }
 
 func toolCallRecord(call tools.Request) domain.ToolCall {

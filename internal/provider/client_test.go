@@ -531,7 +531,7 @@ func TestCompleteChatReasoningFallbackField(t *testing.T) {
 
 func TestCompleteChatParsesCachedTokens(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":6}}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":6}},"timings":{"cache_n":6,"prompt_n":4,"prompt_ms":20,"prompt_per_second":200,"predicted_n":2,"predicted_ms":40,"predicted_per_second":50}}`))
 	}))
 	defer server.Close()
 
@@ -551,6 +551,11 @@ func TestCompleteChatParsesCachedTokens(t *testing.T) {
 	}
 	if resp.Usage.CachedTokens != 6 {
 		t.Fatalf("expected cached tokens, got %#v", resp.Usage)
+	}
+	performance := resp.Performance
+	if performance.TimeToFirstResponseMS <= 0 || performance.CachedPromptTokens != 6 || performance.ProcessedPromptTokens != 4 ||
+		performance.PromptTokensPerSecond != 200 || performance.GeneratedTokens != 2 || performance.GenerationTokensPerSecond != 50 {
+		t.Fatalf("expected native model performance, got %#v", performance)
 	}
 }
 
@@ -839,6 +844,9 @@ func TestStreamChatResponseEmitsPromptProgressStatus(t *testing.T) {
 	}
 	if status.Meta[domain.EventMetaPromptProgress] != "true" || status.Meta["processed"] != "5" || status.Meta["total"] != "10" || status.Meta["cache"] != "2" || status.Meta["time_ms"] != "3" {
 		t.Fatalf("unexpected prompt progress metadata: %#v", status.Meta)
+	}
+	if resp.Performance.CachedPromptTokens != 2 || resp.Performance.ProcessedPromptTokens != 8 || resp.Performance.PromptTokensPerSecond != 1000 {
+		t.Fatalf("expected prompt progress performance fallback, got %#v", resp.Performance)
 	}
 }
 
@@ -1169,7 +1177,7 @@ func TestStreamChatRecorderExposesAndCancelsActiveStream(t *testing.T) {
 func TestStreamChatTraceIncludesPromptProgressMeta(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"prompt_progress\":{\"total\":100,\"cache\":80,\"processed\":90,\"time_ms\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"prompt_progress\":{\"total\":100,\"cache\":80,\"processed\":90,\"time_ms\":7},\"timings\":{\"cache_n\":80,\"prompt_n\":20,\"prompt_ms\":10,\"prompt_per_second\":2000,\"predicted_n\":2,\"predicted_ms\":50,\"predicted_per_second\":40}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -1194,6 +1202,10 @@ func TestStreamChatTraceIncludesPromptProgressMeta(t *testing.T) {
 	}
 	if !resp.PromptProgressSeen {
 		t.Fatalf("expected prompt progress in response, got %#v", resp)
+	}
+	if resp.Performance.TimeToFirstResponseMS <= 0 || resp.Performance.CachedPromptTokens != 80 || resp.Performance.ProcessedPromptTokens != 20 ||
+		resp.Performance.PromptTokensPerSecond != 2000 || resp.Performance.GenerationTokensPerSecond != 40 {
+		t.Fatalf("expected streamed native performance, got %#v", resp.Performance)
 	}
 	traces := recorder.HTTPTraces()
 	if len(traces) != 1 {

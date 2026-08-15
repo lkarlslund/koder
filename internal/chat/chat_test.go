@@ -62,6 +62,7 @@ type runtimeFakeRunner struct {
 	promptTimeline [][]domain.TimelineItem
 	turnRequests   []TurnRequest
 	events         []<-chan domain.Event
+	response       *ModelResponse
 }
 
 type emptyResponseRunner struct {
@@ -451,6 +452,9 @@ func (f *runtimeFakeRunner) NextAssistantTimelineItemForTurn(_ context.Context, 
 
 func (f *runtimeFakeRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, out chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
 	forwardFakeEvents(f.nextEvents(), out)
+	if f.response != nil {
+		return *f.response, nil
+	}
 	return ModelResponse{Text: "done"}, nil
 }
 
@@ -3709,6 +3713,52 @@ func TestRuntimeAccumulatesTokenUsageSinceCompaction(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatal("timed out waiting for token usage accumulation")
+		}
+	}
+}
+
+func TestRuntimePersistsAssistantModelPerformance(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	performance := domain.ModelPerformance{
+		TimeToFirstResponseMS:     245.5,
+		CachedPromptTokens:        980,
+		ProcessedPromptTokens:     20,
+		PromptTokensPerSecond:     125.5,
+		GeneratedTokens:           40,
+		GenerationTokensPerSecond: 22.25,
+	}
+	runner := &runtimeFakeRunner{response: &ModelResponse{
+		Text:        "measured response",
+		Usage:       domain.Usage{PromptTokens: 1000, CompletionTokens: 40, CachedTokens: 980, TotalTokens: 1040},
+		Performance: performance,
+	}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceUser, Text: "measure this"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if rt.Snapshot().Status == StatusIdle {
+			items, err := timelineForChat(context.Background(), st, chatRecord.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range items {
+				assistant, ok := item.Content.(domain.AssistantMessage)
+				if !ok || assistant.Text != "measured response" {
+					continue
+				}
+				if assistant.Performance == nil || *assistant.Performance != performance {
+					t.Fatalf("persisted performance = %#v, want %#v", assistant.Performance, performance)
+				}
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for persisted performance; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

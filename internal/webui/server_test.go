@@ -2078,6 +2078,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
+	if !strings.Contains(fullPage, `assistantPerformanceLabel(item)`) ||
+		!strings.Contains(fullPage, `time_to_first_response_ms`) ||
+		!strings.Contains(fullPage, `cached_prompt_tokens`) ||
+		!strings.Contains(fullPage, `prompt_tokens_per_second`) ||
+		!strings.Contains(fullPage, `generation_tokens_per_second`) ||
+		!strings.Contains(fullPage, `class="turn-performance"`) {
+		t.Fatalf("expected assistant entries to render persisted LLM performance before the timestamp")
+	}
 	if strings.Contains(fullPage, `Chat settings`) || strings.Contains(fullPage, `saveActiveModelSettings()`) {
 		t.Fatalf("expected chat model dialog to select catalog models without defining chat-specific models")
 	}

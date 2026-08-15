@@ -201,7 +201,7 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
-	return rt.AppendAssistantToolRequests(ctx, item, calls, text, domain.ReasoningContent{}, usage)
+	return rt.AppendAssistantToolRequests(ctx, item, calls, text, domain.ReasoningContent{}, usage, domain.ModelPerformance{})
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID id.ID, req tools.Request) ([]domain.Event, error) {

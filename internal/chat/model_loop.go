@@ -113,7 +113,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 			})
 		} else if len(parsed.ToolCalls) > 0 {
 			l.consecutiveReasoningOnly = 0
-			assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+			assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, parsed.ToolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage, resp.Performance)
 			if err != nil {
 				return TurnStepResult{}, err
 			}
@@ -164,7 +164,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		for _, callErr := range resp.ToolCallErrors {
 			toolCalls = append(toolCalls, l.model.FailedStreamedProviderToolCall(callErr))
 		}
-		assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage)
+		assistantItem, err := rt.AppendAssistantToolCalls(ctx, assistantItem, toolCalls, strings.TrimSpace(resp.Text), reasoningContent, resp.Usage, resp.Performance)
 		if err != nil {
 			return TurnStepResult{}, err
 		}
@@ -176,7 +176,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	if call != nil {
 		l.consecutiveReasoningOnly = 0
 		l.model.RecordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		assistantItem, err := rt.AppendAssistantToolRequests(ctx, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, domain.Usage{})
+		assistantItem, err := rt.AppendAssistantToolRequests(ctx, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), reasoningContent, resp.Usage, resp.Performance)
 		if err != nil {
 			return TurnStepResult{}, err
 		}
@@ -253,6 +253,10 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		if !resp.Streamed {
 			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
 		}
+	}
+	if resp.Performance.HasAny() {
+		performance := resp.Performance
+		assistant.Performance = &performance
 	}
 	if !resp.Streamed && strings.TrimSpace(text) != "" {
 		out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text, Item: assistantItem}

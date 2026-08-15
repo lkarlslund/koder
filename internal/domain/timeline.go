@@ -85,16 +85,36 @@ type Reference struct {
 
 // AssistantMessage stores one assistant response and its owned children.
 type AssistantMessage struct {
-	Reasoning ReasoningContent `json:"reasoning,omitempty"`
-	Text      string           `json:"text,omitempty"`
-	Tools     []ToolCall       `json:"tools,omitempty"`
-	Usage     *Usage           `json:"usage,omitempty"`
-	Error     *ItemError       `json:"error,omitempty"`
-	Provider  ProviderTrace    `json:"provider,omitempty"`
+	Reasoning   ReasoningContent  `json:"reasoning,omitempty"`
+	Text        string            `json:"text,omitempty"`
+	Tools       []ToolCall        `json:"tools,omitempty"`
+	Usage       *Usage            `json:"usage,omitempty"`
+	Performance *ModelPerformance `json:"performance,omitempty"`
+	Error       *ItemError        `json:"error,omitempty"`
+	Provider    ProviderTrace     `json:"provider,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.
 func (AssistantMessage) TimelineKind() TimelineKind { return TimelineKindAssistant }
+
+// ModelPerformance stores one provider request's measured LLM performance.
+type ModelPerformance struct {
+	TimeToFirstResponseMS     float64 `json:"time_to_first_response_ms,omitempty"`
+	CachedPromptTokens        int     `json:"cached_prompt_tokens,omitempty"`
+	ProcessedPromptTokens     int     `json:"processed_prompt_tokens,omitempty"`
+	PromptProcessingMS        float64 `json:"prompt_processing_ms,omitempty"`
+	PromptTokensPerSecond     float64 `json:"prompt_tokens_per_second,omitempty"`
+	GeneratedTokens           int     `json:"generated_tokens,omitempty"`
+	GenerationMS              float64 `json:"generation_ms,omitempty"`
+	GenerationTokensPerSecond float64 `json:"generation_tokens_per_second,omitempty"`
+}
+
+// HasAny reports whether at least one performance measurement is available.
+func (p ModelPerformance) HasAny() bool {
+	return p.TimeToFirstResponseMS > 0 || p.CachedPromptTokens > 0 || p.ProcessedPromptTokens > 0 ||
+		p.PromptProcessingMS > 0 || p.PromptTokensPerSecond > 0 || p.GeneratedTokens > 0 ||
+		p.GenerationMS > 0 || p.GenerationTokensPerSecond > 0
+}
 
 // AppendText appends visible assistant text.
 func (m *AssistantMessage) AppendText(delta string) {

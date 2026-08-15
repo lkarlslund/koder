@@ -2812,6 +2812,71 @@
           const pad = value => String(value).padStart(2, '0');
           return pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
         },
+        assistantPerformance(item) {
+          const content = item?.content || item?.Content || {};
+          return content.performance || content.Performance || null;
+        },
+        performanceField(performance, pascal, snake) {
+          return Number((performance && (performance[pascal] ?? performance[snake])) || 0);
+        },
+        formatPerformanceDuration(milliseconds) {
+          const value = Number(milliseconds || 0);
+          if (!Number.isFinite(value) || value <= 0) return '';
+          if (value < 1000) return Math.round(value) + 'ms';
+          return (value / 1000).toFixed(value < 10000 ? 1 : 0).replace(/\.0$/, '') + 's';
+        },
+        formatPerformanceRate(rate) {
+          const value = Number(rate || 0);
+          if (!Number.isFinite(value) || value <= 0) return '';
+          return (value >= 100 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, ''));
+        },
+        formatCachePercent(percent) {
+          const value = Number(percent);
+          if (!Number.isFinite(value)) return '';
+          return (Math.round(value * 10) / 10).toFixed(1).replace(/\.0$/, '');
+        },
+        assistantPerformanceValues(item) {
+          const performance = this.assistantPerformance(item);
+          if (!performance) return null;
+          const cached = this.performanceField(performance, 'CachedPromptTokens', 'cached_prompt_tokens');
+          const processed = this.performanceField(performance, 'ProcessedPromptTokens', 'processed_prompt_tokens');
+          const promptTotal = cached + processed;
+          return {
+            ttfr: this.performanceField(performance, 'TimeToFirstResponseMS', 'time_to_first_response_ms'),
+            cached,
+            processed,
+            cachePercent: promptTotal > 0 ? cached * 100 / promptTotal : null,
+            promptRate: this.performanceField(performance, 'PromptTokensPerSecond', 'prompt_tokens_per_second'),
+            generationRate: this.performanceField(performance, 'GenerationTokensPerSecond', 'generation_tokens_per_second'),
+            generated: this.performanceField(performance, 'GeneratedTokens', 'generated_tokens'),
+          };
+        },
+        assistantPerformanceLabel(item) {
+          const values = this.assistantPerformanceValues(item);
+          if (!values) return '';
+          const parts = [];
+          const ttfr = this.formatPerformanceDuration(values.ttfr);
+          if (ttfr) parts.push('TTFR ' + ttfr);
+          if (values.cachePercent !== null) parts.push('cache ' + this.formatCachePercent(values.cachePercent) + '%');
+          const promptRate = this.formatPerformanceRate(values.promptRate);
+          if (promptRate) parts.push(promptRate + ' pp/s');
+          const generationRate = this.formatPerformanceRate(values.generationRate);
+          if (generationRate) parts.push(generationRate + ' tg/s');
+          return parts.join(' · ');
+        },
+        assistantPerformanceTooltip(item) {
+          const values = this.assistantPerformanceValues(item);
+          if (!values) return '';
+          const lines = [];
+          const ttfr = this.formatPerformanceDuration(values.ttfr);
+          if (ttfr) lines.push('Time to first response: ' + ttfr);
+          if (values.cachePercent !== null) lines.push('Prompt cache: ' + this.formatCachePercent(values.cachePercent) + '% (' + values.cached + ' cached, ' + values.processed + ' processed)');
+          const promptRate = this.formatPerformanceRate(values.promptRate);
+          if (promptRate) lines.push('Prompt processing: ' + promptRate + ' tokens/s');
+          const generationRate = this.formatPerformanceRate(values.generationRate);
+          if (generationRate) lines.push('Token generation: ' + generationRate + ' tokens/s' + (values.generated > 0 ? ' (' + values.generated + ' tokens)' : ''));
+          return lines.join('\n');
+        },
         timelineItemIsLatest(item) {
           const id = this.timelineItemID(item);
           if (!id) return false;
