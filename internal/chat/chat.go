@@ -512,12 +512,17 @@ func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.Queue
 	}
 	r.chat.LastMessage = text
 	chatRecord := r.chat
+	revision := uint64(0)
+	if r.state != nil {
+		revision = r.state.TimelineRevision(item.ID)
+	}
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
 		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -576,12 +581,17 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 		}
 	}
 	chatRecord := r.chat
+	revision := uint64(0)
+	if r.state != nil {
+		revision = r.state.TimelineRevision(item.ID)
+	}
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
 		if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -652,12 +662,17 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 	chatRecord := r.chat
 	chatID := r.chat.ID
 	queue := cloneQueuedInputs(r.queue)
+	revision := uint64(0)
+	if r.state != nil {
+		revision = r.state.TimelineRevision(item.ID)
+	}
 	r.mu.Unlock()
 
 	if r.deps.Store != nil {
 		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := setChatQueuedInputs(ctx, r.deps.Store, chatID, queue); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
@@ -845,7 +860,8 @@ func (r *Chat) ResetContextAndTokenUsage(ctx context.Context) error {
 	return nil
 }
 
-// Persist writes the current chat snapshot and remaps optimistic in-memory IDs to durable store IDs.
+// Persist flushes only timeline revisions that have not already been confirmed
+// durable, then stores the latest chat and queue metadata.
 func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if st == nil {
 		st = r.deps.Store
@@ -860,33 +876,18 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 		slog.Info("chat persist", "chat_id", chatRecord.ID, "session_id", chatRecord.SessionID, "timeline_items", 0, "queued_inputs", len(chatRecord.QueuedInputs), "state_loaded", false)
 		return updateChat(ctx, st, chatRecord)
 	}
-	timeline := r.state.SnapshotTimeline()
+	dirty := r.state.DirtyTimeline()
 	r.mu.RUnlock()
 
-	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		return r.markPersistError(err)
-	}
-	itemIDs := make(map[string]struct{}, len(persisted))
-	for _, item := range persisted {
-		itemIDs[item.ID] = struct{}{}
-	}
-
-	changed := false
-	for _, item := range timeline {
+	for _, pending := range dirty {
+		item := pending.Item
 		if item.ChatID == "" {
 			item.ChatID = chatRecord.ID
 		}
-		if _, ok := itemIDs[item.ID]; ok {
-			if err := putTimelineItem(ctx, st, item); err != nil {
-				return r.markPersistError(err)
-			}
-			continue
-		}
-		if _, err := insertTimelineItem(ctx, st, item); err != nil {
+		if err := putTimelineItem(ctx, st, item); err != nil {
 			return r.markPersistError(err)
 		}
-		changed = true
+		r.markTimelineItemPersisted(item.ID, pending.Revision)
 	}
 	chatRecord.QueuedInputs = cloneQueuedInputs(r.snapshotQueue())
 	if err := updateChat(ctx, st, chatRecord); err != nil {
@@ -895,15 +896,25 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	slog.Info("chat persist",
 		"chat_id", chatRecord.ID,
 		"session_id", chatRecord.SessionID,
-		"timeline_items", len(timeline),
-		"inserted_items", changed,
+		"dirty_timeline_items", len(dirty),
 		"queued_inputs", len(chatRecord.QueuedInputs),
 		"state_loaded", true,
 	)
-	if changed {
+	if len(dirty) > 0 {
 		r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
 	}
 	return nil
+}
+
+func (r *Chat) markTimelineItemPersisted(itemID id.ID, revision uint64) {
+	if r == nil || itemID == "" || revision == 0 {
+		return
+	}
+	r.mu.Lock()
+	if r.state != nil {
+		r.state.MarkTimelinePersisted(itemID, revision)
+	}
+	r.mu.Unlock()
 }
 
 func (r *Chat) Enqueue(item QueueItem) {
@@ -1704,11 +1715,16 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 		}
 	}
 	chatRecord := r.chat
+	revision := uint64(0)
+	if r.state != nil {
+		revision = r.state.TimelineRevision(item.ID)
+	}
 	r.mu.Unlock()
 	if r.deps.Store != nil {
 		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -1818,6 +1834,10 @@ func (r *Chat) appendAssistantItem(ctx context.Context, item domain.TimelineItem
 		}
 	}
 	chatRecord := r.chat
+	revision := uint64(0)
+	if r.state != nil {
+		revision = r.state.TimelineRevision(item.ID)
+	}
 	r.mu.Unlock()
 	if r.deps.Store != nil {
 		if _, err := insertTimelineItem(ctx, r.deps.Store, item); err != nil {
@@ -1825,6 +1845,7 @@ func (r *Chat) appendAssistantItem(ctx context.Context, item domain.TimelineItem
 				return domain.TimelineItem{}, err
 			}
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -1968,7 +1989,7 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 		message = "Tool execution failed because koder restarted before the tool completed."
 	}
 	now := time.Now().UTC()
-	var changed []domain.TimelineItem
+	var changed []dirtyTimelineItem
 	r.mu.Lock()
 	if r.state == nil {
 		r.mu.Unlock()
@@ -2004,7 +2025,8 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 		}
 		record.Item.Content = assistant
 		record.Item.UpdatedAt = now
-		changed = append(changed, record.Item)
+		revision := r.state.MarkTimelineItemDirty(record.Item.ID)
+		changed = append(changed, dirtyTimelineItem{Item: record.Item, Revision: revision})
 	}
 	chatRecord := r.chat
 	r.mu.Unlock()
@@ -2012,16 +2034,17 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 		return 0, nil
 	}
 	if r.deps.Store != nil {
-		for _, item := range changed {
-			if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
+		for _, pending := range changed {
+			if err := putTimelineItem(ctx, r.deps.Store, pending.Item); err != nil {
 				return count, err
 			}
+			r.markTimelineItemPersisted(pending.Item.ID, pending.Revision)
 		}
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return count, err
 		}
 	}
-	item := changed[len(changed)-1]
+	item := changed[len(changed)-1].Item
 	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, false, true, true))
 	return count, nil
 }
@@ -2068,6 +2091,7 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		record.Item.Content = assistant
 		record.Item.UpdatedAt = now
 		item = record.Item
+		r.state.MarkTimelineItemDirty(item.ID)
 		if timelineItemRequiresImages(item) {
 			r.chat.RequiresImages = true
 			r.state.UpdateChat(func(chat *domain.Chat) {
@@ -2083,6 +2107,7 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		break
 	}
 	chatRecord := r.chat
+	revision := r.state.TimelineRevision(item.ID)
 	r.mu.Unlock()
 	if item.ID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
@@ -2091,6 +2116,7 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		if err := putTimelineItem(ctx, r.deps.Store, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
+		r.markTimelineItemPersisted(item.ID, revision)
 		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
@@ -3690,8 +3716,10 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 		}
 	}
 	r.mu.Lock()
+	revision := uint64(0)
 	if r.state != nil {
 		r.state.UpsertTimelineItem(item)
+		revision = r.state.TimelineRevision(item.ID)
 	}
 	r.chat.LastMessage = notice.Text
 	if r.state != nil {
@@ -3702,6 +3730,9 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 	r.status = StatusIdle
 	r.statusText = ""
 	r.mu.Unlock()
+	if r.deps.Store != nil {
+		r.markTimelineItemPersisted(item.ID, revision)
+	}
 	r.broadcast(r.snapshotUpdateWithItem(item, nil, true, false, true, false, false))
 	return nil
 }

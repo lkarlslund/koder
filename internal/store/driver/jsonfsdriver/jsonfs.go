@@ -16,7 +16,7 @@ const Name = "jsonfs"
 
 type Backend struct {
 	root string
-	mu   sync.Mutex
+	mu   sync.RWMutex
 }
 
 func Open(stateDir string) (*Backend, error) {
@@ -64,6 +64,8 @@ func (b *Backend) Get(ctx context.Context, namespace string, id string) ([]byte,
 	if err := driver.EnsureContext(ctx); err != nil {
 		return nil, err
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	path := filepath.Join(b.root, "collections", namespace, id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -119,6 +121,8 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	if err := driver.EnsureContext(ctx); err != nil {
 		return nil, err
 	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	paths, err := b.listRecordPaths(namespace, lookup)
 	if err != nil {
 		return nil, err

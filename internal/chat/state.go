@@ -21,7 +21,14 @@ type ChatState struct {
 
 // TimelineRecord stores one mutable timeline item.
 type TimelineRecord struct {
-	Item domain.TimelineItem
+	Item              domain.TimelineItem
+	revision          uint64
+	persistedRevision uint64
+}
+
+type dirtyTimelineItem struct {
+	Item     domain.TimelineItem
+	Revision uint64
 }
 
 type PendingAssistantTurn struct {
@@ -51,6 +58,8 @@ func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.Time
 			record = &TimelineRecord{}
 		}
 		record.Item = item
+		record.revision++
+		record.persistedRevision = record.revision
 		nextTimeline = append(nextTimeline, record)
 		nextByItem[item.ID] = record
 	}
@@ -221,7 +230,7 @@ func (s *ChatState) AppendTimelineItem(item domain.TimelineItem) *TimelineRecord
 	if item.ID == "" {
 		item.ID = NewTimelineID(item.CreatedAt)
 	}
-	record := &TimelineRecord{Item: item}
+	record := &TimelineRecord{Item: item, revision: 1}
 	s.timeline = append(s.timeline, record)
 	s.byItem[item.ID] = record
 	return record
@@ -250,6 +259,7 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 		created = true
 	}
 	record.Item = item
+	record.revision++
 	return record, created
 }
 
@@ -271,7 +281,7 @@ func (s *ChatState) EnsureTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	if record := s.replaceTemporaryActiveAssistant(item); record != nil {
 		return record, false
 	}
-	record := &TimelineRecord{Item: item}
+	record := &TimelineRecord{Item: item, revision: 1}
 	s.timeline = append(s.timeline, record)
 	s.byItem[item.ID] = record
 	return record, true
@@ -302,6 +312,7 @@ func (s *ChatState) replaceTemporaryActiveAssistant(item domain.TimelineItem) *T
 	}
 	delete(s.byItem, active.Item.ID)
 	active.Item = item
+	active.revision++
 	s.byItem[item.ID] = active
 	return active
 }
@@ -367,6 +378,63 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 		out = append(out, record.Item)
 	}
 	return out
+}
+
+// DirtyTimeline returns timeline values whose latest in-memory revision has
+// not been confirmed durable yet.
+func (s *ChatState) DirtyTimeline() []dirtyTimelineItem {
+	if s == nil {
+		return nil
+	}
+	out := make([]dirtyTimelineItem, 0)
+	for _, record := range s.timeline {
+		if record == nil || record.revision == record.persistedRevision {
+			continue
+		}
+		out = append(out, dirtyTimelineItem{Item: record.Item, Revision: record.revision})
+	}
+	return out
+}
+
+// MarkTimelinePersisted marks revision durable without hiding a newer edit
+// that may have arrived while storage I/O was in progress.
+func (s *ChatState) MarkTimelinePersisted(itemID id.ID, revision uint64) {
+	if s == nil || itemID == "" || revision == 0 {
+		return
+	}
+	record := s.byItem[itemID]
+	if record == nil || revision > record.revision {
+		return
+	}
+	if revision > record.persistedRevision {
+		record.persistedRevision = revision
+	}
+}
+
+// MarkTimelineItemDirty records an in-place mutation made through a timeline
+// record pointer.
+func (s *ChatState) MarkTimelineItemDirty(itemID id.ID) uint64 {
+	if s == nil || itemID == "" {
+		return 0
+	}
+	record := s.byItem[itemID]
+	if record == nil {
+		return 0
+	}
+	record.revision++
+	return record.revision
+}
+
+// TimelineRevision returns the current in-memory revision for itemID.
+func (s *ChatState) TimelineRevision(itemID id.ID) uint64 {
+	if s == nil || itemID == "" {
+		return 0
+	}
+	record := s.byItem[itemID]
+	if record == nil {
+		return 0
+	}
+	return record.revision
 }
 
 // ReplaceTimeline replaces the loaded timeline while preserving current chat metadata.
@@ -437,6 +505,7 @@ func (s *ChatState) AppendAssistantText(chatID id.ID, text string) error {
 	assistant.AppendText(text)
 	record.Item.Content = assistant
 	record.Item.UpdatedAt = time.Now().UTC()
+	record.revision++
 	return nil
 }
 
@@ -459,6 +528,7 @@ func (s *ChatState) AppendAssistantReasoning(chatID id.ID, text string) error {
 	assistant.AppendReasoning(text)
 	record.Item.Content = assistant
 	record.Item.UpdatedAt = time.Now().UTC()
+	record.revision++
 	return nil
 }
 
@@ -470,6 +540,7 @@ func (s *ChatState) SealActiveAssistant(status domain.ToolStatus) {
 	_ = status
 	if record := s.LatestActiveAssistant(); record != nil && !record.Item.Sealed() {
 		record.Item.Seal(time.Now().UTC())
+		record.revision++
 	}
 }
 

@@ -42,6 +42,36 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 	}
 }
 
+func TestChatStateTracksOnlyUnpersistedTimelineRevisions(t *testing.T) {
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, []domain.TimelineItem{{
+		ID: "stored", ChatID: "chat-7", Seq: 1, Content: domain.UserMessage{Text: "stored"},
+	}}, nil)
+	if got := state.DirtyTimeline(); len(got) != 0 {
+		t.Fatalf("loaded records should be clean, got %#v", got)
+	}
+
+	record := state.AppendTimelineItem(domain.TimelineItem{
+		ID: "new", ChatID: "chat-7", Seq: 2, Content: domain.AssistantMessage{Text: "draft"},
+	})
+	dirty := state.DirtyTimeline()
+	if len(dirty) != 1 || dirty[0].Item.ID != "new" {
+		t.Fatalf("dirty records = %#v", dirty)
+	}
+
+	state.MarkTimelinePersisted("new", dirty[0].Revision)
+	record.Item.Content = domain.AssistantMessage{Text: "newer"}
+	newerRevision := state.MarkTimelineItemDirty("new")
+	state.MarkTimelinePersisted("new", dirty[0].Revision)
+	dirty = state.DirtyTimeline()
+	if len(dirty) != 1 || dirty[0].Revision != newerRevision {
+		t.Fatalf("newer revision was incorrectly marked clean: %#v", dirty)
+	}
+	state.MarkTimelinePersisted("new", newerRevision)
+	if got := state.DirtyTimeline(); len(got) != 0 {
+		t.Fatalf("persisted records should be clean, got %#v", got)
+	}
+}
+
 func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
 	state := NewTimelineState(domain.Chat{ID: "chat-7"}, nil, nil)
 	record, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: "chat-7", Seq: 1, Content: domain.AssistantMessage{Text: "first"}})
