@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -128,6 +129,64 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
 		t.Fatalf("expected missing chat to redirect to root, got status=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+func TestOfferedFileDownloadStreamsLiveFile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	path := filepath.Join(t.TempDir(), "result.txt")
+	if err := os.WriteFile(path, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record, err := offeredfile.NewManager(st).Create(context.Background(), offeredfile.Record{
+		SessionID: "session-1", ChatID: "chat-1", Path: path, Name: "result.txt", MIME: "text/plain", Size: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := app.New(cfg, engine)
+	if err := ctrl.Start(context.Background(), app.StartupModeNew, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte("updated live contents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(srv.URL() + "/api/offered-files/" + record.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "updated live contents" {
+		t.Fatalf("download status/body = %d/%q", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename=result.txt` {
+		t.Fatalf("content disposition = %q", got)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("nosniff header = %q", got)
 	}
 }
 
@@ -1839,6 +1898,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `<video class="tool-media-video" controls preload="metadata" playsinline`) ||
 		strings.Contains(fullPage, `<video class="tool-media-video" autoplay`) {
 		t.Fatalf("expected user-controlled image, audio, and video rendering")
+	}
+	if !strings.Contains(fullPage, `kind === 'offer_file'`) ||
+		!strings.Contains(fullPage, `function renderOfferFileBlock`) ||
+		!strings.Contains(fullPage, `'/api/offered-files/' + encodeURIComponent(token)`) ||
+		!strings.Contains(fullPage, `tool-offered-file-download`) ||
+		!strings.Contains(fullPage, `bi-file-earmark-zip`) {
+		t.Fatalf("expected offered files to render a typed live-file download card")
 	}
 	if !strings.Contains(fullPage, `renderedTimeline()`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||

@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -47,6 +48,7 @@ type Engine struct {
 	store         *store.Store
 	debug         *debugsrv.Recorder
 	files         *attachment.Manager
+	offeredFiles  *offeredfile.Manager
 	caps          *provider.CapabilityStore
 	agents        *agents.Manager
 	mcp           *mcp.Manager
@@ -78,6 +80,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		store:         st,
 		debug:         debug,
 		files:         attachment.NewManager(cfg.StateDir()),
+		offeredFiles:  offeredfile.NewManager(st),
 		caps:          provider.NewCapabilityStore(cfg.StateDir()),
 		agents:        agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:           mcpManager,
@@ -114,6 +117,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		MCP:              e.mcp,
 		Browser:          e.browser,
 		Attachments:      e.files,
+		OfferedFiles:     e.offeredFiles,
 		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)

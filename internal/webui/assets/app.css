@@ -182,6 +182,11 @@
     .tool-media-result { display: grid; gap: .35rem; }
     .tool-media-audio { width: min(100%, 42rem); }
     .tool-media-video { display: block; width: min(100%, 60rem); max-height: 70vh; background: #000; border-radius: .35rem; }
+    .tool-offered-file { display: flex; align-items: center; gap: .75rem; max-width: 42rem; border: 1px solid var(--bs-border-color); border-radius: .45rem; background: var(--bs-tertiary-bg); }
+    .tool-offered-file-icon { flex: 0 0 auto; color: var(--bs-primary); font-size: 1.65rem; }
+    .tool-offered-file-details { min-width: 0; flex: 1 1 auto; font-family: var(--bs-body-font-family); }
+    .tool-offered-file-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-offered-file-download { display: inline-flex; flex: 0 0 auto; align-items: center; gap: .35rem; }
     .mermaid-diagram { position: relative; margin: .75rem 0; max-width: 100%; overflow: auto; border: 1px solid var(--bs-border-color); border-radius: .45rem; padding: .75rem; background: var(--bs-body-bg); }
     .mermaid-diagram svg { display: block; width: 100%; max-width: 100%; min-width: 0; height: auto; margin: 0 auto; font-size: 16px; }
     .mermaid-diagram svg text { font-size: 16px; }

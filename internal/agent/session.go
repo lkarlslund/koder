@@ -10,6 +10,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
 )
@@ -39,6 +40,14 @@ func (e *Engine) LoadSession(ctx context.Context, sessionID id.ID) (*sessionpkg.
 // Session returns an already loaded session owner, loading it if needed.
 func (e *Engine) Session(ctx context.Context, sessionID id.ID) (*sessionpkg.Session, error) {
 	return e.LoadSession(ctx, sessionID)
+}
+
+// ResolveOfferedFile loads a live-file capability by its opaque token.
+func (e *Engine) ResolveOfferedFile(ctx context.Context, token string) (offeredfile.Record, error) {
+	if e == nil || e.offeredFiles == nil {
+		return offeredfile.Record{}, fmt.Errorf("offered file service is unavailable")
+	}
+	return e.offeredFiles.Resolve(ctx, token)
 }
 
 // LoadedSessions returns the live session owners currently held by the registry.
@@ -120,6 +129,9 @@ func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	var cleanupErrs []error
 	if e.files != nil {
 		cleanupErrs = append(cleanupErrs, e.files.DeleteSessionData(sessionID))
+	}
+	if e.offeredFiles != nil {
+		cleanupErrs = append(cleanupErrs, e.offeredFiles.DeleteSession(ctx, sessionID))
 	}
 	if managedRoot != "" {
 		if err := os.RemoveAll(managedRoot); err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
@@ -153,6 +154,7 @@ type Runtime struct {
 	MCP                   MCPExecutor
 	Browser               browserapi.Service
 	Attachments           *attachment.Manager
+	OfferedFiles          *offeredfile.Manager
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
 }
@@ -316,7 +318,7 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 		return checkBrowserUploadPaths(runtime, req)
 	case FileWrite, FileEdit:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
-	case FileRead, ViewImage, ShowImage, ShowMedia, FileGlob, FileGrep, CodeSearch, Lint:
+	case FileRead, ViewImage, ShowImage, ShowMedia, OfferFile, FileGlob, FileGrep, CodeSearch, Lint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:
 		return nil

@@ -45,6 +45,7 @@ const (
 	ToolKindViewImage           ToolKind = "view_image"
 	ToolKindShowImage           ToolKind = "show_image"
 	ToolKindShowMedia           ToolKind = "show_media"
+	ToolKindOfferFile           ToolKind = "offer_file"
 	ToolKindFileGlob            ToolKind = "file_glob"
 	ToolKindFileGrep            ToolKind = "file_grep"
 	ToolKindCodeSearch          ToolKind = "code_search"
@@ -130,6 +131,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindFileRead,
 	ToolKindViewImage,
 	ToolKindShowMedia,
+	ToolKindOfferFile,
 	ToolKindFileGlob,
 	ToolKindFileGrep,
 	ToolKindCodeSearch,

@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -123,6 +124,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
+	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
@@ -162,6 +164,43 @@ func (s *Server) handleSessionAttachment(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeFile(w, r, path)
+}
+
+func (s *Server) handleOfferedFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/offered-files/"))
+	if token == "" || strings.Contains(token, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	record, err := s.controller.ResolveOfferedFile(r.Context(), token)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	file, err := os.Open(record.Path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType := strings.TrimSpace(record.MIME)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": record.Name}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, record.Name, info.ModTime(), file)
 }
 
 // Addr returns the resolved server bind address.

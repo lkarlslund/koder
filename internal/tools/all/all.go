@@ -12,6 +12,7 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/linttool"
 	_ "github.com/lkarlslund/koder/internal/tools/mcptool"
 	_ "github.com/lkarlslund/koder/internal/tools/milestonetool"
+	_ "github.com/lkarlslund/koder/internal/tools/offerfiletool"
 	_ "github.com/lkarlslund/koder/internal/tools/questiontool"
 	_ "github.com/lkarlslund/koder/internal/tools/readtool"
 	_ "github.com/lkarlslund/koder/internal/tools/showimagetool"

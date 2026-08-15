@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -1040,6 +1041,14 @@ func (c *Controller) SessionAttachmentPath(sessionID id.ID, attachmentID string)
 		return "", fmt.Errorf("attachment not found")
 	}
 	return matches[0], nil
+}
+
+// ResolveOfferedFile loads a live-file download capability.
+func (c *Controller) ResolveOfferedFile(ctx context.Context, token string) (offeredfile.Record, error) {
+	if c == nil || c.agent == nil {
+		return offeredfile.Record{}, fmt.Errorf("offered file service is unavailable")
+	}
+	return c.agent.ResolveOfferedFile(ctx, token)
 }
 
 // ContinueForSelection asks the selected chat to continue.

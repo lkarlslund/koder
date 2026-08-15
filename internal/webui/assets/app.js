@@ -808,6 +808,41 @@
 	    : '<video class="tool-media-video" controls preload="metadata" playsinline src="' + escapeHTML(media.src) + '"></video>';
 	  return toolResultHeader(summary) + '<div class="tool-result-body tool-media-result">' + element + (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') + '</div>';
     }
+    function offeredFileIcon(name, mime) {
+      const filename = String(name || '').toLowerCase();
+      const type = String(mime || '').toLowerCase();
+      if (type.startsWith('image/')) return 'bi-file-earmark-image';
+      if (type.startsWith('audio/')) return 'bi-file-earmark-music';
+      if (type.startsWith('video/')) return 'bi-file-earmark-play';
+      if (type === 'application/pdf') return 'bi-file-earmark-pdf';
+      if (type.includes('wordprocessingml') || type === 'application/msword') return 'bi-file-earmark-word';
+      if (type.includes('spreadsheetml') || type === 'application/vnd.ms-excel') return 'bi-file-earmark-excel';
+      if (type.includes('presentationml') || type === 'application/vnd.ms-powerpoint') return 'bi-file-earmark-ppt';
+      if (type.includes('zip') || type.includes('gzip') || type.includes('tar') || type.includes('rar') || type.includes('7z') || /\.(zip|gz|tgz|tar|rar|7z|xz|bz2|zst)$/.test(filename)) return 'bi-file-earmark-zip';
+      if (type.startsWith('text/') || type.includes('json') || type.includes('xml') || type.includes('yaml')) {
+        return /\.(c|cc|cpp|cs|css|go|h|hpp|html|java|js|jsx|php|py|rb|rs|sh|sql|ts|tsx|vue)$/.test(filename) ? 'bi-file-earmark-code' : 'bi-file-earmark-text';
+      }
+      return type === 'application/octet-stream' ? 'bi-file-earmark-binary' : 'bi-file-earmark';
+    }
+    function renderOfferFileBlock(data, fallbackText) {
+      const token = firstValue(data, ['token', 'Token']);
+      const name = firstValue(data, ['name', 'Name']) || 'download';
+      const mime = firstValue(data, ['mime_type', 'MIMEType']);
+      const rawSize = firstValue(data, ['size', 'Size']);
+      const size = Number(rawSize) || 0;
+      const title = firstValue(data, ['title', 'Title']);
+      const summary = title || firstValue(data, ['summary', 'Summary']) || fallbackText || name;
+      if (!token) return renderCompactBlock('Offered file', summary);
+      const meta = [mime, rawSize !== '' ? formatByteCount(size) : ''].filter(Boolean).join(' · ');
+      const href = '/api/offered-files/' + encodeURIComponent(token);
+      return toolResultHeader(summary) +
+        '<div class="tool-result-body tool-offered-file">' +
+          '<i class="bi ' + offeredFileIcon(name, mime) + ' tool-offered-file-icon" aria-hidden="true"></i>' +
+          '<div class="tool-offered-file-details"><div class="tool-offered-file-name">' + escapeHTML(name) + '</div>' +
+            (meta ? '<div class="small text-secondary">' + escapeHTML(meta) + '</div>' : '') + '</div>' +
+          '<a class="btn btn-sm btn-outline-primary tool-offered-file-download" href="' + escapeHTML(href) + '" download title="Download ' + escapeHTML(name) + '"><i class="bi bi-download"></i><span>Download</span></a>' +
+        '</div>';
+    }
     function readRangeLabel(args, data) {
       const requestedStart = firstValue(args, ['start_line', 'StartLine']);
       const requestedEnd = firstValue(args, ['end_line', 'EndLine']);
@@ -864,6 +899,7 @@
         case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
 		case 'show_media': return path ? 'Show media ' + path : 'Show media';
 		case 'show_image': return path ? 'Show image ' + path : 'Show image';
+		case 'offer_file': return path ? 'Offer file ' + path : 'Offer file';
         case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
         default: return kind || 'Tool';
       }
@@ -975,6 +1011,7 @@
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
 	  if (kind === 'show_media' || kind === 'show_image') return renderShowMediaBlock(data, toolResultText(tool));
+	  if (kind === 'offer_file') return renderOfferFileBlock(data, toolResultText(tool));
 	  if (kind === 'browser_screenshot' || kind === 'browser_image') return renderImagePreviewBlock('Browser image', data, toolResultText(tool), false);
 	  if (kind.startsWith('browser_')) return renderCompactBlock(firstValue(data, ['summary', 'Summary']) || kind.replaceAll('_', ' '), firstValue(data, ['text', 'Text']) || toolResultText(tool), 'tool-result-body-mono');
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
@@ -3702,6 +3739,7 @@
           if (kind === 'webfetch') return 'bi-globe';
 		  if (kind === 'show_media') return 'bi-play-btn';
 		  if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
+		  if (kind === 'offer_file') return 'bi-file-earmark-arrow-down';
           return 'bi-wrench-adjustable';
         },
         toolTitle(tool) { return toolTitleText(tool); },
