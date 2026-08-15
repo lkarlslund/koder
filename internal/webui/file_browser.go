@@ -103,6 +103,12 @@ func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		s.handleSessionFileRaw(w, r, sessionID)
+	case "download":
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleSessionFileDownload(w, r, sessionID)
 	case "send":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -204,22 +210,35 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 		writeFileBrowserError(w, err)
 		return
 	}
-	info, err := os.Stat(full)
+	file, err := os.Open(full)
 	if err != nil {
-		writeFileBrowserError(w, fmt.Errorf("stat path: %w", err))
+		writeFileBrowserError(w, fmt.Errorf("open file: %w", err))
 		return
 	}
-	if info.IsDir() {
-		http.Error(w, "path is a directory", http.StatusBadRequest)
-		return
-	}
-	mimeType, err := detectFileBrowserMIME(full, rel)
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
-		writeFileBrowserError(w, err)
+		writeFileBrowserError(w, fmt.Errorf("stat file: %w", err))
 		return
 	}
+	if !info.Mode().IsRegular() {
+		http.Error(w, "path is not a regular file", http.StatusBadRequest)
+		return
+	}
+	mimeType := detectOpenFileBrowserMIME(file, rel)
 	if !isFileBrowserImageMIME(mimeType) {
 		http.Error(w, "file is not a supported image", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (s *Server) handleSessionFileDownload(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	if err != nil {
+		writeFileBrowserError(w, err)
 		return
 	}
 	file, err := os.Open(full)
@@ -228,7 +247,22 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		writeFileBrowserError(w, fmt.Errorf("stat file: %w", err))
+		return
+	}
+	if !info.Mode().IsRegular() {
+		http.Error(w, "path is not a regular file", http.StatusBadRequest)
+		return
+	}
+	mimeType := detectOpenFileBrowserMIME(file, rel)
+	if strings.TrimSpace(mimeType) == "" {
+		mimeType = "application/octet-stream"
+	}
 	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name()}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
@@ -419,28 +453,32 @@ func looksBinary(data []byte) bool {
 }
 
 func detectFileBrowserMIME(full, rel string) (string, error) {
-	extMIME := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(rel))))
-	if isFileBrowserImageMIME(extMIME) {
-		return extMIME, nil
-	}
 	file, err := os.Open(full)
 	if err != nil {
-		return extMIME, fmt.Errorf("open file: %w", err)
+		return "", fmt.Errorf("open file: %w", err)
 	}
 	defer file.Close()
+	return detectOpenFileBrowserMIME(file, rel), nil
+}
+
+func detectOpenFileBrowserMIME(file *os.File, rel string) string {
+	extMIME := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(rel))))
+	if isFileBrowserImageMIME(extMIME) {
+		return extMIME
+	}
 	var sniff [512]byte
-	n, err := file.Read(sniff[:])
-	if err != nil && n == 0 {
-		return extMIME, nil
+	n, _ := file.ReadAt(sniff[:], 0)
+	if n == 0 {
+		return extMIME
 	}
 	detected := http.DetectContentType(sniff[:n])
 	if detected == "application/octet-stream" && extMIME != "" {
-		return extMIME, nil
+		return extMIME
 	}
 	if detected != "" {
-		return detected, nil
+		return detected
 	}
-	return extMIME, nil
+	return extMIME
 }
 
 func isFileBrowserImageMIME(mimeType string) bool {

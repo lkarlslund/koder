@@ -196,6 +196,10 @@
         return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/raw?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
       },
 
+      downloadFileURL(path) {
+        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/download?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
+      },
+
       pathFromURL() {
         return String(new URLSearchParams(location.search).get('path') || '').trim();
       },

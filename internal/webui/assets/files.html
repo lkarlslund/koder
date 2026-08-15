@@ -84,6 +84,7 @@
                 <div class="small text-secondary" x-text="fileMeta()"></div>
               </div>
               <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+                <a class="btn btn-sm btn-outline-secondary" :href="downloadFileURL(file.path)" :download="file.name" title="Download file"><i class="bi bi-download"></i><span class="visually-hidden">Download file</span></a>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Send file to chat">
                   <button type="button" class="btn btn-outline-primary" title="Send file reference to chat" @click="sendFileToChat()" :disabled="sendBusy || !chatID"><i class="bi bi-send"></i></button>
                   <button type="button" class="btn btn-outline-secondary" title="Send selected text to chat" @click="sendFileToChat({selection: true})" :disabled="sendBusy || !chatID"><i class="bi bi-cursor-text"></i></button>

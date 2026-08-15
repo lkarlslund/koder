@@ -162,6 +162,8 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		`imageLightbox.open`,
 		`image-lightbox`,
 		`image-lightbox-img`,
+		`Download file`,
+		`downloadFileURL(file.path)`,
 		currentAssetHash,
 	} {
 		if !strings.Contains(text, want) {
@@ -308,6 +310,29 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	}
 	if !bytes.Equal(body, imageBytes) {
 		t.Fatalf("unexpected raw image body: got %d bytes want %d", len(body), len(imageBytes))
+	}
+
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/download?path=README.md")
+	if err != nil {
+		t.Fatalf("download file: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected download ok, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename=README.md` {
+		t.Fatalf("expected attachment content disposition, got %q", got)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected nosniff download header, got %q", got)
+	}
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read download body: %v", err)
+	}
+	if !bytes.Equal(body, []byte("# Project\n\n```go\npackage main\n```\n")) {
+		t.Fatalf("unexpected download body: %q", body)
 	}
 
 	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=../outside.txt")
