@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -72,6 +73,27 @@ func IndexPrefix(namespace, name, value string) string {
 
 func IndexKey(namespace, name, value, id string) string {
 	return IndexPrefix(namespace, name, value) + id
+}
+
+func OrderedIndexKey(namespace, name, value, order, id string) string {
+	if order == "" {
+		return IndexKey(namespace, name, value, id)
+	}
+	return IndexPrefix(namespace, name, value) + IndexCursor(order, id)
+}
+
+func IndexCursor(order, id string) string {
+	if order == "" {
+		return id
+	}
+	return order + "~" + id
+}
+
+func IDFromIndexCursor(cursor string) string {
+	if idx := strings.LastIndex(cursor, "~"); idx >= 0 {
+		return cursor[idx+1:]
+	}
+	return cursor
 }
 
 func WriteJSONFile(path string, value any) error {

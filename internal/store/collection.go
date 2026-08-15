@@ -24,6 +24,7 @@ type CollectionSpec[T any] struct {
 type IndexSpec[T any] struct {
 	Name  string
 	Value func(T) string
+	Order func(T) string
 }
 
 // Query selects all records or the records matching one secondary index.
@@ -47,6 +48,14 @@ func ByIndex[T any](name, value string) Query[T] {
 type Collection[T any] struct {
 	store *Store
 	spec  CollectionSpec[T]
+}
+
+// Page is a bounded collection result in durable-ID order.
+type Page[T any] struct {
+	Items     []T
+	Total     int
+	HasBefore bool
+	HasAfter  bool
 }
 
 // NewCollection returns a typed collection for spec.
@@ -174,14 +183,55 @@ func (c Collection[T]) List(ctx context.Context, query Query[T]) ([]T, error) {
 	return out, nil
 }
 
+// ListIndexPage returns one bounded page for an exact secondary-index value.
+// Cursors are exclusive durable record IDs.
+func (c Collection[T]) ListIndexPage(ctx context.Context, name, value, before, after string, limit int, tail bool) (Page[T], error) {
+	if name == "" || value == "" {
+		return Page[T]{}, fmt.Errorf("page %s: index name and value are required", c.spec.Namespace)
+	}
+	if limit <= 0 {
+		return Page[T]{}, fmt.Errorf("page %s: positive limit is required", c.spec.Namespace)
+	}
+	if before != "" && after != "" {
+		return Page[T]{}, fmt.Errorf("page %s: before and after are mutually exclusive", c.spec.Namespace)
+	}
+	rawPage, err := c.store.backend.ListIndexPage(ctx, c.spec.Namespace, driver.IndexPageRequest{
+		Name: name, Value: value, Before: before, After: after, Limit: limit, Tail: tail,
+	})
+	if err != nil {
+		return Page[T]{}, err
+	}
+	out := Page[T]{
+		Items:     make([]T, 0, len(rawPage.Items)),
+		Total:     rawPage.Total,
+		HasBefore: rawPage.HasBefore,
+		HasAfter:  rawPage.HasAfter,
+	}
+	for _, raw := range rawPage.Items {
+		var item T
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return Page[T]{}, fmt.Errorf("decode %s page item: %w", c.spec.Namespace, err)
+		}
+		if !c.matchesIndex(item, name, value) {
+			continue
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, nil
+}
+
 func (c Collection[T]) put(ctx context.Context, value T) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", c.spec.Namespace, err)
 	}
-	indexes := make(map[string]string, len(c.spec.Indexes))
+	indexes := make(map[string]driver.IndexValue, len(c.spec.Indexes))
 	for _, spec := range c.spec.Indexes {
-		indexes[spec.Name] = spec.Value(value)
+		index := driver.IndexValue{Value: spec.Value(value)}
+		if spec.Order != nil {
+			index.Order = spec.Order(value)
+		}
+		indexes[spec.Name] = index
 	}
 	id := c.spec.GetID(value)
 	if err := c.store.backend.Put(ctx, c.spec.Namespace, id, data, indexes); err != nil {
@@ -189,6 +239,29 @@ func (c Collection[T]) put(ctx context.Context, value T) error {
 	}
 	slog.Debug("store put", "namespace", c.spec.Namespace, "id", id, "bytes", len(data), "indexes", len(indexes))
 	return nil
+}
+
+// AddIndexEntries builds one secondary index for existing records without
+// rewriting the records themselves.
+func (c Collection[T]) AddIndexEntries(ctx context.Context, name, value string, items []T) error {
+	var indexSpec *IndexSpec[T]
+	for idx := range c.spec.Indexes {
+		if c.spec.Indexes[idx].Name == name {
+			indexSpec = &c.spec.Indexes[idx]
+			break
+		}
+	}
+	if indexSpec == nil || indexSpec.Order == nil {
+		return fmt.Errorf("build %s index %q: ordered index is not configured", c.spec.Namespace, name)
+	}
+	entries := make([]driver.OrderedIndexEntry, 0, len(items))
+	for _, item := range items {
+		if indexSpec.Value(item) != value {
+			continue
+		}
+		entries = append(entries, driver.OrderedIndexEntry{ID: c.spec.GetID(item), Order: indexSpec.Order(item)})
+	}
+	return c.store.backend.AddIndexEntries(ctx, c.spec.Namespace, name, value, entries)
 }
 
 func collectionIDKey(id any) (string, error) {

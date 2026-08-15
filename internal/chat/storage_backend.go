@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/store/driver"
 )
 
 type Approval struct {
@@ -130,11 +131,7 @@ func (s *Source) TimelinePageAfter(ctx context.Context, chatID, after id.ID, lim
 	if err != nil {
 		return TimelinePage{}, err
 	}
-	items, err := timelineForChat(ctx, deps.Store, chatID)
-	if err != nil {
-		return TimelinePage{}, err
-	}
-	return timelinePageAfter(items, after, limit), nil
+	return timelinePageAfterForChat(ctx, deps.Store, chatID, after, limit)
 }
 
 func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
@@ -144,8 +141,21 @@ func timelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
 		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
 		Indexes: []store.IndexSpec[domain.TimelineItem]{
 			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
+			{
+				Name:  "chat-seq",
+				Value: func(v domain.TimelineItem) string { return v.ChatID },
+				Order: func(v domain.TimelineItem) string { return timelineSequenceKey(v.Seq) },
+			},
 		},
 	})
+}
+
+func timelineSequenceKey(seq int64) string {
+	return fmt.Sprintf("%020d", max(int64(0), seq))
+}
+
+func timelineIndexCursor(item domain.TimelineItem) string {
+	return driver.IndexCursor(timelineSequenceKey(item.Seq), item.ID)
 }
 
 func approvalCollection(st *store.Store) store.Collection[Approval] {
@@ -459,29 +469,130 @@ type TimelinePage struct {
 	Total     int
 }
 
+const timelineHydrationPageSize = 64
+
+func timelineWorkingSetForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, int, bool, error) {
+	var loaded []domain.TimelineItem
+	before := id.ID("")
+	total := 0
+	for {
+		page, err := timelinePageForChat(ctx, st, chatID, before, timelineHydrationPageSize, false)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		total = page.Total
+		loaded = append(slices.Clone(page.Items), loaded...)
+		if start, ok := workingSetStartAfterCompaction(loaded); ok {
+			return slices.Clone(loaded[start:]), total, start > 0 || page.HasMore, nil
+		}
+		if !page.HasMore || len(page.Items) == 0 {
+			return loaded, total, false, nil
+		}
+		before = page.Before
+	}
+}
+
+func workingSetStartAfterCompaction(items []domain.TimelineItem) (int, bool) {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		compaction, ok := items[idx].Content.(domain.Compaction)
+		if !ok || compaction.Status != "completed" || strings.TrimSpace(compaction.Summary) == "" {
+			continue
+		}
+		firstKeptID := strings.TrimSpace(compaction.FirstKeptItemID)
+		if firstKeptID == "" {
+			return 0, false
+		}
+		firstKept := slices.IndexFunc(items[:idx], func(item domain.TimelineItem) bool {
+			return item.ID == firstKeptID
+		})
+		if firstKept >= 0 {
+			return firstKept, true
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
 func timelinePageForChat(ctx context.Context, st *store.Store, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
-	items, err := timelineForChat(ctx, st, chatID)
+	if all || limit <= 0 {
+		items, err := timelineForChat(ctx, st, chatID)
+		if err != nil {
+			return TimelinePage{}, err
+		}
+		total := len(items)
+		return timelinePage(items, false, false, total), nil
+	}
+	if err := ensureTimelineSequenceIndex(ctx, st, chatID); err != nil {
+		return TimelinePage{}, err
+	}
+	beforeCursor, err := timelineCursorForItem(ctx, st, before)
 	if err != nil {
 		return TimelinePage{}, err
 	}
-	total := len(items)
-	if all || limit <= 0 || total <= limit {
-		return timelinePage(items, false, false, total), nil
+	page, err := timelineCollection(st).ListIndexPage(ctx, "chat-seq", string(chatID), beforeCursor, "", limit, true)
+	if err != nil {
+		return TimelinePage{}, err
 	}
-	end := total
-	if before != "" {
-		idx := slices.IndexFunc(items, func(item domain.TimelineItem) bool {
-			return item.ID == before
-		})
-		if idx >= 0 {
-			end = idx
-		}
+	sortTimeline(page.Items)
+	return timelinePage(page.Items, page.HasBefore, page.HasAfter, page.Total), nil
+}
+
+func timelinePageAfterForChat(ctx context.Context, st *store.Store, chatID, after id.ID, limit int) (TimelinePage, error) {
+	if limit <= 0 {
+		limit = 1
 	}
-	if end <= 0 {
-		return TimelinePage{LoadedAll: true, Total: total}, nil
+	if err := ensureTimelineSequenceIndex(ctx, st, chatID); err != nil {
+		return TimelinePage{}, err
 	}
-	start := max(0, end-limit)
-	return timelinePage(items[start:end], start > 0, end < total, total), nil
+	afterCursor, err := timelineCursorForItem(ctx, st, after)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	page, err := timelineCollection(st).ListIndexPage(ctx, "chat-seq", string(chatID), "", afterCursor, limit, false)
+	if err != nil {
+		return TimelinePage{}, err
+	}
+	sortTimeline(page.Items)
+	return timelinePage(page.Items, page.HasBefore, page.HasAfter, page.Total), nil
+}
+
+func timelineCursorForItem(ctx context.Context, st *store.Store, itemID id.ID) (string, error) {
+	if itemID == "" {
+		return "", nil
+	}
+	item, err := timelineCollection(st).Get(ctx, itemID)
+	if err != nil {
+		return "", err
+	}
+	return timelineIndexCursor(item), nil
+}
+
+func ensureTimelineSequenceIndex(ctx context.Context, st *store.Store, chatID id.ID) error {
+	if chatID == "" {
+		return fmt.Errorf("timeline page: chat id is required")
+	}
+	unlock := store.LockTimelineMutation()
+	defer unlock()
+	collection := timelineCollection(st)
+	legacy, err := collection.ListIndexPage(ctx, "chat", string(chatID), "", "", 1, true)
+	if err != nil {
+		return err
+	}
+	ordered, err := collection.ListIndexPage(ctx, "chat-seq", string(chatID), "", "", 1, true)
+	if err != nil {
+		return err
+	}
+	if legacy.Total == ordered.Total {
+		return nil
+	}
+	items, err := timelineForChat(ctx, st, chatID)
+	if err != nil {
+		return err
+	}
+	if err := collection.AddIndexEntries(ctx, "chat-seq", string(chatID), items); err != nil {
+		return err
+	}
+	return nil
 }
 
 func timelinePageAfter(items []domain.TimelineItem, after id.ID, limit int) TimelinePage {

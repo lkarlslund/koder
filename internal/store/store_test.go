@@ -251,6 +251,56 @@ func TestCollectionListIsSortedByID(t *testing.T) {
 	}
 }
 
+func TestCollectionListIndexPageReadsOnlyRequestedRange(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+			notes := testNotes(st)
+			for _, item := range []testNote{
+				{ID: "a", ChatID: "chat-7", Body: "a"},
+				{ID: "b", ChatID: "chat-7", Body: "b"},
+				{ID: "c", ChatID: "chat-7", Body: "c"},
+				{ID: "d", ChatID: "chat-7", Body: "d"},
+				{ID: "other", ChatID: "chat-8", Body: "other"},
+			} {
+				if err := notes.Put(context.Background(), item); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			tail, err := notes.ListIndexPage(context.Background(), "chat", "chat-7", "", "", 2, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := []string{tail.Items[0].ID, tail.Items[1].ID}; !slices.Equal(got, []string{"c", "d"}) {
+				t.Fatalf("tail IDs = %#v", got)
+			}
+			if tail.Total != 4 || !tail.HasBefore || tail.HasAfter {
+				t.Fatalf("tail metadata = %#v", tail)
+			}
+
+			older, err := notes.ListIndexPage(context.Background(), "chat", "chat-7", "c", "", 2, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := []string{older.Items[0].ID, older.Items[1].ID}; !slices.Equal(got, []string{"a", "b"}) {
+				t.Fatalf("older IDs = %#v", got)
+			}
+			if older.HasBefore || !older.HasAfter {
+				t.Fatalf("older metadata = %#v", older)
+			}
+
+			newer, err := notes.ListIndexPage(context.Background(), "chat", "chat-7", "", "b", 1, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(newer.Items) != 1 || newer.Items[0].ID != "c" || !newer.HasBefore || !newer.HasAfter {
+				t.Fatalf("newer page = %#v", newer)
+			}
+		})
+	}
+}
+
 func testNotes(st *Store) Collection[testNote] {
 	return NewCollection(st, CollectionSpec[testNote]{
 		Namespace: "test-notes",

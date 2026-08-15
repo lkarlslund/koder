@@ -578,11 +578,11 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 	if err != nil {
 		return nil, err
 	}
-	if err := sourceRuntime.EnsureTimeline(ctx); err != nil {
+	sourceTimeline, err := sourceRuntime.FullTimeline(ctx)
+	if err != nil {
 		return nil, err
 	}
-	sourceSnapshot := sourceRuntime.Snapshot()
-	chatRecord, err := s.chatsSrc.ForkRecordAt(ctx, source, sourceSnapshot.Timeline, anchorItemID, title, position)
+	chatRecord, err := s.chatsSrc.ForkRecordAt(ctx, source, sourceTimeline, anchorItemID, title, position)
 	if err != nil {
 		return nil, err
 	}

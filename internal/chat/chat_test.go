@@ -2071,6 +2071,114 @@ func TestTimelinePageForChatSlicesTailOlderAndAll(t *testing.T) {
 	}
 }
 
+func TestTimelinePageBackfillsOrderedIndexForExistingChat(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	_ = session
+	legacy := store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
+		Namespace: "timeline",
+		GetID:     func(v domain.TimelineItem) string { return v.ID },
+		SetID:     func(v *domain.TimelineItem, value string) { v.ID = value },
+		Indexes: []store.IndexSpec[domain.TimelineItem]{
+			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
+		},
+	})
+	now := time.Now().UTC()
+	for seq, itemID := range []string{"z", "a", "m"} {
+		if err := legacy.Put(context.Background(), domain.TimelineItem{
+			ID: itemID, ChatID: chatRecord.ID, Seq: int64(seq + 1),
+			Content: domain.UserMessage{Text: itemID}, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := timelinePageForChat(context.Background(), st, chatRecord.ID, "", 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Items[0].Seq != 2 || page.Items[1].Seq != 3 {
+		t.Fatalf("backfilled page = %#v", page)
+	}
+}
+
+func TestTimelineWorkingSetStartsAtLatestCompactionTail(t *testing.T) {
+	st := openTestStore(t)
+	_, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	var firstKept domain.TimelineItem
+	for idx := 0; idx < timelineHydrationPageSize+5; idx++ {
+		item, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("old %d", idx)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if idx == timelineHydrationPageSize+3 {
+			firstKept = item
+		}
+	}
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.Compaction{
+		Status: "completed", Summary: "summary", FirstKeptItemID: firstKept.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
+		t.Fatal(err)
+	}
+
+	working, total, hasOlder, err := timelineWorkingSetForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != timelineHydrationPageSize+7 || !hasOlder {
+		t.Fatalf("working-set metadata: total=%d hasOlder=%v", total, hasOlder)
+	}
+	if len(working) != 4 || working[0].ID != firstKept.ID {
+		t.Fatalf("working set = %#v", working)
+	}
+}
+
+func TestLoadHydratesOnlyCompactionWorkingSet(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	for idx := 0; idx < 3; idx++ {
+		if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: fmt.Sprintf("old %d", idx)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "kept"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.Compaction{
+		Status: "completed", Summary: "summary", FirstKeptItemID: kept.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "tail"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := Load(ctx, session, chatRecord, Deps{Store: st}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	snapshot := rt.Snapshot()
+	if len(snapshot.Timeline) != 3 || snapshot.Timeline[0].ID != kept.ID {
+		t.Fatalf("hydrated timeline = %#v", snapshot.Timeline)
+	}
+	if !snapshot.TimelineHasMore || snapshot.TimelineLoadedAll {
+		t.Fatalf("hydration metadata: hasMore=%v loadedAll=%v", snapshot.TimelineHasMore, snapshot.TimelineLoadedAll)
+	}
+	full, err := rt.FullTimeline(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 6 {
+		t.Fatalf("full timeline length = %d", len(full))
+	}
+}
+
 func TestLoadMetadataDefersTimelineUntilNeeded(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

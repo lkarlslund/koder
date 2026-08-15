@@ -219,6 +219,19 @@ func (s *ChatState) Timeline() []*TimelineRecord {
 	return s.timeline
 }
 
+func (s *ChatState) NextTimelineSequence() int64 {
+	if s == nil {
+		return 1
+	}
+	var latest int64
+	for _, record := range s.timeline {
+		if record != nil && record.Item.Seq > latest {
+			latest = record.Item.Seq
+		}
+	}
+	return latest + 1
+}
+
 // AppendTimelineItem adds a new timeline record to the current chat state.
 func (s *ChatState) AppendTimelineItem(item domain.TimelineItem) *TimelineRecord {
 	if s == nil {
@@ -456,7 +469,7 @@ func (s *ChatState) ActiveAssistant(chatID id.ID, now time.Time) *TimelineRecord
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	seq := int64(len(s.timeline) + 1)
+	seq := s.NextTimelineSequence()
 	item := domain.TimelineItem{
 		ID:        NewTimelineID(now),
 		ChatID:    chatID,

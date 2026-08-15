@@ -129,6 +129,7 @@ type Chat struct {
 	draining         bool
 	closed           bool
 	timelineLoaded   bool
+	timelineHasOlder bool
 
 	inbox   chan any
 	done    chan struct{}
@@ -306,9 +307,10 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		chatRecord = loaded
 	}
 	var timeline []domain.TimelineItem
+	timelineHasOlder := !loadTimeline
 	if loadTimeline {
 		var err error
-		timeline, err = timelineForChat(ctx, deps.Store, chatRecord.ID)
+		timeline, _, timelineHasOlder, err = timelineWorkingSetForChat(ctx, deps.Store, chatRecord.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -325,7 +327,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 	if err != nil {
 		return nil, err
 	}
-	return newChat(session, chatRecord, timeline, approvals, deps, onClose, loadTimeline)
+	return newChat(session, chatRecord, timeline, approvals, deps, onClose, loadTimeline, timelineHasOlder)
 }
 
 func repairContextCacheFromTimeline(ctx context.Context, st *store.Store, chatRecord domain.Chat, timeline []domain.TimelineItem) (domain.Chat, error) {
@@ -369,10 +371,10 @@ func repairCapabilityRequirementsFromTimeline(ctx context.Context, st *store.Sto
 
 // New builds a live chat from hydrated persisted state.
 func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID)) (*Chat, error) {
-	return newChat(session, chatRecord, timeline, approvals, deps, onClose, true)
+	return newChat(session, chatRecord, timeline, approvals, deps, onClose, true, false)
 }
 
-func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID), timelineLoaded bool) (*Chat, error) {
+func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []Approval, deps Deps, onClose func(id.ID), timelineLoaded, timelineHasOlder bool) (*Chat, error) {
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
@@ -386,20 +388,21 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		statusText = "Waiting for input"
 	}
 	c := &Chat{
-		deps:           deps,
-		onClose:        onClose,
-		session:        session,
-		chat:           chatRecord,
-		state:          NewTimelineState(chatRecord, timeline, approvals),
-		status:         status,
-		statusText:     statusText,
-		queue:          cloneQueuedInputs(chatRecord.QueuedInputs),
-		queueNotes:     map[id.ID]string{},
-		toolCancels:    map[string]context.CancelFunc{},
-		timelineLoaded: timelineLoaded,
-		inbox:          make(chan any, 64),
-		done:           make(chan struct{}),
-		subs:           map[int]chan Update{},
+		deps:             deps,
+		onClose:          onClose,
+		session:          session,
+		chat:             chatRecord,
+		state:            NewTimelineState(chatRecord, timeline, approvals),
+		status:           status,
+		statusText:       statusText,
+		queue:            cloneQueuedInputs(chatRecord.QueuedInputs),
+		queueNotes:       map[id.ID]string{},
+		toolCancels:      map[string]context.CancelFunc{},
+		timelineLoaded:   timelineLoaded,
+		timelineHasOlder: timelineHasOlder,
+		inbox:            make(chan any, 64),
+		done:             make(chan struct{}),
+		subs:             map[int]chan Update{},
 	}
 	go c.loop()
 	resuming := false
@@ -483,7 +486,7 @@ func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.Queue
 	}
 	seq := int64(1)
 	if r.state != nil {
-		seq = int64(len(r.state.Timeline()) + 1)
+		seq = r.state.NextTimelineSequence()
 	}
 	requiresImages := userMessageRequiresImages(user)
 	item := domain.TimelineItem{
@@ -539,7 +542,7 @@ func (r *Chat) NextAssistantItem() domain.TimelineItem {
 	defer r.mu.RUnlock()
 	seq := int64(1)
 	if r.state != nil {
-		seq = int64(len(r.state.Timeline()) + 1)
+		seq = r.state.NextTimelineSequence()
 	}
 	return domain.TimelineItem{
 		ID:        NewTimelineID(now),
@@ -563,7 +566,7 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 	}
 	r.mu.Lock()
 	if item.Seq == 0 && r.state != nil {
-		item.Seq = int64(len(r.state.Timeline()) + 1)
+		item.Seq = r.state.NextTimelineSequence()
 	}
 	if r.state != nil {
 		r.state.UpsertTimelineItem(item)
@@ -624,7 +627,7 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 	user := userMessageForSteers(steers)
 	seq := int64(1)
 	if r.state != nil {
-		seq = int64(len(r.state.Timeline()) + 1)
+		seq = r.state.NextTimelineSequence()
 	}
 	requiresImages := userMessageRequiresImages(user)
 	item := domain.TimelineItem{
@@ -1329,39 +1332,47 @@ func (r *Chat) Timeline(ctx context.Context) ([]domain.TimelineItem, error) {
 	return r.state.SnapshotTimeline(), nil
 }
 
+// FullTimeline loads the complete durable transcript for exceptional
+// operations such as export, rewind, and fork.
+func (r *Chat) FullTimeline(ctx context.Context) ([]domain.TimelineItem, error) {
+	if r == nil {
+		return nil, fmt.Errorf("chat runtime is required")
+	}
+	r.mu.RLock()
+	st := r.deps.Store
+	chatID := r.chat.ID
+	r.mu.RUnlock()
+	if st == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+	return timelineForChat(ctx, st, chatID)
+}
+
 // TimelinePage returns a page of the live transcript.
 func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bool) (TimelinePage, error) {
-	timeline, err := r.Timeline(ctx)
-	if err != nil {
-		return TimelinePage{}, err
+	r.mu.RLock()
+	st := r.deps.Store
+	chatID := r.chat.ID
+	r.mu.RUnlock()
+	if st == nil {
+		return TimelinePage{}, fmt.Errorf("store is required")
 	}
-	total := len(timeline)
-	if all || limit <= 0 || total <= limit {
-		return timelinePage(timeline, false, false, total), nil
+	if all || limit > 0 {
+		return timelinePageForChat(ctx, st, chatID, before, limit, all)
 	}
-	end := total
-	if before != "" {
-		idx := slices.IndexFunc(timeline, func(item domain.TimelineItem) bool {
-			return item.ID == before
-		})
-		if idx >= 0 {
-			end = idx
-		}
-	}
-	if end <= 0 {
-		return TimelinePage{LoadedAll: true, Total: total}, nil
-	}
-	start := max(0, end-limit)
-	return timelinePage(timeline[start:end], start > 0, end < total, total), nil
+	return TimelinePage{}, fmt.Errorf("timeline page limit is required")
 }
 
 // TimelinePageAfter returns the page immediately newer than after.
 func (r *Chat) TimelinePageAfter(ctx context.Context, after id.ID, limit int) (TimelinePage, error) {
-	timeline, err := r.Timeline(ctx)
-	if err != nil {
-		return TimelinePage{}, err
+	r.mu.RLock()
+	st := r.deps.Store
+	chatID := r.chat.ID
+	r.mu.RUnlock()
+	if st == nil {
+		return TimelinePage{}, fmt.Errorf("store is required")
 	}
-	return timelinePageAfter(timeline, after, limit), nil
+	return timelinePageAfterForChat(ctx, st, chatID, after, limit)
 }
 
 // PendingApprovals returns approval requests derived from the live transcript.
@@ -1397,7 +1408,7 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	if st == nil {
 		return fmt.Errorf("store is required")
 	}
-	timeline, err := timelineForChat(ctx, st, chatRecord.ID)
+	timeline, _, timelineHasOlder, err := timelineWorkingSetForChat(ctx, st, chatRecord.ID)
 	if err != nil {
 		return r.markPersistError(err)
 	}
@@ -1419,6 +1430,7 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 		r.state.MergeTimelineLoaded(chatRecord, timeline, approvals)
 	}
 	r.timelineLoaded = true
+	r.timelineHasOlder = timelineHasOlder
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, true, true))
 	return nil
@@ -1432,14 +1444,14 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
-		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded, TimelineLoadedAll: r.timelineLoaded, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
+		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded || r.timelineHasOlder, TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
 	chatRecord := r.state.Chat()
 	snapshot := Snapshot{
 		Session:           r.session,
 		Chat:              chatRecord,
-		TimelineHasMore:   !r.timelineLoaded,
-		TimelineLoadedAll: r.timelineLoaded,
+		TimelineHasMore:   !r.timelineLoaded || r.timelineHasOlder,
+		TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder,
 		Approvals:         r.state.Approvals(),
 		PendingUserInput:  pendingUserInputCount(r.state.SnapshotTimeline()),
 		QueuedInputs:      visibleQueuedInputs(r.queue),
@@ -1491,7 +1503,19 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 	})
 	if idx < 0 {
 		r.mu.Unlock()
-		return LiveRewindResult{}, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, r.chat.ID)
+		fullTimeline, err := r.FullTimeline(ctx)
+		if err != nil {
+			return LiveRewindResult{}, err
+		}
+		r.mu.Lock()
+		r.state.MergeTimelineLoaded(r.chat, fullTimeline, r.state.Approvals())
+		r.timelineHasOlder = false
+		timeline = r.state.SnapshotTimeline()
+		idx = slices.IndexFunc(timeline, func(item domain.TimelineItem) bool { return item.ID == anchorItemID })
+		if idx < 0 {
+			r.mu.Unlock()
+			return LiveRewindResult{}, fmt.Errorf("timeline item %s not found in chat %s", anchorItemID, r.chat.ID)
+		}
 	}
 	next := slices.Clone(timeline[:idx])
 	removed := slices.Clone(timeline[idx:])
@@ -1695,7 +1719,7 @@ func (r *Chat) AppendTimelineContent(ctx context.Context, content domain.Timelin
 	r.mu.Lock()
 	seq := int64(1)
 	if r.state != nil {
-		seq = int64(len(r.state.Timeline()) + 1)
+		seq = r.state.NextTimelineSequence()
 	}
 	item := domain.TimelineItem{
 		ID:        NewTimelineID(now),
@@ -1816,7 +1840,7 @@ func (r *Chat) appendAssistantItem(ctx context.Context, item domain.TimelineItem
 		item.ChatID = r.chat.ID
 	}
 	if item.Seq == 0 && r.state != nil {
-		item.Seq = int64(len(r.state.Timeline()) + 1)
+		item.Seq = r.state.NextTimelineSequence()
 	}
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = now
@@ -3573,7 +3597,7 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	timelineItem := domain.TimelineItem{
 		ID:        NewTimelineID(now),
 		ChatID:    chat.ID,
-		Seq:       int64(len(r.state.Timeline()) + 1),
+		Seq:       r.state.NextTimelineSequence(),
 		Content:   user,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -3674,7 +3698,7 @@ func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 	r.state.AppendTimelineItem(domain.TimelineItem{
 		ID:        NewTimelineID(now),
 		ChatID:    r.chat.ID,
-		Seq:       int64(len(r.state.Timeline()) + 1),
+		Seq:       r.state.NextTimelineSequence(),
 		Content:   domain.Notice{Text: body, Kind: kind, Level: severity},
 		CreatedAt: now,
 		UpdatedAt: now,
