@@ -234,6 +234,7 @@ type ModelConfigPreference struct {
 	ModelPreset        string                `json:"model_preset"`
 	Options            map[string]any        `json:"model_options,omitempty"`
 	ResolvedOverlay    modeloverlay.Resolved `json:"resolved_overlay"`
+	ModelOverlays      *modeloverlay.Catalog `json:"model_overlays,omitempty"`
 	ExtraBody          map[string]any        `json:"extra_body,omitempty"`
 	Temperature        *float64              `json:"temperature,omitempty"`
 	TopP               *float64              `json:"top_p,omitempty"`

@@ -803,64 +803,33 @@
                 <label class="form-label small text-secondary">Uses detected model</label>
                 <input class="form-control" :value="(modelSettingsDraft.source_provider_id || modelSettingsDraft.provider_id) + ' / ' + modelSettingsDraft.source_model_id" disabled>
               </div>
-              <div class="col-6">
+              <div class="col-12">
                 <label class="form-label small text-secondary">Context</label>
                 <input class="form-control" type="number" min="1" x-model.number="modelSettingsDraft.context_window" :disabled="!modelSettingsEditable()">
               </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Preset</label>
-                <select class="form-select" x-model="modelSettingsDraft.model_preset" :disabled="!modelSettingsEditable()">
-                  <option value="auto">auto</option>
-                  <option value="default">default</option>
-                  <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
-                  <option value="qwen3.8-preserve-thinking">qwen3.8-preserve-thinking</option>
-                </select>
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Temperature</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.temperature" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Top P</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.top_p" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Min P</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.min_p" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Top K</label>
-                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.top_k" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Repeat penalty</label>
-                <input class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelSettingsDraft.repeat_penalty" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-6">
-                <label class="form-label small text-secondary">Thinking</label>
-                <select class="form-select" x-model="modelSettingsDraft.thinking_mode" :disabled="!modelSettingsEditable()">
-                  <option value="auto">auto</option>
-                  <option value="enabled">enabled</option>
-                  <option value="disabled">disabled</option>
-                </select>
-              </div>
               <div class="col-12">
-                <label class="form-label small text-secondary">Thinking budget</label>
-                <input class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelSettingsDraft.thinking_budget" :disabled="!modelSettingsEditable()">
-              </div>
-              <div class="col-12">
-                <label class="form-label small text-secondary">Reasoning effort</label>
-                <select class="form-select" x-model="modelSettingsDraft.reasoning_effort" :disabled="!modelSettingsEditable()">
-                  <option value="">auto</option>
-                  <option value="none">none</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                  <option value="max">max</option>
+                <label class="form-label small text-secondary">Model overlay</label>
+                <select class="form-select" x-model="modelSettingsDraft.model_preset" @change="refreshModelOverlayDraft(modelSettingsDraft)" :disabled="!modelSettingsEditable()">
+                  <template x-for="overlay in modelOverlayChoices(modelSettingsDraft)" :key="overlay.id">
+                    <option :value="overlay.id" x-text="overlay.title"></option>
+                  </template>
                 </select>
+                <div class="form-text" x-text="modelSettingsDraft.resolved_overlay?.title || ''"></div>
               </div>
+              <template x-for="control in modelOverlayControls(modelSettingsDraft)" :key="control.id">
+                <div class="col-12">
+                  <label class="form-label small text-secondary" :for="'chat-model-option-' + control.id" x-text="control.label"></label>
+                  <template x-if="control.type === 'select'">
+                    <select class="form-select" :id="'chat-model-option-' + control.id" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()">
+                      <template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" x-text="choice.label"></option></template>
+                    </select>
+                  </template>
+                  <template x-if="control.type === 'number'"><input class="form-control" :id="'chat-model-option-' + control.id" type="number" :min="control.min" :max="control.max" :step="control.step || 'any'" :placeholder="control.placeholder || 'server default'" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()"></template>
+                  <template x-if="control.type === 'text'"><input class="form-control" :id="'chat-model-option-' + control.id" type="text" :placeholder="control.placeholder || ''" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()"></template>
+                  <template x-if="control.type === 'checkbox'"><label class="form-check"><input class="form-check-input" :id="'chat-model-option-' + control.id" type="checkbox" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()"><span class="form-check-label">Enabled</span></label></template>
+                  <div class="form-text" x-show="control.help" x-text="control.help"></div>
+                </div>
+              </template>
               <div class="col-12" x-show="modelSettingsStatus">
                 <div class="alert mb-0" :class="modelSettingsStatusKind === 'success' ? 'alert-success' : (modelSettingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="modelSettingsStatus"></div>
               </div>
@@ -1263,6 +1232,9 @@
               </div>
 
               <div x-show="settingsTab === 'models'">
+                <template x-for="problem in settings?.model_overlays?.problems || []" :key="problem.file">
+                  <div class="alert alert-warning"><span class="fw-semibold" x-text="problem.file"></span><span x-text="': ' + problem.error"></span></div>
+                </template>
                 <div class="settings-section mb-3">
                   <div class="settings-field">
                     <div class="settings-field-label"><label class="settings-field-title">Default model</label><div class="settings-field-help">Used for new sessions and chats.</div></div>
@@ -1506,37 +1478,33 @@
               </select></div>
             </div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-name">Custom name</label></div><div class="settings-field-control"><input id="settings-model-name" class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source-provider">Uses provider</label><div class="settings-field-help">Provider that serves the underlying model.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-source-provider" class="form-select" x-model="modelConfigDraft.source_provider_id">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source-provider">Uses provider</label><div class="settings-field-help">Provider that serves the underlying model.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-source-provider" class="form-select" x-model="modelConfigDraft.source_provider_id" @change="refreshModelOverlayDraft(modelConfigDraft)">
                 <template x-for="providerID in providerIDOptions()" :key="providerID">
                   <option :value="providerID" x-text="providerID"></option>
                 </template>
               </select></div>
             </div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source">Uses detected model</label></div><div class="settings-field-control"><input id="settings-model-source" class="form-control" x-model="modelConfigDraft.source_model_id" list="model-config-options" autocomplete="off">
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source">Uses detected model</label></div><div class="settings-field-control"><input id="settings-model-source" class="form-control" x-model="modelConfigDraft.source_model_id" @change="refreshModelOverlayDraft(modelConfigDraft)" list="model-config-options" autocomplete="off">
               <datalist id="model-config-options">
                 <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.source_provider_id || modelConfigDraft.provider_id)" :key="model">
                   <option :value="model"></option>
                 </template>
               </datalist></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-context">Context window</label><div class="settings-field-help">Maximum context tokens advertised to Koder.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-context" class="form-control" type="number" min="1" x-model.number="modelConfigDraft.context_window"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-preset">Model preset</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-preset" class="form-select" x-model="modelConfigDraft.model_preset">
-                <option value="auto">auto</option>
-                <option value="default">default</option>
-                <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
-                <option value="qwen3.8-preserve-thinking">qwen3.8-preserve-thinking</option>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-preset">Model overlay</label><div class="settings-field-help" x-text="modelConfigDraft.resolved_overlay?.title || 'Generic model options'"></div></div><div class="settings-field-control"><select id="settings-model-preset" class="form-select" x-model="modelConfigDraft.model_preset" @change="refreshModelOverlayDraft(modelConfigDraft)">
+                <template x-for="overlay in modelOverlayChoices(modelConfigDraft)" :key="overlay.id"><option :value="overlay.id" x-text="overlay.title"></option></template>
               </select></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-temperature">Temperature</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-temperature" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.temperature"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-top-p">Top P</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-top-p" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.top_p"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-min-p">Min P</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-min-p" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.min_p"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-top-k">Top K</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-top-k" class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.top_k"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-repeat-penalty">Repeat penalty</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-repeat-penalty" class="form-control" type="number" min="0" step="0.01" placeholder="auto" x-model="modelConfigDraft.repeat_penalty"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-thinking">Thinking</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-thinking" class="form-select" x-model="modelConfigDraft.thinking_mode">
-                <option value="auto">auto</option>
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
-              </select></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-thinking-budget">Thinking budget</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-thinking-budget" class="form-control" type="number" min="0" step="1" placeholder="auto" x-model.number="modelConfigDraft.thinking_budget"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-reasoning-effort">Reasoning effort</label><div class="settings-field-help">Model-specific reasoning depth; Qwen3.8 supports low, medium, and xhigh.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-reasoning-effort" class="form-select" x-model="modelConfigDraft.reasoning_effort"><option value="">auto</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></div></div>
+            <template x-for="control in modelOverlayControls(modelConfigDraft)" :key="control.id">
+              <div class="settings-field">
+                <div class="settings-field-label"><label class="settings-field-title" :for="'settings-model-option-' + control.id" x-text="control.label"></label><div class="settings-field-help" x-show="control.help" x-text="control.help"></div></div>
+                <div class="settings-field-control">
+                  <template x-if="control.type === 'select'"><select class="form-select" :id="'settings-model-option-' + control.id" x-model="modelConfigDraft.model_options[control.id]"><template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" x-text="choice.label"></option></template></select></template>
+                  <template x-if="control.type === 'number'"><input class="form-control" :id="'settings-model-option-' + control.id" type="number" :min="control.min" :max="control.max" :step="control.step || 'any'" :placeholder="control.placeholder || 'server default'" x-model="modelConfigDraft.model_options[control.id]"></template>
+                  <template x-if="control.type === 'text'"><input class="form-control" :id="'settings-model-option-' + control.id" type="text" :placeholder="control.placeholder || ''" x-model="modelConfigDraft.model_options[control.id]"></template>
+                  <template x-if="control.type === 'checkbox'"><label class="toggle-switch"><input class="toggle-switch-input" :id="'settings-model-option-' + control.id" type="checkbox" x-model="modelConfigDraft.model_options[control.id]"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></template>
+                </div>
+              </div>
+            </template>
             <div class="settings-field settings-field-top">
               <div class="settings-field-label"><span class="settings-field-title">Custom request JSON</span><div class="settings-field-help">Additional fields merged into provider requests.</div></div>
               <div class="settings-field-control"><button class="btn btn-sm mb-2" :class="modelExtraBodyHasContent(modelConfigDraft.extra_body) || modelConfigExtraBodyOpen ? 'btn-outline-primary' : 'btn-outline-secondary'" type="button" @click="modelConfigExtraBodyOpen = !modelConfigExtraBodyOpen">

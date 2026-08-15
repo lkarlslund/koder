@@ -667,7 +667,9 @@ func (c *Controller) ModelConfig(ctx context.Context, providerID, modelID string
 	c.mu.RUnlock()
 	model := modelConfigForPair(cfg, providerID, modelID)
 	pref := modelConfigPreferenceFromConfig(model)
-	pref = decorateModelConfigPreference(cfg, modeloverlay.Load(cfg.ManagedAssetsDir()), pref)
+	catalog := modeloverlay.Load(cfg.ManagedAssetsDir())
+	pref = decorateModelConfigPreference(cfg, catalog, pref)
+	pref.ModelOverlays = &catalog
 	if pref.Custom {
 		return pref
 	}
@@ -725,6 +727,8 @@ func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPrefer
 		c.agent.UpdateConfig(c.cfg)
 	}
 	saved := decorateModelConfigPreference(c.cfg, modeloverlay.Load(c.cfg.ManagedAssetsDir()), modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID)))
+	catalog := modeloverlay.Load(c.cfg.ManagedAssetsDir())
+	saved.ModelOverlays = &catalog
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return saved, nil
@@ -1178,7 +1182,7 @@ func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPrefer
 		Custom:             custom,
 		Editable:           custom,
 		ContextWindow:      model.ContextWindow,
-		ModelPreset:        strings.TrimSpace(model.ModelPreset),
+		ModelPreset:        modeloverlay.NormalizeSelection(model.ModelPreset),
 		Options:            provider.ModelOptionValues(model),
 		ExtraBody:          cloneExtraBodyMap(model.ExtraBody),
 		Temperature:        model.Temperature,

@@ -760,6 +760,51 @@ func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 	}
 }
 
+func TestControllerSaveModelConfigValidatesResolvedOverlayOptions(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"llamacpp": {Name: "llama.cpp", BaseURL: "http://127.0.0.1:8000/v1"},
+		}
+	})
+	pref := ModelConfigPreference{
+		ProviderID:       "llamacpp",
+		ModelID:          "qwen custom",
+		SourceProviderID: "llamacpp",
+		SourceModelID:    "qwen3.8-27b-q8-mtp",
+		ContextWindow:    524288,
+		ModelPreset:      "auto",
+		Options: map[string]any{
+			"reasoning_effort": "medium",
+			"temperature":      1.0,
+		},
+	}
+
+	saved, err := ctrl.SaveModelConfig(context.Background(), pref)
+	if err != nil {
+		t.Fatalf("save valid overlay settings: %v", err)
+	}
+	if saved.ResolvedOverlay.Title != "Qwen3.8" || saved.Options["reasoning_effort"] != "medium" || saved.ModelOverlays == nil {
+		t.Fatalf("expected resolved Qwen3.8 overlay metadata, got %#v", saved)
+	}
+	stored, ok := ctrl.cfg.ModelConfig("llamacpp", "qwen custom")
+	if !ok || stored.Options["reasoning_effort"] != "medium" {
+		t.Fatalf("expected arbitrary overlay options to persist, got %#v", stored)
+	}
+	reloaded, err := config.LoadWithOptions(config.LoadOptions{DataDir: filepath.Dir(ctrl.cfg.Path())})
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	stored, ok = reloaded.ModelConfig("llamacpp", "qwen custom")
+	if !ok || stored.Options["reasoning_effort"] != "medium" || stored.Options["temperature"] != 1.0 {
+		t.Fatalf("expected overlay options to survive config reload, got %#v", stored)
+	}
+
+	pref.Options["reasoning_effort"] = "high"
+	if _, err := ctrl.SaveModelConfig(context.Background(), pref); err == nil || !strings.Contains(err.Error(), "unsupported value high") {
+		t.Fatalf("expected unsupported model option to be rejected, got %v", err)
+	}
+}
+
 func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slots" || r.URL.Path == "/props" {

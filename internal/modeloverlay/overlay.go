@@ -256,6 +256,11 @@ func normalizeSelection(selection string) string {
 	}
 }
 
+// NormalizeSelection converts legacy preset names to their overlay IDs.
+func NormalizeSelection(selection string) string {
+	return normalizeSelection(selection)
+}
+
 func overlayMatches(overlay Template, modelID, transport string) bool {
 	if len(overlay.Match.Transports) > 0 && !containsFold(overlay.Match.Transports, transport) {
 		return false

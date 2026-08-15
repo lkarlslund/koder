@@ -4533,7 +4533,7 @@
           return Number.isFinite(number) ? number : null;
         },
         normalizeModelSettingsDraft(raw = {}) {
-          return Object.assign({
+          const draft = Object.assign({
             original_provider_id: raw.provider_id || '',
             original_model_id: raw.model_id || '',
             provider_id: raw.provider_id || '',
@@ -4545,6 +4545,7 @@
             backing_detected: !!raw.backing_detected,
             context_window: raw.context_window || 32768,
             model_preset: raw.model_preset || 'auto',
+            model_options: raw.model_options && typeof raw.model_options === 'object' ? Object.assign({}, raw.model_options) : {},
             temperature: raw.temperature ?? null,
             top_p: raw.top_p ?? null,
             min_p: raw.min_p ?? null,
@@ -4556,6 +4557,79 @@
             extra_body: raw.extra_body || {},
             extra_body_text: this.formatModelExtraBodyText(raw.extra_body),
           }, raw || {});
+          draft.model_options = draft.model_options && typeof draft.model_options === 'object' ? Object.assign({}, draft.model_options) : {};
+          return this.refreshModelOverlayDraft(draft);
+        },
+        modelOverlayTemplates(draft = null) {
+          const catalog = this.settings?.model_overlays || draft?.model_overlays || {};
+          return Array.isArray(catalog.templates) ? catalog.templates : [];
+        },
+        modelOverlayChoices(draft = null) {
+          return [
+            {id: 'auto', title: 'Auto-detect'},
+            {id: 'default', title: 'Generic only'},
+            ...this.modelOverlayTemplates(draft).filter(item => item?.id && item.id !== 'generic').map(item => ({id: item.id, title: item.title || item.id})),
+          ];
+        },
+        modelOverlayGlobMatches(pattern, value) {
+          const escaped = String(pattern || '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+          try { return new RegExp('^' + escaped + '$', 'i').test(String(value || '')); } catch (_) { return false; }
+        },
+        resolveModelOverlayDraft(draft) {
+          if (!draft) return {ids: [], title: 'Generic model options', controls: []};
+          const templates = this.modelOverlayTemplates(draft);
+          if (!templates.length && draft.resolved_overlay) return draft.resolved_overlay;
+          const selection = String(draft.model_preset || 'auto').trim().toLowerCase() || 'auto';
+          const modelID = String(draft.source_model_id || draft.model_id || '').trim();
+          const matched = templates.filter(item => {
+            if (item?.id === 'generic') return true;
+            if (selection === 'default') return false;
+            if (selection !== 'auto') return item?.id === selection;
+            const patterns = Array.isArray(item?.match?.model_ids) ? item.match.model_ids : [];
+            return patterns.some(pattern => this.modelOverlayGlobMatches(pattern, modelID));
+          }).sort((a, b) => Number(a?.priority || 0) - Number(b?.priority || 0) || String(a?.id || '').localeCompare(String(b?.id || '')));
+          const controls = [];
+          const indexes = new Map();
+          let title = 'Generic model options';
+          for (const item of matched) {
+            if (item?.id !== 'generic' && item?.title) title = item.title;
+            for (const control of (item?.controls || [])) {
+              if (indexes.has(control.id)) controls[indexes.get(control.id)] = control;
+              else { indexes.set(control.id, controls.length); controls.push(control); }
+            }
+          }
+          return {ids: matched.map(item => item.id), title, controls};
+        },
+        refreshModelOverlayDraft(draft) {
+          if (!draft) return draft;
+          const overlay = this.resolveModelOverlayDraft(draft);
+          const current = draft.model_options && typeof draft.model_options === 'object' ? draft.model_options : {};
+          const next = {};
+          for (const control of (overlay.controls || [])) {
+            if (Object.prototype.hasOwnProperty.call(current, control.id)) next[control.id] = current[control.id];
+            else if (Object.prototype.hasOwnProperty.call(control, 'default')) next[control.id] = control.default;
+          }
+          draft.resolved_overlay = overlay;
+          draft.model_options = next;
+          return draft;
+        },
+        modelOverlayControls(draft) {
+          return (draft?.resolved_overlay?.controls || []).filter(control => control?.type !== 'hidden');
+        },
+        normalizedModelOverlayOptions(draft) {
+          const values = draft?.model_options || {};
+          const out = {};
+          for (const control of (draft?.resolved_overlay?.controls || [])) {
+            let value = values[control.id];
+            if (value === '' || value === null || value === undefined) continue;
+            if (control.type === 'number') {
+              value = Number(value);
+              if (!Number.isFinite(value)) continue;
+            }
+            if (control.type === 'checkbox') value = !!value;
+            out[control.id] = value;
+          }
+          return out;
         },
         modelSettingsEditable() {
           return !!(this.modelSettingsDraft && (this.modelSettingsDraft.editable || this.modelSettingsDraft.custom));
@@ -4635,6 +4709,7 @@
             top_k: Number(this.modelSettingsDraft.top_k || 0),
             repeat_penalty: this.blankableNumber(this.modelSettingsDraft.repeat_penalty),
             thinking_budget: Number(this.modelSettingsDraft.thinking_budget || 0),
+            model_options: this.normalizedModelOverlayOptions(this.modelSettingsDraft),
           });
           this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
           this.rpc('save_model_config', payload).then(result => {
@@ -5367,6 +5442,7 @@
             editable: true,
             context_window: 32768,
             model_preset: 'auto',
+            model_options: {},
             temperature: null,
             top_p: null,
             min_p: null,
@@ -5403,14 +5479,15 @@
         editModelConfig(key) {
           const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
           if (!item) return;
-          this.modelConfigDraft = JSON.parse(JSON.stringify(Object.assign({
+          this.modelConfigDraft = this.normalizeModelSettingsDraft(JSON.parse(JSON.stringify(Object.assign({
             original_provider_id: item.provider_id || '',
             original_model_id: item.model_id || '',
             context_window: 32768,
             model_preset: 'auto',
+            model_options: {},
             thinking_mode: 'auto',
             extra_body: {}
-          }, item)));
+          }, item))));
           this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
           this.modelConfigExtraBodyOpen = this.modelExtraBodyHasContent(this.modelConfigDraft.extra_body);
           this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; this.showModelConfigEditor = true;
@@ -5452,6 +5529,7 @@
             editable: true,
             context_window: contextWindow,
             model_preset: String(this.modelConfigDraft.model_preset || 'auto').trim() || 'auto',
+            model_options: this.normalizedModelOverlayOptions(this.modelConfigDraft),
             temperature: this.blankableNumber(this.modelConfigDraft.temperature),
             top_p: this.blankableNumber(this.modelConfigDraft.top_p),
             min_p: this.blankableNumber(this.modelConfigDraft.min_p),
