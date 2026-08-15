@@ -16,6 +16,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -248,7 +249,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			Tools:      defs,
 			ToolChoice: "auto",
 			Stream:     false,
-			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), r.modelConfig(providerID, modelID)),
+			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), r.modelConfig(providerID, modelID), modeloverlay.Load(r.cfg.ManagedAssetsDir())),
 		})
 		if err != nil {
 			return "", err

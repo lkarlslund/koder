@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -42,21 +43,22 @@ import (
 )
 
 type Engine struct {
-	cfg          config.Config
-	store        *store.Store
-	debug        *debugsrv.Recorder
-	files        *attachment.Manager
-	caps         *provider.CapabilityStore
-	agents       *agents.Manager
-	mcp          *mcp.Manager
-	settings     *settings.Store
-	modelRuntime *modelruntime.Runtime
-	toolsRuntime *toolruntime.Runtime
-	browser      *browser.Manager
-	envMu        sync.Mutex
-	envPrompts   map[id.ID]string
-	registry     *sessionpkg.Registry
-	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
+	cfg           config.Config
+	store         *store.Store
+	debug         *debugsrv.Recorder
+	files         *attachment.Manager
+	caps          *provider.CapabilityStore
+	agents        *agents.Manager
+	mcp           *mcp.Manager
+	settings      *settings.Store
+	modelOverlays modeloverlay.Catalog
+	modelRuntime  *modelruntime.Runtime
+	toolsRuntime  *toolruntime.Runtime
+	browser       *browser.Manager
+	envMu         sync.Mutex
+	envPrompts    map[id.ID]string
+	registry      *sessionpkg.Registry
+	retryPause    func(context.Context, time.Duration, func(time.Duration)) error
 }
 
 const (
@@ -72,15 +74,16 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	execRuntime := execruntime.NewManager()
 	settingsStore := settings.New(cfg)
 	e := &Engine{
-		cfg:        cfg,
-		store:      st,
-		debug:      debug,
-		files:      attachment.NewManager(cfg.StateDir()),
-		caps:       provider.NewCapabilityStore(cfg.StateDir()),
-		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
-		mcp:        mcpManager,
-		settings:   settingsStore,
-		retryPause: modelruntime.DefaultRetryPause,
+		cfg:           cfg,
+		store:         st,
+		debug:         debug,
+		files:         attachment.NewManager(cfg.StateDir()),
+		caps:          provider.NewCapabilityStore(cfg.StateDir()),
+		agents:        agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
+		mcp:           mcpManager,
+		settings:      settingsStore,
+		modelOverlays: modeloverlay.Load(cfg.ManagedAssetsDir()),
+		retryPause:    modelruntime.DefaultRetryPause,
 	}
 	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
 	e.modelRuntime = modelruntime.New(modelruntime.Config{
@@ -119,6 +122,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
+	e.modelOverlays = modeloverlay.Load(cfg.ManagedAssetsDir())
 	if e.settings != nil {
 		e.settings.Update(cfg)
 	} else {
@@ -510,7 +514,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 		providerCfg = e.providerConfigForChat(chat)
 		modelCfg = e.modelConfigForChat(chat)
 	}
-	extraBody := provider.RequestExtraBody(providerCfg, modelCfg)
+	extraBody := provider.RequestExtraBody(providerCfg, modelCfg, e.modelOverlays)
 	extraBody = provider.WithLlamaPromptCache(extraBody, providerCfg)
 	req := provider.ChatRequest{
 		SessionID:          session.ID,
@@ -616,7 +620,7 @@ func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
 	if err != nil {
 		return false
 	}
-	return provider.PreserveThinkingEnabled(model.SourceModelID, strings.TrimSpace(model.Model.ModelPreset))
+	return provider.PreserveThinkingEnabled(model.Provider, model.Model, e.modelOverlays)
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {

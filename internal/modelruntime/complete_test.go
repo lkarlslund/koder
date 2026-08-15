@@ -325,7 +325,7 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 			Content: "hello",
 		}},
 		Stream:    true,
-		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], config.ModelConfig{ModelID: "test-model", ModelPreset: provider.ModelPresetDefault}),
+		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], config.ModelConfig{ModelID: "test-model", ModelPreset: provider.ModelPresetDefault}, runtime.modelOverlays),
 	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
 	close(events)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
@@ -239,7 +240,7 @@ func (r *Runtime) startCavemanThinking(ctx context.Context, chat domain.Chat, ch
 		Model:     modelID,
 		Messages:  cavemanThinkingMessages(thinking.Prompt, reasoning),
 		Stream:    true,
-		ExtraBody: cavemanThinkingExtraBody(thinking.Provider, thinking.Model),
+		ExtraBody: cavemanThinkingExtraBody(thinking.Provider, thinking.Model, r.modelOverlays),
 	}
 	if r.caveman == nil {
 		r.caveman = newCavemanService(thinking.Parallelism)
@@ -384,8 +385,8 @@ func (r *Runtime) completeCavemanThinking(ctx context.Context, providerID id.ID,
 	return resp, err
 }
 
-func cavemanThinkingExtraBody(cfg config.Provider, model config.ModelConfig) map[string]any {
-	body := provider.RequestExtraBody(cfg, model)
+func cavemanThinkingExtraBody(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) map[string]any {
+	body := provider.RequestExtraBody(cfg, model, catalog)
 	if body == nil {
 		body = map[string]any{}
 	}

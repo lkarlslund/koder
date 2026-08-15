@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 )
 
 const (
@@ -73,43 +74,64 @@ func AutoMatchPresetID(modelID string) string {
 	return ModelPresetDefault
 }
 
-func PreserveThinkingEnabled(modelID, selected string) bool {
-	resolved := ResolvePresetID(modelID, selected)
-	return resolved == ModelPresetQwen36PreserveThinking || resolved == ModelPresetQwen38PreserveThinking
+func PreserveThinkingEnabled(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) bool {
+	resolved := catalog.Resolve(model.ModelID, model.ModelPreset, OverlayTransport(cfg))
+	return resolved.BoolValue("preserve_thinking", ModelOptionValues(model))
 }
 
-func RequestExtraBody(cfg config.Provider, model config.ModelConfig) map[string]any {
+func RequestExtraBody(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) map[string]any {
 	body := map[string]any{}
 	if PromptProgressRequested(cfg) {
 		body["return_progress"] = true
 	}
-	modelID := strings.TrimSpace(model.ModelID)
-	selected := strings.TrimSpace(model.ModelPreset)
-	resolvedPreset := ResolvePresetID(modelID, selected)
-	switch resolvedPreset {
-	case ModelPresetQwen36PreserveThinking:
-		if isDashScopeBaseURL(cfg.BaseURL) {
-			body["enable_thinking"] = false
-			body["preserve_thinking"] = false
-		} else {
-			body["chat_template_kwargs"] = map[string]any{
-				"enable_thinking":   false,
-				"preserve_thinking": true,
-			}
-		}
-	case ModelPresetQwen38PreserveThinking:
-		if isDashScopeBaseURL(cfg.BaseURL) {
-			body["preserve_thinking"] = true
-		} else {
-			chatTemplateKwargs(body)["preserve_thinking"] = true
-		}
-	}
-	applyModelRequestOptions(body, cfg, model)
+	resolved := catalog.Resolve(model.ModelID, model.ModelPreset, OverlayTransport(cfg))
+	body = resolved.Apply(body, ModelOptionValues(model), OverlayTransport(cfg))
 	applyCustomExtraBody(body, model.ExtraBody)
 	if len(body) == 0 {
 		return nil
 	}
 	return body
+}
+
+// ModelOptionValues combines arbitrary overlay settings with legacy typed model
+// settings. Explicit overlay values win, which makes migration non-destructive.
+func ModelOptionValues(model config.ModelConfig) map[string]any {
+	values := make(map[string]any, len(model.Options)+8)
+	for key, value := range model.Options {
+		values[key] = value
+	}
+	setLegacy := func(key string, value any, present bool) {
+		if _, exists := values[key]; !exists && present {
+			values[key] = value
+		}
+	}
+	setLegacy("temperature", pointerValue(model.Temperature), model.Temperature != nil)
+	setLegacy("top_p", pointerValue(model.TopP), model.TopP != nil)
+	setLegacy("min_p", pointerValue(model.MinP), model.MinP != nil)
+	setLegacy("top_k", model.TopK, model.TopK > 0)
+	setLegacy("repeat_penalty", pointerValue(model.RepeatPenalty), model.RepeatPenalty != nil)
+	setLegacy("thinking_mode", strings.TrimSpace(strings.ToLower(model.ThinkingMode)), strings.TrimSpace(model.ThinkingMode) != "" && model.ThinkingMode != "auto")
+	setLegacy("thinking_budget", model.ThinkingBudget, model.ThinkingBudget > 0)
+	setLegacy("reasoning_effort", strings.TrimSpace(strings.ToLower(model.ReasoningEffort)), strings.TrimSpace(model.ReasoningEffort) != "" && model.ReasoningEffort != "auto")
+	return values
+}
+
+func pointerValue(value *float64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+// OverlayTransport names the request dialect available to JSON bindings.
+func OverlayTransport(cfg config.Provider) string {
+	if isDashScopeBaseURL(cfg.BaseURL) {
+		return "dashscope"
+	}
+	if looksLikeLlamaProvider(cfg) {
+		return "llama"
+	}
+	return "openai"
 }
 
 func applyCustomExtraBody(body map[string]any, extra map[string]any) {
@@ -140,71 +162,6 @@ func WithLlamaPromptCache(body map[string]any, cfg config.Provider) map[string]a
 	}
 	body["cache_prompt"] = true
 	return body
-}
-
-func applyModelRequestOptions(body map[string]any, cfg config.Provider, model config.ModelConfig) {
-	if model.Temperature != nil {
-		body["temperature"] = *model.Temperature
-	}
-	if model.TopP != nil {
-		body["top_p"] = *model.TopP
-	}
-	if model.MinP != nil {
-		body["min_p"] = *model.MinP
-	}
-	if model.TopK > 0 {
-		body["top_k"] = model.TopK
-	}
-	if model.RepeatPenalty != nil {
-		body["repeat_penalty"] = *model.RepeatPenalty
-	}
-	if effort := strings.TrimSpace(strings.ToLower(model.ReasoningEffort)); effort != "" && effort != "auto" {
-		body["reasoning_effort"] = effort
-		if looksLikeLlamaProvider(cfg) && effort != "none" {
-			chatTemplateKwargs(body)["reasoning_effort"] = effort
-		}
-	}
-	switch strings.TrimSpace(strings.ToLower(model.ThinkingMode)) {
-	case "enabled":
-		setThinkingOptions(body, cfg, true, model.ThinkingBudget)
-	case "disabled":
-		setThinkingOptions(body, cfg, false, 0)
-	case "auto", "":
-		if model.ThinkingBudget > 0 {
-			setThinkingBudget(body, cfg, model.ThinkingBudget)
-		}
-	}
-}
-
-func setThinkingOptions(body map[string]any, cfg config.Provider, enabled bool, budget int) {
-	if isDashScopeBaseURL(cfg.BaseURL) {
-		body["enable_thinking"] = enabled
-		body["preserve_thinking"] = enabled
-		if budget > 0 {
-			body["thinking_budget"] = budget
-		}
-		return
-	}
-	kwargs := chatTemplateKwargs(body)
-	kwargs["enable_thinking"] = enabled
-	// Qwen 3.6's llama.cpp-compatible Jinja template changes older assistant
-	// formatting when preserve_thinking is false and a new user message is
-	// appended. Keep the template shape stable even when thinking is disabled.
-	kwargs["preserve_thinking"] = true
-	if budget > 0 {
-		kwargs["thinking_budget"] = budget
-	}
-}
-
-func setThinkingBudget(body map[string]any, cfg config.Provider, budget int) {
-	if budget <= 0 {
-		return
-	}
-	if isDashScopeBaseURL(cfg.BaseURL) {
-		body["thinking_budget"] = budget
-		return
-	}
-	chatTemplateKwargs(body)["thinking_budget"] = budget
 }
 
 func chatTemplateKwargs(body map[string]any) map[string]any {

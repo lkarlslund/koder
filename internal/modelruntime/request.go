@@ -42,7 +42,7 @@ func (r *Runtime) ChatRequest(session domain.Session, chat domain.Chat, messages
 		providerCfg = r.providerConfigForChat(chat)
 		modelCfg = r.modelConfigForChat(chat)
 	}
-	extraBody := provider.RequestExtraBody(providerCfg, modelCfg)
+	extraBody := provider.RequestExtraBody(providerCfg, modelCfg, r.modelOverlays)
 	extraBody = provider.WithLlamaPromptCache(extraBody, providerCfg)
 	req := provider.ChatRequest{
 		SessionID:          session.ID,

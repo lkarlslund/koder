@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -666,6 +667,7 @@ func (c *Controller) ModelConfig(ctx context.Context, providerID, modelID string
 	c.mu.RUnlock()
 	model := modelConfigForPair(cfg, providerID, modelID)
 	pref := modelConfigPreferenceFromConfig(model)
+	pref = decorateModelConfigPreference(cfg, modeloverlay.Load(cfg.ManagedAssetsDir()), pref)
 	if pref.Custom {
 		return pref
 	}
@@ -710,6 +712,10 @@ func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPrefer
 		c.mu.Unlock()
 		return ModelConfigPreference{}, fmt.Errorf("source provider %q is not configured", sourceProviderID)
 	}
+	if err := validateModelOverlay(c.cfg, model); err != nil {
+		c.mu.Unlock()
+		return ModelConfigPreference{}, err
+	}
 	c.cfg.SetModelConfig(model)
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
@@ -718,7 +724,7 @@ func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPrefer
 	if c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}
-	saved := modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID))
+	saved := decorateModelConfigPreference(c.cfg, modeloverlay.Load(c.cfg.ManagedAssetsDir()), modelConfigPreferenceFromConfig(modelConfigForPair(c.cfg, providerID, modelID)))
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return saved, nil
@@ -1025,17 +1031,21 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
 			MaxChildChats:    c.cfg.MaxChildChats,
 		},
-		UI:           browserPreferencesFromConfig(c.cfg.UI),
-		Compaction:   compactionPreferencesFromConfig(c.cfg),
-		Thinking:     thinkingPreferencesFromConfig(c.cfg),
-		Prompts:      prompts,
-		Providers:    c.providerStateLocked(),
-		Models:       models,
-		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models, models),
-		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
-		Access:       accessPreferencesFromConfig(c.cfg.Access),
-		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
-		Browser:      nativeBrowserPreferencesFromConfig(c.cfg.Browser, c.agent),
+		UI:            browserPreferencesFromConfig(c.cfg.UI),
+		Compaction:    compactionPreferencesFromConfig(c.cfg),
+		Thinking:      thinkingPreferencesFromConfig(c.cfg),
+		Prompts:       prompts,
+		Providers:     c.providerStateLocked(),
+		Models:        models,
+		ModelConfigs:  modelConfigPreferencesFromConfig(c.cfg.Models, models),
+		ModelOverlays: modeloverlay.Load(c.cfg.ManagedAssetsDir()),
+		MCPServers:    mcpPreferencesFromConfig(c.cfg.MCPServers),
+		Access:        accessPreferencesFromConfig(c.cfg.Access),
+		ToolDefaults:  toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
+		Browser:       nativeBrowserPreferencesFromConfig(c.cfg.Browser, c.agent),
+	}
+	for idx := range state.ModelConfigs {
+		state.ModelConfigs[idx] = decorateModelConfigPreference(c.cfg, state.ModelOverlays, state.ModelConfigs[idx])
 	}
 	repairPreferencesDefaultModel(&state, liveModels)
 	return state, nil
@@ -1169,6 +1179,7 @@ func modelConfigPreferenceFromConfig(model config.ModelConfig) ModelConfigPrefer
 		Editable:           custom,
 		ContextWindow:      model.ContextWindow,
 		ModelPreset:        strings.TrimSpace(model.ModelPreset),
+		Options:            provider.ModelOptionValues(model),
 		ExtraBody:          cloneExtraBodyMap(model.ExtraBody),
 		Temperature:        model.Temperature,
 		TopP:               model.TopP,
@@ -1574,6 +1585,9 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 		if sourceProviderID := strings.TrimSpace(model.SourceProviderID); sourceProviderID != "" && !cfg.HasUsableProvider(sourceProviderID) {
 			return fmt.Errorf("source provider %q is not configured", sourceProviderID)
 		}
+		if err := validateModelOverlay(*cfg, model); err != nil {
+			return err
+		}
 		next = append(next, model)
 	}
 	cfg.Models = nil
@@ -1617,6 +1631,7 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		SourceModelID:    sourceModelID,
 		ContextWindow:    pref.ContextWindow,
 		ModelPreset:      strings.TrimSpace(pref.ModelPreset),
+		Options:          cloneExtraBodyMap(pref.Options),
 		ExtraBody:        cloneExtraBodyMap(pref.ExtraBody),
 		Temperature:      pref.Temperature,
 		TopP:             pref.TopP,
@@ -1627,6 +1642,38 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		ThinkingBudget:   pref.ThinkingBudget,
 		ReasoningEffort:  strings.TrimSpace(pref.ReasoningEffort),
 	}, nil
+}
+
+func decorateModelConfigPreference(cfg config.Config, catalog modeloverlay.Catalog, pref ModelConfigPreference) ModelConfigPreference {
+	sourceProviderID := strings.TrimSpace(pref.SourceProviderID)
+	if sourceProviderID == "" {
+		sourceProviderID = strings.TrimSpace(pref.ProviderID)
+	}
+	sourceModelID := strings.TrimSpace(pref.SourceModelID)
+	if sourceModelID == "" {
+		sourceModelID = strings.TrimSpace(pref.ModelID)
+	}
+	providerCfg, _ := cfg.Provider(sourceProviderID)
+	pref.ResolvedOverlay = catalog.Resolve(sourceModelID, pref.ModelPreset, provider.OverlayTransport(providerCfg))
+	pref.Options = pref.ResolvedOverlay.EffectiveValues(pref.Options)
+	return pref
+}
+
+func validateModelOverlay(cfg config.Config, model config.ModelConfig) error {
+	sourceProviderID := strings.TrimSpace(model.SourceProviderID)
+	if sourceProviderID == "" {
+		sourceProviderID = strings.TrimSpace(model.ProviderID)
+	}
+	sourceModelID := strings.TrimSpace(model.SourceModelID)
+	if sourceModelID == "" {
+		sourceModelID = strings.TrimSpace(model.ModelID)
+	}
+	providerCfg, _ := cfg.Provider(sourceProviderID)
+	resolved := modeloverlay.Load(cfg.ManagedAssetsDir()).Resolve(sourceModelID, model.ModelPreset, provider.OverlayTransport(providerCfg))
+	if err := resolved.ValidateValues(model.Options); err != nil {
+		return fmt.Errorf("model options for %s/%s: %w", model.ProviderID, model.ModelID, err)
+	}
+	return nil
 }
 
 func cloneExtraBodyMap(src map[string]any) map[string]any {

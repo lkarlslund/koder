@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -220,43 +221,46 @@ type ProviderProbeResult struct {
 }
 
 type ModelConfigPreference struct {
-	OriginalProviderID string         `json:"original_provider_id"`
-	OriginalModelID    string         `json:"original_model_id"`
-	ProviderID         string         `json:"provider_id"`
-	ModelID            string         `json:"model_id"`
-	SourceProviderID   string         `json:"source_provider_id,omitempty"`
-	SourceModelID      string         `json:"source_model_id,omitempty"`
-	Custom             bool           `json:"custom"`
-	Editable           bool           `json:"editable"`
-	BackingDetected    bool           `json:"backing_detected"`
-	ContextWindow      int            `json:"context_window"`
-	ModelPreset        string         `json:"model_preset"`
-	ExtraBody          map[string]any `json:"extra_body,omitempty"`
-	Temperature        *float64       `json:"temperature,omitempty"`
-	TopP               *float64       `json:"top_p,omitempty"`
-	MinP               *float64       `json:"min_p,omitempty"`
-	TopK               int            `json:"top_k,omitempty"`
-	RepeatPenalty      *float64       `json:"repeat_penalty,omitempty"`
-	ThinkingMode       string         `json:"thinking_mode"`
-	ThinkingBudget     int            `json:"thinking_budget,omitempty"`
-	ReasoningEffort    string         `json:"reasoning_effort,omitempty"`
+	OriginalProviderID string                `json:"original_provider_id"`
+	OriginalModelID    string                `json:"original_model_id"`
+	ProviderID         string                `json:"provider_id"`
+	ModelID            string                `json:"model_id"`
+	SourceProviderID   string                `json:"source_provider_id,omitempty"`
+	SourceModelID      string                `json:"source_model_id,omitempty"`
+	Custom             bool                  `json:"custom"`
+	Editable           bool                  `json:"editable"`
+	BackingDetected    bool                  `json:"backing_detected"`
+	ContextWindow      int                   `json:"context_window"`
+	ModelPreset        string                `json:"model_preset"`
+	Options            map[string]any        `json:"model_options,omitempty"`
+	ResolvedOverlay    modeloverlay.Resolved `json:"resolved_overlay"`
+	ExtraBody          map[string]any        `json:"extra_body,omitempty"`
+	Temperature        *float64              `json:"temperature,omitempty"`
+	TopP               *float64              `json:"top_p,omitempty"`
+	MinP               *float64              `json:"min_p,omitempty"`
+	TopK               int                   `json:"top_k,omitempty"`
+	RepeatPenalty      *float64              `json:"repeat_penalty,omitempty"`
+	ThinkingMode       string                `json:"thinking_mode"`
+	ThinkingBudget     int                   `json:"thinking_budget,omitempty"`
+	ReasoningEffort    string                `json:"reasoning_effort,omitempty"`
 }
 
 // PreferencesState is the complete settings payload exposed to browser clients.
 type PreferencesState struct {
-	General      GeneralPreferences       `json:"general"`
-	UI           BrowserPreferences       `json:"ui"`
-	Compaction   CompactionPreferences    `json:"compaction"`
-	Thinking     ThinkingPreferences      `json:"thinking"`
-	Prompts      []PromptPreference       `json:"prompts"`
-	Providers    ProviderState            `json:"providers"`
-	Models       []ModelOption            `json:"models"`
-	ModelConfigs []ModelConfigPreference  `json:"model_configs"`
-	MCPServers   []MCPServerPreference    `json:"mcp_servers"`
-	Access       AccessPreferences        `json:"access"`
-	ToolDefaults []ToolDefaultPreference  `json:"tool_defaults"`
-	Browser      NativeBrowserPreferences `json:"browser"`
-	RestartKeys  []string                 `json:"restart_keys,omitempty"`
+	General       GeneralPreferences       `json:"general"`
+	UI            BrowserPreferences       `json:"ui"`
+	Compaction    CompactionPreferences    `json:"compaction"`
+	Thinking      ThinkingPreferences      `json:"thinking"`
+	Prompts       []PromptPreference       `json:"prompts"`
+	Providers     ProviderState            `json:"providers"`
+	Models        []ModelOption            `json:"models"`
+	ModelConfigs  []ModelConfigPreference  `json:"model_configs"`
+	ModelOverlays modeloverlay.Catalog     `json:"model_overlays"`
+	MCPServers    []MCPServerPreference    `json:"mcp_servers"`
+	Access        AccessPreferences        `json:"access"`
+	ToolDefaults  []ToolDefaultPreference  `json:"tool_defaults"`
+	Browser       NativeBrowserPreferences `json:"browser"`
+	RestartKeys   []string                 `json:"restart_keys,omitempty"`
 }
 
 type NativeBrowserPreferences struct {

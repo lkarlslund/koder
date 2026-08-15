@@ -5,7 +5,13 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 )
+
+func requestExtraBody(t *testing.T, cfg config.Provider, model config.ModelConfig) map[string]any {
+	t.Helper()
+	return RequestExtraBody(cfg, model, modeloverlay.Load(t.TempDir()))
+}
 
 func TestAutoMatchPresetIDMatchesQwen36(t *testing.T) {
 	if got := AutoMatchPresetID("Qwen/Qwen3.6-35B-A3B"); got != ModelPresetQwen36PreserveThinking {
@@ -23,7 +29,7 @@ func TestAutoMatchPresetIDMatchesQwen38(t *testing.T) {
 }
 
 func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
 		ModelID:         "qwen3.8-27b-q8-mtp",
 		ModelPreset:     ModelPresetAuto,
 		ThinkingMode:    "enabled",
@@ -43,14 +49,14 @@ func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
 	}
 }
 
-func TestRequestExtraBodySendsStandardReasoningEffortToRemoteProvider(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "https://api.example.invalid/v1"}, config.ModelConfig{
+func TestRequestExtraBodyDoesNotGuessUnsupportedReasoningEffort(t *testing.T) {
+	got := requestExtraBody(t, config.Provider{BaseURL: "https://api.example.invalid/v1"}, config.ModelConfig{
 		ModelID:         "reasoning-model",
 		ModelPreset:     ModelPresetDefault,
 		ReasoningEffort: "high",
 	})
-	if got["reasoning_effort"] != "high" {
-		t.Fatalf("expected top-level reasoning effort, got %#v", got)
+	if _, ok := got["reasoning_effort"]; ok {
+		t.Fatalf("unknown models must not receive guessed reasoning options: %#v", got)
 	}
 	if _, ok := got["chat_template_kwargs"]; ok {
 		t.Fatalf("remote provider must not receive llama.cpp template kwargs: %#v", got)
@@ -58,10 +64,10 @@ func TestRequestExtraBodySendsStandardReasoningEffortToRemoteProvider(t *testing
 }
 
 func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, config.ModelConfig{ModelID: "qwen3.6-plus", ModelPreset: ModelPresetQwen36PreserveThinking})
+	got := requestExtraBody(t, config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, config.ModelConfig{ModelID: "qwen3.6-plus", ModelPreset: ModelPresetQwen36PreserveThinking})
 	want := map[string]any{
 		"enable_thinking":   false,
-		"preserve_thinking": false,
+		"preserve_thinking": true,
 		"return_progress":   true,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -70,7 +76,7 @@ func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
 }
 
 func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: ModelPresetAuto})
+	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{ModelID: "Qwen/Qwen3.6-35B-A3B", ModelPreset: ModelPresetAuto})
 	want := map[string]any{
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   false,
@@ -83,23 +89,19 @@ func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 	}
 }
 
-func TestRequestExtraBodyKeepsCompatibleQwenTemplateCacheStable(t *testing.T) {
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+func TestDefaultOverlaySkipsModelSpecificOptions(t *testing.T) {
+	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
 		ModelID:      "Qwen/Qwen3.6-35B-A3B",
 		ModelPreset:  ModelPresetDefault,
 		ThinkingMode: "disabled",
 	})
-	kwargs, ok := got["chat_template_kwargs"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected chat template kwargs, got %#v", got)
-	}
-	if kwargs["enable_thinking"] != false || kwargs["preserve_thinking"] != true {
-		t.Fatalf("expected disabled thinking with preserved template shape, got %#v", kwargs)
+	if _, ok := got["chat_template_kwargs"]; ok {
+		t.Fatalf("default overlay should omit model-specific options, got %#v", got)
 	}
 }
 
 func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
-	got := RequestExtraBody(config.Provider{
+	got := requestExtraBody(t, config.Provider{
 		PromptProgressMode:      "auto",
 		PromptProgressProbed:    true,
 		PromptProgressSupported: true,
@@ -113,7 +115,7 @@ func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
 }
 
 func TestRequestExtraBodyIncludesPendingAutoPromptProgress(t *testing.T) {
-	got := RequestExtraBody(config.Provider{
+	got := requestExtraBody(t, config.Provider{
 		PromptProgressMode: "auto",
 	}, config.ModelConfig{ModelID: "model-a", ModelPreset: ModelPresetDefault})
 	want := map[string]any{
@@ -128,15 +130,17 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 	temperature := 0.7
 	topP := 0.9
 	repeatPenalty := 1.05
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
-		ModelID:        "Qwen/Qwen3.6-35B-A3B",
-		ModelPreset:    ModelPresetDefault,
-		Temperature:    &temperature,
-		TopP:           &topP,
-		TopK:           40,
-		RepeatPenalty:  &repeatPenalty,
-		ThinkingMode:   "enabled",
-		ThinkingBudget: 4096,
+	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+		ModelID:       "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset:   ModelPresetAuto,
+		Temperature:   &temperature,
+		TopP:          &topP,
+		TopK:          40,
+		RepeatPenalty: &repeatPenalty,
+		ThinkingMode:  "enabled",
+		Options: map[string]any{
+			"thinking_mode": "enabled",
+		},
 	})
 	want := map[string]any{
 		"temperature":     0.7,
@@ -147,7 +151,6 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
 			"preserve_thinking": true,
-			"thinking_budget":   4096,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -157,7 +160,7 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 
 func TestRequestExtraBodyIncludesCustomModelJSON(t *testing.T) {
 	temperature := 0.7
-	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
+	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
 		ModelID:     "custom-model",
 		ModelPreset: ModelPresetDefault,
 		Temperature: &temperature,

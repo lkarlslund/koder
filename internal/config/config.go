@@ -95,6 +95,7 @@ type ModelConfig struct {
 	SourceModelID    string         `toml:"source_model_id,omitempty"`
 	ContextWindow    int            `toml:"context_window"`
 	ModelPreset      string         `toml:"model_preset"`
+	Options          map[string]any `toml:"options,omitempty"`
 	ExtraBody        map[string]any `toml:"extra_body,omitempty"`
 	Temperature      *float64       `toml:"temperature,omitempty"`
 	TopP             *float64       `toml:"top_p,omitempty"`
@@ -668,6 +669,9 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 	}
 	if len(model.ExtraBody) == 0 {
 		model.ExtraBody = nil
+	}
+	if len(model.Options) == 0 {
+		model.Options = nil
 	}
 	model.ThinkingMode = normalizeThinkingMode(model.ThinkingMode)
 	if model.ThinkingBudget < 0 {

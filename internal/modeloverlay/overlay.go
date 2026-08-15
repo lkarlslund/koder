@@ -303,13 +303,17 @@ func wildcardMatch(pattern, value string) bool {
 // EffectiveValues merges overlay defaults with saved per-model values.
 func (r Resolved) EffectiveValues(saved map[string]any) map[string]any {
 	values := make(map[string]any, len(r.Controls))
+	declared := make(map[string]bool, len(r.Controls))
 	for _, control := range r.Controls {
+		declared[control.ID] = true
 		if control.Default != nil {
 			values[control.ID] = control.Default
 		}
 	}
 	for key, value := range saved {
-		values[key] = value
+		if declared[key] {
+			values[key] = value
+		}
 	}
 	return values
 }

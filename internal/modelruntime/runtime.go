@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
@@ -37,22 +38,23 @@ type Config struct {
 }
 
 type Runtime struct {
-	cfg         config.Config
-	store       *store.Store
-	debug       *debugsrv.Recorder
-	files       *attachment.Manager
-	caps        *provider.CapabilityStore
-	agents      *agents.Manager
-	settings    *settings.Store
-	tools       *toolruntime.Runtime
-	mcp         *mcp.Manager
-	sessions    SessionSource
-	caveman     *cavemanService
-	cavemanMu   sync.Mutex
-	cavemanJobs map[id.ID]cavemanJob
-	retryPause  func(context.Context, time.Duration, func(time.Duration)) error
-	envMu       sync.Mutex
-	envCache    map[string]string
+	cfg           config.Config
+	store         *store.Store
+	debug         *debugsrv.Recorder
+	files         *attachment.Manager
+	caps          *provider.CapabilityStore
+	agents        *agents.Manager
+	settings      *settings.Store
+	modelOverlays modeloverlay.Catalog
+	tools         *toolruntime.Runtime
+	mcp           *mcp.Manager
+	sessions      SessionSource
+	caveman       *cavemanService
+	cavemanMu     sync.Mutex
+	cavemanJobs   map[id.ID]cavemanJob
+	retryPause    func(context.Context, time.Duration, func(time.Duration)) error
+	envMu         sync.Mutex
+	envCache      map[string]string
 }
 
 const (
@@ -82,19 +84,20 @@ func New(cfg Config) *Runtime {
 		settingsStore = settings.New(cfg.Config)
 	}
 	return &Runtime{
-		cfg:         cfg.Config,
-		store:       cfg.Store,
-		debug:       cfg.Debug,
-		files:       files,
-		caps:        caps,
-		agents:      agentManager,
-		settings:    settingsStore,
-		tools:       cfg.Tools,
-		mcp:         cfg.MCP,
-		sessions:    cfg.Sessions,
-		caveman:     newCavemanService(cfg.Config.Thinking.CavemanParallelism),
-		cavemanJobs: map[id.ID]cavemanJob{},
-		retryPause:  waitForRetry,
+		cfg:           cfg.Config,
+		store:         cfg.Store,
+		debug:         cfg.Debug,
+		files:         files,
+		caps:          caps,
+		agents:        agentManager,
+		settings:      settingsStore,
+		modelOverlays: modeloverlay.Load(cfg.Config.ManagedAssetsDir()),
+		tools:         cfg.Tools,
+		mcp:           cfg.MCP,
+		sessions:      cfg.Sessions,
+		caveman:       newCavemanService(cfg.Config.Thinking.CavemanParallelism),
+		cavemanJobs:   map[id.ID]cavemanJob{},
+		retryPause:    waitForRetry,
 	}
 }
 
@@ -103,6 +106,7 @@ func (r *Runtime) UpdateConfig(cfg config.Config) {
 		return
 	}
 	r.cfg = cfg
+	r.modelOverlays = modeloverlay.Load(cfg.ManagedAssetsDir())
 	if r.settings != nil {
 		r.settings.Update(cfg)
 	} else {
