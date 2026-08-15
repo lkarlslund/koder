@@ -690,21 +690,35 @@ func appendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content 
 	if content == nil {
 		return domain.TimelineItem{}, fmt.Errorf("append timeline: content is required")
 	}
+	if err := ensureTimelineSequenceIndex(ctx, st, chatID); err != nil {
+		return domain.TimelineItem{}, err
+	}
 	unlock := store.LockTimelineMutation()
 	defer unlock()
-	items, err := timelineForChat(ctx, st, chatID)
+	latestSeq, err := latestTimelineSequence(ctx, st, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
 	now := time.Now().UTC()
 	item := domain.TimelineItem{
 		ChatID:    chatID,
-		Seq:       int64(len(items) + 1),
+		Seq:       latestSeq + 1,
 		Content:   content,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	return insertTimelineItem(ctx, st, item)
+}
+
+func latestTimelineSequence(ctx context.Context, st *store.Store, chatID id.ID) (int64, error) {
+	page, err := timelineCollection(st).ListIndexPage(ctx, "chat-seq", string(chatID), "", "", 1, true)
+	if err != nil {
+		return 0, err
+	}
+	if len(page.Items) == 0 {
+		return 0, nil
+	}
+	return page.Items[len(page.Items)-1].Seq, nil
 }
 
 func attachToolResult(ctx context.Context, st *store.Store, chatID id.ID, toolCallID string, result domain.ToolResult) (domain.TimelineItem, error) {
@@ -915,15 +929,7 @@ func appendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chat
 	return item, nil
 }
 
-func pendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]Approval, error) {
-	chatRecord, err := getChat(ctx, st, chatID)
-	if err != nil {
-		return nil, err
-	}
-	items, err := timelineForChat(ctx, st, chatID)
-	if err != nil {
-		return nil, err
-	}
+func pendingApprovalsForTimeline(chatRecord domain.Chat, items []domain.TimelineItem) []Approval {
 	var approvals []Approval
 	for _, item := range items {
 		assistant, ok := item.Content.(domain.AssistantMessage)
@@ -946,7 +952,7 @@ func pendingApprovalsForChat(ctx context.Context, st *store.Store, chatID id.ID)
 			})
 		}
 	}
-	return approvals, nil
+	return approvals
 }
 
 func SyntheticApprovalID(toolCallID string) id.ID {

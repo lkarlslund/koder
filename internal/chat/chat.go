@@ -308,6 +308,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 	}
 	var timeline []domain.TimelineItem
 	timelineHasOlder := !loadTimeline
+	var approvals []Approval
 	if loadTimeline {
 		var err error
 		timeline, _, timelineHasOlder, err = timelineWorkingSetForChat(ctx, deps.Store, chatRecord.ID)
@@ -322,10 +323,7 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 		if err != nil {
 			return nil, err
 		}
-	}
-	approvals, err := pendingApprovalsForChat(ctx, deps.Store, chatRecord.ID)
-	if err != nil {
-		return nil, err
+		approvals = pendingApprovalsForTimeline(chatRecord, timeline)
 	}
 	return newChat(session, chatRecord, timeline, approvals, deps, onClose, loadTimeline, timelineHasOlder)
 }
@@ -1412,10 +1410,7 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	if err != nil {
 		return r.markPersistError(err)
 	}
-	approvals, err := pendingApprovalsForChat(ctx, st, chatRecord.ID)
-	if err != nil {
-		return r.markPersistError(err)
-	}
+	approvals := pendingApprovalsForTimeline(chatRecord, timeline)
 	r.mu.Lock()
 	chatRecord, err = repairContextCacheFromTimeline(ctx, st, chatRecord, timeline)
 	if err != nil {
