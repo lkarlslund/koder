@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "id": "muse-glimmer",
+  "title": "Muse Glimmer",
+  "description": "Reasoning control exposed by the Muse Glimmer chat template.",
+  "priority": 440,
+  "match": {
+    "model_ids": ["*muse-glimmer*"]
+  },
+  "controls": [
+    {
+      "id": "reasoning_strength",
+      "label": "Reasoning strength",
+      "type": "select",
+      "default": "auto",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "low", "label": "Low"},
+        {"value": "medium", "label": "Medium"},
+        {"value": "high", "label": "High"}
+      ],
+      "bindings": [{"path": "chat_template_kwargs.reasoning_strength", "transports": ["llama"], "omit_values": ["auto"]}]
+    },
+    {
+      "id": "preserve_thinking",
+      "label": "Preserve thinking",
+      "type": "hidden",
+      "default": true
+    }
+  ]
+}

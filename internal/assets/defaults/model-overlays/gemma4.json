@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "id": "gemma4",
+  "title": "Gemma 4",
+  "description": "Thinking controls exposed by the Gemma 4 chat template.",
+  "priority": 400,
+  "match": {
+    "model_ids": ["*gemma-4*", "*gemma4*"]
+  },
+  "controls": [
+    {
+      "id": "thinking_mode",
+      "label": "Thinking",
+      "type": "select",
+      "default": "auto",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [{"path": "chat_template_kwargs.enable_thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}]
+    },
+    {
+      "id": "preserve_thinking",
+      "label": "Preserve thinking",
+      "type": "select",
+      "default": "disabled",
+      "choices": [
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [{"path": "chat_template_kwargs.preserve_thinking", "transports": ["llama"], "value_map": {"enabled": true, "disabled": false}}]
+    }
+  ]
+}

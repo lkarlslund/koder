@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "id": "qwen3.5",
+  "title": "Qwen3.5",
+  "description": "Thinking control exposed by the Qwen3.5 chat template.",
+  "priority": 350,
+  "match": {
+    "model_ids": ["*qwen3.5*", "*qwen3-5*"]
+  },
+  "controls": [
+    {
+      "id": "thinking_mode",
+      "label": "Thinking",
+      "type": "select",
+      "default": "disabled",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [{"path": "chat_template_kwargs.enable_thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}]
+    }
+  ]
+}

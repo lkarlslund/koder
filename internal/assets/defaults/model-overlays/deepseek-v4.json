@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "deepseek-v4",
+  "title": "DeepSeek V4",
+  "description": "Thinking controls accepted by the DeepSeek V4 chat template.",
+  "priority": 420,
+  "match": {
+    "model_ids": ["*deepseek-v4*"]
+  },
+  "controls": [
+    {
+      "id": "thinking_mode",
+      "label": "Thinking",
+      "type": "select",
+      "default": "auto",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [{"path": "chat_template_kwargs.thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}]
+    },
+    {
+      "id": "reasoning_effort",
+      "label": "Reasoning effort",
+      "type": "select",
+      "default": "auto",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "high", "label": "High"},
+        {"value": "max", "label": "Maximum"}
+      ],
+      "bindings": [
+        {"path": "reasoning_effort", "omit_values": ["auto"]},
+        {"path": "chat_template_kwargs.reasoning_effort", "transports": ["llama"], "omit_values": ["auto"]}
+      ]
+    },
+    {
+      "id": "preserve_thinking",
+      "label": "Preserve thinking",
+      "type": "hidden",
+      "default": true
+    }
+  ]
+}

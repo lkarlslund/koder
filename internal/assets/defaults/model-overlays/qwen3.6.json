@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "qwen3.6",
+  "title": "Qwen3.6",
+  "description": "Thinking controls exposed by the Qwen3.6 chat template.",
+  "priority": 360,
+  "match": {
+    "model_ids": ["*qwen3.6*", "*qwen3-6*"]
+  },
+  "controls": [
+    {
+      "id": "thinking_mode",
+      "label": "Thinking",
+      "type": "select",
+      "default": "disabled",
+      "choices": [
+        {"value": "auto", "label": "Server default"},
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [
+        {"path": "chat_template_kwargs.enable_thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
+        {"path": "enable_thinking", "transports": ["dashscope"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}
+      ]
+    },
+    {
+      "id": "preserve_thinking",
+      "label": "Preserve thinking",
+      "help": "Send prior reasoning back to the model on later turns.",
+      "type": "select",
+      "default": "enabled",
+      "choices": [
+        {"value": "enabled", "label": "Enabled"},
+        {"value": "disabled", "label": "Disabled"}
+      ],
+      "bindings": [
+        {"path": "chat_template_kwargs.preserve_thinking", "transports": ["llama"], "value_map": {"enabled": true, "disabled": false}},
+        {"path": "preserve_thinking", "transports": ["dashscope"], "value_map": {"enabled": true, "disabled": false}}
+      ]
+    }
+  ]
+}
