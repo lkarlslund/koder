@@ -302,7 +302,8 @@
     .model-dialog { width: min(980px, 100%); max-height: min(760px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-dialog-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); overflow: hidden; }
     .model-list { min-height: 0; overflow: auto; }
-    .model-settings-panel { min-height: 0; overflow: auto; padding: 1rem; }
+    .model-settings-panel { min-width: 0; min-height: 0; overflow: auto; padding: 1rem; }
+    .model-settings-panel .min-w-0 { min-width: 0; }
     @media (max-width: 860px) {
       .model-dialog-body { grid-template-columns: 1fr; }
       .model-settings-panel { border-left: 0 !important; border-top: 1px solid var(--bs-border-color); }
