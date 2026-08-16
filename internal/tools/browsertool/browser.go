@@ -224,7 +224,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		var paths []string
 		_ = json.Unmarshal([]byte(args["paths"]), &paths)
 		for index, path := range paths {
-			abs, _, pathErr := tools.ReadablePath(opts.Runtime.Workdir, path)
+			abs, _, pathErr := tools.ResolvePath(opts.Runtime, path, accesssettings.AccessRead)
 			if pathErr != nil {
 				return tools.Result{}, pathErr
 			}
@@ -341,7 +341,7 @@ func extractedData(kind tools.ID, value any, fallback []byte) []byte {
 }
 
 func saveOutput(runtime tools.Runtime, path string, data []byte) (string, error) {
-	abs, label, err := tools.WritablePath(runtime, path)
+	abs, label, err := tools.ResolvePath(runtime, path, accesssettings.AccessWrite)
 	if err != nil {
 		return "", err
 	}
@@ -521,12 +521,9 @@ func permittedBrowserURL(runtime tools.Runtime, raw string) (string, error) {
 	if parsed.Host != "" && parsed.Host != "localhost" {
 		return "", errors.New("file URL host must be empty or localhost")
 	}
-	abs, _, err := tools.ReadablePath(runtime.Workdir, parsed.Path)
+	abs, _, err := tools.ResolvePath(runtime, parsed.Path, accesssettings.AccessRead)
 	if err != nil {
 		return "", fmt.Errorf("resolve browser file URL: %w", err)
-	}
-	if err := runtime.CheckPathAccess(accesssettings.AccessRead, abs); err != nil {
-		return "", err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {

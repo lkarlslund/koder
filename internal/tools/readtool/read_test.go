@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -31,7 +32,7 @@ func TestExecuteAllowsAbsolutePathOutsideWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, AccessSettings: accesssettings.AllowAll()}, Request: tools.Request{
 		Args: map[string]string{"path": target},
 	}})
 	if err != nil {

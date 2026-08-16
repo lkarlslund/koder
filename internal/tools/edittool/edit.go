@@ -11,6 +11,7 @@ import (
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -82,7 +83,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	abs, rel, err := tools.WritablePath(runtime, req.Args["path"])
+	abs, rel, err := tools.ResolvePath(runtime, req.Args["path"], accesssettings.AccessWrite)
 	if err != nil {
 		return tools.Result{}, err
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -45,7 +46,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if runtime.OfferedFiles == nil {
 		return tools.Result{}, errors.New("offered file service is unavailable")
 	}
-	abs, _, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
+	abs, _, err := tools.ResolvePath(runtime, req.Args["path"], accesssettings.AccessRead)
 	if err != nil {
 		return tools.Result{}, err
 	}

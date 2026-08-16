@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -73,7 +74,7 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 }
 func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
+	abs, rel, err := tools.ResolvePath(runtime, req.Args["path"], accesssettings.AccessRead)
 	if err != nil {
 		return tools.Result{}, err
 	}

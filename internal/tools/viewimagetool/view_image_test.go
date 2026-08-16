@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -62,5 +63,32 @@ func TestExecuteRejectsNonImageFile(t *testing.T) {
 	}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported image type") {
 		t.Fatalf("expected non-image rejection, got %v", err)
+	}
+}
+
+func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
+	runtime := tools.Runtime{Workdir: t.TempDir(), SessionID: id.New()}
+	t.Cleanup(func() { _ = os.RemoveAll(runtime.SessionTmpDir()) })
+	if err := os.MkdirAll(runtime.SessionTmpDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(runtime.SessionTmpDir(), "screen.png")
+	if err := os.WriteFile(target, []byte("\x89PNG\r\n\x1a\nfake"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Call(t.Context(), tools.Options{
+		Runtime: runtime,
+		Request: tools.Request{Args: map[string]string{"path": "/tmp/screen.png"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta["path"] != "/tmp/screen.png" {
+		t.Fatalf("path label = %q, want /tmp/screen.png", result.Meta["path"])
+	}
+	stored, ok := result.Stored.(tools.ViewImageStoredResult)
+	if !ok || stored.SourcePath != target {
+		t.Fatalf("stored image = %#v, want source %q", result.Stored, target)
 	}
 }

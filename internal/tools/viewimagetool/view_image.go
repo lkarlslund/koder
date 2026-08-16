@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -46,7 +47,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
+	abs, rel, err := tools.ResolvePath(runtime, req.Args["path"], accesssettings.AccessRead)
 	if err != nil {
 		return tools.Result{}, err
 	}

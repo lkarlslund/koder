@@ -169,17 +169,73 @@ func Allows(settings Settings, req Request) error {
 	return nil
 }
 
-func modeForPath(settings Settings, abs string, projectRoot string) Mode {
+// MapPath translates an absolute path from the sandbox namespace to the path
+// used by the Koder process. Explicit project, home, and mount mappings take
+// precedence over the sandbox's /tmp mapping, matching bubblewrap mount order.
+func MapPath(settings Settings, req Request) (string, error) {
+	settings = Normalize(settings)
+	abs, err := filepath.Abs(strings.TrimSpace(req.Path))
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	tmpRoot := filepath.Clean("/tmp")
+	if !pathContains(tmpRoot, abs) || hasExplicitMapping(settings, abs, strings.TrimSpace(req.ProjectRoot)) {
+		return abs, nil
+	}
+	switch settings.Tmp {
+	case TmpHost:
+		return abs, nil
+	case TmpSession:
+		tmpDir := strings.TrimSpace(settings.TmpDir)
+		if tmpDir == "" {
+			return "", fmt.Errorf("session /tmp is unavailable")
+		}
+		rel, err := filepath.Rel(tmpRoot, abs)
+		if err != nil {
+			return "", fmt.Errorf("map session /tmp path: %w", err)
+		}
+		return filepath.Join(filepath.Clean(tmpDir), rel), nil
+	case TmpEphemeral:
+		return "", fmt.Errorf("%s is in ephemeral /tmp and is only available within the command that created it", abs)
+	default:
+		return "", fmt.Errorf("unsupported /tmp access mode %q", settings.Tmp)
+	}
+}
+
+func hasExplicitMapping(settings Settings, abs string, projectRoot string) bool {
 	if projectRoot != "" && pathContains(projectRoot, abs) {
-		return settings.Project
+		return true
 	}
 	for _, mount := range settings.Mounts {
+		if pathContains(mount.Path, abs) {
+			return true
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && pathContains(home, abs) {
+		return true
+	}
+	return false
+}
+
+func modeForPath(settings Settings, abs string, projectRoot string) Mode {
+	for idx := len(settings.Mounts) - 1; idx >= 0; idx-- {
+		mount := settings.Mounts[idx]
 		if pathContains(mount.Path, abs) {
 			return mount.Mode
 		}
 	}
+	if projectRoot != "" && pathContains(projectRoot, abs) {
+		return settings.Project
+	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" && pathContains(home, abs) {
 		return settings.Home
+	}
+	if settings.Tmp == TmpSession && strings.TrimSpace(settings.TmpDir) != "" && pathContains(settings.TmpDir, abs) {
+		return ModeReadWrite
+	}
+	if settings.Tmp == TmpHost && pathContains(filepath.Clean("/tmp"), abs) {
+		return ModeReadWrite
 	}
 	return settings.Root
 }

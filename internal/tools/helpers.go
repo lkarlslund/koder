@@ -118,7 +118,9 @@ func ReadablePath(root string, raw string) (abs string, label string, err error)
 	return WorkspacePath(root, clean)
 }
 
-func WritablePath(runtime Runtime, raw string) (abs string, label string, err error) {
+// ResolvePath translates a path from the session's sandbox namespace to the
+// host namespace and enforces the requested access against the resolved target.
+func ResolvePath(runtime Runtime, raw string, kind accesssettings.AccessKind) (abs string, label string, err error) {
 	root, err := workspaceRoot(runtime.Workdir)
 	if err != nil {
 		return "", "", err
@@ -132,13 +134,77 @@ func WritablePath(runtime Runtime, raw string) (abs string, label string, err er
 	} else {
 		abs = filepath.Clean(filepath.Join(root, clean))
 	}
-	if err := runtime.CheckPathAccess(accesssettings.AccessWrite, abs); err != nil {
+	label = pathLabel(root, abs)
+	settings := accesssettings.Normalize(runtime.AccessSettings)
+	if accesssettings.IsZero(runtime.AccessSettings) {
+		settings = accesssettings.Default()
+	}
+	if settings.Tmp == accesssettings.TmpSession {
+		settings.TmpDir = runtime.SessionTmpDir()
+	}
+	abs, err = accesssettings.MapPath(settings, accesssettings.Request{Path: abs, ProjectRoot: runtime.Workdir})
+	if err != nil {
 		return "", "", err
 	}
-	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return abs, filepath.ToSlash(rel), nil
+	if err := allowsPath(settings, runtime.Workdir, kind, abs); err != nil {
+		return "", "", err
 	}
-	return abs, filepath.ToSlash(abs), nil
+	switch kind {
+	case accesssettings.AccessRead:
+		resolved, exists, resolveErr := resolveExistingPath(abs)
+		if resolveErr != nil {
+			return "", "", resolveErr
+		}
+		if !exists {
+			return "", "", fmt.Errorf("%s: %w", label, fs.ErrNotExist)
+		}
+		abs = resolved
+	case accesssettings.AccessWrite:
+		abs, err = resolveWritablePath(abs)
+		if err != nil {
+			return "", "", err
+		}
+	default:
+		return "", "", fmt.Errorf("unsupported path access kind %q", kind)
+	}
+	if err := allowsPath(settings, runtime.Workdir, kind, abs); err != nil {
+		return "", "", err
+	}
+	return abs, label, nil
+}
+
+func pathLabel(root, abs string) string {
+	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(abs)
+}
+
+func allowsPath(settings accesssettings.Settings, projectRoot string, kind accesssettings.AccessKind, abs string) error {
+	return accesssettings.Allows(settings, accesssettings.Request{Kind: kind, Path: abs, ProjectRoot: projectRoot})
+}
+
+func resolveWritablePath(abs string) (string, error) {
+	current := filepath.Clean(abs)
+	var missing []string
+	for {
+		resolved, exists, err := resolveExistingPath(current)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			for idx := len(missing) - 1; idx >= 0; idx-- {
+				resolved = filepath.Join(resolved, missing[idx])
+			}
+			return resolved, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("resolve writable path %s: no existing parent", abs)
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 func WorkspaceDir(root string, raw string) (abs string, rel string, err error) {

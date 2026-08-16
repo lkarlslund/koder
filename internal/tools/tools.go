@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -281,6 +282,9 @@ func Call(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := checkRuntimeAccess(runtime, req); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Result{}, err
+		}
 		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
 	}
 	return tool.Call(ctx, Options{Runtime: runtime, Request: req})
@@ -326,11 +330,8 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 }
 
 func checkRequestOutputPath(runtime Runtime, path string) error {
-	abs, _, err := WritablePath(runtime, path)
-	if err != nil {
-		return err
-	}
-	return runtime.CheckPathAccess(accesssettings.AccessWrite, abs)
+	_, _, err := ResolvePath(runtime, path, accesssettings.AccessWrite)
+	return err
 }
 
 func checkBrowserUploadPaths(runtime Runtime, req Request) error {
@@ -339,11 +340,7 @@ func checkBrowserUploadPaths(runtime Runtime, req Request) error {
 		return fmt.Errorf("decode browser upload paths: %w", err)
 	}
 	for _, path := range paths {
-		abs, _, err := ReadablePath(runtime.Workdir, path)
-		if err != nil {
-			return err
-		}
-		if err := runtime.CheckPathAccess(accesssettings.AccessRead, abs); err != nil {
+		if _, _, err := ResolvePath(runtime, path, accesssettings.AccessRead); err != nil {
 			return err
 		}
 	}
@@ -358,14 +355,8 @@ func checkRequestPath(runtime Runtime, req Request, kind accesssettings.AccessKi
 	if path == "" {
 		path = "."
 	}
-	abs, _, err := ReadablePath(runtime.Workdir, path)
-	if kind == accesssettings.AccessWrite {
-		abs, _, err = WritablePath(runtime, path)
-	}
-	if err != nil {
-		return err
-	}
-	return runtime.CheckPathAccess(kind, abs)
+	_, _, err := ResolvePath(runtime, path, kind)
+	return err
 }
 
 func normalizeRuntime(runtime Runtime) Runtime {
@@ -382,10 +373,6 @@ func normalizeRuntime(runtime Runtime) Runtime {
 
 func (r Runtime) CheckNetworkAccess() error {
 	return accesssettings.Allows(r.AccessSettings, accesssettings.Request{Kind: accesssettings.AccessNetwork})
-}
-
-func (r Runtime) CheckPathAccess(kind accesssettings.AccessKind, abs string) error {
-	return accesssettings.Allows(r.AccessSettings, accesssettings.Request{Kind: kind, Path: abs, ProjectRoot: r.Workdir})
 }
 
 func (r Runtime) SessionTmpDir() string {

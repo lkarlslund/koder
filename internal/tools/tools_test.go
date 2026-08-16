@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
@@ -124,13 +126,13 @@ func TestReadablePathExpandsHomePath(t *testing.T) {
 	}
 }
 
-func TestWritablePathExpandsHomePath(t *testing.T) {
+func TestResolvePathExpandsWritableHomePath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	target := filepath.Join(home, "notes.txt")
 	runtime := tools.Runtime{Workdir: t.TempDir(), AccessSettings: accesssettings.AllowAll()}
 
-	abs, label, err := tools.WritablePath(runtime, "~/notes.txt")
+	abs, label, err := tools.ResolvePath(runtime, "~/notes.txt", accesssettings.AccessWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +183,7 @@ func TestWorkspacePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) 
 	}
 }
 
-func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
+func TestResolvePathAllowsWritableDotDotPathInsideWorkspace(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "repo")
 	if err := os.Mkdir(root, 0o755); err != nil {
@@ -189,7 +191,7 @@ func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
 	}
 	runtime := tools.Runtime{Workdir: root}
 
-	abs, rel, err := tools.WritablePath(runtime, "../repo/../repo/./main.go")
+	abs, rel, err := tools.ResolvePath(runtime, "../repo/../repo/./main.go", accesssettings.AccessWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +200,99 @@ func TestWritablePathAllowsDotDotPathThatResolvesInsideWorkspace(t *testing.T) {
 	}
 	if rel != "main.go" {
 		t.Fatalf("expected workspace label main.go, got %q", rel)
+	}
+}
+
+func TestResolvePathMapsSessionTmpCreatedBySandboxedCommand(t *testing.T) {
+	root := t.TempDir()
+	runtime := testRuntime(root)
+	runtime.SessionID = id.New()
+	t.Cleanup(func() { _ = os.RemoveAll(runtime.SessionTmpDir()) })
+
+	_, err := tools.Call(t.Context(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{"command": "printf 'from sandbox' > /tmp/result.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tools.Call(t.Context(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: domain.ToolKindFileRead,
+		Args: map[string]string{"path": "/tmp/result.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "from sandbox") {
+		t.Fatalf("unexpected file contents: %q", result.Output)
+	}
+	if result.Meta["path"] != "/tmp/result.txt" {
+		t.Fatalf("path label = %q, want /tmp/result.txt", result.Meta["path"])
+	}
+}
+
+func TestResolvePathEnforcesProjectAccessModes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(path, []byte("notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		mode    accesssettings.Mode
+		readOK  bool
+		writeOK bool
+	}{
+		{name: "none", mode: accesssettings.ModeNone},
+		{name: "read-only", mode: accesssettings.ModeReadOnly, readOK: true},
+		{name: "read-write", mode: accesssettings.ModeReadWrite, readOK: true, writeOK: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := accesssettings.Default()
+			settings.Project = tt.mode
+			runtime := tools.Runtime{Workdir: root, AccessSettings: settings}
+			_, _, readErr := tools.ResolvePath(runtime, "notes.txt", accesssettings.AccessRead)
+			if (readErr == nil) != tt.readOK {
+				t.Fatalf("read error = %v, want success %t", readErr, tt.readOK)
+			}
+			_, _, writeErr := tools.ResolvePath(runtime, "notes.txt", accesssettings.AccessWrite)
+			if (writeErr == nil) != tt.writeOK {
+				t.Fatalf("write error = %v, want success %t", writeErr, tt.writeOK)
+			}
+		})
+	}
+}
+
+func TestResolvePathRejectsWritableSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	settings := accesssettings.Default()
+	settings.Project = accesssettings.ModeReadWrite
+	settings.Root = accesssettings.ModeReadOnly
+	toolRuntime := tools.Runtime{Workdir: root, AccessSettings: settings}
+
+	if _, _, err := tools.ResolvePath(toolRuntime, "outside/new.txt", accesssettings.AccessWrite); err == nil {
+		t.Fatal("expected write through escaping symlink to be denied")
+	}
+}
+
+func TestMissingFileIsToolFailureNotAccessDenial(t *testing.T) {
+	_, err := tools.Call(t.Context(), tools.Options{
+		Runtime: testRuntime(t.TempDir()),
+		Request: tools.Request{Tool: domain.ToolKindFileRead, Args: map[string]string{"path": "missing.txt"}},
+	})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error = %v, want file-not-found", err)
+	}
+	if tools.IsDenied(err) {
+		t.Fatalf("file-not-found was classified as access denial: %v", err)
 	}
 }
 
