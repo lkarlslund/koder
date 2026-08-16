@@ -18,6 +18,9 @@ const (
 	SelectionAuto    = "auto"
 	SelectionDefault = "default"
 	directoryName    = "model-overlays"
+
+	ReasoningReplayTagThink        = "tag:think"
+	ReasoningReplaySeparateContent = "reasoning_content"
 )
 
 // Catalog contains all valid model overlays and non-fatal loading problems.
@@ -34,14 +37,15 @@ type Problem struct {
 
 // Template declaratively describes model matching, UI controls, and request bindings.
 type Template struct {
-	Version     int       `json:"version"`
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description,omitempty"`
-	Priority    int       `json:"priority,omitempty"`
-	Match       Match     `json:"match"`
-	Controls    []Control `json:"controls,omitempty"`
-	Source      string    `json:"source,omitempty"`
+	Version         int       `json:"version"`
+	ID              string    `json:"id"`
+	Title           string    `json:"title"`
+	Description     string    `json:"description,omitempty"`
+	Priority        int       `json:"priority,omitempty"`
+	Match           Match     `json:"match"`
+	ReasoningReplay string    `json:"reasoning_replay,omitempty"`
+	Controls        []Control `json:"controls,omitempty"`
+	Source          string    `json:"source,omitempty"`
 }
 
 // Match selects models and provider transports for an overlay.
@@ -82,9 +86,10 @@ type Binding struct {
 
 // Resolved is the deterministic merge of overlays for one model.
 type Resolved struct {
-	IDs      []string  `json:"ids"`
-	Title    string    `json:"title"`
-	Controls []Control `json:"controls"`
+	IDs             []string  `json:"ids"`
+	Title           string    `json:"title"`
+	ReasoningReplay string    `json:"reasoning_replay"`
+	Controls        []Control `json:"controls"`
 }
 
 // Load reads embedded overlays and lets files in root/model-overlays override
@@ -158,6 +163,9 @@ func validateTemplate(overlay Template) error {
 	if strings.TrimSpace(overlay.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
+	if err := validateReasoningReplay(overlay.ReasoningReplay); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, control := range overlay.Controls {
 		if strings.TrimSpace(control.ID) == "" {
@@ -181,6 +189,18 @@ func validateTemplate(overlay Template) error {
 				return fmt.Errorf("control %q: %w", control.ID, err)
 			}
 		}
+	}
+	return nil
+}
+
+func validateReasoningReplay(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || value == ReasoningReplaySeparateContent {
+		return nil
+	}
+	tag, ok := strings.CutPrefix(value, "tag:")
+	if !ok || !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`).MatchString(tag) {
+		return fmt.Errorf("unsupported reasoning_replay %q", value)
 	}
 	return nil
 }
@@ -221,11 +241,14 @@ func (c Catalog) Resolve(modelID, selection, transport string) Resolved {
 		}
 	}
 	controlIndex := map[string]int{}
-	resolved := Resolved{}
+	resolved := Resolved{ReasoningReplay: ReasoningReplayTagThink}
 	for _, overlay := range matched {
 		resolved.IDs = append(resolved.IDs, overlay.ID)
 		if overlay.ID != "generic" && strings.TrimSpace(overlay.Title) != "" {
 			resolved.Title = overlay.Title
+		}
+		if replay := strings.TrimSpace(overlay.ReasoningReplay); replay != "" {
+			resolved.ReasoningReplay = replay
 		}
 		for _, control := range overlay.Controls {
 			if idx, ok := controlIndex[control.ID]; ok {

@@ -79,6 +79,37 @@ func PreserveThinkingEnabled(cfg config.Provider, model config.ModelConfig, cata
 	return resolved.BoolValue("preserve_thinking", ModelOptionValues(model))
 }
 
+// ReasoningReplay selects how preserved assistant reasoning is serialized in
+// subsequent requests. Model overlays default to a tagged content block.
+func ReasoningReplay(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) string {
+	resolved := catalog.Resolve(model.ModelID, model.ModelPreset, OverlayTransport(cfg))
+	return resolved.ReasoningReplay
+}
+
+// WithReasoningReplay adds preserved reasoning to a historical assistant
+// message using the representation selected by the model overlay.
+func WithReasoningReplay(message Message, reasoning, replay string) Message {
+	reasoning = strings.TrimSpace(reasoning)
+	if reasoning == "" {
+		return message
+	}
+	if replay == modeloverlay.ReasoningReplaySeparateContent {
+		message.ReasoningContent = reasoning
+		return message
+	}
+	tag, ok := strings.CutPrefix(replay, "tag:")
+	if !ok || strings.TrimSpace(tag) == "" {
+		tag = "think"
+	}
+	block := "<" + tag + ">\n" + reasoning + "\n</" + tag + ">"
+	if strings.TrimSpace(message.Content) == "" {
+		message.Content = block
+	} else {
+		message.Content = block + "\n\n" + strings.TrimSpace(message.Content)
+	}
+	return message
+}
+
 func RequestExtraBody(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) map[string]any {
 	body := map[string]any{}
 	if PromptProgressRequested(cfg) {

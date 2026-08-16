@@ -2369,7 +2369,7 @@ func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
 	cfg.SetModelConfig(config.ModelConfig{
 		ProviderID:     "test",
 		ModelID:        "Qwen/Qwen3.6-35B-A3B",
-		ModelPreset:    provider.ModelPresetDefault,
+		ModelPreset:    provider.ModelPresetAuto,
 		Temperature:    &temperature,
 		TopP:           &topP,
 		ThinkingMode:   "disabled",
@@ -2487,8 +2487,8 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 	}
 }
 
-func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
-	cfg := testConfig(t)
+func TestBuildConversationPreservesSeparateReasoningForQwenPreset(t *testing.T) {
+	cfg := testConfig(t).WithManagedAssetsDir(t.TempDir())
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: "http://127.0.0.1:8000/v1",
@@ -2524,8 +2524,8 @@ func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
 		t.Fatalf("expected assistant message, got %#v", conversation)
 	}
 	assistant := conversation[len(conversation)-1]
-	if !strings.Contains(assistant.Content, "<think>\nhidden trace\n</think>") || !strings.Contains(assistant.Content, "done") {
-		t.Fatalf("expected preserved thinking block, got %#v", assistant)
+	if assistant.Content != "done" || assistant.ReasoningContent != "hidden trace" {
+		t.Fatalf("expected separately preserved reasoning, got %#v", assistant)
 	}
 }
 

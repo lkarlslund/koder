@@ -123,6 +123,66 @@ func TestConversationMessagesForSuccessfulToolDoesNotAddErrorGuidance(t *testing
 	}
 }
 
+func TestConversationMessagesUseOverlayReasoningReplay(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default().WithStateDir(t.TempDir()).WithManagedAssetsDir(t.TempDir())
+	cfg.Providers = map[string]config.Provider{
+		"llama": {BaseURL: "http://127.0.0.1:8000/v1"},
+	}
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:  "llama",
+		ModelID:     "qwen3.8-27b-q8-mtp",
+		ModelPreset: provider.ModelPresetAuto,
+	})
+	runtime := New(Config{Config: cfg})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1", ProviderID: "llama", ModelID: "qwen3.8-27b-q8-mtp"}
+	item := domain.TimelineItem{
+		ID:     "assistant-1",
+		ChatID: chat.ID,
+		Content: domain.AssistantMessage{
+			Text:      "answer",
+			Reasoning: domain.ReasoningContent{Text: "trace"},
+		},
+	}
+
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Content != "answer" || messages[0].ReasoningContent != "trace" {
+		t.Fatalf("expected separate reasoning replay, got %#v", messages)
+	}
+}
+
+func TestConversationMessagesDefaultToThinkTagReplay(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default().WithStateDir(t.TempDir()).WithManagedAssetsDir(t.TempDir())
+	cfg.Providers = map[string]config.Provider{
+		"openai": {BaseURL: "https://example.invalid/v1"},
+	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "openai", ModelID: "generic-model"})
+	runtime := New(Config{Config: cfg})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1", ProviderID: "openai", ModelID: "generic-model"}
+	item := domain.TimelineItem{
+		ID:     "assistant-1",
+		ChatID: chat.ID,
+		Content: domain.AssistantMessage{
+			Text:      "answer",
+			Reasoning: domain.ReasoningContent{Text: "trace"},
+		},
+	}
+
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ReasoningContent != "" || messages[0].Content != "<think>\ntrace\n</think>\n\nanswer" {
+		t.Fatalf("expected tagged reasoning replay, got %#v", messages)
+	}
+}
+
 func assistantToolItem(itemID, callID, command, output string) domain.TimelineItem {
 	return domain.TimelineItem{
 		ID:     id.ID(itemID),

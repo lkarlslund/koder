@@ -18,6 +18,7 @@ control to the outgoing OpenAI-compatible request body:
     "model_ids": ["*example-model*"],
     "transports": ["llama"]
   },
+  "reasoning_replay": "tag:think",
   "controls": [
     {
       "id": "reasoning_level",
@@ -41,6 +42,13 @@ control to the outgoing OpenAI-compatible request body:
   ]
 }
 ```
+
+`reasoning_replay` controls how preserved assistant reasoning is sent back in
+later requests. It defaults to `tag:think`, which prepends the reasoning to
+assistant content as a `<think>...</think>` block. Use `reasoning_content` for
+models that expect reasoning in the separate OpenAI-compatible
+`reasoning_content` message field. Other XML-style tags can be selected with
+`tag:<name>`.
 
 Supported control types are `select`, `number`, `text`, `checkbox`, and
 `hidden`. Number controls can specify `min`, `max`, and `step`; text and number

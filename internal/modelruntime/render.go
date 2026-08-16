@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/environment"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/skills"
@@ -218,12 +219,16 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 		if strings.TrimSpace(content.Text) != "" {
 			textChunks = append(textChunks, content.Text)
 		}
-		out := []provider.Message{{
+		message := provider.Message{
 			Role:      provider.RoleAssistant,
-			Content:   assistantConversationContent(textChunks, reasoningChunks, preserveThinking),
+			Content:   strings.TrimSpace(strings.Join(textChunks, "\n\n")),
 			ToolCalls: toolCalls,
-		}}
-		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
+		}
+		if preserveThinking && len(reasoningChunks) > 0 {
+			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), r.reasoningReplay(chat))
+		}
+		out := []provider.Message{message}
+		if strings.TrimSpace(out[0].Content) == "" && strings.TrimSpace(out[0].ReasoningContent) == "" && len(out[0].ToolCalls) == 0 {
 			out = out[:0]
 		}
 		for _, tool := range content.Tools {
@@ -578,35 +583,23 @@ func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
 }
 
 func (r *Runtime) preserveThinkingEnabled(chat domain.Chat) bool {
-	thinking, err := r.settings.Thinking(chat, r.cfg.Thinking.CavemanPrompt, true)
+	model, err := r.settings.Model(chat)
 	if err != nil {
-		return true
+		return false
 	}
-	return thinking.PreserveThinking
+	return provider.PreserveThinkingEnabled(model.Provider, model.Model, r.modelOverlays)
+}
+
+func (r *Runtime) reasoningReplay(chat domain.Chat) string {
+	model, err := r.settings.Model(chat)
+	if err != nil {
+		return modeloverlay.ReasoningReplayTagThink
+	}
+	return provider.ReasoningReplay(model.Provider, model.Model, r.modelOverlays)
 }
 
 func (r *Runtime) compactionKeepToolCalls() int {
 	return config.NormalizeCompactionKeepToolCalls(r.settings.Snapshot().Compaction.KeepToolCalls)
-}
-
-func assistantConversationContent(textChunks, reasoningChunks []string, preserveThinking bool) string {
-	body := strings.TrimSpace(strings.Join(textChunks, "\n\n"))
-	if !preserveThinking || len(reasoningChunks) == 0 {
-		return body
-	}
-	thinking := formatThinkingBlock(strings.Join(reasoningChunks, "\n\n"))
-	if body == "" {
-		return thinking
-	}
-	return thinking + "\n\n" + body
-}
-
-func formatThinkingBlock(reasoning string) string {
-	reasoning = strings.TrimSpace(reasoning)
-	if reasoning == "" {
-		return ""
-	}
-	return "<think>\n" + reasoning + "\n</think>"
 }
 
 func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {

@@ -97,11 +97,12 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 }
 
 type Message struct {
-	Role         Role          `json:"role"`
-	Content      string        `json:"content,omitempty"`
-	ContentParts []ContentPart `json:"-"`
-	ToolCallID   string        `json:"tool_call_id,omitempty"`
-	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	Role             Role          `json:"role"`
+	Content          string        `json:"content,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ContentParts     []ContentPart `json:"-"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
 }
 
 type ContentPart struct {
@@ -133,10 +134,11 @@ var probePNG = []byte{
 
 func (m Message) MarshalJSON() ([]byte, error) {
 	type wireMessage struct {
-		Role       string     `json:"role"`
-		Content    any        `json:"content,omitempty"`
-		ToolCallID string     `json:"tool_call_id,omitempty"`
-		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		Role             string     `json:"role"`
+		Content          any        `json:"content,omitempty"`
+		ReasoningContent string     `json:"reasoning_content,omitempty"`
+		ToolCallID       string     `json:"tool_call_id,omitempty"`
+		ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	}
 	var content any
 	trimmed := strings.TrimSpace(sanitizePromptText(m.Content))
@@ -166,10 +168,11 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		content = items
 	}
 	return json.Marshal(wireMessage{
-		Role:       providerRole(m.Role),
-		Content:    content,
-		ToolCallID: m.ToolCallID,
-		ToolCalls:  sanitizeToolCalls(m.ToolCalls),
+		Role:             providerRole(m.Role),
+		Content:          content,
+		ReasoningContent: strings.TrimSpace(sanitizePromptText(m.ReasoningContent)),
+		ToolCallID:       m.ToolCallID,
+		ToolCalls:        sanitizeToolCalls(m.ToolCalls),
 	})
 }
 

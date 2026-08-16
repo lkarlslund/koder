@@ -7,6 +7,7 @@
   "match": {
     "model_ids": ["*qwen3.8*", "*qwen3-8*"]
   },
+  "reasoning_replay": "reasoning_content",
   "controls": [
     {
       "id": "thinking_mode",

@@ -101,6 +101,21 @@ func TestMessageMarshalJSONOmitsEmptyAssistantToolCallContent(t *testing.T) {
 	}
 }
 
+func TestMessageMarshalJSONIncludesSeparateReasoningContent(t *testing.T) {
+	data, err := json.Marshal(Message{
+		Role:             RoleAssistant,
+		Content:          "answer",
+		ReasoningContent: "private trace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"content":"answer"`) || !strings.Contains(got, `"reasoning_content":"private trace"`) {
+		t.Fatalf("expected separate answer and reasoning fields, got %s", got)
+	}
+}
+
 func TestChatRequestMarshalJSONIncludesStreamUsageOptions(t *testing.T) {
 	data, err := json.Marshal(ChatRequest{
 		Model:  "test-model",

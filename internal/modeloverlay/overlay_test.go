@@ -18,6 +18,9 @@ func TestBuiltinsResolveQwen38AndApplyBindings(t *testing.T) {
 	if !reflect.DeepEqual(resolved.IDs, []string{"generic", "qwen3.8"}) {
 		t.Fatalf("Resolve() IDs = %v", resolved.IDs)
 	}
+	if resolved.ReasoningReplay != ReasoningReplaySeparateContent {
+		t.Fatalf("ReasoningReplay = %q, want %q", resolved.ReasoningReplay, ReasoningReplaySeparateContent)
+	}
 	if err := resolved.ValidateValues(map[string]any{"reasoning_effort": "high"}); err == nil {
 		t.Fatal("ValidateValues() accepted an unsupported Qwen3.8 reasoning level")
 	}
@@ -36,6 +39,13 @@ func TestBuiltinsResolveQwen38AndApplyBindings(t *testing.T) {
 		gotJSON, _ := json.Marshal(body)
 		wantJSON, _ := json.Marshal(want)
 		t.Fatalf("Apply() = %s, want %s", gotJSON, wantJSON)
+	}
+}
+
+func TestGenericReasoningReplayDefaultsToThinkTag(t *testing.T) {
+	resolved := Load(t.TempDir()).Resolve("generic-model", SelectionAuto, "openai")
+	if resolved.ReasoningReplay != ReasoningReplayTagThink {
+		t.Fatalf("ReasoningReplay = %q, want %q", resolved.ReasoningReplay, ReasoningReplayTagThink)
 	}
 }
 

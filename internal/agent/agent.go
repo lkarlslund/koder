@@ -627,6 +627,14 @@ func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
 	return provider.PreserveThinkingEnabled(model.Provider, model.Model, e.modelOverlays)
 }
 
+func (e *Engine) reasoningReplay(chat domain.Chat) string {
+	model, err := e.settings.Model(chat)
+	if err != nil {
+		return modeloverlay.ReasoningReplayTagThink
+	}
+	return provider.ReasoningReplay(model.Provider, model.Model, e.modelOverlays)
+}
+
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {
 	refreshCount, generatedAt := sessionTitleRefreshState(session)
 	if refreshCount == 0 {
@@ -1083,12 +1091,16 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		if strings.TrimSpace(content.Text) != "" {
 			textChunks = append(textChunks, content.Text)
 		}
-		out := []provider.Message{{
+		message := provider.Message{
 			Role:      provider.RoleAssistant,
-			Content:   assistantConversationContent(textChunks, reasoningChunks, preserveThinking),
+			Content:   strings.TrimSpace(strings.Join(textChunks, "\n\n")),
 			ToolCalls: toolCalls,
-		}}
-		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
+		}
+		if preserveThinking && len(reasoningChunks) > 0 {
+			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), e.reasoningReplay(chat))
+		}
+		out := []provider.Message{message}
+		if strings.TrimSpace(out[0].Content) == "" && strings.TrimSpace(out[0].ReasoningContent) == "" && len(out[0].ToolCalls) == 0 {
 			out = out[:0]
 		}
 		for _, tool := range content.Tools {
@@ -1406,18 +1418,6 @@ func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID
 		ContentParts: contentParts,
 		ToolCallID:   toolCallID,
 	}, true
-}
-
-func assistantConversationContent(textChunks, reasoningChunks []string, preserveThinking bool) string {
-	body := strings.TrimSpace(strings.Join(textChunks, "\n\n"))
-	if !preserveThinking || len(reasoningChunks) == 0 {
-		return body
-	}
-	thinking := formatThinkingBlock(strings.Join(reasoningChunks, "\n\n"))
-	if body == "" {
-		return thinking
-	}
-	return thinking + "\n\n" + body
 }
 
 func formatThinkingBlock(reasoning string) string {
