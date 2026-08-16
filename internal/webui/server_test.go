@@ -2183,6 +2183,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `Chat settings`) ||
 		!strings.Contains(fullPage, `Global model settings`) ||
 		!strings.Contains(fullPage, `saveActiveModelSettings()`) ||
+		!strings.Contains(fullPage, `String(choice.value) === String(modelSettingsDraft.model_options[control.id])`) ||
 		!strings.Contains(fullPage, `save_model_config`) {
 		t.Fatalf("expected model picker to edit reusable global models without defining chat-specific models")
 	}
@@ -2481,6 +2482,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `defaultModelValue()`) ||
 		!strings.Contains(fullPage, `modelOverlayControls(modelConfigDraft)`) ||
 		!strings.Contains(fullPage, `modelConfigDraft.model_options[control.id]`) ||
+		!strings.Contains(fullPage, `String(choice.value) === String(modelConfigDraft.model_options[control.id])`) ||
 		!strings.Contains(fullPage, `modelOverlayChoices(modelConfigDraft)`) ||
 		!strings.Contains(fullPage, `source_model_id`) ||
 		!strings.Contains(fullPage, `modelOptionLabel(model)`) {

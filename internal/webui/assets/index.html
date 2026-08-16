@@ -822,7 +822,7 @@
                   <label class="form-label small text-secondary" :for="'picker-model-option-' + control.id" x-text="control.label"></label>
                   <template x-if="control.type === 'select'">
                     <select class="form-select" :id="'picker-model-option-' + control.id" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()">
-                      <template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" x-text="choice.label"></option></template>
+                      <template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" :selected="String(choice.value) === String(modelSettingsDraft.model_options[control.id])" x-text="choice.label"></option></template>
                     </select>
                   </template>
                   <template x-if="control.type === 'number'"><input class="form-control" :id="'picker-model-option-' + control.id" type="number" :min="control.min" :max="control.max" :step="control.step || 'any'" :placeholder="control.placeholder || 'server default'" x-model="modelSettingsDraft.model_options[control.id]" :disabled="!modelSettingsEditable()"></template>
@@ -1499,7 +1499,7 @@
               <div class="settings-field">
                 <div class="settings-field-label"><label class="settings-field-title" :for="'settings-model-option-' + control.id" x-text="control.label"></label><div class="settings-field-help" x-show="control.help" x-text="control.help"></div></div>
                 <div class="settings-field-control">
-                  <template x-if="control.type === 'select'"><select class="form-select" :id="'settings-model-option-' + control.id" x-model="modelConfigDraft.model_options[control.id]"><template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" x-text="choice.label"></option></template></select></template>
+                  <template x-if="control.type === 'select'"><select class="form-select" :id="'settings-model-option-' + control.id" x-model="modelConfigDraft.model_options[control.id]"><template x-for="choice in control.choices || []" :key="String(choice.value)"><option :value="choice.value" :selected="String(choice.value) === String(modelConfigDraft.model_options[control.id])" x-text="choice.label"></option></template></select></template>
                   <template x-if="control.type === 'number'"><input class="form-control" :id="'settings-model-option-' + control.id" type="number" :min="control.min" :max="control.max" :step="control.step || 'any'" :placeholder="control.placeholder || 'server default'" x-model="modelConfigDraft.model_options[control.id]"></template>
                   <template x-if="control.type === 'text'"><input class="form-control" :id="'settings-model-option-' + control.id" type="text" :placeholder="control.placeholder || ''" x-model="modelConfigDraft.model_options[control.id]"></template>
                   <template x-if="control.type === 'checkbox'"><label class="toggle-switch"><input class="toggle-switch-input" :id="'settings-model-option-' + control.id" type="checkbox" x-model="modelConfigDraft.model_options[control.id]"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></template>
