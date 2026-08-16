@@ -492,6 +492,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(websocketReadLimit)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	s.markConnected()
 
@@ -1946,6 +1947,7 @@ type rpcResponse struct {
 const (
 	websocketHeartbeatInterval = 15 * time.Second
 	websocketWriteTimeout      = 5 * time.Second
+	websocketReadLimit         = 1 << 20
 )
 
 func decodeParams(raw json.RawMessage, out any) error {

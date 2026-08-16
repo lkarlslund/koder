@@ -1308,6 +1308,34 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	}
 }
 
+func TestWebSocketAcceptsSettingsSizedRPCMessages(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	params, err := json.Marshal(map[string]string{"padding": strings.Repeat("x", 64<<10)})
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	writeRPC(t, ctx, conn, 1, "unknown_large_request", string(params))
+	var resp rpcResponse
+	if err := json.Unmarshal(readRPCResponse(t, ctx, conn, 1), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "unknown method") {
+		t.Fatalf("expected dispatched large request, got %#v", resp)
+	}
+}
+
 func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	ctrl := newTestController(t)
 	recorder := debugsrv.NewRecorder()
@@ -2152,8 +2180,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `class="turn-performance"`) {
 		t.Fatalf("expected assistant entries to render persisted LLM performance before the timestamp")
 	}
-	if strings.Contains(fullPage, `Chat settings`) || strings.Contains(fullPage, `saveActiveModelSettings()`) {
-		t.Fatalf("expected chat model dialog to select catalog models without defining chat-specific models")
+	if strings.Contains(fullPage, `Chat settings`) ||
+		!strings.Contains(fullPage, `Global model settings`) ||
+		!strings.Contains(fullPage, `saveActiveModelSettings()`) ||
+		!strings.Contains(fullPage, `save_model_config`) {
+		t.Fatalf("expected model picker to edit reusable global models without defining chat-specific models")
 	}
 	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Chat`) || !strings.Contains(fullPage, `activeChatRoleLabel()`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Access`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
