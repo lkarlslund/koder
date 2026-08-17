@@ -92,3 +92,24 @@ func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
 		t.Fatalf("stored image = %#v, want source %q", result.Stored, target)
 	}
 }
+
+func TestExecuteRecognizesQEMUPortablePixmapWithPNGExtension(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "screen.png")
+	ppm := append([]byte("P6\n1 1\n255\n"), 0x20, 0x40, 0x80)
+	if err := os.WriteFile(target, ppm, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workspace},
+		Request: tools.Request{Args: map[string]string{"path": "screen.png"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := result.Stored.(tools.ViewImageStoredResult)
+	if !ok || stored.MIMEType != "image/png" {
+		t.Fatalf("stored image = %#v, want normalized image/png", result.Stored)
+	}
+}

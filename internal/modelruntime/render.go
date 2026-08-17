@@ -565,7 +565,7 @@ func (r *Runtime) toolImageMessage(chat domain.Chat, part domain.Part, toolCallI
 	if sourcePath == "" || mimeType == "" {
 		return provider.Message{}, false
 	}
-	data, err := os.ReadFile(sourcePath)
+	data, mimeType, err := attachment.LoadImage(sourcePath)
 	if err != nil || len(data) == 0 {
 		return provider.Message{}, false
 	}

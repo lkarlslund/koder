@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"mime"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
@@ -90,25 +86,6 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 }
 
 func detectImageMIME(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = file.Close() }()
-
-	var sniff [512]byte
-	n, err := file.Read(sniff[:])
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
-	}
-	mimeType := http.DetectContentType(sniff[:n])
-	if mimeType == "application/octet-stream" {
-		if byExt := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); byExt != "" {
-			mimeType = byExt
-		}
-	}
-	if attachment.ClassifyMIME(mimeType) != attachment.KindImage {
-		return "", fmt.Errorf("unsupported image type %q", mimeType)
-	}
-	return mimeType, nil
+	_, mimeType, err := attachment.LoadImage(path)
+	return mimeType, err
 }

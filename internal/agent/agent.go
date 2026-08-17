@@ -1363,7 +1363,7 @@ func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID
 	if sourcePath == "" || mimeType == "" {
 		return provider.Message{}, false
 	}
-	data, err := os.ReadFile(sourcePath)
+	data, mimeType, err := attachment.LoadImage(sourcePath)
 	if err != nil || len(data) == 0 {
 		return provider.Message{}, false
 	}

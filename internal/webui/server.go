@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -429,30 +430,14 @@ func handleShowImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "path is a directory", http.StatusBadRequest)
 		return
 	}
-	file, err := os.Open(path)
+	data, mimeType, err := attachment.LoadImage(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	defer func() { _ = file.Close() }()
-	var sniff [512]byte
-	n, err := file.Read(sniff[:])
-	if err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	mimeType := http.DetectContentType(sniff[:n])
-	if attachment.ClassifyMIME(mimeType) != attachment.KindImage {
 		http.Error(w, "path is not an image", http.StatusUnsupportedMediaType)
-		return
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Cache-Control", "no-cache")
-	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
+	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), bytes.NewReader(data))
 }
 
 func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
