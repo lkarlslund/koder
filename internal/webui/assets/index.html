@@ -47,7 +47,32 @@
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID() && !quickChatMode()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions &amp; Chats" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
-		<button class="btn btn-sm" :class="browserStatusClass()" :title="browserStatusTitle()" @click="openSettingsDialog('browser')"><i class="bi bi-globe2"></i><span class="visually-hidden">Browser status</span></button>
+		<div class="browser-control position-relative" @click.outside="closeBrowserPanel()">
+		  <button class="btn btn-sm" :class="browserStatusClass()" :title="browserStatusTitle()" @click="toggleBrowserPanel()" :aria-expanded="browserPanelOpen"><i class="bi bi-globe2"></i><span class="browser-status-dot" :class="browserStatusDotClass()"></span><span class="visually-hidden">Browser status</span></button>
+		  <section class="browser-popover border rounded shadow bg-body" x-show="browserPanelOpen" x-transition style="display: none;">
+		    <header class="browser-popover-header border-bottom">
+		      <div class="min-w-0"><div class="fw-semibold">Managed browser</div><div class="small text-secondary text-truncate" x-text="browserStatusDescription(browserStatus)"></div></div>
+		      <span class="badge" :class="browserStatusBadgeClass(browserStatus)" x-text="browserStatus?.state || 'unknown'"></span>
+		    </header>
+		    <div class="browser-popover-tabs">
+		      <div class="small text-secondary p-2" x-show="browserTabsLoading && browserOwnedTabs().length === 0"><span class="spinner-border spinner-border-sm me-1"></span>Loading tabs</div>
+		      <div class="small text-danger p-2" x-show="browserPanelError" x-text="browserPanelError"></div>
+		      <div class="small text-secondary p-2" x-show="!browserTabsLoading && !browserPanelError && browserStatus?.state !== 'running'">Browser is not running.</div>
+		      <div class="small text-secondary p-2" x-show="!browserTabsLoading && !browserPanelError && browserStatus?.state === 'running' && browserOwnedTabs().length === 0">No tabs owned by this chat.</div>
+		      <template x-for="tab in browserOwnedTabs()" :key="tab.id">
+		        <button type="button" class="browser-tab-row" @click="openBrowserPreview(tab)" :title="tab.url || tab.title">
+		          <i class="bi" :class="tab.selected ? 'bi-window-stack text-primary' : 'bi-window'"></i>
+		          <span class="min-w-0"><span class="browser-tab-title" x-text="tab.title || 'Untitled tab'"></span><span class="browser-tab-url" x-text="tab.url || 'about:blank'"></span></span>
+		          <i class="bi bi-chevron-right text-secondary"></i>
+		        </button>
+		      </template>
+		    </div>
+		    <footer class="browser-popover-footer border-top">
+		      <button type="button" class="btn btn-sm btn-outline-secondary" @click="refreshBrowserTabs()" :disabled="browserTabsLoading" title="Refresh browser tabs"><i class="bi bi-arrow-clockwise"></i></button>
+		      <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeBrowserPanel(); openSettingsDialog('browser')"><i class="bi bi-gear me-1"></i>Settings</button>
+		    </footer>
+		  </section>
+		</div>
         <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
@@ -1558,6 +1583,39 @@
 
   <div class="toast-stack" x-show="toast" x-transition style="display: none;">
     <div class="alert alert-danger shadow mb-0" role="status" x-text="toast"></div>
+  </div>
+
+  <div class="modal-backdrop-lite browser-preview-backdrop" x-show="browserPreview.open" x-transition @click.self="closeBrowserPreview()" @keydown.escape.window="closeBrowserPreview()" style="display: none;">
+    <section class="browser-preview-dialog border rounded shadow bg-body" role="dialog" aria-modal="true" aria-label="Browser tab preview">
+      <header class="browser-preview-header border-bottom">
+        <div class="min-w-0">
+          <div class="fw-semibold text-truncate" x-text="browserPreview.tab?.title || 'Browser tab'"></div>
+          <div class="small text-secondary text-truncate" x-text="browserPreview.tab?.url || ''"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <label class="small text-secondary text-nowrap" for="browser-preview-rate">Refresh</label>
+          <select id="browser-preview-rate" class="form-select form-select-sm browser-preview-rate" x-model.number="browserPreview.rate" @change="setBrowserPreviewRate(browserPreview.rate)">
+            <option :value="0">Paused</option>
+            <option :value="1">1 second</option>
+            <option :value="2">2 seconds</option>
+            <option :value="5">5 seconds</option>
+            <option :value="10">10 seconds</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="refreshBrowserPreview(true)" :disabled="browserPreview.loading" title="Refresh now"><i class="bi bi-arrow-clockwise"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeBrowserPreview()" title="Close preview"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </header>
+      <div class="browser-preview-body">
+        <img x-show="browserPreview.src" class="browser-preview-image" :src="browserPreview.src" :alt="browserPreview.tab?.title || 'Browser tab preview'">
+        <div class="browser-preview-placeholder text-secondary" x-show="!browserPreview.src && !browserPreview.error"><span class="spinner-border spinner-border-sm me-2" x-show="browserPreview.loading"></span><span x-text="browserPreview.loading ? 'Capturing tab' : 'No preview yet'"></span></div>
+        <div class="browser-preview-placeholder text-danger" x-show="browserPreview.error" x-text="browserPreview.error"></div>
+        <div class="browser-preview-updating" x-show="browserPreview.loading && browserPreview.src"><span class="spinner-border spinner-border-sm"></span></div>
+      </div>
+      <footer class="browser-preview-footer border-top small text-secondary">
+        <span x-text="browserPreview.rate ? 'Live preview' : 'Preview paused'"></span>
+        <span x-show="browserPreview.lastUpdated" x-text="browserPreview.lastUpdated ? 'Updated ' + browserPreview.lastUpdated : ''"></span>
+      </footer>
+    </section>
   </div>
 
   <div class="modal-backdrop-lite image-lightbox" x-show="imageLightbox.open" x-transition @click.self="closeImageLightbox()" @keydown.escape.window="closeImageLightbox()" style="display: none;">

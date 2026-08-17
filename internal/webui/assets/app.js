@@ -1045,7 +1045,8 @@
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0},
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserPanelOpen: false, browserTabs: [], browserTabsLoading: false, browserPanelError: '', browserPanelTimer: null,
+		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -1064,6 +1065,8 @@
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
+		  this.refreshBrowserStatus();
+		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); this.observeLastTranscriptItem(); });
         },
         initializeRouteHydration() {
@@ -3029,6 +3032,7 @@
         modalOpenName() {
           if (this.userInputQuestions().length > 0) return 'user_input';
           if (this.imageLightbox?.open) return 'image';
+		  if (this.browserPreview?.open) return 'browser_preview';
           if (this.showProviderEditor) return 'provider';
           if (this.showModelConfigEditor) return 'model_config';
           if (this.showMCPEditor) return 'mcp';
@@ -5264,6 +5268,10 @@
 		  const state = String(this.browserStatus?.state || 'unknown');
 		  return state === 'running' ? 'btn-outline-success' : state === 'error' ? 'btn-outline-danger' : 'btn-outline-secondary';
 		},
+		browserStatusDotClass() {
+		  const state = String(this.browserStatus?.state || 'unknown');
+		  return state === 'running' ? 'is-running' : state === 'error' ? 'is-error' : '';
+		},
 		browserStatusDescription(status) {
 		  status = status || this.browserStatus || {};
 		  const details = [status.executable, status.version, status.owned_tabs ? status.owned_tabs + ' tab(s) owned by this chat' : ''].filter(Boolean);
@@ -5273,6 +5281,74 @@
 		refreshBrowserStatus() {
 		  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 		  this.rpc('browser_action', {action: 'status'}).then(status => { this.browserStatus = status || this.browserStatus; }).catch(() => {});
+		},
+		toggleBrowserPanel() {
+		  this.browserPanelOpen = !this.browserPanelOpen;
+		  if (!this.browserPanelOpen) return this.closeBrowserPanel();
+		  this.refreshBrowserTabs();
+		},
+		closeBrowserPanel() {
+		  this.browserPanelOpen = false;
+		  if (this.browserPanelTimer) clearTimeout(this.browserPanelTimer);
+		  this.browserPanelTimer = null;
+		},
+		browserOwnedTabs() { return (this.browserTabs || []).filter(tab => !!tab?.owned); },
+		refreshBrowserTabs() {
+		  if (!this.browserPanelOpen || this.browserTabsLoading || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		  this.browserTabsLoading = true; this.browserPanelError = '';
+		  if (this.browserPanelTimer) clearTimeout(this.browserPanelTimer);
+		  this.browserPanelTimer = null;
+		  this.rpc('browser_tabs', {}).then(result => {
+			this.browserStatus = result?.status || this.browserStatus;
+			this.browserTabs = Array.isArray(result?.tabs) ? result.tabs : [];
+		  }).catch(err => { this.browserPanelError = err.message || String(err); }).finally(() => {
+			this.browserTabsLoading = false;
+			if (this.browserPanelOpen) this.browserPanelTimer = setTimeout(() => this.refreshBrowserTabs(), 3000);
+		  });
+		},
+		openBrowserPreview(tab) {
+		  if (!tab?.id) return;
+		  this.closeBrowserPanel();
+		  const generation = Number(this.browserPreview?.generation || 0) + 1;
+		  const rate = Math.max(0, Number(this.browserPreview?.rate ?? readPreference('browserPreviewRate', '2')) || 0);
+		  this.browserPreview = {open: true, tab: {...tab}, rate, src: '', loading: false, error: '', lastUpdated: '', timer: null, generation};
+		  this.reportClientStateSoon();
+		  this.refreshBrowserPreview(true);
+		},
+		closeBrowserPreview() {
+		  if (this.browserPreview?.timer) clearTimeout(this.browserPreview.timer);
+		  this.browserPreview = {...this.browserPreview, open: false, src: '', loading: false, timer: null, generation: Number(this.browserPreview?.generation || 0) + 1};
+		  this.reportClientStateSoon();
+		},
+		setBrowserPreviewRate(value) {
+		  const rate = [0, 1, 2, 5, 10].includes(Number(value)) ? Number(value) : 2;
+		  this.browserPreview.rate = rate;
+		  writePreference('browserPreviewRate', String(rate));
+		  if (this.browserPreview.timer) clearTimeout(this.browserPreview.timer);
+		  this.browserPreview.timer = null;
+		  if (this.browserPreview.open && rate > 0 && !this.browserPreview.loading) this.browserPreview.timer = setTimeout(() => this.refreshBrowserPreview(), rate * 1000);
+		},
+		refreshBrowserPreview(immediate = false) {
+		  const preview = this.browserPreview;
+		  if (!preview?.open || preview.loading || !preview.tab?.id) return;
+		  if (!immediate && Number(preview.rate) <= 0) return;
+		  if (preview.timer) clearTimeout(preview.timer);
+		  preview.timer = null; preview.loading = true; preview.error = '';
+		  const generation = preview.generation;
+		  this.rpc('browser_tab_preview', {tab_id: preview.tab.id}).then(result => {
+			if (!this.browserPreview.open || this.browserPreview.generation !== generation) return;
+			const encoded = String(result?.image_base64 || '');
+			if (!encoded) throw new Error('Browser returned an empty screenshot');
+			this.browserPreview.src = 'data:' + String(result?.mime || 'image/jpeg') + ';base64,' + encoded;
+			this.browserPreview.lastUpdated = new Date().toLocaleTimeString();
+		  }).catch(err => {
+			if (this.browserPreview.open && this.browserPreview.generation === generation) this.browserPreview.error = err.message || String(err);
+		  }).finally(() => {
+			if (!this.browserPreview.open || this.browserPreview.generation !== generation) return;
+			this.browserPreview.loading = false;
+			const rate = Number(this.browserPreview.rate) || 0;
+			if (rate > 0) this.browserPreview.timer = setTimeout(() => this.refreshBrowserPreview(), rate * 1000);
+		  });
 		},
 		browserAction(action) {
 		  this.settingsStatus = ''; this.settingsStatusKind = 'secondary';

@@ -1234,6 +1234,28 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.BrowserAction(ctx, s.appSelection(clientID), strings.TrimSpace(in.Action))
+	case "browser_tabs":
+		status, tabs, err := s.controller.BrowserTabs(ctx, s.appSelection(clientID))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"status": status, "tabs": tabs}, nil
+	case "browser_tab_preview":
+		var in struct {
+			TabID string `json:"tab_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		image, err := s.controller.BrowserTabScreenshot(ctx, s.appSelection(clientID), strings.TrimSpace(in.TabID))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"tab_id":       strings.TrimSpace(in.TabID),
+			"mime":         image.MIME,
+			"image_base64": base64.StdEncoding.EncodeToString(image.Data),
+		}, nil
 	case "save_preferences":
 		var in app.PreferencesState
 		if err := decodeParams(params, &in); err != nil {

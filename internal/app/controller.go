@@ -480,6 +480,29 @@ func (c *Controller) BrowserAction(ctx context.Context, selection Selection, act
 	return c.agent.BrowserAction(ctx, action, browserapi.Chat{SessionID: selection.SessionID, ChatID: selection.ChatID})
 }
 
+func (c *Controller) BrowserTabs(ctx context.Context, selection Selection) (browserapi.Status, []browserapi.Tab, error) {
+	if c == nil || c.agent == nil {
+		return browserapi.Status{}, nil, fmt.Errorf("browser service is unavailable")
+	}
+	chat := browserapi.Chat{SessionID: selection.SessionID, ChatID: selection.ChatID}
+	status := c.agent.BrowserStatus(chat)
+	if status.State != "running" {
+		return status, []browserapi.Tab{}, nil
+	}
+	tabs, err := c.agent.BrowserTabs(ctx, chat)
+	return status, tabs, err
+}
+
+func (c *Controller) BrowserTabScreenshot(ctx context.Context, selection Selection, tabID string) (browserapi.Binary, error) {
+	if c == nil || c.agent == nil {
+		return browserapi.Binary{}, fmt.Errorf("browser service is unavailable")
+	}
+	if strings.TrimSpace(tabID) == "" {
+		return browserapi.Binary{}, fmt.Errorf("browser tab id is required")
+	}
+	return c.agent.BrowserTabScreenshot(ctx, browserapi.Chat{SessionID: selection.SessionID, ChatID: selection.ChatID}, tabID)
+}
+
 func (c *Controller) stateForSelection(ctx context.Context, selection Selection) (State, error) {
 	c.mu.RLock()
 	base := State{

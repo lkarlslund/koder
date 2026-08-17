@@ -453,6 +453,13 @@ func TestChromiumIntegration(t *testing.T) {
 	if second.URL != server.URL+"/" {
 		t.Fatalf("new tab returned stale URL: %s", second.URL)
 	}
+	preview, err := m.ScreenshotTab(t.Context(), chat, tab.ID, "jpeg", 72)
+	if err != nil || preview.MIME != "image/jpeg" || len(preview.Data) == 0 {
+		t.Fatalf("capture specific tab: mime=%q bytes=%d err=%v", preview.MIME, len(preview.Data), err)
+	}
+	if selected := m.selectedTab(chat.ChatID); selected != second.ID {
+		t.Fatalf("specific-tab screenshot changed selected tab from %q to %q", second.ID, selected)
+	}
 	visibility, err = m.Evaluate(t.Context(), chat, `document.visibilityState`)
 	if err != nil || visibility != `"visible"` {
 		t.Fatalf("second tab is not active: %s, %v", visibility, err)

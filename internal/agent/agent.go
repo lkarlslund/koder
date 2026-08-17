@@ -199,6 +199,20 @@ func (e *Engine) BrowserAction(ctx context.Context, action string, chat browsera
 	return e.browser.Status(ctx, chat), err
 }
 
+func (e *Engine) BrowserTabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.Tab, error) {
+	if e == nil || e.browser == nil {
+		return nil, fmt.Errorf("browser service is unavailable")
+	}
+	return e.browser.Tabs(ctx, chat)
+}
+
+func (e *Engine) BrowserTabScreenshot(ctx context.Context, chat browserapi.Chat, tabID string) (browserapi.Binary, error) {
+	if e == nil || e.browser == nil {
+		return browserapi.Binary{}, fmt.Errorf("browser service is unavailable")
+	}
+	return e.browser.ScreenshotTab(ctx, chat, tabID, "jpeg", 72)
+}
+
 func (e *Engine) ReloadMCP(ctx context.Context) error {
 	if e.mcp == nil {
 		return nil

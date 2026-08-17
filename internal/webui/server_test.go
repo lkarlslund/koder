@@ -2413,6 +2413,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `setInterval(() => this.renderTabActivityIcon(true)`) {
 		t.Fatalf("expected the busy favicon to remain static because browsers do not reliably repaint animated favicons")
 	}
+	if !strings.Contains(fullPage, `toggleBrowserPanel()`) ||
+		!strings.Contains(fullPage, `rpc('browser_tabs', {})`) ||
+		!strings.Contains(fullPage, `rpc('browser_tab_preview', {tab_id: preview.tab.id})`) ||
+		!strings.Contains(fullPage, `x-model.number="browserPreview.rate"`) ||
+		!strings.Contains(fullPage, `class="browser-preview-image"`) {
+		t.Fatalf("expected browser status disclosure with owned tabs and adjustable live screenshot preview")
+	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
 	}

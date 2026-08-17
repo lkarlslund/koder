@@ -863,6 +863,22 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	if err != nil {
 		return browserapi.Binary{}, err
 	}
+	return m.captureScreenshot(ctx, tab, tabCtx, locator, fullPage, format, quality)
+}
+
+// ScreenshotTab captures one owned tab without changing the chat's selected tab.
+func (m *Manager) ScreenshotTab(ctx context.Context, chat browserapi.Chat, tabID, format string, quality int) (browserapi.Binary, error) {
+	if _, err := m.Tabs(ctx, chat); err != nil {
+		return browserapi.Binary{}, err
+	}
+	tab, err := m.ownedTab(chat, strings.TrimSpace(tabID))
+	if err != nil {
+		return browserapi.Binary{}, err
+	}
+	return m.captureScreenshot(ctx, tab, tab.ctx, browserapi.Locator{}, false, format, quality)
+}
+
+func (m *Manager) captureScreenshot(ctx context.Context, tab *ownedTab, tabCtx context.Context, locator browserapi.Locator, fullPage bool, format string, quality int) (browserapi.Binary, error) {
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
 	var data []byte
