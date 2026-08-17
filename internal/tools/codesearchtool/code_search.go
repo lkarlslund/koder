@@ -43,14 +43,27 @@ type searchOptions struct {
 }
 
 type lspClient struct {
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	stdout      *bufio.Reader
-	mu          sync.Mutex
-	nextID      int
-	diagnostics map[string][]lspDiagnostic
-	documents   map[string]lspDocument
-	closeOnce   sync.Once
+	cmd                *exec.Cmd
+	stdin              io.WriteCloser
+	stdout             *bufio.Reader
+	mu                 sync.Mutex
+	nextID             int
+	diagnostics        map[string]lspDiagnosticSnapshot
+	diagnosticSequence uint64
+	documents          map[string]lspDocument
+	responses          chan lspReadResult
+	closeOnce          sync.Once
+}
+
+type lspReadResult struct {
+	response lspResponse
+	err      error
+}
+
+type lspDiagnosticSnapshot struct {
+	Diagnostics []lspDiagnostic
+	Version     *int
+	Sequence    uint64
 }
 
 type lspDocument struct {
@@ -781,20 +794,19 @@ func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs str
 	}
 	uri := fileURI(abs)
 	languageID := languageIDForPath(server, path)
-	if err := client.syncDocument(ctx, uri, languageID, before); err != nil {
+	beforeDiagnostics, ok, err := client.diagnosticsForDocument(ctx, uri, languageID, before, time.Second)
+	if err != nil {
 		return DiagnosticReport{}, err
 	}
-	beforeDiagnostics, ok := client.waitDiagnostics(ctx, uri, time.Second)
 	if !ok {
 		return DiagnosticReport{Skipped: []string{"lsp: timed out waiting for diagnostics for " + path}}, nil
 	}
 	if after != before {
-		if err := client.syncDocument(ctx, uri, languageID, after); err != nil {
+		afterDiagnostics, ok, err := client.diagnosticsForDocument(ctx, uri, languageID, after, time.Second)
+		if err != nil {
 			return DiagnosticReport{}, err
 		}
-		var ok bool
 		beforeDiagnostics = append([]lspDiagnostic(nil), beforeDiagnostics...)
-		afterDiagnostics, ok := client.waitDiagnostics(ctx, uri, time.Second)
 		if !ok {
 			return DiagnosticReport{Skipped: []string{"lsp: timed out waiting for diagnostics for " + path}}, nil
 		}
@@ -890,14 +902,17 @@ func startLSP(rootAbs string, server languageServer) (*lspClient, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &lspClient{
+	client := &lspClient{
 		cmd:         cmd,
 		stdin:       stdin,
 		stdout:      bufio.NewReader(stdout),
 		nextID:      1,
-		diagnostics: map[string][]lspDiagnostic{},
+		diagnostics: map[string]lspDiagnosticSnapshot{},
 		documents:   map[string]lspDocument{},
-	}, nil
+		responses:   make(chan lspReadResult, 64),
+	}
+	go client.readLoop()
+	return client, nil
 }
 
 func (c *lspClient) initialize(ctx context.Context, rootAbs string) error {
@@ -1009,8 +1024,13 @@ func (c *lspClient) syncDocument(ctx context.Context, uri, languageID, text stri
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	_, _, err := c.syncDocumentLocked(ctx, uri, languageID, text)
+	return err
+}
+
+func (c *lspClient) syncDocumentLocked(ctx context.Context, uri, languageID, text string) (int, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, false, err
 	}
 	if c.documents == nil {
 		c.documents = map[string]lspDocument{}
@@ -1026,13 +1046,13 @@ func (c *lspClient) syncDocument(ctx context.Context, uri, languageID, text stri
 			},
 		}
 		if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: params}); err != nil {
-			return err
+			return 0, false, err
 		}
 		c.documents[uri] = lspDocument{LanguageID: languageID, Version: 1, Text: text}
-		return nil
+		return 1, true, nil
 	}
 	if doc.Text == text {
-		return nil
+		return doc.Version, false, nil
 	}
 	doc.Version++
 	params := map[string]any{
@@ -1043,15 +1063,45 @@ func (c *lspClient) syncDocument(ctx context.Context, uri, languageID, text stri
 		"contentChanges": []map[string]string{{"text": text}},
 	}
 	if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: "textDocument/didChange", Params: params}); err != nil {
-		return err
+		return 0, false, err
 	}
 	doc.Text = text
 	c.documents[uri] = doc
-	return nil
+	return doc.Version, true, nil
 }
 
-func (c *lspClient) flushDiagnostics(ctx context.Context, uri string) error {
-	_, err := c.request(ctx, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
+func (c *lspClient) diagnosticsForDocument(ctx context.Context, uri, languageID, text string, wait time.Duration) ([]lspDiagnostic, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	doc, open := c.documents[uri]
+	changing := !open || doc.LanguageID != languageID || doc.Text != text
+	if changing && open {
+		// Consume notifications caused by the previous document version before
+		// sending didChange. Some servers omit the optional diagnostic version.
+		if err := c.flushDiagnosticsLocked(ctx, uri); err != nil {
+			return nil, false, err
+		}
+	}
+	baseline := c.diagnostics[uri].Sequence
+	version, changed, err := c.syncDocumentLocked(ctx, uri, languageID, text)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := c.flushDiagnosticsLocked(ctx, uri); err != nil {
+		return nil, false, err
+	}
+	if snapshot, ok := c.freshDiagnosticsLocked(uri, version, baseline, changed); ok {
+		return snapshot.Diagnostics, true, nil
+	}
+	return c.waitDiagnosticsLocked(ctx, uri, version, baseline, changed, wait)
+}
+
+func (c *lspClient) flushDiagnosticsLocked(ctx context.Context, uri string) error {
+	_, err := c.requestLocked(ctx, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
 	if err == nil {
 		return nil
 	}
@@ -1067,6 +1117,10 @@ func (c *lspClient) request(ctx context.Context, method string, params any) (jso
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.requestLocked(ctx, method, params)
+}
+
+func (c *lspClient) requestLocked(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := c.nextID
 	c.nextID++
 	if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
@@ -1100,26 +1154,39 @@ func (c *lspClient) notify(ctx context.Context, method string, params any) error
 	return writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: method, Params: params})
 }
 
-func (c *lspClient) waitDiagnostics(ctx context.Context, uri string, duration time.Duration) ([]lspDiagnostic, bool) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func (c *lspClient) waitDiagnosticsLocked(ctx context.Context, uri string, version int, baseline uint64, requireNew bool, duration time.Duration) ([]lspDiagnostic, bool, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for {
 		if err := waitCtx.Err(); err != nil {
-			return nil, false
+			return nil, false, nil
 		}
 		resp, err := c.readResponseNoKill(waitCtx)
 		if err != nil {
-			return nil, false
+			if waitCtx.Err() != nil {
+				return nil, false, nil
+			}
+			return nil, false, err
 		}
-		if c.handleNotification(resp) == uri {
-			return append([]lspDiagnostic(nil), c.diagnostics[uri]...), true
+		if c.handleNotification(resp) != uri {
+			continue
+		}
+		if snapshot, ok := c.freshDiagnosticsLocked(uri, version, baseline, requireNew); ok {
+			return snapshot.Diagnostics, true, nil
 		}
 	}
+}
+
+func (c *lspClient) freshDiagnosticsLocked(uri string, version int, baseline uint64, requireNew bool) (lspDiagnosticSnapshot, bool) {
+	snapshot, ok := c.diagnostics[uri]
+	if !ok || requireNew && snapshot.Sequence <= baseline {
+		return lspDiagnosticSnapshot{}, false
+	}
+	if snapshot.Version != nil && *snapshot.Version != version {
+		return lspDiagnosticSnapshot{}, false
+	}
+	snapshot.Diagnostics = append([]lspDiagnostic(nil), snapshot.Diagnostics...)
+	return snapshot, true
 }
 
 func (c *lspClient) handleNotification(resp lspResponse) string {
@@ -1128,15 +1195,25 @@ func (c *lspClient) handleNotification(resp lspResponse) string {
 	}
 	var payload struct {
 		URI         string          `json:"uri"`
+		Version     *int            `json:"version,omitempty"`
 		Diagnostics []lspDiagnostic `json:"diagnostics"`
 	}
 	if err := json.Unmarshal(resp.Params, &payload); err != nil || strings.TrimSpace(payload.URI) == "" {
 		return ""
 	}
 	if c.diagnostics == nil {
-		c.diagnostics = map[string][]lspDiagnostic{}
+		c.diagnostics = map[string]lspDiagnosticSnapshot{}
 	}
-	c.diagnostics[payload.URI] = append([]lspDiagnostic(nil), payload.Diagnostics...)
+	current := c.diagnostics[payload.URI]
+	if payload.Version != nil && current.Version != nil && *payload.Version < *current.Version {
+		return ""
+	}
+	c.diagnosticSequence++
+	c.diagnostics[payload.URI] = lspDiagnosticSnapshot{
+		Diagnostics: append([]lspDiagnostic(nil), payload.Diagnostics...),
+		Version:     payload.Version,
+		Sequence:    c.diagnosticSequence,
+	}
 	return payload.URI
 }
 
@@ -1149,20 +1226,27 @@ func (c *lspClient) readResponse(ctx context.Context) (lspResponse, error) {
 }
 
 func (c *lspClient) readResponseNoKill(ctx context.Context) (lspResponse, error) {
-	type readResult struct {
-		response lspResponse
-		err      error
-	}
-	out := make(chan readResult, 1)
-	go func() {
-		resp, err := readLSP(c.stdout)
-		out <- readResult{response: resp, err: err}
-	}()
 	select {
-	case result := <-out:
+	case result, ok := <-c.responses:
+		if !ok {
+			return lspResponse{}, io.EOF
+		}
 		return result.response, result.err
 	case <-ctx.Done():
 		return lspResponse{}, ctx.Err()
+	}
+}
+
+func (c *lspClient) readLoop() {
+	defer close(c.responses)
+	for {
+		// A single goroutine must own stdout. Starting a cancellable reader for
+		// every request leaves the old reader alive when its context times out.
+		resp, err := readLSP(c.stdout)
+		c.responses <- lspReadResult{response: resp, err: err}
+		if err != nil {
+			return
+		}
 	}
 }
 

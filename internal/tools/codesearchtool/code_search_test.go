@@ -319,6 +319,46 @@ func TestLSPDiagnosticsSkipsWhenDiagnosticsDoNotPublish(t *testing.T) {
 	}
 }
 
+func TestLSPDiagnosticsDoesNotReturnQueuedPreEditDiagnostics(t *testing.T) {
+	withTestLSPManager(t, time.Hour, 10*time.Millisecond)
+	workdir := t.TempDir()
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+	t.Setenv("KODER_FAKE_LSP_BASELINE_DIAGNOSTIC", "1")
+	t.Setenv("KODER_FAKE_LSP_DIAGNOSTIC_ON_CHANGE", "1")
+
+	TouchFile(t.Context(), workdir, "main.go", "package main\nfunc Target() {}\n")
+	report := LSPDiagnostics(t.Context(), workdir, "main.go", "package main\nfunc Target() { fixed }\n", "package main\nfunc Target() { fixed }\n", false)
+
+	if len(report.Diagnostics) != 1 {
+		t.Fatalf("expected one fresh diagnostic, got %#v skipped=%#v", report.Diagnostics, report.Skipped)
+	}
+	if got := report.Diagnostics[0].Message; got != "fake diagnostic" {
+		t.Fatalf("expected post-edit diagnostic, got %q", got)
+	}
+}
+
+func TestLSPDiagnosticsRejectsOutOfOrderVersion(t *testing.T) {
+	withTestLSPManager(t, time.Hour, 10*time.Millisecond)
+	workdir := t.TempDir()
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+	t.Setenv("KODER_FAKE_LSP_VERSIONED_OUT_OF_ORDER", "1")
+
+	report := LSPDiagnostics(t.Context(), workdir, "main.go", "package main\nfunc Target() {}\n", "package main\nfunc Target() { changed }\n", false)
+
+	if len(report.Diagnostics) != 1 {
+		t.Fatalf("expected one fresh diagnostic, got %#v skipped=%#v", report.Diagnostics, report.Skipped)
+	}
+	if got := report.Diagnostics[0].Message; got != "version 2 diagnostic" {
+		t.Fatalf("expected newest diagnostic, got %q", got)
+	}
+}
+
 func installFakeServer(t *testing.T, name string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -349,13 +389,18 @@ func runFakeLSP() {
 			fakeWriteResponse(id, map[string]any{"capabilities": map[string]any{}})
 		case "initialized":
 		case "textDocument/didOpen":
-			if os.Getenv("KODER_FAKE_LSP_BASELINE_DIAGNOSTIC") == "1" {
+			if os.Getenv("KODER_FAKE_LSP_VERSIONED_OUT_OF_ORDER") == "1" {
+				fakeWriteDiagnosticsVersion([]map[string]any{fakeDiagnostic("version 1 diagnostic")}, 1)
+			} else if os.Getenv("KODER_FAKE_LSP_BASELINE_DIAGNOSTIC") == "1" {
 				fakeWriteDiagnostic("baseline diagnostic")
 			} else if os.Getenv("KODER_FAKE_LSP_NO_OPEN_DIAGNOSTIC") != "1" {
 				fakeWriteDiagnostics(nil)
 			}
 		case "textDocument/didChange":
-			if os.Getenv("KODER_FAKE_LSP_DIAGNOSTIC_ON_CHANGE") == "1" {
+			if os.Getenv("KODER_FAKE_LSP_VERSIONED_OUT_OF_ORDER") == "1" {
+				fakeWriteDiagnosticsVersion([]map[string]any{fakeDiagnostic("version 2 diagnostic")}, 2)
+				fakeWriteDiagnosticsVersion([]map[string]any{fakeDiagnostic("late version 1 diagnostic")}, 1)
+			} else if os.Getenv("KODER_FAKE_LSP_DIAGNOSTIC_ON_CHANGE") == "1" {
 				fakeWriteDiagnostic("fake diagnostic")
 			}
 		case "workspace/symbol":
@@ -512,23 +557,35 @@ func fakeWriteResponse(id int, result any) {
 }
 
 func fakeWriteDiagnostic(message string) {
-	fakeWriteDiagnostics([]map[string]any{{
+	fakeWriteDiagnostics([]map[string]any{fakeDiagnostic(message)})
+}
+
+func fakeDiagnostic(message string) map[string]any {
+	return map[string]any{
 		"range":    fakeRange(),
 		"severity": 1,
 		"source":   "fake",
 		"code":     "F001",
 		"message":  message,
-	}})
+	}
 }
 
 func fakeWriteDiagnostics(diagnostics []map[string]any) {
+	fakeWriteDiagnosticsVersion(diagnostics, 0)
+}
+
+func fakeWriteDiagnosticsVersion(diagnostics []map[string]any, version int) {
+	params := map[string]any{
+		"uri":         os.Getenv("KODER_FAKE_LSP_URI"),
+		"diagnostics": diagnostics,
+	}
+	if version > 0 {
+		params["version"] = version
+	}
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "textDocument/publishDiagnostics",
-		"params": map[string]any{
-			"uri":         os.Getenv("KODER_FAKE_LSP_URI"),
-			"diagnostics": diagnostics,
-		},
+		"params":  params,
 	})
 	_, _ = fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }
