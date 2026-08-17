@@ -1099,11 +1099,13 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 			Content:   strings.TrimSpace(strings.Join(textChunks, "\n\n")),
 			ToolCalls: toolCalls,
 		}
-		if preserveThinking && len(reasoningChunks) > 0 {
+		// Reasoning alone is an interrupted response and is not a valid assistant
+		// history message for providers such as llama.cpp.
+		if preserveThinking && len(reasoningChunks) > 0 && (message.Content != "" || len(message.ToolCalls) > 0) {
 			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), e.reasoningReplay(chat))
 		}
 		out := []provider.Message{message}
-		if strings.TrimSpace(out[0].Content) == "" && strings.TrimSpace(out[0].ReasoningContent) == "" && len(out[0].ToolCalls) == 0 {
+		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
 			out = out[:0]
 		}
 		for _, tool := range content.Tools {

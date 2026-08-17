@@ -212,6 +212,37 @@ func TestConversationMessagesUseOverlayReasoningReplay(t *testing.T) {
 	}
 }
 
+func TestConversationMessagesDropInterruptedReasoningOnlyAssistant(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default().WithStateDir(t.TempDir()).WithManagedAssetsDir(t.TempDir())
+	cfg.Providers = map[string]config.Provider{
+		"llama": {BaseURL: "http://127.0.0.1:8000/v1"},
+	}
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:  "llama",
+		ModelID:     "qwen3.8-27b-q8-mtp",
+		ModelPreset: provider.ModelPresetAuto,
+	})
+	runtime := New(Config{Config: cfg})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1", ProviderID: "llama", ModelID: "qwen3.8-27b-q8-mtp"}
+	item := domain.TimelineItem{
+		ID:     "assistant-1",
+		ChatID: chat.ID,
+		Content: domain.AssistantMessage{
+			Reasoning: domain.ReasoningContent{Text: "unfinished trace"},
+		},
+	}
+
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected interrupted reasoning-only assistant item to be omitted, got %#v", messages)
+	}
+}
+
 func TestConversationMessagesDefaultToThinkTagReplay(t *testing.T) {
 	t.Parallel()
 

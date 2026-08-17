@@ -230,11 +230,14 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 			Content:   strings.TrimSpace(strings.Join(textChunks, "\n\n")),
 			ToolCalls: toolCalls,
 		}
-		if preserveThinking && len(reasoningChunks) > 0 {
+		// A reasoning-only assistant item is an interrupted response, not a valid
+		// historical chat message. In particular, llama.cpp rejects an assistant
+		// message that has reasoning_content but neither content nor tool_calls.
+		if preserveThinking && len(reasoningChunks) > 0 && (message.Content != "" || len(message.ToolCalls) > 0) {
 			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), r.reasoningReplay(chat))
 		}
 		out := []provider.Message{message}
-		if strings.TrimSpace(out[0].Content) == "" && strings.TrimSpace(out[0].ReasoningContent) == "" && len(out[0].ToolCalls) == 0 {
+		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
 			out = out[:0]
 		}
 		for _, tool := range content.Tools {
