@@ -932,7 +932,7 @@ func (c *Controller) eventForSelectedExec(ctx context.Context, owner *sessionpkg
 
 // SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
 func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection Selection, kind chat.QueueKind, text string, drafts []attachment.Draft) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -963,7 +963,7 @@ func (c *Controller) enqueuePrompt(rt *chat.Chat, text string, kind chat.QueueKi
 
 // ReorderQueueForSelection reorders the selected chat queued inputs by ID.
 func (c *Controller) ReorderQueueForSelection(ctx context.Context, selection Selection, ids []id.ID) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -980,7 +980,7 @@ func reorderRuntimeQueue(rt *chat.Chat, ids []id.ID) error {
 
 // DeleteQueueItemForSelection removes a queued input from the selected chat.
 func (c *Controller) DeleteQueueItemForSelection(ctx context.Context, selection Selection, id id.ID) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -997,7 +997,7 @@ func deleteRuntimeQueueItem(rt *chat.Chat, id id.ID) error {
 
 // ToggleQueueItemKindForSelection switches a selected queued input between normal and steer delivery.
 func (c *Controller) ToggleQueueItemKindForSelection(ctx context.Context, selection Selection, id id.ID) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -1014,7 +1014,7 @@ func toggleRuntimeQueueItemKind(rt *chat.Chat, id id.ID) error {
 
 // SendQueueItemNowForSelection promotes a held queued input for the selected chat.
 func (c *Controller) SendQueueItemNowForSelection(ctx context.Context, selection Selection, id id.ID) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -1031,7 +1031,7 @@ func sendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
 
 // AbortAndSendQueueItemNowForSelection cancels the active turn and dispatches the selected queued input.
 func (c *Controller) AbortAndSendQueueItemNowForSelection(ctx context.Context, selection Selection, id id.ID) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -1076,7 +1076,7 @@ func (c *Controller) ResolveOfferedFile(ctx context.Context, token string) (offe
 
 // ContinueForSelection asks the selected chat to continue.
 func (c *Controller) ContinueForSelection(ctx context.Context, selection Selection, note string) error {
-	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
 		return err
 	}
@@ -2251,7 +2251,18 @@ func chatSidebarStatusText(status string) string {
 }
 
 func (c *Controller) resolveSelectedRuntime(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
-	owner, session, chatRecord, err := c.resolveSelectedChat(ctx, selection, allowDefaultChat)
+	return c.resolveSelectedRuntimeWithTouch(ctx, selection, allowDefaultChat, true)
+}
+
+// resolveSelectedRuntimeWithoutTouch resolves an interactive command against the
+// already-selected chat without synchronously rewriting selection metadata. The
+// queue persistence path updates chat recency when it stores the command.
+func (c *Controller) resolveSelectedRuntimeWithoutTouch(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
+	return c.resolveSelectedRuntimeWithTouch(ctx, selection, allowDefaultChat, false)
+}
+
+func (c *Controller) resolveSelectedRuntimeWithTouch(ctx context.Context, selection Selection, allowDefaultChat, touch bool) (*sessionpkg.Session, domain.Session, domain.Chat, *chat.Chat, error) {
+	owner, session, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, selection, allowDefaultChat, touch)
 	if err != nil {
 		return nil, domain.Session{}, domain.Chat{}, nil, err
 	}
@@ -2262,7 +2273,7 @@ func (c *Controller) resolveSelectedRuntime(ctx context.Context, selection Selec
 	return owner, session, chatRecord, rt, nil
 }
 
-func (c *Controller) resolveSelectedChat(ctx context.Context, selection Selection, allowDefaultChat bool) (*sessionpkg.Session, domain.Session, domain.Chat, error) {
+func (c *Controller) resolveSelectedChatWithTouch(ctx context.Context, selection Selection, allowDefaultChat, touch bool) (*sessionpkg.Session, domain.Session, domain.Chat, error) {
 	if selection.SessionID == "" {
 		return nil, domain.Session{}, domain.Chat{}, fmt.Errorf("session id is required")
 	}
@@ -2299,9 +2310,11 @@ func (c *Controller) resolveSelectedChat(ctx context.Context, selection Selectio
 	if err != nil {
 		return nil, domain.Session{}, domain.Chat{}, err
 	}
-	session, chatRecord, _, err = owner.TouchSelection(ctx, chatRecord.ID)
-	if err != nil {
-		return nil, domain.Session{}, domain.Chat{}, err
+	if touch {
+		session, chatRecord, _, err = owner.TouchSelection(ctx, chatRecord.ID)
+		if err != nil {
+			return nil, domain.Session{}, domain.Chat{}, err
+		}
 	}
 	chatRecord.PermissionProfile = ""
 	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)

@@ -2232,11 +2232,11 @@ func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 		})
 	}
 	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	if err := r.persistQueue(); err != nil {
 		_ = r.markPersistError(err)
 		return
 	}
-	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	r.maybeDispatchNext()
 }
 
@@ -2250,8 +2250,8 @@ func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
 		})
 	}
 	r.mu.Unlock()
-	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	_ = r.persistQueue()
 	r.maybeDispatchNext()
 }
 
@@ -2278,8 +2278,8 @@ func (r *Chat) handleReorderQueue(ids []id.ID) {
 		})
 	}
 	r.mu.Unlock()
-	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	_ = r.persistQueue()
 }
 
 func (r *Chat) handleDeleteQueueItem(id id.ID) {
@@ -2303,8 +2303,8 @@ func (r *Chat) handleDeleteQueueItem(id id.ID) {
 	}
 	r.mu.Unlock()
 	if found {
-		_ = r.persistQueue()
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+		_ = r.persistQueue()
 	}
 }
 
@@ -2340,8 +2340,8 @@ func (r *Chat) handleToggleQueueItemKind(id id.ID) {
 		})
 	}
 	r.mu.Unlock()
-	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	_ = r.persistQueue()
 }
 
 func (r *Chat) handleSendQueueItemNow(id id.ID) {
@@ -2377,8 +2377,8 @@ func (r *Chat) handleSendQueueItemNow(id id.ID) {
 		})
 	}
 	r.mu.Unlock()
-	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	_ = r.persistQueue()
 	r.maybeDispatchNext()
 }
 
@@ -2423,13 +2423,13 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 	if cancel != nil && wasActive {
 		cancel()
 	}
-	_ = r.persistQueue()
 	if wasActive {
 		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
 		r.broadcast(r.snapshotUpdateFlags(&evt, true, true, true, true, false))
 	} else {
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	}
+	_ = r.persistQueue()
 	r.maybeDispatchNext()
 }
 
@@ -2444,8 +2444,8 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 			})
 		}
 		r.mu.Unlock()
-		_ = r.persistQueue()
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, true, false, false))
+		_ = r.persistQueue()
 		return
 	}
 	if r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput {
@@ -2457,8 +2457,8 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 			})
 		}
 		r.mu.Unlock()
-		_ = r.persistQueue()
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+		_ = r.persistQueue()
 		return
 	}
 	r.queue = cloneQueuedInputs(remaining)
@@ -2491,8 +2491,8 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.statusText = "Waiting for LLM response"
 	r.mu.Unlock()
 
-	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryContinue, true, true, true, false))
+	_ = r.persistQueue()
 	r.runItem(ctx, turn, item)
 }
 

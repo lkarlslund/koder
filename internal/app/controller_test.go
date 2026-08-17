@@ -1748,6 +1748,64 @@ func TestControllerStateForSelectionDoesNotSwitchControllerState(t *testing.T) {
 	}
 }
 
+func TestControllerQueueMutationDoesNotTouchSessionMetadata(t *testing.T) {
+	ctrl, st := newTestController(t)
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	owner, err := ctrl.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	rt, err := owner.Chat(ctx, selection.ChatID)
+	if err != nil {
+		t.Fatalf("load chat: %v", err)
+	}
+	queuedID := id.New()
+	rt.ReplaceQueue([]domain.QueuedInput{{
+		ID:        queuedID,
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
+		Source:    domain.UserMessageSourceUser,
+		Text:      "later",
+		Held:      true,
+		CreatedAt: time.Now().UTC(),
+	}})
+	deadline := time.Now().Add(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out preparing queued input")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	storedBefore, err := modeltest.GetSession(ctx, st, selection.SessionID)
+	if err != nil {
+		t.Fatalf("get session before queue mutation: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if err := ctrl.ToggleQueueItemKindForSelection(ctx, selection, queuedID); err != nil {
+		t.Fatalf("toggle queued input: %v", err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		queued := rt.Snapshot().QueuedInputs
+		if len(queued) == 1 && domain.DeliveryForQueuedInput(queued[0]) == domain.QueuedInputDeliveryTurnBoundary {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out toggling queued input")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	storedAfter, err := modeltest.GetSession(ctx, st, selection.SessionID)
+	if err != nil {
+		t.Fatalf("get session after queue mutation: %v", err)
+	}
+	if !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
+		t.Fatalf("queue mutation touched session updated_at: before=%s after=%s", storedBefore.UpdatedAt, storedAfter.UpdatedAt)
+	}
+}
+
 func TestControllerStateForSelectionDoesNotPersistLastUsedChat(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default().WithStateDir(t.TempDir())
