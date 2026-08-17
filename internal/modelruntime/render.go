@@ -113,6 +113,12 @@ func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat
 	}
 	out := make([]provider.Message, 0, len(items)-start)
 	for _, item := range items[start:] {
+		// Compaction items are envelope-boundary metadata, not conversation
+		// messages. A canceled compaction can remain in the retained tail when a
+		// later compaction completes, so ignore it while rebuilding that tail.
+		if _, ok := item.Content.(domain.Compaction); ok {
+			continue
+		}
 		messages, err := r.ConversationMessagesForTimelineItem(session, chat, item, r.preserveThinkingEnabled(chat))
 		if err != nil {
 			return nil, err

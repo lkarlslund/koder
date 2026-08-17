@@ -65,6 +65,63 @@ func TestBuildPromptEnvelopeCompactionSummaryPreservesRetainedToolTail(t *testin
 	}
 }
 
+func TestBuildPromptEnvelopeRepeatedCompactionIgnoresPendingMarkerInRetainedTail(t *testing.T) {
+	t.Parallel()
+
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{
+		ID:           "chat-1",
+		SessionID:    session.ID,
+		ProviderID:   "test",
+		ModelID:      "test-model",
+		WorkflowRole: chatrole.Orchestrator,
+	}
+	now := time.Now().UTC()
+	timeline := []domain.TimelineItem{
+		assistantToolItem("kept-assistant", "call-1", "inspect state", "state output"),
+		{
+			ID:     "interrupted-compaction",
+			ChatID: chat.ID,
+			Seq:    2,
+			Content: domain.Compaction{
+				Status:          "pending",
+				FirstKeptItemID: "kept-assistant",
+			},
+			CreatedAt: now,
+		},
+		{
+			ID:     "completed-compaction",
+			ChatID: chat.ID,
+			Seq:    3,
+			Content: domain.Compaction{
+				Summary:         "latest durable summary",
+				Status:          "completed",
+				FirstKeptItemID: "kept-assistant",
+			},
+			CreatedAt: now,
+		},
+		{
+			ID:        "user-1",
+			ChatID:    chat.ID,
+			Seq:       4,
+			Content:   domain.UserMessage{Text: "continue working"},
+			CreatedAt: now,
+		},
+	}
+
+	envelope, err := runtime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(provider.SerializePromptEnvelope(envelope))
+	for _, want := range []string{"latest durable summary", "inspect state", "state output", "continue working"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q in prompt, got %s", want, joined)
+		}
+	}
+}
+
 func TestConversationMessagesForToolErrorGivesRecoveryGuidance(t *testing.T) {
 	t.Parallel()
 
