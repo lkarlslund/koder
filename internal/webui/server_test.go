@@ -2415,11 +2415,14 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `toggleBrowserPanel()`) ||
 		!strings.Contains(fullPage, `class="sidebar-section browser-sidebar-section"`) ||
+		!strings.Contains(fullPage, `x-show="browserStatus?.state === 'running'"`) ||
+		!strings.Contains(fullPage, `class="status-filter-button active"`) ||
+		!strings.Contains(fullPage, `class="badge exec-process-state"`) ||
 		!strings.Contains(fullPage, `rpc('browser_tabs', {})`) ||
 		!strings.Contains(fullPage, `rpc('browser_tab_preview', {tab_id: preview.tab.id})`) ||
 		!strings.Contains(fullPage, `x-model.number="browserPreview.rate"`) ||
 		!strings.Contains(fullPage, `class="browser-preview-image"`) {
-		t.Fatalf("expected browser status disclosure with owned tabs and adjustable live screenshot preview")
+		t.Fatalf("expected running browser disclosure to match process styling and provide owned tabs with adjustable live screenshot preview")
 	}
 	if strings.Contains(fullPage, `class="browser-control`) {
 		t.Fatalf("expected browser status to live in the sidebar rather than the top action bar")

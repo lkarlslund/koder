@@ -5272,7 +5272,10 @@
 		browserStatusTitle() { return 'Browser: ' + String(this.browserStatus?.state || 'unknown') + (this.browserStatus?.owned_tabs ? '\n' + this.browserStatus.owned_tabs + ' owned tab(s)' : ''); },
 		refreshBrowserStatus() {
 		  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-		  this.rpc('browser_action', {action: 'status'}).then(status => { this.browserStatus = status || this.browserStatus; }).catch(() => {});
+		  this.rpc('browser_action', {action: 'status'}).then(status => {
+			this.browserStatus = status || this.browserStatus;
+			if (this.browserStatus?.state !== 'running' && this.browserPanelOpen) this.closeBrowserPanel();
+		  }).catch(() => {});
 		},
 		toggleBrowserPanel() {
 		  this.browserPanelOpen = !this.browserPanelOpen;
@@ -5293,6 +5296,7 @@
 		  this.rpc('browser_tabs', {}).then(result => {
 			this.browserStatus = result?.status || this.browserStatus;
 			this.browserTabs = Array.isArray(result?.tabs) ? result.tabs : [];
+			if (this.browserStatus?.state !== 'running') this.closeBrowserPanel();
 		  }).catch(err => { this.browserPanelError = err.message || String(err); }).finally(() => {
 			this.browserTabsLoading = false;
 			if (this.browserPanelOpen) this.browserPanelTimer = setTimeout(() => this.refreshBrowserTabs(), 3000);
