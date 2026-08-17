@@ -92,6 +92,9 @@ func TestCommandExecuteResolvesWorkdirRelativeToSessionProjectRoot(t *testing.T)
 	if want := filepath.Join(root, "sub"); control.start.Workdir != want {
 		t.Fatalf("expected session-relative workdir %q, got %q", want, control.start.Workdir)
 	}
+	if control.start.SessionRoot != root {
+		t.Fatalf("expected session root %q, got %q", root, control.start.SessionRoot)
+	}
 }
 
 func TestWriteStdinAllowsEmptyCharsForWait(t *testing.T) {

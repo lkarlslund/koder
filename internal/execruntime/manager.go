@@ -33,6 +33,7 @@ const (
 	defaultStdinWait     = 250 * time.Millisecond
 	postExitDrainGrace   = 50 * time.Millisecond
 	maxStdinWait         = 5 * time.Minute
+	envSessionRoot       = "KODER_SESSION_ROOT"
 )
 
 type State string
@@ -70,6 +71,7 @@ type StartRequest struct {
 	ToolCallID     string
 	Command        string
 	Workdir        string
+	SessionRoot    string
 	Shell          string
 	Login          bool
 	TTY            bool
@@ -257,7 +259,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		processgroup.Configure(cmd)
 	}
 	cmd.Dir = strings.TrimSpace(req.Workdir)
-	cmd.Env = nil
+	sessionRoot := strings.TrimSpace(req.SessionRoot)
+	if sessionRoot == "" {
+		sessionRoot = cmd.Dir
+	}
+	cmd.Env = processEnvironment(envSessionRoot, sessionRoot)
 	p := &process{
 		processID:  m.nextProcessID(),
 		sessionID:  req.SessionID,
@@ -321,6 +327,18 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	snap := p.drainSnapshot(req.PreviewBytes)
 	m.publish(Event{Kind: EventKindState, Snapshot: snap})
 	return snap, nil
+}
+
+func processEnvironment(key, value string) []string {
+	environ := os.Environ()
+	out := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		if name != key {
+			out = append(out, entry)
+		}
+	}
+	return append(out, key+"="+value)
 }
 
 func (m *Manager) Status(_ context.Context, req StatusRequest) (Snapshot, error) {

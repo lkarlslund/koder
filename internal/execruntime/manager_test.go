@@ -3,11 +3,37 @@ package execruntime
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestManagerStartExportsSessionRoot(t *testing.T) {
+	t.Setenv(envSessionRoot, "/stale/session/root")
+	root := t.TempDir()
+	workdir := filepath.Join(root, "subdir")
+	if err := os.Mkdir(workdir, 0o755); err != nil {
+		t.Fatalf("create workdir: %v", err)
+	}
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID:   "session-1",
+		ChatID:      "chat-2",
+		Command:     "printf '%s' \"$KODER_SESSION_ROOT\"",
+		Workdir:     workdir,
+		SessionRoot: root,
+		YieldTime:   time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if snap.Output != root {
+		t.Fatalf("expected KODER_SESSION_ROOT=%q, got %q", root, snap.Output)
+	}
+}
 
 func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	mgr := NewManager()
