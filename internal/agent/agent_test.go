@@ -5604,6 +5604,41 @@ func TestRepeatedCompactionWithoutCurrentToolTailKeepsCurrentSegmentBoundary(t *
 	}
 }
 
+func TestRepeatedCompactionIgnoresPendingMarkerInPreservedTail(t *testing.T) {
+	cfg := testConfig(t)
+	engine := New(cfg, nil, nil)
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, ProviderID: "test", ModelID: "test-model"}
+	timeline := []domain.TimelineItem{
+		{ID: "old-user", Seq: 1, Content: domain.UserMessage{Text: "old history"}},
+		{ID: "kept-assistant", Seq: 2, Content: domain.AssistantMessage{Text: "retained tail"}},
+		{ID: "pending-compact", Seq: 3, Content: domain.Compaction{
+			Status:          "pending",
+			FirstKeptItemID: "kept-assistant",
+		}},
+		{ID: "completed-compact", Seq: 4, Content: domain.Compaction{
+			Summary:         "latest summary",
+			Status:          "completed",
+			FirstKeptItemID: "kept-assistant",
+		}},
+		{ID: "current-user", Seq: 5, Content: domain.UserMessage{Text: "continue work"}},
+	}
+
+	envelope, err := engine.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := providerMessagesText(provider.SerializePromptEnvelope(envelope))
+	for _, want := range []string{"latest summary", "retained tail", "continue work"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected replay to contain %q, got %s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "old history") {
+		t.Fatalf("expected completed compaction to replace old history, got %s", joined)
+	}
+}
+
 func completedFileReadToolCall(callID, output string) domain.ToolCall {
 	return domain.ToolCall{
 		Tool:       domain.ToolKindFileRead,
@@ -5786,6 +5821,75 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 	if !sawStreaming {
 		t.Fatal("expected compaction streaming status event")
 	}
+}
+
+func TestCompactSessionMarksCanceledCompactionFailed(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Minute},
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chatRecord.ID, "hello")
+	appendAssistantTimelineItem(t, st, chatRecord.ID, domain.AssistantMessage{Text: "world"})
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- engine.compactChatRuntime(ctx, session, rt, client, "manual", "", nil)
+	}()
+	<-requestStarted
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled compaction, got %v", err)
+	}
+	close(releaseRequest)
+
+	timeline, err := rt.Timeline(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		compaction, ok := item.Content.(domain.Compaction)
+		if !ok {
+			continue
+		}
+		if compaction.Status != "failed" {
+			t.Fatalf("expected canceled compaction marker to be failed, got %#v", compaction)
+		}
+		return
+	}
+	t.Fatal("expected canceled compaction marker")
 }
 
 func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {

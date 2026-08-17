@@ -985,6 +985,9 @@ func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat 
 	}
 	out := make([]provider.Message, 0, len(items)-start)
 	for _, item := range items[start:] {
+		if _, ok := item.Content.(domain.Compaction); ok {
+			continue
+		}
 		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
 		if err != nil {
 			return nil, err
@@ -1583,7 +1586,7 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 			AfterContextTokens:  afterContextTokens,
 		}
 		var err error
-		compactionItem, err = rt.UpdateCompaction(ctx, compactionItem, next)
+		compactionItem, err = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, next)
 		return err
 	}
 	if out != nil {
@@ -1673,7 +1676,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			AfterContextTokens:  afterContextTokens,
 		}
 		var updateErr error
-		compactionItem, updateErr = rt.UpdateCompaction(ctx, compactionItem, next)
+		compactionItem, updateErr = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, next)
 		return updateErr
 	}
 	if out != nil {
