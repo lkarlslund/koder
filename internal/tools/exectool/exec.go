@@ -579,7 +579,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		}
 	}
 	if len(running) == 0 {
-		return errors.New("process_id is empty. exec_write_stdin can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat. Do not call exec_write_stdin again. Use the information already available, start a new command with exec_command if more work is needed, or answer the user.")
+		return errors.New("process_id is empty; exec_write_stdin can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat; do not call exec_write_stdin again; use the information already available, start a new command with exec_command if more work is needed, or answer the user")
 	}
 	ids := make([]string, 0, len(running))
 	for _, snap := range running {

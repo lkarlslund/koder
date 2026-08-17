@@ -452,7 +452,7 @@ func recordFakeLSPEvent(event string) int {
 	if err != nil {
 		return 0
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	_, _ = fmt.Fprintln(file, event)
 	return fakeLSPEventCountNoFail(path, event)
 }

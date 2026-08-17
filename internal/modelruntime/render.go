@@ -61,9 +61,7 @@ func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat do
 		}
 		envelope.Items = append(envelope.Items, messages...)
 	}
-	for _, msg := range previewTurnInstructionMessages(turnInstructions) {
-		envelope.Items = append(envelope.Items, msg)
-	}
+	envelope.Items = append(envelope.Items, previewTurnInstructionMessages(turnInstructions)...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
 		msg, ok, err := r.previewUserMessage(session, prompt, drafts, refs)
 		if err != nil {

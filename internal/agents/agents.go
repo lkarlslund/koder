@@ -212,14 +212,13 @@ func (m *Manager) Resolve(ctx context.Context, client *provider.Client, modelID 
 		if err != nil {
 			continue
 		}
-		prompt.WriteString(fmt.Sprintf("FILE: %s\nKIND: %s\nPRIORITY: %d\nMODIFIED: %s\nCHECKSUM: %s\nCONTENT:\n%s\n\n---\n\n",
+		fmt.Fprintf(&prompt, "FILE: %s\nKIND: %s\nPRIORITY: %d\nMODIFIED: %s\nCHECKSUM: %s\nCONTENT:\n%s\n\n---\n\n",
 			item.Path,
 			item.Kind,
 			item.Priority,
 			item.ModTime.UTC().Format(time.RFC3339),
 			item.Checksum,
-			string(body),
-		))
+			string(body))
 	}
 	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
 		Model: modelID,

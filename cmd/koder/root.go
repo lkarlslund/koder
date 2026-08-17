@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -119,7 +118,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	recorder := debugsrv.NewRecorder()
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
@@ -236,15 +235,6 @@ func webBindForLaunch(serveOpts serveConfig) (string, error) {
 	return defaultWebBind, nil
 }
 
-func isReusableWebBind(bind string) bool {
-	bind = strings.TrimSpace(bind)
-	if bind == "" {
-		return false
-	}
-	_, port, err := net.SplitHostPort(bind)
-	return err == nil && port != "" && port != "0"
-}
-
 func newDoctorCommand(root *rootOptions) *cobra.Command {
 	var opts doctorOptions
 	cmd := &cobra.Command{
@@ -304,13 +294,18 @@ func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, 
 	if err := client.Health(ctx); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "config: %s\n", cfg.Path())
-	fmt.Fprintf(out, "provider: %s\n", providerID)
+	if _, err := fmt.Fprintf(out, "config: %s\nprovider: %s\n", cfg.Path(), providerID); err != nil {
+		return err
+	}
 	if modelID != "" {
-		fmt.Fprintf(out, "model: %s\n", modelID)
+		if _, err := fmt.Fprintf(out, "model: %s\n", modelID); err != nil {
+			return err
+		}
 	}
 	if opts.tts {
-		fmt.Fprintln(out, "mode: tts")
+		if _, err := fmt.Fprintln(out, "mode: tts"); err != nil {
+			return err
+		}
 	}
 	if !opts.listModels && modelID == "" {
 		return nil
@@ -324,7 +319,9 @@ func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, 
 	}
 	if opts.listModels {
 		for _, model := range models {
-			fmt.Fprintf(out, "model: %s (%s)\n", model.ID, strings.TrimSpace(model.OwnedBy))
+			if _, err := fmt.Fprintf(out, "model: %s (%s)\n", model.ID, strings.TrimSpace(model.OwnedBy)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -346,12 +343,9 @@ func newVersionCommand() *cobra.Command {
 		Short: "Print version",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info := version.Current()
-			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.Name, info.Version)
-			fmt.Fprintf(cmd.OutOrStdout(), "commit: %s\n", info.Commit)
-			fmt.Fprintf(cmd.OutOrStdout(), "dirty: %s\n", info.Dirty)
-			fmt.Fprintf(cmd.OutOrStdout(), "build_time: %s\n", info.BuildTime)
-			fmt.Fprintf(cmd.OutOrStdout(), "go_version: %s\n", info.GoVersion)
-			return nil
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s\ncommit: %s\ndirty: %s\nbuild_time: %s\ngo_version: %s\n",
+				info.Name, info.Version, info.Commit, info.Dirty, info.BuildTime, info.GoVersion)
+			return err
 		},
 	}
 }
@@ -374,9 +368,8 @@ func newDebugCommand() *cobra.Command {
 		Use:   "info",
 		Short: "Print debug API endpoint information",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "debug endpoints are served by the web UI under /debug")
-			fmt.Fprintln(cmd.OutOrStdout(), "use the running koder web URL, for example http://127.0.0.1:44323/debug/runtime")
-			return nil
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "debug endpoints are served by the web UI under /debug\nuse the running koder web URL, for example http://127.0.0.1:44323/debug/runtime")
+			return err
 		},
 	})
 	cmd.AddCommand(newDebugTailCommand())
@@ -400,7 +393,7 @@ func newSessionDumpCommand(root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer st.Close()
+			defer func() { _ = st.Close() }()
 
 			engine := agent.New(cfg, st, nil)
 			owner, err := engine.LoadSession(cmd.Context(), sessionID)
@@ -463,9 +456,12 @@ func newDebugTailCommand() *cobra.Command {
 					return err
 				}
 				body, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
+				closeErr := resp.Body.Close()
 				if readErr != nil {
 					return readErr
+				}
+				if closeErr != nil {
+					return closeErr
 				}
 				if resp.StatusCode >= 300 {
 					return fmt.Errorf("debug api status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -480,7 +476,9 @@ func newDebugTailCommand() *cobra.Command {
 						continue
 					}
 					seen[key] = struct{}{}
-					fmt.Fprintf(cmd.OutOrStdout(), "%s [%s/%s] %s\n", event.Timestamp.Format(time.RFC3339), event.Source, event.Kind, strings.TrimSpace(event.Text))
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s [%s/%s] %s\n", event.Timestamp.Format(time.RFC3339), event.Source, event.Kind, strings.TrimSpace(event.Text)); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-cmd.Context().Done():

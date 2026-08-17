@@ -121,7 +121,7 @@ func detectMediaMIME(path string) (string, attachment.Kind, error) {
 	if err != nil {
 		return "", attachment.KindUnsupported, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var sniff [512]byte
 	n, err := file.Read(sniff[:])
 	if err != nil && !errors.Is(err, io.EOF) {

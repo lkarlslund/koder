@@ -12,7 +12,11 @@ func TestManagerCreatesResolvesAndDeletesSessionCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 
 	manager := NewManager(st)
 	record, err := manager.Create(context.Background(), Record{

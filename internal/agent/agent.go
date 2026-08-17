@@ -403,13 +403,6 @@ func (e *Engine) RefreshAgents(ctx context.Context, sessionID id.ID) (domain.Ses
 	return e.refreshSessionAgents(ctx, session, chat, client)
 }
 
-func (e *Engine) ensureSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {
-	if !needsSessionAgentsRefresh(session) {
-		return session, nil
-	}
-	return e.refreshSessionAgents(ctx, session, chat, client)
-}
-
 func needsSessionAgentsRefresh(session domain.Session) bool {
 	if strings.TrimSpace(session.ProjectChecksum) == "" {
 		return true
@@ -456,29 +449,6 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	})
 }
 
-func (e *Engine) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {
-	user := domain.UserMessage{Text: prompt}
-	for _, draft := range drafts {
-		meta, err := e.files.AdoptDraft(draft, session.ID)
-		if err != nil {
-			return domain.UserMessage{}, err
-		}
-		user.Attachments = append(user.Attachments, domain.Attachment{
-			ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original,
-		})
-	}
-	for _, ref := range refs {
-		user.References = append(user.References, domain.Reference{
-			Kind:    string(ref.Kind),
-			Path:    ref.Path,
-			Display: ref.Display,
-			Start:   ref.Start,
-			End:     ref.End,
-		})
-	}
-	return user, nil
-}
-
 func (e *Engine) maxToolLoopSteps() int {
 	if e.cfg.MaxToolLoopSteps > 0 {
 		return e.cfg.MaxToolLoopSteps
@@ -519,9 +489,9 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 }
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	modelID := strings.TrimSpace(chat.ModelID)
-	providerCfg := config.Provider{}
-	modelCfg := config.ModelConfig{}
+	var modelID string
+	var providerCfg config.Provider
+	var modelCfg config.ModelConfig
 	if model, err := e.settings.Model(chat); err == nil {
 		modelID = model.SourceModelID
 		providerCfg = model.Provider
@@ -605,10 +575,6 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 			"supported": strconv.FormatBool(supported),
 		})
 	}
-}
-
-func (e *Engine) modelPresetForChat(chat domain.Chat) string {
-	return strings.TrimSpace(e.modelConfigForChat(chat).ModelPreset)
 }
 
 func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
@@ -875,30 +841,6 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func filterFutureUserMessagesAfterToolCall(timeline []domain.TimelineItem) []domain.TimelineItem {
-	lastToolAssistant := -1
-	for idx, item := range timeline {
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok || len(assistant.Tools) == 0 {
-			continue
-		}
-		lastToolAssistant = idx
-	}
-	if lastToolAssistant < 0 {
-		return timeline
-	}
-	out := make([]domain.TimelineItem, 0, len(timeline))
-	for idx, item := range timeline {
-		if idx > lastToolAssistant {
-			if _, ok := item.Content.(domain.UserMessage); ok {
-				continue
-			}
-		}
-		out = append(out, item)
-	}
-	return out
-}
-
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
 	return e.modelRuntime.EstimateContextTokensForTimeline(session, chat, timeline)
 }
@@ -958,9 +900,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 		}
 		envelope.Items = appendTimelinePromptMessages(envelope.Items, item, messages...)
 	}
-	for _, msg := range previewTurnInstructionMessages(turnInstructions) {
-		envelope.Items = append(envelope.Items, msg)
-	}
+	envelope.Items = append(envelope.Items, previewTurnInstructionMessages(turnInstructions)...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
 		msg, ok, err := e.previewUserMessage(session, prompt, drafts, refs)
 		if err != nil {
@@ -2378,23 +2318,6 @@ func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) 
 		Error:       &domain.ToolError{Message: "Invalid tool call: " + parseErr.Error()},
 		CompletedAt: now,
 	}, true
-}
-
-func (e *Engine) failedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
-	call := callErr.ToolCall
-	kind := domain.ToolKind(strings.TrimSpace(call.Function.Name))
-	now := time.Now().UTC()
-	toolCallID := strings.TrimSpace(call.ID)
-	if toolCallID == "" {
-		toolCallID = "stream_argument_limit_" + strconv.FormatInt(now.UnixNano(), 10)
-	}
-	return domain.ToolCall{
-		ToolCallID:  domain.ToolCallID(toolCallID),
-		Tool:        kind,
-		Status:      domain.ToolStatusErrored,
-		Error:       &domain.ToolError{Message: callErr.Message},
-		CompletedAt: now,
-	}
 }
 
 func toolCallRecord(call tools.Request) domain.ToolCall {

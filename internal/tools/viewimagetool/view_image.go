@@ -94,7 +94,7 @@ func detectImageMIME(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var sniff [512]byte
 	n, err := file.Read(sniff[:])

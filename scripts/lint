@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+# research contains source snapshots and intentionally incomplete fixtures; lint
+# the buildable Koder product packages that are also exercised by CI.
+exec golangci-lint run ./cmd/... ./internal/...

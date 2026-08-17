@@ -200,10 +200,6 @@ func normalizeReport(report Report) Report {
 	return report
 }
 
-func syntaxDiagnostics(path, content string) []Diagnostic {
-	return syntaxReport(context.Background(), path, content).Diagnostics
-}
-
 func syntaxReport(ctx context.Context, path, content string) Report {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go":

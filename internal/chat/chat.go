@@ -2804,10 +2804,6 @@ func withoutAutoResumeContinuations(items []domain.QueuedInput) ([]domain.Queued
 	return filtered, true
 }
 
-func (r *Chat) handleStreamEvent(evt domain.Event) {
-	r.handleStreamEventForTurn(0, evt)
-}
-
 func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	refreshedQueue, queueChanged, queueErr := r.queueRefreshForEvent(evt)
 	r.mu.Lock()
@@ -3138,10 +3134,6 @@ func timelineItemSummary(item domain.TimelineItem) string {
 		return strings.TrimSpace(payload.Text)
 	}
 	return ""
-}
-
-func (r *Chat) handleStreamClosed() {
-	r.handleStreamClosedForTurn(0)
 }
 
 func (r *Chat) handleStreamClosedForTurn(turn uint64) {
@@ -3534,24 +3526,6 @@ func (r *Chat) snapshotQueue() []domain.QueuedInput {
 	return cloneQueuedInputs(r.queue)
 }
 
-func (r *Chat) hasQueuedModelTurn() bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, item := range r.queue {
-		if item.Held {
-			continue
-		}
-		switch domain.DeliveryForQueuedInput(item) {
-		case domain.QueuedInputDeliveryContinue, domain.QueuedInputDeliveryNextTurn:
-			return true
-		}
-	}
-	return false
-}
-
 func (r *Chat) broadcast(update Update) {
 	r.subsMu.Lock()
 	defer r.subsMu.Unlock()
@@ -3702,26 +3676,6 @@ func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID
 	}
 	browserResult, ok := tools.BrowserStoredResultForPart(part)
 	return ok && browserResult.Attachment != nil && attachment.ClassifyMIME(browserResult.Attachment.MIME) == attachment.KindImage
-}
-
-func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
-	if r.state == nil {
-		return
-	}
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return
-	}
-	now := time.Now().UTC()
-	r.state.AppendTimelineItem(domain.TimelineItem{
-		ID:        NewTimelineID(now),
-		ChatID:    r.chat.ID,
-		Seq:       r.state.NextTimelineSequence(),
-		Content:   domain.Notice{Text: body, Kind: kind, Level: severity},
-		CreatedAt: now,
-		UpdatedAt: now,
-		SealedAt:  now,
-	})
 }
 
 func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string) error {

@@ -65,7 +65,9 @@ func newExecCommand(root *rootOptions) *cobra.Command {
 				}
 			}
 			if strings.TrimSpace(out) != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), out)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), out); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

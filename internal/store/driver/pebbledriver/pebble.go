@@ -92,7 +92,7 @@ func (b *Backend) needsSchemaReset() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read pebble metadata: %w", err)
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return false, fmt.Errorf("decode pebble metadata: %w", err)
 	}
@@ -122,7 +122,7 @@ func (b *Backend) Get(ctx context.Context, namespace string, id string) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("get %s %s: %w", namespace, id, err)
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 	return driver.CloneBytes(data), nil
 }
 
@@ -136,7 +136,7 @@ func (b *Backend) Put(ctx context.Context, namespace string, id string, data []b
 		return pebble.ErrClosed
 	}
 	batch := b.db.NewBatch()
-	defer batch.Close()
+	defer func() { _ = batch.Close() }()
 	if err := b.deleteIndexEntries(batch, namespace, id); err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (b *Backend) Delete(ctx context.Context, namespace string, id string) error
 		return pebble.ErrClosed
 	}
 	batch := b.db.NewBatch()
-	defer batch.Close()
+	defer func() { _ = batch.Close() }()
 	if err := b.deleteIndexEntries(batch, namespace, id); err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (b *Backend) ListIndexPage(ctx context.Context, namespace string, req drive
 	if err != nil {
 		return driver.IndexPage{}, err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 
 	type selectedID struct {
 		id       string
@@ -279,7 +279,7 @@ func (b *Backend) AddIndexEntries(ctx context.Context, namespace, name, value st
 		return pebble.ErrClosed
 	}
 	batch := b.db.NewBatch()
-	defer batch.Close()
+	defer func() { _ = batch.Close() }()
 	for _, entry := range entries {
 		if err := driver.EnsureContext(ctx); err != nil {
 			return err
@@ -303,7 +303,7 @@ func (b *Backend) listByPrefix(prefix string) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 	var out [][]byte
 	for ok := iter.First(); ok; ok = iter.Next() {
 		out = append(out, driver.CloneBytes(iter.Value()))
@@ -320,7 +320,7 @@ func (b *Backend) listByIndex(namespace string, lookup *driver.IndexLookup) ([][
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 	var out [][]byte
 	for ok := iter.First(); ok; ok = iter.Next() {
 		id := driver.IDFromIndexCursor(strings.TrimPrefix(string(iter.Key()), prefix))
@@ -348,7 +348,7 @@ func (b *Backend) deleteIndexEntries(batch *pebble.Batch, namespace, id string) 
 	if err != nil {
 		return err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 	suffix := []byte("/" + id)
 	orderedSuffix := []byte("~" + id)
 	for ok := iter.First(); ok; ok = iter.Next() {

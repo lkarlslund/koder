@@ -297,7 +297,7 @@ func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var active struct {
 		Active []ActiveHTTPTrace `json:"active"`
 	}
@@ -312,7 +312,7 @@ func TestServerExposesAndCancelsActiveChatHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var canceled struct {
 		Canceled int               `json:"canceled"`
 		Active   []ActiveHTTPTrace `json:"active"`
@@ -348,7 +348,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected transcript status: %d", resp.StatusCode)
 	}
@@ -366,7 +366,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected events status: %d", resp.StatusCode)
 	}
@@ -384,7 +384,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected global events status: %d", resp.StatusCode)
 	}
@@ -434,7 +434,7 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected transcript status %d: %s", resp.StatusCode, string(data))
@@ -459,7 +459,7 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var traces struct {
 		Traces []HTTPTrace `json:"traces"`
 	}
@@ -474,7 +474,7 @@ func TestServerExposesSpecificChatTranscriptAndHTTPTraces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected invalid chat/session pair to fail, got %d", resp.StatusCode)
 	}
@@ -515,7 +515,7 @@ func TestServerExposesSpecificChatDebugDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected chat detail status %d: %s", resp.StatusCode, string(data))
@@ -562,7 +562,7 @@ func TestServerRewindResolvesFirstCompactionError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected rewind status %d: %s", resp.StatusCode, body)
@@ -596,7 +596,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected analysis status %d: %s", resp.StatusCode, string(data))
@@ -677,7 +677,7 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected sessions status %d: %s", resp.StatusCode, string(data))
@@ -723,7 +723,7 @@ func TestServerExposesPprofHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected pprof status: %d", resp.StatusCode)
 	}
@@ -753,7 +753,7 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected runtime status %d: %s", resp.StatusCode, string(data))
@@ -783,7 +783,7 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var clients struct {
 		Clients []ClientDebug `json:"clients"`
 	}
@@ -801,7 +801,7 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var chat ChatDebug
 	if err := json.NewDecoder(resp.Body).Decode(&chat); err != nil {
 		t.Fatal(err)

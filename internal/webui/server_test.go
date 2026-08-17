@@ -55,7 +55,7 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	select {
 	case url := <-opened:
@@ -87,7 +87,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get root: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected root welcome app ok, got %d", resp.StatusCode)
 	}
@@ -96,7 +96,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get inactive session url: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected session app ok, got %d", resp.StatusCode)
 	}
@@ -105,7 +105,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get inactive session chat url: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected session chat app ok, got %d", resp.StatusCode)
 	}
@@ -117,7 +117,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get missing session url: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
 		t.Fatalf("expected missing session to redirect to root, got status=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
 	}
@@ -126,7 +126,7 @@ func TestServerServesSessionAndWelcomeRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get missing chat url: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
 		t.Fatalf("expected missing chat to redirect to root, got status=%d location=%q", resp.StatusCode, resp.Header.Get("Location"))
 	}
@@ -144,7 +144,7 @@ func TestOfferedFileDownloadStreamsLiveFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	path := filepath.Join(t.TempDir(), "result.txt")
 	if err := os.WriteFile(path, []byte("first"), 0o644); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestOfferedFileDownloadStreamsLiveFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get file browser: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected file browser ok, got %d", resp.StatusCode)
 	}
@@ -245,7 +245,7 @@ func TestServerServesSessionPlanningBoardRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get planning board: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected planning board ok, got %d", resp.StatusCode)
 	}
@@ -298,7 +298,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get tree: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected tree ok, got %d: %s", resp.StatusCode, body)
@@ -321,7 +321,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read markdown: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected read ok, got %d: %s", resp.StatusCode, body)
@@ -338,7 +338,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read image metadata: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected image read ok, got %d: %s", resp.StatusCode, body)
@@ -355,7 +355,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read raw image: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected raw image ok, got %d: %s", resp.StatusCode, body)
@@ -375,7 +375,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("download file: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected download ok, got %d: %s", resp.StatusCode, body)
@@ -398,7 +398,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read traversal: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected traversal bad request, got %d", resp.StatusCode)
 	}
@@ -415,7 +415,7 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send file to chat: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected send ok, got %d: %s", resp.StatusCode, body)
@@ -463,7 +463,7 @@ func TestSessionPlanningBoardAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get board: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected board ok, got %d: %s", resp.StatusCode, body)
@@ -486,7 +486,7 @@ func TestSessionPlanningBoardAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected task update ok, got %d: %s", resp.StatusCode, body)
@@ -503,7 +503,7 @@ func TestSessionPlanningBoardAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update milestone: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected milestone update ok, got %d: %s", resp.StatusCode, body)
@@ -520,7 +520,7 @@ func TestSessionPlanningBoardAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected task create ok, got %d: %s", resp.StatusCode, body)
@@ -562,7 +562,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -617,12 +617,12 @@ func TestWebSocketClientsKeepIndependentSessionSelections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial first websocket: %v", err)
 	}
-	defer firstConn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = firstConn.Close(websocket.StatusNormalClosure, "") }()
 	secondConn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(secondID), nil)
 	if err != nil {
 		t.Fatalf("dial second websocket: %v", err)
 	}
-	defer secondConn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = secondConn.Close(websocket.StatusNormalClosure, "") }()
 
 	writeRPC(t, ctx, firstConn, 1, "hello", `{}`)
 	if got := readRPCStateSession(t, ctx, firstConn, 1); got != firstID {
@@ -662,7 +662,7 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post rpc: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected rpc ok status, got %d: %s", resp.StatusCode, body)
@@ -708,7 +708,7 @@ func TestHTTPRPCMethodPathUsesExplicitSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post rpc method: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected rpc ok status, got %d: %s", resp.StatusCode, body)
@@ -928,7 +928,7 @@ func TestWebSocketHelloReturnsWelcomeForStaleURLSessionSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -990,7 +990,7 @@ func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"restart_process","params":{}}`)); err != nil {
 		t.Fatalf("write restart_process: %v", err)
 	}
@@ -1061,7 +1061,7 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -1072,7 +1072,7 @@ func TestRestartNeededEndpointBroadcastsRestartDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post restart-needed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected restart-needed status 200, got %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -1213,7 +1213,7 @@ func TestServerHealthEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get health: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected health status 200, got %d", resp.StatusCode)
 	}
@@ -1240,7 +1240,7 @@ func TestServerExposesDebugEndpointsOnWebPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get debug runtime: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected debug runtime status 200, got %d", resp.StatusCode)
 	}
@@ -1273,7 +1273,7 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -1320,7 +1320,7 @@ func TestWebSocketAcceptsSettingsSizedRPCMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	params, err := json.Marshal(map[string]string{"padding": strings.Repeat("x", 64<<10)})
 	if err != nil {
@@ -1349,7 +1349,7 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -1608,7 +1608,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get index: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected index status 200, got %d", resp.StatusCode)
 	}
@@ -2557,7 +2557,7 @@ func TestFaviconDoesNot404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get favicon: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected favicon status 200, got %d", resp.StatusCode)
 	}
@@ -2629,7 +2629,7 @@ func getAssetBody(t *testing.T, srv *Server, path string) string {
 	if err != nil {
 		t.Fatalf("get asset %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected asset %s status 200, got %d", path, resp.StatusCode)
 	}
@@ -2684,7 +2684,7 @@ func TestWebSocketHelloPushesGitDiffSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	writeRPC(t, ctx, conn, 1, "hello", `{}`)
 
 	msg := readRPCResponse(t, ctx, conn, 1)
@@ -2764,7 +2764,7 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"set_model","params":{"provider_id":"test","model_id":"next-model"}}`)); err != nil {
 		t.Fatalf("write set_model: %v", err)
 	}
@@ -2826,7 +2826,7 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"switch_chat","params":{"chat_id":"%s"}}`, firstID))); err != nil {
 		t.Fatalf("write switch_chat: %v", err)
 	}
@@ -2883,7 +2883,7 @@ func TestWebSocketReceivesSelectedSessionUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	writeRPC(t, wsCtx, conn, 1, "hello", `{}`)
 	_ = readRPCResponse(t, wsCtx, conn, 1)
 
@@ -2939,7 +2939,7 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	payload := fmt.Sprintf(`{"id":1,"method":"reorder_chats","params":{"chat_ids":["%s","%s","%s"]}}`, thirdID, firstID, secondID)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
 		t.Fatalf("write reorder_chats: %v", err)
@@ -3000,7 +3000,7 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":"%s"}}`, deletedID))); err != nil {
 		t.Fatalf("write delete_chat: %v", err)
 	}
@@ -3055,7 +3055,7 @@ func TestWebSocketRenameChatUpdatesChatTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"rename_chat","params":{"chat_id":"%s","title":"Renamed chat"}}`, chatID))); err != nil {
 		t.Fatalf("write rename_chat: %v", err)
 	}
@@ -3111,7 +3111,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"list_sessions","params":{}}`)); err != nil {
 		t.Fatalf("write list_sessions: %v", err)
 	}
@@ -3264,7 +3264,7 @@ func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"new_quick_chat","params":{}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -3345,7 +3345,7 @@ func TestWebSocketNewSessionCreatesMissingProjectRootOnlyWhenRequested(t *testin
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	missingRoot := filepath.Join(t.TempDir(), "missing", "project")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"new_session","params":{"title":"Missing","project_root":%q}}`, missingRoot))); err != nil {
@@ -3423,7 +3423,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	save := fmt.Sprintf(`{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","template_id":"openai-compatible","kind":"openai-compatible","name":"Local","base_url":%q,"api_key":"secret","model":"stale-model","headers":{"X-Test":"yes"}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(save)); err != nil {
 		t.Fatalf("write save_provider: %v", err)
@@ -3556,7 +3556,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	request := fmt.Sprintf(`{"id":1,"method":"test_provider","params":{"provider_id":"probe","template_id":"openai-compatible","kind":"openai-compatible","name":"Probe","base_url":%q,"api_key":"secret","model":"alpha","headers":{}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(request)); err != nil {
 		t.Fatalf("write test_provider: %v", err)
@@ -3614,7 +3614,7 @@ func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testi
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"composer_completions","params":{"text":"/pro","cursor":4}}`)); err != nil {
 		t.Fatalf("write command completion request: %v", err)
 	}
@@ -3722,7 +3722,7 @@ func TestWebSocketComposerCompletionsUseExplicitSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	req := fmt.Sprintf(`{"id":1,"method":"composer_completions","params":{"text":"Use $rev","cursor":8,"session_id":%q,"chat_id":%q}}`, state.Session.ID, state.ActiveChatID)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(req)); err != nil {
@@ -3805,7 +3805,7 @@ func TestClipboardImageUploadEndpointReturnsDraftAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200, got %s: %s", resp.Status, body)

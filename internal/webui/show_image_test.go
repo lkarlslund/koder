@@ -26,7 +26,7 @@ func TestShowImageEndpointServesLocalImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %s", resp.Status)
 	}
@@ -52,7 +52,7 @@ func TestShowImageEndpointRejectsNonImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("expected 415, got %s", resp.Status)
 	}

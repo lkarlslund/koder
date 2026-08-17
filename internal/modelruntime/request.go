@@ -29,9 +29,9 @@ func (r *Runtime) ProviderStreamingEnabled(chat domain.Chat) bool {
 }
 
 func (r *Runtime) ChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	modelID := strings.TrimSpace(chat.ModelID)
-	providerCfg := config.Provider{}
-	modelCfg := config.ModelConfig{}
+	var modelID string
+	var providerCfg config.Provider
+	var modelCfg config.ModelConfig
 	if model, err := r.settings.Model(chat); err == nil {
 		modelID = model.SourceModelID
 		providerCfg = model.Provider

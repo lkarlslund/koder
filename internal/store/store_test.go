@@ -151,7 +151,11 @@ func TestJSONFSWritesInspectableCollectionFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 	note, err := testNotes(st).Insert(context.Background(), testNote{ChatID: "chat-7", Body: "inspect"})
 	if err != nil {
 		t.Fatal(err)

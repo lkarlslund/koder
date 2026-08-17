@@ -96,16 +96,6 @@ func TestStartWebUISurfacesBindError(t *testing.T) {
 	}
 }
 
-func newRootTestStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
-}
-
 func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())

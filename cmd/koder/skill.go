@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -141,38 +142,34 @@ func newSkillListCommand(root *rootOptions) *cobra.Command {
 				}
 			}
 
-			out := cmd.OutOrStdout()
 			opts, err := skillDiscoverOptions(root)
 			if err != nil {
 				return err
 			}
 			items := skills.DiscoverWithOptions(dir, opts)
 			paths := collectDiscoveryPaths(dir, opts)
+			var output strings.Builder
 
 			if len(items) == 0 {
-				fmt.Fprintln(out, "No skills found.")
-				fmt.Fprintln(out)
-				fmt.Fprintln(out, "Searched:")
+				output.WriteString("No skills found.\n\nSearched:\n")
 				for _, p := range paths {
 					exists := dirExists(p.path)
 					status := "not found"
 					if exists {
 						status = "exists (no skills)"
 					}
-					fmt.Fprintf(out, "  [%s] %s (%s)\n", p.scope, p.path, status)
+					_, _ = fmt.Fprintf(&output, "  [%s] %s (%s)\n", p.scope, p.path, status)
 				}
-				fmt.Fprintln(out)
-				fmt.Fprintln(out, "To create a skill, place a directory with SKILL.md under one of the paths above.")
-				fmt.Fprintln(out, "User skills go in ~/.agents/skills/<name>/SKILL.md")
-				return nil
+				output.WriteString("\nTo create a skill, place a directory with SKILL.md under one of the paths above.\n")
+				output.WriteString("User skills go in ~/.agents/skills/<name>/SKILL.md\n")
+				_, err := io.WriteString(cmd.OutOrStdout(), output.String())
+				return err
 			}
 
 			// Print found skills grouped by path
 			for _, s := range items {
 				scope := string(s.Scope)
-				fmt.Fprintf(out, "[%s] %s\n", scope, s.Name)
-				fmt.Fprintf(out, "       %s\n", s.Description)
-				fmt.Fprintf(out, "       %s\n", s.Directory)
+				_, _ = fmt.Fprintf(&output, "[%s] %s\n       %s\n       %s\n", scope, s.Name, s.Description, s.Directory)
 			}
 
 			// Also show paths that were searched but contributed nothing
@@ -184,12 +181,13 @@ func newSkillListCommand(root *rootOptions) *cobra.Command {
 				if !usedPaths[p.path] {
 					exists := dirExists(p.path)
 					if !exists {
-						fmt.Fprintf(out, "\nSkipped: %s (not found)\n", p.path)
+						_, _ = fmt.Fprintf(&output, "\nSkipped: %s (not found)\n", p.path)
 					}
 				}
 			}
 
-			return nil
+			_, err = io.WriteString(cmd.OutOrStdout(), output.String())
+			return err
 		},
 	}
 	listCmd.Flags().StringVar(&workdir, "workdir", "", "Working directory for skill discovery (default: $PWD)")

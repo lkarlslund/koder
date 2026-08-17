@@ -195,15 +195,6 @@ func WithLlamaPromptCache(body map[string]any, cfg config.Provider) map[string]a
 	return body
 }
 
-func chatTemplateKwargs(body map[string]any) map[string]any {
-	if existing, ok := body["chat_template_kwargs"].(map[string]any); ok {
-		return existing
-	}
-	next := map[string]any{}
-	body["chat_template_kwargs"] = next
-	return next
-}
-
 func PromptProgressEnabled(cfg config.Provider) bool {
 	mode := config.NormalizePromptProgressMode(cfg.PromptProgressMode)
 	switch mode {

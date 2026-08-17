@@ -186,7 +186,7 @@ func (s *Server) handleOfferedFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		http.NotFound(w, r)
@@ -434,7 +434,7 @@ func handleShowImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var sniff [512]byte
 	n, err := file.Read(sniff[:])
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -470,7 +470,7 @@ func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "image is required", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(file)
 	if err != nil {
 		http.Error(w, "read image upload: "+err.Error(), http.StatusBadRequest)
@@ -493,7 +493,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(websocketReadLimit)
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	s.markConnected()
 
 	ctx := r.Context()

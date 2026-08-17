@@ -1,0 +1,18 @@
+version: "2"
+
+run:
+  tests: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  exclusions:
+    paths:
+      - research
+
+formatters:
+  exclusions:
+    paths:
+      - research

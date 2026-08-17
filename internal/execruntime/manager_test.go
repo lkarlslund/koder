@@ -170,7 +170,7 @@ func TestManagerWriteStdinEmptyWaitsAndDrainsNewOutput(t *testing.T) {
 func TestManagerExecPreviewUsesSixteenKiBAndLineBoundary(t *testing.T) {
 	var output strings.Builder
 	for i := 1; i <= 1200; i++ {
-		output.WriteString(fmt.Sprintf("line-%04d %s\n", i, strings.Repeat("x", 32)))
+		_, _ = fmt.Fprintf(&output, "line-%04d %s\n", i, strings.Repeat("x", 32))
 	}
 	p := &process{output: output.String()}
 	snap := p.snapshot(0)

@@ -1371,22 +1371,6 @@ func (c *Controller) snapshotWithExecProcessesForSession(session domain.Session,
 	return c.snapshotWithExecProcessesLocked(snapshot)
 }
 
-func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
-	for idx := range *chats {
-		if (*chats)[idx].ID == chatRecord.ID {
-			(*chats)[idx] = chatRecord
-			return
-		}
-	}
-	*chats = append(*chats, chatRecord)
-	slices.SortFunc(*chats, func(a, b domain.Chat) int {
-		if a.Position != b.Position {
-			return a.Position - b.Position
-		}
-		return strings.Compare(string(a.ID), string(b.ID))
-	})
-}
-
 // DeleteChatForSelection archives a chat in the selected session.
 func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
@@ -2031,27 +2015,6 @@ func blankAsDash(value string) string {
 	return value
 }
 
-func (c *Controller) initialSession(ctx context.Context, mode StartupMode, projectRoot string) (domain.Session, error) {
-	if c.agent == nil {
-		return domain.Session{}, fmt.Errorf("no chat agent")
-	}
-	if mode == StartupModeNew {
-		if session, ok, err := c.restartInterruptedSession(ctx); err != nil {
-			return domain.Session{}, err
-		} else if ok {
-			return session, nil
-		}
-	}
-	sessions, err := c.workspaceSessions(ctx)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	if len(sessions) == 0 {
-		return c.createWorkspaceSession(ctx, "New Session", projectRoot)
-	}
-	return newestSession(sessions), nil
-}
-
 func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) error {
 	if c.agent == nil {
 		return fmt.Errorf("no chat agent")
@@ -2139,17 +2102,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) e
 		loaded.Kick()
 	}
 	return nil
-}
-
-func (c *Controller) createWorkspaceSession(ctx context.Context, title string, projectRoot string) (domain.Session, error) {
-	if c.agent == nil {
-		return domain.Session{}, fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.CreateSession(ctx, title, projectRoot, false)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	return owner.Snapshot().Session, nil
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
@@ -2448,38 +2400,6 @@ func chatByID(chats []domain.Chat, chatID id.ID) (domain.Chat, bool) {
 		}
 	}
 	return domain.Chat{}, false
-}
-
-func fallbackChatID(chats []domain.Chat, deleting domain.Chat) id.ID {
-	if deleting.ParentChatID != nil {
-		for _, item := range chats {
-			if item.ID == *deleting.ParentChatID && item.ID != deleting.ID {
-				return item.ID
-			}
-		}
-	}
-	for _, item := range chats {
-		if item.ID != deleting.ID {
-			return item.ID
-		}
-	}
-	return ""
-}
-
-func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) id.ID {
-	if archiving.ParentChatID != nil {
-		for _, item := range chats {
-			if item.ID == *archiving.ParentChatID && item.ID != archiving.ID && !item.Archived {
-				return item.ID
-			}
-		}
-	}
-	for _, item := range chats {
-		if item.ID != archiving.ID && !item.Archived {
-			return item.ID
-		}
-	}
-	return ""
 }
 
 // Touch avoids stale-session ordering when a renderer action changes state.

@@ -1,19 +1,11 @@
 package browser
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/chromedp/chromedp"
-
 	"github.com/lkarlslund/koder/internal/browserapi"
 )
-
-func validateLocator(ctx context.Context, locator browserapi.Locator, action string) error {
-	var found bool
-	return chromedp.Run(ctx, chromedp.Evaluate(`Boolean(`+locatorExpression(locator, action)+`)`, &found))
-}
 
 func locatorExpression(locator browserapi.Locator, action string) string {
 	if locator.Empty() && action == "press" {

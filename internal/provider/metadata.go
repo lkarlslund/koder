@@ -178,7 +178,7 @@ func (c *Client) decodeJSONAt(ctx context.Context, method, endpoint string, body
 	if err != nil {
 		return fmt.Errorf("%s: %w", operation, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return &APIError{Operation: operation, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw))}

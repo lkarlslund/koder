@@ -1061,7 +1061,7 @@ func TestHandleModelToolCallDeniesGloballyDisabledTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
@@ -1092,7 +1092,7 @@ func TestGlobalToolDefaultDisablesPersistedSessionToolState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "provider", "model", nil)
@@ -1127,7 +1127,7 @@ func TestUpdateChatPersistsThroughEngineControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
@@ -1183,7 +1183,7 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
@@ -1259,7 +1259,7 @@ func TestStartChatRejectsArchivedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
@@ -1291,7 +1291,7 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
 	if err != nil {
@@ -1322,7 +1322,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1371,7 +1371,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1422,7 +1422,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1469,7 +1469,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1510,7 +1510,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1549,7 +1549,7 @@ func TestBuildConversationCompactionSummaryPreservesRecentToolCallBoundary(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1588,7 +1588,7 @@ func TestBuildConversationAfterCompactionPreservesSavedBoundarySuffix(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1631,7 +1631,7 @@ func TestBuildCompactionConversationIncludesRecentToolTailInSummarySource(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1672,7 +1672,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
@@ -1745,7 +1745,7 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1798,7 +1798,7 @@ func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1854,7 +1854,7 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1903,7 +1903,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1942,7 +1942,7 @@ func TestBuildConversationRendersSteerAfterToolResultAsSeparateUserMessage(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -1986,7 +1986,7 @@ func TestBuildConversationKeepsStandaloneSteerAsUserMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -2016,7 +2016,7 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
@@ -2068,7 +2068,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
@@ -2130,7 +2130,7 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2171,7 +2171,7 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -2242,7 +2242,7 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2284,7 +2284,7 @@ func TestPreviewNextRequestIncludesStructuredFileReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	workdir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello refs"), 0o644); err != nil {
@@ -2337,7 +2337,7 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
@@ -2379,7 +2379,7 @@ func TestPreviewNextRequestIncludesExplicitModelSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
@@ -2406,7 +2406,7 @@ func TestPreviewNextRequestHidesGloballyDisabledTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, cfg.Defaults.ModelID, nil)
 	if err != nil {
@@ -2435,7 +2435,7 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v1.0.0"}, nil)
 	server.AddTool(&sdkmcp.Tool{Name: "zeta", Description: "late tool", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
@@ -2503,7 +2503,7 @@ func TestBuildConversationPreservesSeparateReasoningForQwenPreset(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
@@ -2587,7 +2587,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2696,7 +2696,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2835,7 +2835,7 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2885,7 +2885,7 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenStopRequested(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -2958,7 +2958,7 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3065,7 +3065,7 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3157,7 +3157,7 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3224,7 +3224,7 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3264,7 +3264,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3298,7 +3298,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeFinalAssistant(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3333,7 +3333,7 @@ func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3426,7 +3426,7 @@ func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3493,7 +3493,7 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3574,7 +3574,7 @@ func TestRunPromptPersistsInvalidKnownProviderToolCallAsToolError(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3683,7 +3683,7 @@ func TestRunPromptPersistsOversizedStreamedToolCallAsToolError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3735,7 +3735,7 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -3828,7 +3828,7 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	recorder := debugsrv.NewRecorder()
 	engine := New(cfg, st, recorder)
@@ -3937,7 +3937,7 @@ func TestRunPromptStartsCavemanBeforeMainStreamCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
@@ -3999,7 +3999,7 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4081,7 +4081,7 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	workdir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello\n"), 0o644); err != nil {
@@ -4144,7 +4144,7 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4190,7 +4190,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -4238,7 +4238,7 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -4281,7 +4281,7 @@ func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	workdir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workdir, "main.go"), []byte("package main\nfunc Target() {}\n"), 0o644); err != nil {
@@ -4344,7 +4344,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		}
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))
 		case 2:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
 		default:
@@ -4376,7 +4376,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	workdir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workdir, ".git"), 0o755); err != nil {
@@ -4494,7 +4494,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4625,7 +4625,7 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4705,7 +4705,7 @@ func TestManualCompactNextPromptUsesCompactedLiveTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4778,7 +4778,7 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -4839,7 +4839,7 @@ func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "missing", "test-model", nil)
@@ -4900,7 +4900,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		}
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))
 		case 2:
 			if !strings.Contains(requests[1], "no such file or directory") {
 				t.Fatalf("expected second request to include tool failure, got %s", requests[1])
@@ -4935,7 +4935,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	workdir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workdir, ".git"), 0o755); err != nil {
@@ -5032,7 +5032,7 @@ func TestRunPromptIgnoresUnknownContextUsageAfterCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5098,7 +5098,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5277,7 +5277,7 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5318,7 +5318,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 			t.Fatalf("read request body: %v", err)
 		}
 		requestBodies = append(requestBodies, string(body))
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"content":"compact summary %d"}}]}`, len(requestBodies))))
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":"compact summary %d"}}]}`, len(requestBodies))
 	}))
 	defer server.Close()
 
@@ -5338,7 +5338,7 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5430,7 +5430,7 @@ func TestBuildConversationIgnoresInvalidCompactionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5706,7 +5706,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5779,7 +5779,7 @@ func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5848,7 +5848,7 @@ func TestCompactSessionMarksCanceledCompactionFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -5936,7 +5936,7 @@ func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "chat", "chat-model", nil)
@@ -5977,7 +5977,7 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "chat", "chat-model", nil)
@@ -6025,7 +6025,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -6070,7 +6070,7 @@ func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -6157,7 +6157,7 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -6206,7 +6206,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
@@ -6265,7 +6265,7 @@ func TestRunPromptIncludesVisibleTurnInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -6341,7 +6341,7 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -6433,7 +6433,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -6516,7 +6516,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -6596,7 +6596,7 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	var waited []time.Duration
@@ -6677,7 +6677,7 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
@@ -6741,7 +6741,7 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "New Session", "test", "test-model", nil)
@@ -6802,7 +6802,7 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "Existing Session", "test", "test-model", nil)
@@ -6848,7 +6848,7 @@ func TestRunPromptDeniesRepeatedIdenticalToolCallsThenStops(t *testing.T) {
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`, requests)))
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`, requests)
 	}))
 	defer server.Close()
 
@@ -6863,7 +6863,7 @@ func TestRunPromptDeniesRepeatedIdenticalToolCallsThenStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7032,7 +7032,7 @@ func TestRunPromptPausesOnEmptyProviderResponseAfterToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7091,7 +7091,7 @@ func TestRunPromptDoesNotAddInstructionAfterOrdinaryToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7159,7 +7159,7 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7244,7 +7244,7 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7326,7 +7326,7 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7381,7 +7381,7 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal args: %v", err)
 		}
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, requests, string(args))))
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, requests, string(args))
 	}))
 	defer server.Close()
 
@@ -7397,7 +7397,7 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
@@ -7447,7 +7447,7 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
@@ -7520,7 +7520,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	var rt *chatpkg.Chat
@@ -7581,7 +7581,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)

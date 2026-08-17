@@ -3202,10 +3202,8 @@ func TestRuntimeHardCancelRemovesPartialAssistantResponse(t *testing.T) {
 		},
 	}
 	deadline = time.After(2 * time.Second)
-	for {
-		if assistantTextInSnapshot(rt.Snapshot(), "partial answer") {
-			break
-		}
+	for !assistantTextInSnapshot(rt.Snapshot(), "partial answer") {
+
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for partial assistant: %#v", rt.Snapshot())

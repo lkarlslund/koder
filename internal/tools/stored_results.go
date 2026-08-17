@@ -508,9 +508,7 @@ func compactReadStoredResult(result ReadStoredResult, limits CompactFormatLimits
 	}
 	switch result.Mode {
 	case ReadStoredModeDirectory:
-		for _, entry := range result.Entries {
-			lines = append(lines, entry)
-		}
+		lines = append(lines, result.Entries...)
 	default:
 		for _, line := range result.Lines {
 			lines = append(lines, strconv.Itoa(line.Number)+": "+line.Text)

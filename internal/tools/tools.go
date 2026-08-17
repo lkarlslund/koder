@@ -472,7 +472,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 		return Request{}, fmt.Errorf("provider tool call for %s missing id", kind)
 	}
 	if limit := ArgumentByteLimits()[kind.String()]; limit > 0 && len(call.Function.Arguments) > limit {
-		return Request{}, ProviderCallError{Request: req, Err: fmt.Errorf("%s tool arguments exceeded %s. Use smaller tool calls.", kind, formatArgumentByteLimit(limit))}
+		return Request{}, ProviderCallError{Request: req, Err: fmt.Errorf("%s tool arguments exceeded %s; use smaller tool calls", kind, formatArgumentByteLimit(limit))}
 	}
 	args, err := decodeStringMap([]byte(call.Function.Arguments))
 	if err != nil {

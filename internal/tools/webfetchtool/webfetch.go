@@ -100,7 +100,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if err != nil {
 		return tools.Result{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return tools.Result{}, fmt.Errorf("fetch status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))

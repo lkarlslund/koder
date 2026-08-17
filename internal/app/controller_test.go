@@ -43,17 +43,6 @@ func testChatCollection(st *store.Store) store.Collection[domain.Chat] {
 	})
 }
 
-func testTimelineCollection(st *store.Store) store.Collection[domain.TimelineItem] {
-	return store.NewCollection(st, store.CollectionSpec[domain.TimelineItem]{
-		Namespace: "timeline",
-		GetID:     func(v domain.TimelineItem) string { return v.ID },
-		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
-		Indexes: []store.IndexSpec[domain.TimelineItem]{
-			{Name: "chat", Value: func(v domain.TimelineItem) string { return v.ChatID }},
-		},
-	})
-}
-
 func testGetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
 	return testChatCollection(st).Get(ctx, chatID)
 }
@@ -70,69 +59,6 @@ func testSetChatQueuedInputs(ctx context.Context, st *store.Store, chatID id.ID,
 	chatRecord.QueuedInputs = slices.Clone(items)
 	chatRecord.UpdatedAt = time.Now().UTC()
 	return testUpdateChat(ctx, st, chatRecord)
-}
-
-func testTimelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]domain.TimelineItem, error) {
-	items, err := testTimelineCollection(st).List(ctx, store.ByIndex[domain.TimelineItem]("chat", string(chatID)))
-	if err != nil {
-		return nil, err
-	}
-	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
-		switch {
-		case a.Seq < b.Seq:
-			return -1
-		case a.Seq > b.Seq:
-			return 1
-		case a.ID < b.ID:
-			return -1
-		case a.ID > b.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return items, nil
-}
-
-func testAppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
-	items, err := testTimelineForChat(ctx, st, chatID)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	now := time.Now().UTC()
-	return testTimelineCollection(st).Insert(ctx, domain.TimelineItem{
-		ChatID:    chatID,
-		Seq:       int64(len(items) + 1),
-		Content:   content,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-}
-
-func testPutTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
-	return testTimelineCollection(st).Put(ctx, item)
-}
-
-func testAppendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	assistant := domain.AssistantMessage{Text: text}
-	for _, call := range calls {
-		if err := assistant.AddToolCall(call); err != nil {
-			return domain.TimelineItem{}, err
-		}
-	}
-	usage = usage.Normalized()
-	if usage.HasAnyTokens() {
-		assistant.Usage = &usage
-	}
-	item, err := testAppendTimeline(ctx, st, chatID, assistant)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item.Seal(time.Now().UTC())
-	if err := testPutTimelineItem(ctx, st, item); err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
 }
 
 func setSessionProjectRoot(ctx context.Context, st *store.Store, sessionID id.ID, root string) error {
@@ -640,7 +566,7 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote","max_model_len":65536},{"id":"a-model","status":{"args":["llama-server","--ctx-size","49152"]}}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote","max_model_len":65536},{"id":"a-model","status":{"args":["llama-server","--ctx-size","49152"]}}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -693,7 +619,7 @@ func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -814,7 +740,7 @@ func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -838,7 +764,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
-			fmt.Fprint(w, `{"data":[{"id":"omnivoice-base-Q8_0.gguf","owned_by":"local"}]}`)
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"omnivoice-base-Q8_0.gguf","owned_by":"local"}]}`)
 		case "/v1/audio/speech":
 			w.Header().Set("Content-Type", "audio/pcm")
 			_, _ = w.Write([]byte{0, 1, 2, 3})
@@ -890,7 +816,7 @@ func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T)
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -1142,7 +1068,7 @@ func TestControllerPreferencesRepairsMissingDefaultModel(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprint(w, `{"data":[{"id":"new-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"new-model"}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -1253,7 +1179,7 @@ func TestControllerSetModelRejectsModelOutsideCatalog(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"catalog-model"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"catalog-model"}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -1278,7 +1204,7 @@ func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 		case "/slots", "/props":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
-			fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
 		case "/v1/chat/completions":
 			http.Error(w, "image vision unsupported content part", http.StatusBadRequest)
 		default:

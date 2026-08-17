@@ -60,7 +60,7 @@ func TestParseStatusCapsDetailedDiffPreview(t *testing.T) {
 	var raw strings.Builder
 	raw.WriteString("## main\n")
 	for i := range maxDiffFiles + 5 {
-		raw.WriteString(fmt.Sprintf(" M file-%04d.go\n", i))
+		_, _ = fmt.Fprintf(&raw, " M file-%04d.go\n", i)
 	}
 
 	got := parseStatus(raw.String(), "")
@@ -119,7 +119,11 @@ func TestWatcherReportsFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer watcher.Close()
+	t.Cleanup(func() {
+		if err := watcher.Close(); err != nil {
+			t.Errorf("close watcher: %v", err)
+		}
+	})
 
 	if err := os.WriteFile(filepath.Join(root, "changed.txt"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)

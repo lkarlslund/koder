@@ -176,7 +176,7 @@ func TestWriteStdinMissingProcessIDExplainsNoRunningProcesses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing process id error")
 	}
-	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "Do not call exec_write_stdin again", "exec_command"} {
+	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "do not call exec_write_stdin again", "exec_command"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}

@@ -215,7 +215,7 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 		writeFileBrowserError(w, fmt.Errorf("open file: %w", err))
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		writeFileBrowserError(w, fmt.Errorf("stat file: %w", err))
@@ -246,7 +246,7 @@ func (s *Server) handleSessionFileDownload(w http.ResponseWriter, r *http.Reques
 		writeFileBrowserError(w, fmt.Errorf("open file: %w", err))
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		writeFileBrowserError(w, fmt.Errorf("stat file: %w", err))
@@ -457,7 +457,7 @@ func detectFileBrowserMIME(full, rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return detectOpenFileBrowserMIME(file, rel), nil
 }
 

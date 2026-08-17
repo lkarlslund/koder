@@ -362,7 +362,7 @@ func (s *Session) ReplaceWorkspaceWatcher(snapshot func(context.Context, string)
 
 func workspaceSignature(status workspacepkg.Status, diff workspacepkg.Diff) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
+	fmt.Fprintf(&b, "%t\n%s\n%s\n%t\n%s\n%s\n%s\n%d/%d/%d/%d\n",
 		status.Available,
 		status.ProjectRoot,
 		status.AgentsChecksum,
@@ -373,14 +373,13 @@ func workspaceSignature(status workspacepkg.Status, diff workspacepkg.Diff) stri
 		status.Added,
 		status.Modified,
 		status.Deleted,
-		status.Untracked,
-	))
+		status.Untracked)
 	for _, file := range diff.Files {
 		b.WriteString(file.Code)
 		b.WriteByte('\t')
 		b.WriteString(file.Path)
 		b.WriteByte('\t')
-		b.WriteString(fmt.Sprintf("%d/%d\n", file.Additions, file.Deletions))
+		fmt.Fprintf(&b, "%d/%d\n", file.Additions, file.Deletions)
 	}
 	return b.String()
 }

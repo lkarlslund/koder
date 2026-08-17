@@ -478,7 +478,7 @@ func (c *Client) listModelItems(ctx context.Context) ([]modelResponseItem, error
 	if err != nil {
 		return nil, fmt.Errorf("list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
@@ -529,7 +529,7 @@ func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (
 	if err != nil {
 		return 0, fmt.Errorf("list models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return 0, &APIError{
@@ -687,19 +687,6 @@ func isOptionalContextWindowProbeError(err error) bool {
 	return false
 }
 
-func isOptionalLlamaProbeError(err error) bool {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed:
-			return true
-		default:
-			return false
-		}
-	}
-	return false
-}
-
 func (c *Client) propsRequest(ctx context.Context, baseURL, path string) (propsResponse, error) {
 	req, err := c.newRequestAt(ctx, http.MethodGet, baseURL, path, nil)
 	if err != nil {
@@ -709,7 +696,7 @@ func (c *Client) propsRequest(ctx context.Context, baseURL, path string) (propsR
 	if err != nil {
 		return propsResponse{}, fmt.Errorf("get props: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return propsResponse{}, &APIError{
@@ -737,7 +724,7 @@ func (c *Client) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("health status %d", resp.StatusCode)
 	}
@@ -762,7 +749,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("complete chat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
 		Status:       resp.StatusCode,
 		ResponseHdrs: redactHeaders(resp.Header),
@@ -874,7 +861,7 @@ func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("tts probe: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
@@ -931,7 +918,7 @@ func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechR
 	if err != nil {
 		return SpeechResponse{}, fmt.Errorf("tts request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 		return SpeechResponse{}, &APIError{
@@ -1016,7 +1003,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("stream chat: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
 		Status:       resp.StatusCode,
 		ResponseHdrs: redactHeaders(resp.Header),

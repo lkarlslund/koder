@@ -589,7 +589,7 @@ func (c *Controller) SetDefaultModel(ctx context.Context, providerID, modelID st
 	found := false
 	for _, option := range options {
 		if option.ProviderID == providerID && option.ModelID == modelID {
-			if option.SupportsChat == false {
+			if !option.SupportsChat {
 				return PreferencesState{}, fmt.Errorf("model %s/%s does not support chat completions", providerID, modelID)
 			}
 			found = true
@@ -1025,7 +1025,7 @@ func repairDeletedModelReferences(ctx context.Context, cfg *config.Config, provi
 		return
 	}
 	for _, option := range options {
-		if option.SupportsChat == false {
+		if !option.SupportsChat {
 			continue
 		}
 		cfg.Defaults.ProviderID = option.ProviderID
@@ -1993,13 +1993,4 @@ func parseDurationOrZero(value string) time.Duration {
 		return 0
 	}
 	return duration
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

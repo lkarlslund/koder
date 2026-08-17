@@ -328,7 +328,7 @@ func readFilePage(abs string, startLine, limit, byteLimit int) (filePage, error)
 	if err != nil {
 		return filePage{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	reader := bufio.NewReader(file)
 	lines := make([]tools.ReadStoredLine, 0, limit)
@@ -382,7 +382,7 @@ func readFilePage(abs string, startLine, limit, byteLimit int) (filePage, error)
 		}
 	}
 
-	if lineNo < start && !(lineNo == 0 && start == 1) {
+	if lineNo < start && (lineNo != 0 || start != 1) {
 		return filePage{}, fmt.Errorf("start_line %d is out of range for this file (%d lines)", start, lineNo)
 	}
 	page := filePage{
@@ -410,7 +410,7 @@ func readDirectoryPage(abs string, startLine, limit, byteLimit int) (directoryPa
 	}
 	start := max(1, startLine)
 	total := len(items)
-	if total < start && !(total == 0 && start == 1) {
+	if total < start && (total != 0 || start != 1) {
 		return directoryPage{}, fmt.Errorf("start_line %d is out of range for this directory (%d entries)", start, total)
 	}
 	page := directoryPage{Total: total}

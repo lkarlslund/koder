@@ -378,7 +378,7 @@ func classifyFile(path string) (Kind, string, error) {
 	if err != nil {
 		return KindUnsupported, "", fmt.Errorf("open attachment: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var sniff [512]byte
 	n, err := file.Read(sniff[:])
@@ -432,13 +432,13 @@ func copyFile(src, dst string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open attachment source: %w", err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return 0, fmt.Errorf("create attachment destination: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	size, err := io.Copy(out, in)
 	if err != nil {

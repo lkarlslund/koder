@@ -21,7 +21,11 @@ func TestOfferFileCreatesLiveCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 	manager := offeredfile.NewManager(st)
 
 	result, err := (tool{}).Call(context.Background(), tools.Options{
