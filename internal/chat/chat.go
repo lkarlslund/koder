@@ -133,6 +133,7 @@ type Chat struct {
 
 	inbox   chan any
 	done    chan struct{}
+	workers sync.WaitGroup
 	subsMu  sync.Mutex
 	subs    map[int]chan Update
 	nextSub int
@@ -1127,6 +1128,15 @@ func (r *Chat) Close() {
 	case <-done:
 	}
 	<-done
+	r.workers.Wait()
+}
+
+func (r *Chat) startWorker(run func()) {
+	r.workers.Add(1)
+	go func() {
+		defer r.workers.Done()
+		run()
+	}()
 }
 
 // DrainAndClose waits for the active turn to reach a persisted boundary, then closes the chat.
@@ -2579,12 +2589,12 @@ func (r *Chat) handleCompact(instructions string, reply chan<- error) {
 	reply <- nil
 
 	out := make(chan domain.Event, 32)
-	go func() {
+	r.startWorker(func() {
 		defer close(out)
 		if err := service.CompactChat(ctx, r, instructions, out); err != nil {
 			r.handleTurnError(ctx, out, err)
 		}
-	}()
+	})
 	r.forwardTurnEvents(turn, out)
 }
 
@@ -2631,7 +2641,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
-	go func() {
+	r.startWorker(func() {
 		defer close(out)
 		shouldContinue, err := service.ApproveToolForTurn(ctx, r, toolCallID, rule, out)
 		if err != nil {
@@ -2641,7 +2651,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 		if shouldContinue {
 			r.continueTurnLoop(ctx, nil, out)
 		}
-	}()
+	})
 	r.forwardTurnEvents(turn, out)
 }
 
@@ -2668,12 +2678,12 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, true))
 
 	out := make(chan domain.Event, 32)
-	go func() {
+	r.startWorker(func() {
 		defer close(out)
 		if err := service.DenyToolForTurn(ctx, r, toolCallID, out); err != nil {
 			r.handleTurnError(ctx, out, err)
 		}
-	}()
+	})
 	r.forwardTurnEvents(turn, out)
 }
 
@@ -2765,7 +2775,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 	r.broadcast(r.snapshotUpdateFlags(nil, false, queueChanged, true, false, false))
 
 	out := make(chan domain.Event, 32)
-	go func() {
+	r.startWorker(func() {
 		defer close(out)
 		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, r, out)
 		if err != nil {
@@ -2775,7 +2785,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		if shouldContinue {
 			r.continueTurnLoop(ctx, nil, out)
 		}
-	}()
+	})
 	r.forwardTurnEvents(turn, out)
 }
 
@@ -3295,7 +3305,7 @@ func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput
 
 func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedInput, note string) {
 	out := make(chan domain.Event, 32)
-	go func() {
+	r.startWorker(func() {
 		defer close(out)
 		var (
 			turnInstructions []provider.InstructionBlock
@@ -3317,7 +3327,7 @@ func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedI
 			return
 		}
 		r.continueTurnLoop(ctx, turnInstructions, out)
-	}()
+	})
 	r.forwardTurnEvents(turn, out)
 }
 
@@ -3391,7 +3401,7 @@ func (r *Chat) handleTurnError(ctx context.Context, out chan<- domain.Event, err
 }
 
 func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
-	go func() {
+	r.startWorker(func() {
 		var (
 			pendingToolDelta *domain.Event
 			toolDeltaTimer   *time.Timer
@@ -3417,14 +3427,14 @@ func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
 		}
 		flushToolDelta := func() {
 			if pendingToolDelta != nil {
-				r.inbox <- streamEventCmd{turn: turn, event: *pendingToolDelta}
+				r.sendWorkerCommand(streamEventCmd{turn: turn, event: *pendingToolDelta})
 				pendingToolDelta = nil
 			}
 			stopToolDeltaTimer()
 		}
 		defer func() {
 			flushToolDelta()
-			r.inbox <- streamClosedCmd{turn: turn}
+			r.sendWorkerCommand(streamClosedCmd{turn: turn})
 		}()
 
 		for {
@@ -3435,7 +3445,7 @@ func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
 				}
 				if debounceStreamingToolCallDelta(evt) {
 					if toolDeltaTimer == nil {
-						r.inbox <- streamEventCmd{turn: turn, event: evt}
+						r.sendWorkerCommand(streamEventCmd{turn: turn, event: evt})
 						startToolDeltaTimer()
 						continue
 					}
@@ -3444,12 +3454,21 @@ func (r *Chat) forwardTurnEvents(turn uint64, events <-chan domain.Event) {
 					continue
 				}
 				flushToolDelta()
-				r.inbox <- streamEventCmd{turn: turn, event: evt}
+				r.sendWorkerCommand(streamEventCmd{turn: turn, event: evt})
 			case <-toolDeltaTimerC:
 				flushToolDelta()
 			}
 		}
-	}()
+	})
+}
+
+func (r *Chat) sendWorkerCommand(cmd any) bool {
+	select {
+	case r.inbox <- cmd:
+		return true
+	case <-r.done:
+		return false
+	}
 }
 
 func debounceStreamingToolCallDelta(evt domain.Event) bool {
