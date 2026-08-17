@@ -3869,15 +3869,19 @@ func TestRunPromptStoresAndReplaysCavemanReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var assistantReplay string
+	var assistantContent string
+	var assistantReasoning string
 	for _, msg := range next.Messages {
 		if msg.Role == provider.RoleAssistant {
-			assistantReplay += msg.Content
+			assistantContent += msg.Content
+			assistantReasoning += msg.ReasoningContent
 		}
 	}
-	if !strings.Contains(assistantReplay, "me inspect files. me edit small.") || strings.Contains(assistantReplay, "inspect the files carefully") {
+	if !strings.Contains(assistantReasoning, "me inspect files. me edit small.") ||
+		strings.Contains(assistantReasoning, "inspect the files carefully") ||
+		strings.Contains(assistantContent, "inspect the files carefully") {
 		raw, _ := json.Marshal(next.Messages)
-		t.Fatalf("expected next request to replay caveman reasoning only, assistant=%q messages=%s", assistantReplay, raw)
+		t.Fatalf("expected next request to replay caveman reasoning only, content=%q reasoning=%q messages=%s", assistantContent, assistantReasoning, raw)
 	}
 }
 
