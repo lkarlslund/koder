@@ -5264,14 +5264,6 @@
 		  const state = String(status?.state || 'unknown');
 		  return state === 'running' ? 'text-bg-success' : state === 'error' ? 'text-bg-danger' : state === 'starting' ? 'text-bg-warning' : 'text-bg-secondary';
 		},
-		browserStatusClass() {
-		  const state = String(this.browserStatus?.state || 'unknown');
-		  return state === 'running' ? 'btn-outline-success' : state === 'error' ? 'btn-outline-danger' : 'btn-outline-secondary';
-		},
-		browserStatusDotClass() {
-		  const state = String(this.browserStatus?.state || 'unknown');
-		  return state === 'running' ? 'is-running' : state === 'error' ? 'is-error' : '';
-		},
 		browserStatusDescription(status) {
 		  status = status || this.browserStatus || {};
 		  const details = [status.executable, status.version, status.owned_tabs ? status.owned_tabs + ' tab(s) owned by this chat' : ''].filter(Boolean);

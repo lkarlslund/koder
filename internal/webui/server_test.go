@@ -2414,11 +2414,15 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected the busy favicon to remain static because browsers do not reliably repaint animated favicons")
 	}
 	if !strings.Contains(fullPage, `toggleBrowserPanel()`) ||
+		!strings.Contains(fullPage, `class="sidebar-section browser-sidebar-section"`) ||
 		!strings.Contains(fullPage, `rpc('browser_tabs', {})`) ||
 		!strings.Contains(fullPage, `rpc('browser_tab_preview', {tab_id: preview.tab.id})`) ||
 		!strings.Contains(fullPage, `x-model.number="browserPreview.rate"`) ||
 		!strings.Contains(fullPage, `class="browser-preview-image"`) {
 		t.Fatalf("expected browser status disclosure with owned tabs and adjustable live screenshot preview")
+	}
+	if strings.Contains(fullPage, `class="browser-control`) {
+		t.Fatalf("expected browser status to live in the sidebar rather than the top action bar")
 	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
