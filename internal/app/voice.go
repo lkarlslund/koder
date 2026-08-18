@@ -66,6 +66,7 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 	if err := c.enqueuePrompt(runtime, text, chat.QueueKindUser, nil); err != nil {
 		return voice.DelegationResult{}, err
 	}
+	turnStarted := false
 
 	for {
 		select {
@@ -76,6 +77,9 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 				return voice.DelegationResult{}, fmt.Errorf("delegated chat closed before replying")
 			}
 			snapshot := update.Snapshot
+			if voiceTurnStarted(snapshot.Status, snapshot.Active) {
+				turnStarted = true
+			}
 			switch snapshot.Status {
 			case chat.StatusWaitingApproval:
 				return voiceAttentionResult(session, chatRecord, "The delegated chat needs approval. Open Koder to review it."), nil
@@ -91,10 +95,26 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 					Text:         response,
 				}, nil
 			}
-			if snapshot.Status == chat.StatusErrored && !snapshot.Active {
+			if message := latestModelErrorAfter(snapshot.Timeline, initialSeq); message != "" {
+				return voice.DelegationResult{}, fmt.Errorf("delegated chat stopped with an error: %s", message)
+			}
+			if snapshot.Status == chat.StatusErrored && !snapshot.Active && turnStarted {
 				return voice.DelegationResult{}, fmt.Errorf("delegated chat stopped with an error")
 			}
 		}
+	}
+}
+
+func voiceTurnStarted(status chat.Status, active bool) bool {
+	if active {
+		return true
+	}
+	switch status {
+	case chat.StatusWaitingLLM, chat.StatusStreamingThoughts, chat.StatusStreamingResponse,
+		chat.StatusRunningTools, chat.StatusWaitingApproval, chat.StatusWaitingInput:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -134,6 +154,26 @@ func latestAssistantTextAfter(timeline []domain.TimelineItem, sequence int64) st
 		message, ok := item.Content.(domain.AssistantMessage)
 		if ok && item.Sealed() && strings.TrimSpace(message.Text) != "" {
 			return strings.TrimSpace(message.Text)
+		}
+	}
+	return ""
+}
+
+func latestModelErrorAfter(timeline []domain.TimelineItem, sequence int64) string {
+	for index := len(timeline) - 1; index >= 0; index-- {
+		item := timeline[index]
+		if item.Seq <= sequence {
+			break
+		}
+		switch content := item.Content.(type) {
+		case domain.AssistantMessage:
+			if content.Error != nil && strings.TrimSpace(content.Error.Message) != "" {
+				return strings.TrimSpace(content.Error.Message)
+			}
+		case domain.Notice:
+			if content.Kind == "model_error" && strings.TrimSpace(content.Text) != "" {
+				return strings.TrimSpace(content.Text)
+			}
 		}
 	}
 	return ""
