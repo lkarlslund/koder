@@ -91,7 +91,7 @@ func (c *Controller) ChatTranscript(ctx context.Context, sessionID, chatID id.ID
 	if err != nil {
 		return nil, err
 	}
-	page, err := owner.TimelinePage(ctx, chatRecord.ID, opts.Before, opts.Limit, opts.All || opts.Tail)
+	page, err := owner.TimelinePage(ctx, chatRecord.ID, opts.Before, opts.Limit, opts.All)
 	if err != nil {
 		return nil, err
 	}
