@@ -24,10 +24,12 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
+import java.io.File
 
 @SuppressLint("SetTextI18n")
 class MainActivity : Activity(), CallController.Listener {
@@ -212,7 +214,8 @@ class MainActivity : Activity(), CallController.Listener {
 
     private fun addPart(part: VoicePart) {
         when {
-            part.mimeType.startsWith("text/") -> addBubble("Koder", part.text.ifBlank { part.alt }, Color.WHITE)
+            part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() ->
+                addBubble("Koder", part.text, Color.WHITE)
             part.mimeType.startsWith("image/") -> addImage(part)
             else -> addGenericPart(part)
         }
@@ -260,12 +263,51 @@ class MainActivity : Activity(), CallController.Listener {
                 text = label
                 setTextColor(0xFF0D47A1.toInt())
             }, matchWrap())
-            if (part.url.isNotBlank()) setOnClickListener {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(part.url)))
-            }
+            if (part.url.isNotBlank()) setOnClickListener { downloadAndOpen(part) }
         }
         feed.addView(card, cardMargins())
         scrollToBottom()
+    }
+
+    private fun downloadAndOpen(part: VoicePart) {
+        controller.loadBytes(part.url) { bytes, error ->
+            if (bytes == null) {
+                runOnUiThread {
+                    Toast.makeText(this, error ?: "Could not download attachment", Toast.LENGTH_LONG).show()
+                }
+                return@loadBytes
+            }
+            try {
+                val directory = File(cacheDir, "voice-presentations").apply { mkdirs() }
+                val requestedName = part.name.ifBlank { "koder-${part.id.ifBlank { part.url.hashCode().toString() }}" }
+                val safeName = requestedName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
+                    .ifBlank { "koder-attachment" }
+                val file = File(directory, safeName)
+                file.outputStream().use { it.write(bytes) }
+                val uri = FileProvider.getUriForFile(this, "$packageName.presentations", file)
+                runOnUiThread { openPresentation(uri, part.mimeType) }
+            } catch (failure: Exception) {
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        failure.message ?: "Could not open attachment",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun openPresentation(uri: Uri, mimeType: String) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType.ifBlank { "application/octet-stream" })
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "No app can open ${mimeType.ifBlank { "this attachment" }}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun addBubble(who: String, text: String, color: Int) = runOnUiThread {
@@ -318,5 +360,6 @@ class MainActivity : Activity(), CallController.Listener {
 
     companion object {
         private const val PERMISSION_REQUEST = 80
+        private val DISPLAYABLE_TEXT_TYPES = setOf("text/plain", "text/markdown")
     }
 }

@@ -134,6 +134,7 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    implementation("androidx.core:core:1.17.0")
     implementation("androidx.core:core-telecom:1.0.1")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
