@@ -1145,7 +1145,7 @@ func httpTraceFilterFromQuery(r *http.Request) HTTPTraceFilter {
 
 func transcriptOptionsFromRequest(r *http.Request) TranscriptOptions {
 	if r == nil {
-		return TranscriptOptions{}
+		return TranscriptOptions{All: true}
 	}
 	query := r.URL.Query()
 	limit, _ := strconv.Atoi(strings.TrimSpace(query.Get("limit")))
@@ -1153,7 +1153,7 @@ func transcriptOptionsFromRequest(r *http.Request) TranscriptOptions {
 		Before: id.ID(strings.TrimSpace(query.Get("before"))),
 		Limit:  limit,
 		Tail:   strings.EqualFold(strings.TrimSpace(query.Get("tail")), "true"),
-		All:    strings.EqualFold(strings.TrimSpace(query.Get("all")), "true"),
+		All:    limit <= 0 || strings.EqualFold(strings.TrimSpace(query.Get("all")), "true"),
 	}
 }
 

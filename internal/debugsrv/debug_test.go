@@ -132,6 +132,22 @@ func sliceFakeTranscript(items []domain.TimelineItem, opts TranscriptOptions) []
 	return out
 }
 
+func TestTranscriptOptionsDefaultToFullTranscript(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/sessions/session/chats/chat/transcript", nil)
+	opts := transcriptOptionsFromRequest(req)
+	if !opts.All || opts.Limit != 0 {
+		t.Fatalf("options = %#v, want unbounded transcript", opts)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/debug/sessions/session/chats/chat/transcript?tail=true&limit=10", nil)
+	opts = transcriptOptionsFromRequest(req)
+	if opts.All || !opts.Tail || opts.Limit != 10 {
+		t.Fatalf("options = %#v, want ten-item tail page", opts)
+	}
+}
+
 func debugTimelineItem(chatID id.ID, seq int64, content domain.TimelineContent) domain.TimelineItem {
 	item := domain.TimelineItem{
 		ID:      id.ID(fmt.Sprintf("item-%d", seq)),
