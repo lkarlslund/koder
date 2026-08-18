@@ -14,10 +14,38 @@ import (
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
-type fakeBackend struct{ delegated bool }
+type fakeBackend struct {
+	delegated  bool
+	transcript string
+	spoken     string
+}
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error) {
 	return []voice.Session{{ID: "session-1", Title: "Laptop repair"}}, nil
+}
+
+func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
+	return voice.AudioConfig{
+		Input:               voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 16000, Channels: 1},
+		Output:              voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 24000, Channels: 1},
+		MaxUtteranceSeconds: 60,
+	}
+}
+
+func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
+	if format != f.VoiceAudioConfig().Input || len(pcm) == 0 {
+		return "", context.Canceled
+	}
+	f.transcript = "check the laptop"
+	return f.transcript, nil
+}
+
+func (f *fakeBackend) StreamVoiceSpeech(_ context.Context, text string, consume func([]byte) error) error {
+	f.spoken = text
+	if err := consume([]byte{1}); err != nil {
+		return err
+	}
+	return consume([]byte{0, 2, 0})
 }
 
 func TestSharedProtocolFixturesDecode(t *testing.T) {
@@ -75,7 +103,69 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	if message.Message == nil || message.Message.SpokenText != "Done: check it" || !backend.delegated {
 		t.Fatalf("message=%#v delegated=%v", message, backend.delegated)
 	}
+	readType(t, ctx, conn, "state")
+	ttsStart := readType(t, ctx, conn, "tts_start")
+	if ttsStart.AudioFormat == nil || *ttsStart.AudioFormat != backend.VoiceAudioConfig().Output {
+		t.Fatalf("tts_start = %#v", ttsStart)
+	}
+	frame := readAudioFrame(t, ctx, conn)
+	if frame.Kind != voice.AudioFrameOutputPCM || frame.Sequence != 0 || len(frame.PCM) != 4 {
+		t.Fatalf("output audio = %#v", frame)
+	}
+	readType(t, ctx, conn, "tts_end")
 	readType(t, ctx, conn, "ready")
+}
+
+func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	ready := readType(t, ctx, conn, "ready")
+	if ready.AudioConfig == nil {
+		t.Fatal("ready did not advertise audio config")
+	}
+	format := ready.AudioConfig.Input
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_start", UtteranceID: "audio-1", AudioFormat: &format}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "state")
+	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, PCM: []byte{7, 0, 8, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_commit", UtteranceID: "audio-1", SessionID: "session-1"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "state") // transcribing
+	transcript := readType(t, ctx, conn, "transcript")
+	if transcript.Transcript != "check the laptop" {
+		t.Fatalf("transcript = %#v", transcript)
+	}
+	readType(t, ctx, conn, "state") // processing
+	message := readType(t, ctx, conn, "message")
+	if message.Message == nil || message.Message.SpokenText != "Done: check the laptop" || !backend.delegated {
+		t.Fatalf("message=%#v backend=%#v", message, backend)
+	}
+	readType(t, ctx, conn, "state") // speaking
+	readType(t, ctx, conn, "tts_start")
+	output := readAudioFrame(t, ctx, conn)
+	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.PCM) != 4 {
+		t.Fatalf("output = %#v", output)
+	}
+	readType(t, ctx, conn, "tts_end")
+	readType(t, ctx, conn, "ready")
+	if backend.spoken != "Done: check the laptop" {
+		t.Fatalf("synthesized text = %q", backend.spoken)
+	}
 }
 
 func TestHandlerRejectsConcurrentCalls(t *testing.T) {
@@ -118,6 +208,22 @@ func readType(t *testing.T, ctx context.Context, conn *websocket.Conn, want stri
 	}
 	if frame.Type != want {
 		t.Fatalf("frame type = %q, want %q; payload=%s", frame.Type, want, payload)
+	}
+	return frame
+}
+
+func readAudioFrame(t *testing.T, ctx context.Context, conn *websocket.Conn) voice.AudioFrame {
+	t.Helper()
+	messageType, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageBinary {
+		t.Fatalf("message type = %v, want binary; payload=%s", messageType, payload)
+	}
+	frame, err := voice.DecodeAudioFrame(payload)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return frame
 }
