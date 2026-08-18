@@ -31,6 +31,18 @@ class VoiceProtocolTest {
         assertEquals("session-fixture-1", json.getString("session_id"))
     }
 
+    @Test
+    fun decodesAndSelectsDurableVoiceChatsSeparatelyFromTargets() {
+        val frame = VoiceProtocol.parse(
+            """{"type":"ready","protocol":"voice.v1","call_state":{"voice_session_id":"voice-2","active_session_id":"work-1","sessions":[{"id":"work-1","title":"Laptop"}],"voice_sessions":[{"id":"voice-1","title":"Personal"},{"id":"voice-2","title":"Work"}]}}""",
+        )
+        assertEquals("voice-2", frame.callState?.voiceSessionId)
+        assertEquals(listOf("voice-1", "voice-2"), frame.callState?.voiceSessions?.map { it.id })
+        val selection = JSONObject(VoiceProtocol.selectVoiceSession("voice-1"))
+        assertEquals("select_voice_session", selection.getString("type"))
+        assertEquals("voice-1", selection.getString("voice_session_id"))
+    }
+
 	@Test
 	fun audioFrameMatchesGoWireFixture() {
 		val encoded = VoiceProtocol.encodeAudio(

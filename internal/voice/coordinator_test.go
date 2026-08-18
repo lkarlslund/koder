@@ -97,6 +97,25 @@ func TestCallUsesExplicitTarget(t *testing.T) {
 	}
 }
 
+func TestCallCanReturnToAutomaticSessionSelection(t *testing.T) {
+	backend := &fakeBackend{sessions: []Session{{ID: "one", Title: "One"}}}
+	call := NewCall(backend)
+	if _, err := call.SelectSession(context.Background(), "one"); err != nil {
+		t.Fatal(err)
+	}
+	message, err := call.SelectSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := call.State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.ActiveSessionID != "" || message.SpokenText != "Automatic session selection is on." {
+		t.Fatalf("state = %#v, message = %#v", state, message)
+	}
+}
+
 func TestCallUsesSemanticRouteAndDelegates(t *testing.T) {
 	backend := &fakeRoutingBackend{
 		fakeBackend: fakeBackend{sessions: []Session{

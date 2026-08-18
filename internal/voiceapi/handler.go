@@ -44,12 +44,13 @@ func NewHandler(backend backend, token string) *Handler {
 }
 
 type clientFrame struct {
-	Type        string             `json:"type"`
-	Protocol    string             `json:"protocol,omitempty"`
-	UtteranceID string             `json:"utterance_id,omitempty"`
-	Text        string             `json:"text,omitempty"`
-	SessionID   string             `json:"session_id,omitempty"`
-	AudioFormat *voice.AudioFormat `json:"audio_format,omitempty"`
+	Type           string             `json:"type"`
+	Protocol       string             `json:"protocol,omitempty"`
+	UtteranceID    string             `json:"utterance_id,omitempty"`
+	Text           string             `json:"text,omitempty"`
+	SessionID      string             `json:"session_id,omitempty"`
+	VoiceSessionID string             `json:"voice_session_id,omitempty"`
+	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
 }
 
 type serverFrame struct {
@@ -183,7 +184,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "select_session":
+			audio = nil
 			message, err := call.SelectSession(ctx, frame.SessionID)
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
+				return
+			}
+		case "select_voice_session":
+			audio = nil
+			message, err := call.SelectVoiceSession(ctx, frame.VoiceSessionID)
 			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}

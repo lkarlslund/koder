@@ -168,6 +168,13 @@ class VoiceConnection(
         }
     }
 
+    fun selectVoiceSession(sessionId: String) {
+        require(sessionId.isNotBlank()) { "Voice chat id is required" }
+        check(socket?.send(VoiceProtocol.selectVoiceSession(sessionId)) == true) {
+            "Voice connection is not open"
+        }
+    }
+
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) {
         val resolved = try {
             VoiceProtocol.resourceUrl(server, url)

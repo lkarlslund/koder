@@ -39,6 +39,13 @@ func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error
 	return []voice.Session{{ID: "session-1", Title: "Laptop repair"}}, nil
 }
 
+func (f *fakeBackend) ListVoiceChats(context.Context) ([]voice.Session, error) {
+	return []voice.Session{
+		{ID: "voice-1", Title: "Personal"},
+		{ID: "voice-2", Title: "Work"},
+	}, nil
+}
+
 func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
 	return voice.AudioConfig{
 		Input:               voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 16000, Channels: 1},
@@ -144,6 +151,39 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	readType(t, ctx, conn, "ready")
 	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check it" {
 		t.Fatalf("recorded voice exchange = session %q transcript %q", backend.recordedVoiceSessionID, backend.recordedTranscript)
+	}
+}
+
+func TestHandlerSwitchesDurableVoiceChat(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	ready := readType(t, ctx, conn, "ready")
+	if ready.CallState == nil || len(ready.CallState.VoiceSessions) != 2 {
+		t.Fatalf("ready call state = %#v", ready.CallState)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{
+		Type: "select_voice_session", Protocol: protocolVersion, VoiceSessionID: "voice-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message := readType(t, ctx, conn, "message")
+	if message.Message == nil || message.Message.SpokenText != "Using voice chat Voice Chat." {
+		t.Fatalf("switch message = %#v", message)
+	}
+	readType(t, ctx, conn, "state")
+	readType(t, ctx, conn, "tts_start")
+	readAudioFrame(t, ctx, conn)
+	readType(t, ctx, conn, "tts_end")
+	ready = readType(t, ctx, conn, "ready")
+	if ready.CallState == nil || ready.CallState.VoiceSessionID != "voice-2" {
+		t.Fatalf("switched call state = %#v", ready.CallState)
 	}
 }
 

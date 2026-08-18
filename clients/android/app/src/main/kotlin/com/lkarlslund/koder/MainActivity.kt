@@ -41,11 +41,15 @@ class MainActivity : Activity(), CallController.Listener {
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var sessionSpinner: Spinner
+    private lateinit var voiceSessionSpinner: Spinner
     private lateinit var feed: LinearLayout
     private lateinit var feedScroll: ScrollView
     private lateinit var typedMessage: EditText
     private var sessions: List<VoiceSession> = emptyList()
+    private var voiceSessions: List<VoiceSession> = emptyList()
     private var spinnerUpdating = false
+    private var voiceSpinnerUpdating = false
+    private var selectedVoiceSessionId = ""
     private var connected = false
     private var pendingStart = false
 
@@ -73,6 +77,8 @@ class MainActivity : Activity(), CallController.Listener {
             server.isEnabled = !connected
             token.isEnabled = !connected
             updateSessions(snapshot.sessions, snapshot.activeSessionId)
+            if (snapshot.voiceSessionId.isNotBlank()) selectedVoiceSessionId = snapshot.voiceSessionId
+            updateVoiceSessions(snapshot.voiceSessions, snapshot.voiceSessionId)
         }
     }
 
@@ -123,6 +129,17 @@ class MainActivity : Activity(), CallController.Listener {
         }
         root.addView(callButton, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 6))
 
+        voiceSessionSpinner = Spinner(this)
+        voiceSessionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!voiceSpinnerUpdating && connected) {
+                    voiceSessions.getOrNull(position)?.let { controller.selectVoiceSession(it.id) }
+                }
+            }
+        }
+        root.addView(voiceSessionSpinner, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
+
         status = TextView(this).apply {
             text = "Ready"
             textSize = 16f
@@ -171,6 +188,7 @@ class MainActivity : Activity(), CallController.Listener {
         root.addView(composer, matchWrap())
         setContentView(root)
         updateSessions(emptyList(), "")
+        updateVoiceSessions(emptyList(), "")
     }
 
     private fun requestCallStart() {
@@ -199,7 +217,7 @@ class MainActivity : Activity(), CallController.Listener {
             server.error = "Server address is required"
             return
         }
-        controller.start(address, token.text.toString())
+        controller.start(address, token.text.toString(), selectedVoiceSessionId)
     }
 
     private fun updateSessions(next: List<VoiceSession>, activeId: String) {
@@ -210,6 +228,16 @@ class MainActivity : Activity(), CallController.Listener {
         sessionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         sessionSpinner.setSelection((next.indexOfFirst { it.id == activeId } + 1).coerceAtLeast(0))
         spinnerUpdating = false
+    }
+
+    private fun updateVoiceSessions(next: List<VoiceSession>, activeId: String) {
+        if (next == voiceSessions && voiceSessionSpinner.selectedItemPosition == next.indexOfFirst { it.id == activeId }) return
+        voiceSessions = next
+        val labels = next.map { "Voice chat · ${it.title.ifBlank { "Untitled" }}" }.ifEmpty { listOf("Voice chat · loading") }
+        voiceSpinnerUpdating = true
+        voiceSessionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+        voiceSessionSpinner.setSelection(next.indexOfFirst { it.id == activeId }.coerceAtLeast(0))
+        voiceSpinnerUpdating = false
     }
 
     private fun addPart(part: VoicePart) {

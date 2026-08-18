@@ -122,6 +122,26 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 	return out, nil
 }
 
+// ListVoiceChats returns the durable coordination transcripts available to a
+// native voice call. These are separate from work-session routing targets.
+func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error) {
+	state, err := c.Sessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]voice.Session, 0)
+	for _, session := range state.Sessions {
+		if session.Kind != domain.SessionKindVoice {
+			continue
+		}
+		out = append(out, voice.Session{
+			ID: string(session.ID), Title: voiceSessionTitle(session),
+			LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 // ResolveVoiceRoute runs the constrained voice coordination profile against
 // bounded session summaries. The coordinator validates its structured output
 // before it can select or create anything.

@@ -95,6 +95,7 @@ type SpeechBackend interface {
 // VoiceSessionBackend owns the durable coordination chat layered above an
 // ephemeral phone connection.
 type VoiceSessionBackend interface {
+	ListVoiceChats(context.Context) ([]Session, error)
 	EnsureVoiceSession(context.Context, string) (Session, error)
 	RecordVoiceExchange(context.Context, string, string, Message) error
 }
@@ -135,6 +136,7 @@ type CallState struct {
 	VoiceSessionID  string    `json:"voice_session_id"`
 	ActiveSessionID string    `json:"active_session_id,omitempty"`
 	Sessions        []Session `json:"sessions"`
+	VoiceSessions   []Session `json:"voice_sessions"`
 }
 
 // Call is an ephemeral coordinator bound to one voice connection.
@@ -165,10 +167,23 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	slices.SortStableFunc(sessions, func(a, b Session) int {
 		return b.UpdatedAt.Compare(a.UpdatedAt)
 	})
+	voiceSessions := []Session(nil)
+	if backend, ok := c.backend.(VoiceSessionBackend); ok {
+		voiceSessions, err = backend.ListVoiceChats(ctx)
+		if err != nil {
+			return CallState{}, err
+		}
+		slices.SortStableFunc(voiceSessions, func(a, b Session) int {
+			return b.UpdatedAt.Compare(a.UpdatedAt)
+		})
+	}
 	if c.activeSessionID != "" && !sessionExists(sessions, c.activeSessionID) {
 		c.activeSessionID = ""
 	}
-	return CallState{VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID, Sessions: sessions}, nil
+	return CallState{
+		VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID,
+		Sessions: sessions, VoiceSessions: voiceSessions,
+	}, nil
 }
 
 // SelectSession explicitly changes the target for subsequent utterances.
@@ -177,6 +192,10 @@ func (c *Call) SelectSession(ctx context.Context, sessionID string) (Message, er
 	if err != nil {
 		return Message{}, err
 	}
+	if strings.TrimSpace(sessionID) == "" {
+		c.activeSessionID = ""
+		return textMessage("Automatic session selection is on."), nil
+	}
 	session, ok := sessionByID(state.Sessions, strings.TrimSpace(sessionID))
 	if !ok {
 		return Message{}, fmt.Errorf("session %q was not found", sessionID)
@@ -184,6 +203,21 @@ func (c *Call) SelectSession(ctx context.Context, sessionID string) (Message, er
 	c.activeSessionID = session.ID
 	text := "Using " + session.Title + "."
 	return textMessage(text), nil
+}
+
+// SelectVoiceSession changes the durable coordination transcript used by this
+// call without releasing or acquiring the process-wide live-call lease.
+func (c *Call) SelectVoiceSession(ctx context.Context, sessionID string) (Message, error) {
+	backend, ok := c.backend.(VoiceSessionBackend)
+	if !ok {
+		return Message{}, fmt.Errorf("voice session backend is unavailable")
+	}
+	session, err := backend.EnsureVoiceSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return Message{}, err
+	}
+	c.voiceSessionID = session.ID
+	return textMessage("Using voice chat " + session.Title + "."), nil
 }
 
 // HandleText routes or delegates one final user utterance.

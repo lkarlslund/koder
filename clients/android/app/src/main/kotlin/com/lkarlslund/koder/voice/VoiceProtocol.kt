@@ -44,6 +44,7 @@ data class VoiceCallState(
     val voiceSessionId: String,
     val activeSessionId: String,
     val sessions: List<VoiceSession>,
+    val voiceSessions: List<VoiceSession> = emptyList(),
 )
 
 data class VoiceAudioFormat(
@@ -162,6 +163,12 @@ object VoiceProtocol {
         .put("session_id", sessionId)
         .toString()
 
+    fun selectVoiceSession(sessionId: String): String = JSONObject()
+        .put("type", "select_voice_session")
+        .put("protocol", VOICE_PROTOCOL)
+        .put("voice_session_id", sessionId)
+        .toString()
+
     fun parse(payload: String): VoiceServerFrame {
         val root = JSONObject(payload)
         val protocol = root.optString("protocol")
@@ -232,6 +239,13 @@ object VoiceProtocol {
 		voiceSessionId = optString("voice_session_id"),
         activeSessionId = optString("active_session_id"),
         sessions = optJSONArray("sessions").mapObjects { item ->
+            VoiceSession(
+                id = item.getString("id"),
+                title = item.getString("title"),
+                lastMessage = item.optString("last_message"),
+            )
+        },
+        voiceSessions = optJSONArray("voice_sessions").mapObjects { item ->
             VoiceSession(
                 id = item.getString("id"),
                 title = item.getString("title"),

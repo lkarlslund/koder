@@ -21,6 +21,7 @@ class CallController(
         val detail: String = "Ready",
         val partialTranscript: String = "",
         val sessions: List<VoiceSession> = emptyList(),
+        val voiceSessions: List<VoiceSession> = emptyList(),
         val activeSessionId: String = "",
         val voiceSessionId: String = "",
     )
@@ -117,7 +118,8 @@ class CallController(
     }
 
     fun selectSession(sessionId: String) {
-        if (!running || sessionId.isBlank()) return
+        if (!running) return
+        cancelCapture()
         try {
             connection.selectSession(sessionId)
         } catch (error: Exception) {
@@ -125,7 +127,26 @@ class CallController(
         }
     }
 
+    fun selectVoiceSession(sessionId: String) {
+        if (!running || sessionId.isBlank() || sessionId == snapshot.voiceSessionId) return
+        cancelCapture()
+        try {
+            connection.selectVoiceSession(sessionId)
+            update(Stage.PROCESSING, "Switching voice chat…", "")
+        } catch (error: Exception) {
+            update(Stage.ERROR, error.message ?: "Could not switch voice chat")
+        }
+    }
+
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) = connection.loadBytes(url, callback)
+
+    private fun cancelCapture() {
+        microphone.stop()
+        endpoint.reset()
+        val pending = utteranceId
+        utteranceId = ""
+        if (pending.isNotBlank()) connection.cancelAudio(pending)
+    }
 
     fun end() {
         if (!running) return
@@ -154,6 +175,7 @@ class CallController(
         frame.callState?.let { state ->
             snapshot = snapshot.copy(
                 sessions = state.sessions,
+                voiceSessions = state.voiceSessions,
                 activeSessionId = state.activeSessionId,
                 voiceSessionId = state.voiceSessionId,
             )
