@@ -58,6 +58,11 @@ KODER_VOICE_TOKEN='replace-with-a-long-random-token' \
 
 The Android client connects to `ws://<computer-address>:7979/voice/v1`. Do not
 expose an unencrypted `ws://` endpoint beyond a trusted private network.
+Android streams microphone and playback PCM; Koder performs STT and TTS through
+the OpenAI-compatible providers selected in `[voice]`. See the
+[Android setup](clients/android/README.md),
+[as-built architecture](docs/voice-architecture.md), and
+[voice.v1 contract](protocol/voice/v1/README.md).
 
 Use a separate data directory when testing another instance:
 

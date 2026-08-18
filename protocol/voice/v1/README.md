@@ -1,28 +1,148 @@
 # Koder voice protocol v1
 
-The Android client connects to `GET /voice/v1` with an `Authorization: Bearer
-<token>` header. Control frames are UTF-8 JSON text. The server sends `ready`
-immediately after the WebSocket upgrade.
+`voice.v1` is the only integration boundary between the native client and
+Koder. Connect with WebSocket `GET /voice/v1`; use `wss` whenever the HTTP
+origin is HTTPS.
 
-Client frames:
+## Authentication and call selection
 
-- `{"type":"hello","protocol":"voice.v1"}` refreshes call state.
-- `{"type":"select_session","protocol":"voice.v1","session_id":"..."}`
-  changes the call's active target without starting work.
-- `{"type":"utterance","protocol":"voice.v1","utterance_id":"...","text":"...","session_id":"..."}`
-  submits a final transcript. `session_id` is optional and overrides routing.
-- `{"type":"ping","protocol":"voice.v1"}` requests a `pong`.
+When Koder has a voice token, every request requires:
 
-Server frames:
+```http
+Authorization: Bearer <token>
+```
 
-- `ready` contains `call_state.sessions`, `active_session_id`, and state
-  `listening`.
-- `state` reports transient processing state for an utterance.
-- `message` contains concise `spoken_text`, generic MIME-typed `parts`, and
-  optional delegation provenance.
-- `error` contains a user-presentable error string.
-- `pong` contains `server_time`.
+Authentication happens before WebSocket upgrade. The same header is required
+for `/voice/v1/artifacts/...`. Failed authentication returns HTTP 401. A second
+simultaneous call returns HTTP 409.
 
-Audio transport is deliberately additive. The usable first client performs
-speech recognition on Android and sends final text utterances; later v1 frames
-may add binary PCM streaming without changing message or delegation semantics.
+Optional query parameters:
+
+- `call_id`: stable client-generated ID for reconnects;
+- `voice_session_id`: durable voice chat to resume. With no value, Koder uses
+  the most recently updated voice chat or creates the first one.
+
+Text frames are UTF-8 JSON and include `"protocol":"voice.v1"`. Binary frames
+are PCM envelopes described below.
+
+## Client text frames
+
+- `hello`: request a fresh `ready` snapshot.
+- `ping`: request `pong`.
+- `select_voice_session` with `voice_session_id`: switch the durable voice-chat
+  transcript owned by the current live call.
+- `select_session` with `session_id`: select an ordinary work target. An empty
+  ID restores semantic automatic selection.
+- `utterance` with unique `utterance_id`, final `text`, and optional
+  `session_id`: submit typed or already-transcribed input.
+- `audio_start` with unique `utterance_id` and the exact advertised
+  `audio_format`: begin one endpointed utterance.
+- `audio_commit` with matching `utterance_id` and optional `session_id`: finish
+  audio and start STT/routing.
+- `audio_cancel`: discard the current audio utterance.
+
+Only one audio utterance may be open. Selecting a work or voice session cancels
+any server-side partial audio.
+
+Examples:
+
+```json
+{"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
+{"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
+{"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1}}
+{"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}
+```
+
+## Server text frames
+
+- `ready`: listening state, `audio_config`, and `call_state`.
+- `state`: `recording`, `transcribing`, `processing`, or `speaking` for an
+  utterance.
+- `transcript`: final server STT text.
+- `message`: concise result, generic parts, and optional delegation provenance.
+- `tts_start`: output audio format follows in binary frames.
+- `tts_end`: all output audio has been sent.
+- `error`: user-presentable failure. The connection normally remains usable and
+  is followed by a fresh `ready`.
+- `pong`: UTC `server_time`.
+
+`call_state.sessions` lists ordinary and quick work targets.
+`call_state.voice_sessions` lists durable voice chats.
+`voice_session_id` and `active_session_id` identify the current choices.
+
+```json
+{
+  "type": "ready",
+  "protocol": "voice.v1",
+  "state": "listening",
+  "audio_config": {
+    "input": {"encoding":"pcm_s16le","sample_rate":16000,"channels":1},
+    "output": {"encoding":"pcm_s16le","sample_rate":44100,"channels":1},
+    "max_utterance_seconds": 60
+  },
+  "call_state": {
+    "voice_session_id": "voice-id",
+    "active_session_id": "work-id",
+    "sessions": [],
+    "voice_sessions": []
+  }
+}
+```
+
+## Binary PCM envelope
+
+All integers are big-endian except PCM samples, which are signed 16-bit
+little-endian. The fixed header is 12 bytes:
+
+| Offset | Bytes | Meaning |
+| --- | ---: | --- |
+| 0 | 4 | ASCII `KVA1` |
+| 4 | 1 | kind: `1` input PCM, `2` output PCM |
+| 5 | 1 | flags; zero in v1 |
+| 6 | 2 | reserved; must be zero |
+| 8 | 4 | unsigned sequence number |
+| 12 | 1..65536 | non-empty, even-sized PCM16LE payload |
+
+Sequences start at zero independently for each input and output stream and must
+be contiguous. The server rejects malformed, oversized, odd-sized, wrong-kind,
+or out-of-order frames. Total input is bounded by `max_utterance_seconds`.
+
+## Generic message parts
+
+```json
+{
+  "type": "message",
+  "protocol": "voice.v1",
+  "utterance_id": "uuid",
+  "message": {
+    "spoken_text": "Here is the screenshot.",
+    "parts": [{
+      "id": "optional-id",
+      "mime_type": "image/png",
+      "uri": "/voice/v1/artifacts/session/session-id/attachment-id",
+      "metadata": {"name":"current-state.png","alt":"Current app state"}
+    }],
+    "delegation": {
+      "session_id": "session-id",
+      "session_title": "Android app",
+      "chat_id": "chat-id",
+      "needs_attention": false
+    }
+  }
+}
+```
+
+Every part requires `mime_type`. `data` is any inline JSON value; `uri` is a
+resource reference; clients must retain a generic fallback for unknown MIME
+types. Relative URIs resolve against the Koder HTTP origin. Send the bearer
+token only to the same origin.
+
+## Reconnect and compatibility
+
+Clients reconnect with the same `call_id` and `voice_session_id`, then wait for
+`ready`. V1 does not replay an in-flight utterance; clients must not blindly
+resend committed work. Final exchanges already accepted by Koder are in the
+durable voice-chat transcript.
+
+Unknown JSON fields are ignored. Unknown frame types receive `error`. Shared
+fixtures in `testdata` are decoded by both Go and Kotlin tests.
