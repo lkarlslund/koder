@@ -516,6 +516,9 @@ func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string)
 	if session.Kind == domain.SessionKindQuick {
 		return nil, fmt.Errorf("quick sessions cannot create additional chats")
 	}
+	if session.Kind == domain.SessionKindVoice {
+		return nil, fmt.Errorf("voice sessions cannot create additional chats")
+	}
 	if session.ID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
@@ -563,6 +566,9 @@ func (s *Session) ForkChatAt(ctx context.Context, sourceChatID, anchorItemID id.
 	s.mu.RUnlock()
 	if session.Kind == domain.SessionKindQuick {
 		return nil, fmt.Errorf("quick sessions cannot fork chats")
+	}
+	if session.Kind == domain.SessionKindVoice {
+		return nil, fmt.Errorf("voice sessions cannot fork chats")
 	}
 	if session.ID == "" {
 		return nil, fmt.Errorf("session id is required")
@@ -630,6 +636,9 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	s.mu.RUnlock()
 	if session.Kind == domain.SessionKindQuick && hasChat {
 		return nil, fmt.Errorf("quick sessions cannot create additional chats")
+	}
+	if session.Kind == domain.SessionKindVoice && hasChat {
+		return nil, fmt.Errorf("voice sessions cannot create additional chats")
 	}
 	if err := s.chatsSrc.PutRecord(ctx, chatRecord); err != nil {
 		return nil, err

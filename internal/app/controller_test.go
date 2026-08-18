@@ -2349,6 +2349,45 @@ func TestQuickChatLifecycleSeparatesListsAndPromotes(t *testing.T) {
 	}
 }
 
+func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	voiceSession, chatRecord, err := ctrl.CreateVoiceChat(ctx, "Car call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voiceSession.Kind != domain.SessionKindVoice || voiceSession.ProjectRoot != "" || chatRecord.WorkflowRole != chatrole.Voice {
+		t.Fatalf("unexpected voice chat: %#v %#v", voiceSession, chatRecord)
+	}
+	state, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, session := range state.Sessions {
+		found = found || session.ID == voiceSession.ID
+	}
+	if !found {
+		t.Fatalf("voice session missing from durable sessions: %#v", state.Sessions)
+	}
+	selected, err := ctrl.StateForSelection(ctx, Selection{SessionID: voiceSession.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Session.ID != voiceSession.ID || selected.ActiveChatID != chatRecord.ID {
+		t.Fatalf("voice session not selectable: %#v", selected)
+	}
+	targets, err := ctrl.ListVoiceSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.ID == string(voiceSession.ID) {
+			t.Fatal("voice coordination session leaked into delegation targets")
+		}
+	}
+}
+
 func TestCloseQuickChatRemovesItFromQuickList(t *testing.T) {
 	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
 	ctx := context.Background()

@@ -58,6 +58,24 @@ func TestCreateQuickSessionOwnsOneStandaloneChat(t *testing.T) {
 	}
 }
 
+func TestCreateVoiceSessionOwnsOneVoiceChat(t *testing.T) {
+	engine, _ := newQuickTestEngine(t)
+	owner, err := engine.CreateVoiceSession(context.Background(), "Morning voice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := owner.Snapshot()
+	if snapshot.Session.Kind != domain.SessionKindVoice || snapshot.Session.ProjectRoot != "" || snapshot.Session.ProjectRootManaged {
+		t.Fatalf("unexpected voice session: %#v", snapshot.Session)
+	}
+	if snapshot.Session.Title != "Morning voice" || len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Voice {
+		t.Fatalf("unexpected voice chat: %#v %#v", snapshot.Session, snapshot.Chats)
+	}
+	if _, err := owner.NewChat(context.Background(), snapshot.Chats[0].ID, "second"); err == nil || !strings.Contains(err.Error(), "voice sessions") {
+		t.Fatalf("expected new chat rejection, got %v", err)
+	}
+}
+
 func TestDeleteQuickSessionRemovesManagedArtifacts(t *testing.T) {
 	engine, _ := newQuickTestEngine(t)
 	owner, err := engine.CreateQuickSession(context.Background())

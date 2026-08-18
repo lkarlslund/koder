@@ -52,7 +52,7 @@ func (f *fakeBackend) DelegateVoice(_ context.Context, sessionID, text string) (
 
 func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	backend := &fakeBackend{}
-	server := httptest.NewServer(Handler{Backend: backend, Token: "secret"})
+	server := httptest.NewServer(NewHandler(backend, "secret"))
 	defer server.Close()
 	ctx := context.Background()
 	url := "ws" + server.URL[len("http"):]
@@ -76,6 +76,26 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 		t.Fatalf("message=%#v delegated=%v", message, backend.delegated)
 	}
 	readType(t, ctx, conn, "ready")
+}
+
+func TestHandlerRejectsConcurrentCalls(t *testing.T) {
+	server := httptest.NewServer(NewHandler(&fakeBackend{}, ""))
+	defer server.Close()
+	ctx := context.Background()
+	url := "ws" + server.URL[len("http"):]
+	first, _, err := websocket.Dial(ctx, url+"?call_id=first", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, first, "ready")
+	_, response, err := websocket.Dial(ctx, url+"?call_id=second", nil)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
+		t.Fatalf("concurrent dial response=%v err=%v", response, err)
+	}
 }
 
 func writeClientFrame(ctx context.Context, conn *websocket.Conn, frame clientFrame) error {

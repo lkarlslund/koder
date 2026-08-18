@@ -106,6 +106,14 @@ func (e *Engine) CreateQuickSession(ctx context.Context) (*sessionpkg.Session, e
 	return owner, nil
 }
 
+// CreateVoiceSession creates a durable one-chat voice coordination session.
+func (e *Engine) CreateVoiceSession(ctx context.Context, title string) (*sessionpkg.Session, error) {
+	if e == nil || e.registry == nil {
+		return nil, fmt.Errorf("session registry is required")
+	}
+	return e.registry.CreateVoice(ctx, title)
+}
+
 // DeleteSession closes any live runtimes and deletes the persisted session.
 func (e *Engine) DeleteSession(ctx context.Context, sessionID id.ID) error {
 	if e == nil || e.registry == nil {

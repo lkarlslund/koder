@@ -182,6 +182,11 @@ func (r *Registry) CreateQuick(ctx context.Context, sessionID id.ID, projectRoot
 	return r.create(ctx, "New Session", projectRoot, false, sessionID, domain.SessionKindQuick, true, chatrole.Standalone)
 }
 
+// CreateVoice creates a durable one-chat voice coordination session.
+func (r *Registry) CreateVoice(ctx context.Context, title string) (*Session, error) {
+	return r.create(ctx, title, "", false, "", domain.SessionKindVoice, false, chatrole.Voice)
+}
+
 func (r *Registry) create(ctx context.Context, title, projectRoot string, createProjectRoot bool, sessionID id.ID, kind domain.SessionKind, managed bool, role domain.WorkflowRole) (*Session, error) {
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")

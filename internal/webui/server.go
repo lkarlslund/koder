@@ -129,7 +129,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/ws", s.handleWebSocket)
-	mux.Handle("/voice/v1", voiceapi.Handler{Backend: controller, Token: options.VoiceToken})
+	mux.Handle("/voice/v1", voiceapi.NewHandler(controller, options.VoiceToken))
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
 		debugServer := debugsrv.NewServer(controller, s.debug)
@@ -1034,6 +1034,16 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.stateForClient(ctx, clientID)
 	case "new_quick_chat":
 		session, chatRecord, err := s.controller.CreateQuickChat(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"session_id": session.ID, "chat_id": chatRecord.ID}, nil
+	case "new_voice_chat":
+		var in struct {
+			Title string `json:"title"`
+		}
+		_ = decodeParams(params, &in)
+		session, chatRecord, err := s.controller.CreateVoiceChat(ctx, in.Title)
 		if err != nil {
 			return nil, err
 		}

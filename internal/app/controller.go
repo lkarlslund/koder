@@ -1486,6 +1486,27 @@ func (c *Controller) CreateQuickChat(ctx context.Context) (domain.Session, domai
 	return snapshot.Session, snapshot.Chats[0], nil
 }
 
+// CreateVoiceChat creates a durable voice coordination session without selecting it.
+func (c *Controller) CreateVoiceChat(ctx context.Context, title string) (domain.Session, domain.Chat, error) {
+	if c.agent == nil {
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.CreateVoiceSession(ctx, title)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, err
+	}
+	snapshot := owner.Snapshot()
+	if len(snapshot.Chats) != 1 {
+		return domain.Session{}, domain.Chat{}, fmt.Errorf("voice session must contain exactly one chat")
+	}
+	sessionState, err := c.Sessions(ctx)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, err
+	}
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, ""))
+	return snapshot.Session, snapshot.Chats[0], nil
+}
+
 // RenameSession updates a session title.
 func (c *Controller) RenameSession(ctx context.Context, sessionID id.ID, title string) error {
 	if sessionID == "" {

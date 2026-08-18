@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -24,6 +25,12 @@ const delegationTimeout = 30 * time.Minute
 type Handler struct {
 	Backend voice.Backend
 	Token   string
+	Lease   *voice.CallLease
+}
+
+// NewHandler creates a process-scoped voice protocol handler.
+func NewHandler(backend voice.Backend, token string) *Handler {
+	return &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease()}
 }
 
 type clientFrame struct {
@@ -46,7 +53,7 @@ type serverFrame struct {
 }
 
 // ServeHTTP accepts one authenticated voice call.
-func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -55,11 +62,29 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "voice backend unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if h.Lease == nil {
+		http.Error(w, "voice call lease unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if !authorized(r, h.Token) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="koder-voice"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	callID := strings.TrimSpace(r.URL.Query().Get("call_id"))
+	if callID == "" {
+		callID = string(id.New())
+	}
+	release, err := h.Lease.Acquire(callID, r.URL.Query().Get("voice_session_id"))
+	if err != nil {
+		if err == voice.ErrCallActive {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}})
 	if err != nil {
 		return

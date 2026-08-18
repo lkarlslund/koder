@@ -3333,6 +3333,58 @@ func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
 	}
 }
 
+func TestWebSocketCreatesAndSelectsVoiceChat(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"new_voice_chat","params":{"title":"Phone work"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var created struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			SessionID id.ID `json:"session_id"`
+			ChatID    id.ID `json:"chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.OK || created.Result.SessionID == "" || created.Result.ChatID == "" {
+		t.Fatalf("create voice chat: %#v", created)
+	}
+	request := fmt.Sprintf(`{"id":2,"method":"switch_session","params":{"session_id":"%s"}}`, created.Result.SessionID)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(request)); err != nil {
+		t.Fatal(err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var selected struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session      domain.Session `json:"session"`
+			ActiveChatID id.ID          `json:"active_chat_id"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &selected); err != nil {
+		t.Fatal(err)
+	}
+	if !selected.OK || selected.Result.Session.Kind != domain.SessionKindVoice || selected.Result.ActiveChatID != created.Result.ChatID {
+		t.Fatalf("select voice chat: %#v", selected)
+	}
+}
+
 func TestWebSocketNewSessionCreatesMissingProjectRootOnlyWhenRequested(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
