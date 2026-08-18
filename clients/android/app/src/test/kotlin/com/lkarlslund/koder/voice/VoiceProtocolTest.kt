@@ -31,6 +31,34 @@ class VoiceProtocolTest {
         assertEquals("session-fixture-1", json.getString("session_id"))
     }
 
+	@Test
+	fun audioFrameMatchesGoWireFixture() {
+		val encoded = VoiceProtocol.encodeAudio(
+			VoiceAudioFrame(
+				kind = VoiceAudioFrameKind.INPUT_PCM,
+				flags = 0,
+				sequence = 0x01020304,
+				pcm = byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte()),
+			),
+		)
+		assertEquals("4b56413101000000010203043412ccff", encoded.toHex())
+		val decoded = VoiceProtocol.decodeAudio(encoded)
+		assertEquals(VoiceAudioFrameKind.INPUT_PCM, decoded.kind)
+		assertEquals(0x01020304, decoded.sequence)
+		assertTrue(decoded.pcm.contentEquals(byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte())))
+	}
+
+	@Test
+	fun encodesAudioLifecycle() {
+		val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
+		val start = JSONObject(VoiceProtocol.audioStart("utterance-1", format))
+		assertEquals("audio_start", start.getString("type"))
+		assertEquals(16_000, start.getJSONObject("audio_format").getInt("sample_rate"))
+		val commit = JSONObject(VoiceProtocol.audioCommit("utterance-1", "session-1"))
+		assertEquals("audio_commit", commit.getString("type"))
+		assertEquals("session-1", commit.getString("session_id"))
+	}
+
     @Test
     fun normalizesServerAddresses() {
         assertEquals("ws://10.0.2.2:7979/voice/v1", VoiceProtocol.websocketUrl("10.0.2.2:7979"))
@@ -57,4 +85,6 @@ class VoiceProtocolTest {
             ),
         )
     }
+
+	private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

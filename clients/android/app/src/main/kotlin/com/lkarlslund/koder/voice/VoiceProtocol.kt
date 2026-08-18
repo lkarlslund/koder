@@ -3,6 +3,8 @@ package com.lkarlslund.koder.voice
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 const val VOICE_PROTOCOL = "voice.v1"
 
@@ -34,8 +36,39 @@ data class VoiceMessage(
 )
 
 data class VoiceCallState(
+    val voiceSessionId: String,
     val activeSessionId: String,
     val sessions: List<VoiceSession>,
+)
+
+data class VoiceAudioFormat(
+    val encoding: String,
+    val sampleRate: Int,
+    val channels: Int,
+)
+
+data class VoiceAudioConfig(
+    val input: VoiceAudioFormat,
+    val output: VoiceAudioFormat,
+    val maxUtteranceSeconds: Int,
+)
+
+enum class VoiceAudioFrameKind(val wireValue: Int) {
+    INPUT_PCM(1),
+    OUTPUT_PCM(2),
+    ;
+
+    companion object {
+        fun fromWire(value: Int): VoiceAudioFrameKind = entries.firstOrNull { it.wireValue == value }
+            ?: error("Unsupported voice audio frame kind $value")
+    }
+}
+
+data class VoiceAudioFrame(
+    val kind: VoiceAudioFrameKind,
+    val flags: Int,
+    val sequence: Long,
+    val pcm: ByteArray,
 )
 
 data class VoiceServerFrame(
@@ -44,6 +77,9 @@ data class VoiceServerFrame(
     val utteranceId: String = "",
     val state: String = "",
     val callState: VoiceCallState? = null,
+	val audioConfig: VoiceAudioConfig? = null,
+	val audioFormat: VoiceAudioFormat? = null,
+	val transcript: String = "",
     val message: VoiceMessage? = null,
     val error: String = "",
 )
@@ -62,6 +98,59 @@ object VoiceProtocol {
         .apply { if (sessionId.isNotBlank()) put("session_id", sessionId) }
         .toString()
 
+    fun audioStart(id: String, format: VoiceAudioFormat): String = JSONObject()
+        .put("type", "audio_start")
+        .put("protocol", VOICE_PROTOCOL)
+        .put("utterance_id", id)
+        .put("audio_format", format.toJSON())
+        .toString()
+
+    fun audioCommit(id: String, sessionId: String = ""): String = JSONObject()
+        .put("type", "audio_commit")
+        .put("protocol", VOICE_PROTOCOL)
+        .put("utterance_id", id)
+        .apply { if (sessionId.isNotBlank()) put("session_id", sessionId) }
+        .toString()
+
+    fun audioCancel(id: String): String = JSONObject()
+        .put("type", "audio_cancel")
+        .put("protocol", VOICE_PROTOCOL)
+        .put("utterance_id", id)
+        .toString()
+
+    fun encodeAudio(frame: VoiceAudioFrame): ByteArray {
+        require(frame.flags in 0..255) { "Audio flags must fit in one byte" }
+        require(frame.sequence in 0..UINT32_MAX) { "Audio sequence must fit in uint32" }
+        require(frame.pcm.isNotEmpty() && frame.pcm.size <= MAX_AUDIO_PAYLOAD && frame.pcm.size % 2 == 0) {
+            "Audio payload must be non-empty, even-sized PCM16 up to $MAX_AUDIO_PAYLOAD bytes"
+        }
+        return ByteBuffer.allocate(AUDIO_HEADER_BYTES + frame.pcm.size)
+            .order(ByteOrder.BIG_ENDIAN)
+            .put(AUDIO_MAGIC)
+            .put(frame.kind.wireValue.toByte())
+            .put(frame.flags.toByte())
+            .putShort(0)
+            .putInt(frame.sequence.toInt())
+            .put(frame.pcm)
+            .array()
+    }
+
+    fun decodeAudio(payload: ByteArray): VoiceAudioFrame {
+        require(payload.size >= AUDIO_HEADER_BYTES) { "Voice audio frame is shorter than its header" }
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
+        val magic = ByteArray(AUDIO_MAGIC.size).also(buffer::get)
+        require(magic.contentEquals(AUDIO_MAGIC)) { "Invalid voice audio frame magic" }
+        val kind = VoiceAudioFrameKind.fromWire(buffer.get().toInt() and 0xff)
+        val flags = buffer.get().toInt() and 0xff
+        require(buffer.short.toInt() == 0) { "Voice audio reserved bytes must be zero" }
+        val sequence = buffer.int.toLong() and UINT32_MAX
+        val pcm = ByteArray(buffer.remaining()).also(buffer::get)
+        require(pcm.isNotEmpty() && pcm.size <= MAX_AUDIO_PAYLOAD && pcm.size % 2 == 0) {
+            "Invalid voice PCM16 payload size ${pcm.size}"
+        }
+        return VoiceAudioFrame(kind, flags, sequence, pcm)
+    }
+
     fun selectSession(sessionId: String): String = JSONObject()
         .put("type", "select_session")
         .put("protocol", VOICE_PROTOCOL)
@@ -78,6 +167,9 @@ object VoiceProtocol {
             utteranceId = root.optString("utterance_id"),
             state = root.optString("state"),
             callState = root.optJSONObject("call_state")?.toCallState(),
+			audioConfig = root.optJSONObject("audio_config")?.toAudioConfig(),
+			audioFormat = root.optJSONObject("audio_format")?.toAudioFormat(),
+			transcript = root.optString("transcript"),
             message = root.optJSONObject("message")?.toVoiceMessage(),
             error = root.optString("error"),
         )
@@ -132,6 +224,7 @@ object VoiceProtocol {
     }
 
     private fun JSONObject.toCallState(): VoiceCallState = VoiceCallState(
+		voiceSessionId = optString("voice_session_id"),
         activeSessionId = optString("active_session_id"),
         sessions = optJSONArray("sessions").mapObjects { item ->
             VoiceSession(
@@ -141,6 +234,23 @@ object VoiceProtocol {
             )
         },
     )
+
+	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()
+		.put("encoding", encoding)
+		.put("sample_rate", sampleRate)
+		.put("channels", channels)
+
+	private fun JSONObject.toAudioFormat(): VoiceAudioFormat = VoiceAudioFormat(
+		encoding = getString("encoding"),
+		sampleRate = getInt("sample_rate"),
+		channels = getInt("channels"),
+	)
+
+	private fun JSONObject.toAudioConfig(): VoiceAudioConfig = VoiceAudioConfig(
+		input = getJSONObject("input").toAudioFormat(),
+		output = getJSONObject("output").toAudioFormat(),
+		maxUtteranceSeconds = getInt("max_utterance_seconds"),
+	)
 
     private fun JSONObject.toVoiceMessage(): VoiceMessage = VoiceMessage(
         spokenText = optString("spoken_text"),
@@ -167,4 +277,9 @@ object VoiceProtocol {
         if (this == null) return emptyList()
         return List(length()) { index -> transform(getJSONObject(index)) }
     }
+
+	private val AUDIO_MAGIC = byteArrayOf('K'.code.toByte(), 'V'.code.toByte(), 'A'.code.toByte(), '1'.code.toByte())
+	private const val AUDIO_HEADER_BYTES = 12
+	private const val MAX_AUDIO_PAYLOAD = 64 * 1024
+	private const val UINT32_MAX = 0xffff_ffffL
 }
