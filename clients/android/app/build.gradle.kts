@@ -100,10 +100,14 @@ android {
     sourceSets.getByName("main").assets.directories.add(
         sileroVadAssets.get().asFile.absolutePath,
     )
+    sourceSets.getByName("test").resources.directories.add(
+        rootProject.layout.projectDirectory.dir("../../protocol/voice/v1/testdata").asFile.absolutePath,
+    )
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -130,11 +134,16 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    implementation("androidx.core:core-telecom:1.0.1")
+    implementation("com.squareup.okhttp3:okhttp:5.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
 
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.3.0")
 }
