@@ -52,7 +52,7 @@ func Args(cmd Command) ([]string, error) {
 	if err := accesssettings.Validate(settings); err != nil {
 		return nil, err
 	}
-	args := []string{"--die-with-parent", "--new-session"}
+	args := []string{"--die-with-parent", "--new-session", "--unshare-pid"}
 	if !settings.Network && strings.TrimSpace(os.Getenv(envDisableNetUnshare)) == "" {
 		args = append(args, "--unshare-net")
 	}

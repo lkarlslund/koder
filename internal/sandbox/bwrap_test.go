@@ -28,7 +28,7 @@ func TestArgsBuildsReadOnlyRootWritableWorkspaceNoNetwork(t *testing.T) {
 		t.Fatalf("build args: %v", err)
 	}
 	joined := strings.Join(args, "\x00")
-	for _, want := range []string{"--unshare-net", "--ro-bind\x00/\x00/", "--tmpfs\x00/etc/ssh", "--bind", "--tmpfs\x00/tmp", "--\x00/bin/bash\x00-lc\x00pwd"} {
+	for _, want := range []string{"--unshare-net", "--unshare-pid", "--ro-bind\x00/\x00/", "--tmpfs\x00/etc/ssh", "--bind", "--tmpfs\x00/tmp", "--\x00/bin/bash\x00-lc\x00pwd"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected args to contain %q, got %#v", want, args)
 		}

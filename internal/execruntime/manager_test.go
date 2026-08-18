@@ -77,6 +77,42 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 }
 
+func TestManagerTerminateStopsDescendants(t *testing.T) {
+	workdir := t.TempDir()
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "while :; do printf x >> child-alive; sleep 0.02; done & wait",
+		Workdir:   workdir,
+		YieldTime: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := mgr.Terminate(context.Background(), TerminateRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		ProcessID: snap.ProcessID,
+	}); err != nil {
+		t.Fatalf("terminate: %v", err)
+	}
+	path := filepath.Join(workdir, "child-alive")
+	time.Sleep(300 * time.Millisecond)
+	first, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat descendant output: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	second, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat descendant output again: %v", err)
+	}
+	if second.Size() != first.Size() {
+		t.Fatalf("descendant kept running after termination: size grew from %d to %d", first.Size(), second.Size())
+	}
+}
+
 func TestManagerStartTTY(t *testing.T) {
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{
