@@ -86,7 +86,14 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 			case chat.StatusWaitingInput:
 				return voiceAttentionResult(session, chatRecord, "The delegated chat needs more information. Open Koder to answer it."), nil
 			}
-			response := latestAssistantTextAfter(snapshot.Timeline, initialSeq)
+			// Subscription updates intentionally carry a lightweight snapshot without
+			// the full timeline. Read it only at a terminal boundary so streaming
+			// deltas do not repeatedly clone a potentially large transcript.
+			var terminalTimeline []domain.TimelineItem
+			if !snapshot.Active && snapshot.Status != chat.StatusWaitingLLM && snapshot.Status != chat.StatusRunningTools {
+				terminalTimeline = runtime.SnapshotTimeline()
+			}
+			response := latestAssistantTextAfter(terminalTimeline, initialSeq)
 			if response != "" && !snapshot.Active && snapshot.Status != chat.StatusWaitingLLM && snapshot.Status != chat.StatusRunningTools {
 				return voice.DelegationResult{
 					SessionID:    string(session.ID),
@@ -95,7 +102,7 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 					Text:         response,
 				}, nil
 			}
-			if message := latestModelErrorAfter(snapshot.Timeline, initialSeq); message != "" {
+			if message := latestModelErrorAfter(terminalTimeline, initialSeq); message != "" {
 				return voice.DelegationResult{}, fmt.Errorf("delegated chat stopped with an error: %s", message)
 			}
 			if snapshot.Status == chat.StatusErrored && !snapshot.Active && turnStarted {
