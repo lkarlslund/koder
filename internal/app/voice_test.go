@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -96,6 +98,40 @@ func TestLatestAssistantTextAfterRequiresNewSealedAssistant(t *testing.T) {
 	}
 	if got := latestAssistantTextAfter(timeline, 4); got != "" {
 		t.Fatalf("latestAssistantTextAfter() = %q, want empty", got)
+	}
+}
+
+func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
+	timeline := []domain.TimelineItem{
+		{
+			Seq: 1,
+			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+				Tool: domain.ToolKindShowMedia,
+				Result: &domain.ToolResult{Data: tools.ShowMediaStoredResult{
+					SessionID: "session-1", MIMEType: "image/png", Title: "Current state",
+					Attachment: &attachment.Metadata{ID: "012345678901234567890123", Name: "screen.png", MIME: "image/png"},
+				}},
+			}}},
+		},
+		{
+			Seq: 2,
+			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+				Tool: domain.ToolKindOfferFile,
+				Result: &domain.ToolResult{Data: tools.OfferFileStoredResult{
+					Token: "download-token", Name: "appointment.ics", MIMEType: "text/calendar",
+				}},
+			}}},
+		},
+	}
+	parts := voicePresentationParts(timeline, 0)
+	if len(parts) != 2 {
+		t.Fatalf("presentation parts = %#v", parts)
+	}
+	if parts[0].MIMEType != "image/png" || parts[0].URI != "/voice/v1/artifacts/session/session-1/012345678901234567890123" || parts[0].Metadata["name"] != "screen.png" {
+		t.Fatalf("image part = %#v", parts[0])
+	}
+	if parts[1].MIMEType != "text/calendar" || parts[1].URI != "/voice/v1/artifacts/offered/download-token" {
+		t.Fatalf("offered file part = %#v", parts[1])
 	}
 }
 

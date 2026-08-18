@@ -129,7 +129,9 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/ws", s.handleWebSocket)
-	mux.Handle("/voice/v1", voiceapi.NewHandler(controller, options.VoiceToken))
+	voiceHandler := voiceapi.NewHandler(controller, options.VoiceToken)
+	mux.Handle("/voice/v1", voiceHandler)
+	mux.Handle("/voice/v1/", voiceHandler)
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
 		debugServer := debugsrv.NewServer(controller, s.debug)

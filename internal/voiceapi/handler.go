@@ -6,7 +6,10 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +28,7 @@ type backend interface {
 	voice.Backend
 	voice.SpeechBackend
 	voice.VoiceSessionBackend
+	voice.ArtifactBackend
 }
 
 // Handler serves voice calls for one Koder process.
@@ -86,6 +90,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !authorized(r, h.Token) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="koder-voice"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/voice/v1/artifacts/") {
+		h.serveArtifact(w, r)
+		return
+	}
+	if r.URL.Path != "/voice/v1" {
+		http.NotFound(w, r)
 		return
 	}
 	callID := strings.TrimSpace(r.URL.Query().Get("call_id"))
@@ -226,6 +238,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/voice/v1/artifacts/")
+	parts := strings.Split(path, "/")
+	var (
+		file voice.ArtifactFile
+		err  error
+	)
+	switch {
+	case len(parts) == 3 && parts[0] == "session":
+		file, err = h.Backend.VoiceSessionArtifact(parts[1], parts[2])
+	case len(parts) == 2 && parts[0] == "offered":
+		file, err = h.Backend.VoiceOfferedArtifact(r.Context(), parts[1])
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil || strings.TrimSpace(file.Path) == "" {
+		http.NotFound(w, r)
+		return
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.TrimSpace(filepath.Base(file.Name))
+	if name == "" || name == "." {
+		name = filepath.Base(file.Path)
+	}
+	if contentType := strings.TrimSpace(file.MIMEType); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeFile(w, r, file.Path)
 }
 
 func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, sessionID string) error {

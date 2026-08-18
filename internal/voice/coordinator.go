@@ -24,6 +24,7 @@ type DelegationResult struct {
 	ChatID         string `json:"chat_id,omitempty"`
 	Text           string `json:"text"`
 	NeedsAttention bool   `json:"needs_attention,omitempty"`
+	Parts          []Part `json:"parts,omitempty"`
 }
 
 // Backend is the process-owned session capability needed by a voice call.
@@ -61,6 +62,20 @@ type SpeechBackend interface {
 type VoiceSessionBackend interface {
 	EnsureVoiceSession(context.Context, string) (Session, error)
 	RecordVoiceExchange(context.Context, string, string, Message) error
+}
+
+// ArtifactFile is an authenticated presentation resource resolved by Koder.
+type ArtifactFile struct {
+	Path     string
+	Name     string
+	MIMEType string
+}
+
+// ArtifactBackend resolves only resources already surfaced by a delegated
+// chat. It does not provide arbitrary filesystem access to the voice client.
+type ArtifactBackend interface {
+	VoiceSessionArtifact(string, string) (ArtifactFile, error)
+	VoiceOfferedArtifact(context.Context, string) (ArtifactFile, error)
 }
 
 // Part is one generic MIME-typed presentation. Data may be any JSON value;
@@ -186,9 +201,11 @@ func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
 	if spoken == "" {
 		spoken = "The delegated chat finished without a text response."
 	}
+	parts := []Part{{MIMEType: "text/plain", Data: result.Text}}
+	parts = append(parts, result.Parts...)
 	return Message{
 		SpokenText: spoken,
-		Parts:      []Part{{MIMEType: "text/plain", Data: result.Text}},
+		Parts:      parts,
 		Delegation: &result,
 	}, nil
 }

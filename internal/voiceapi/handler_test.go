@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/coder/websocket"
@@ -20,6 +21,18 @@ type fakeBackend struct {
 	spoken                 string
 	recordedVoiceSessionID string
 	recordedTranscript     string
+	artifact               voice.ArtifactFile
+}
+
+func (f *fakeBackend) VoiceSessionArtifact(_, _ string) (voice.ArtifactFile, error) {
+	if f.artifact.Path == "" {
+		return voice.ArtifactFile{}, os.ErrNotExist
+	}
+	return f.artifact, nil
+}
+
+func (f *fakeBackend) VoiceOfferedArtifact(context.Context, string) (voice.ArtifactFile, error) {
+	return f.VoiceSessionArtifact("", "")
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error) {
@@ -98,7 +111,7 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	server := httptest.NewServer(NewHandler(backend, "secret"))
 	defer server.Close()
 	ctx := context.Background()
-	url := "ws" + server.URL[len("http"):]
+	url := "ws" + server.URL[len("http"):] + "/voice/v1"
 
 	_, response, err := websocket.Dial(ctx, url, nil)
 	if err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
@@ -139,7 +152,7 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	server := httptest.NewServer(NewHandler(backend, ""))
 	defer server.Close()
 	ctx := context.Background()
-	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):], nil)
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +206,7 @@ func TestHandlerRejectsConcurrentCalls(t *testing.T) {
 	server := httptest.NewServer(NewHandler(&fakeBackend{}, ""))
 	defer server.Close()
 	ctx := context.Background()
-	url := "ws" + server.URL[len("http"):]
+	url := "ws" + server.URL[len("http"):] + "/voice/v1"
 	first, _, err := websocket.Dial(ctx, url+"?call_id=first", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -206,6 +219,39 @@ func TestHandlerRejectsConcurrentCalls(t *testing.T) {
 	}
 	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
 		t.Fatalf("concurrent dial response=%v err=%v", response, err)
+	}
+}
+
+func TestHandlerServesAuthenticatedVoiceArtifact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "screen.png")
+	if err := os.WriteFile(path, []byte("png-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewHandler(&fakeBackend{artifact: voice.ArtifactFile{
+		Path: path, Name: "current-state.png", MIMEType: "image/png",
+	}}, "secret"))
+	defer server.Close()
+	resourceURL := server.URL + "/voice/v1/artifacts/session/session-1/012345678901234567890123"
+	response, err := http.Get(resourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated artifact status = %d", response.StatusCode)
+	}
+	request, err := http.NewRequest(http.MethodGet, resourceURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "image/png" || !strings.Contains(response.Header.Get("Content-Disposition"), "current-state.png") {
+		t.Fatalf("artifact response status=%d headers=%v", response.StatusCode, response.Header)
 	}
 }
 

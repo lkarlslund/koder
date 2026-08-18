@@ -3,13 +3,16 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -246,6 +249,7 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 					SessionTitle: voiceSessionTitle(session),
 					ChatID:       string(chatRecord.ID),
 					Text:         response,
+					Parts:        voicePresentationParts(terminalTimeline, initialSeq),
 				}, nil
 			}
 			if message := latestModelErrorAfter(terminalTimeline, initialSeq); message != "" {
@@ -256,6 +260,83 @@ func (c *Controller) DelegateVoice(ctx context.Context, sessionID, text string) 
 			}
 		}
 	}
+}
+
+// VoiceSessionArtifact resolves a durable session attachment previously
+// produced by a tool in a delegated chat.
+func (c *Controller) VoiceSessionArtifact(sessionID, attachmentID string) (voice.ArtifactFile, error) {
+	path, err := c.SessionAttachmentPath(id.ID(strings.TrimSpace(sessionID)), strings.TrimSpace(attachmentID))
+	if err != nil {
+		return voice.ArtifactFile{}, err
+	}
+	return voice.ArtifactFile{Path: path}, nil
+}
+
+// VoiceOfferedArtifact resolves an offered-file token through its owning
+// manager while retaining the voice endpoint's bearer-token boundary.
+func (c *Controller) VoiceOfferedArtifact(ctx context.Context, token string) (voice.ArtifactFile, error) {
+	record, err := c.ResolveOfferedFile(ctx, strings.TrimSpace(token))
+	if err != nil {
+		return voice.ArtifactFile{}, err
+	}
+	return voice.ArtifactFile{Path: record.Path, Name: record.Name, MIMEType: record.MIME}, nil
+}
+
+func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []voice.Part {
+	parts := make([]voice.Part, 0)
+	seen := map[string]struct{}{}
+	addAttachment := func(sessionID string, metadata *attachment.Metadata, title string) {
+		if metadata == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(metadata.ID) == "" {
+			return
+		}
+		uri := "/voice/v1/artifacts/session/" + url.PathEscape(sessionID) + "/" + url.PathEscape(metadata.ID)
+		if _, ok := seen[uri]; ok {
+			return
+		}
+		seen[uri] = struct{}{}
+		partMetadata := map[string]string{"name": metadata.Name}
+		if strings.TrimSpace(title) != "" {
+			partMetadata["title"] = strings.TrimSpace(title)
+		}
+		parts = append(parts, voice.Part{ID: metadata.ID, MIMEType: metadata.MIME, URI: uri, Metadata: partMetadata})
+	}
+	for _, item := range timeline {
+		if item.Seq <= sequence {
+			continue
+		}
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Result == nil {
+				continue
+			}
+			switch result := call.Result.Data.(type) {
+			case tools.ShowMediaStoredResult:
+				addAttachment(result.SessionID, result.Attachment, result.Title)
+			case *tools.ShowMediaStoredResult:
+				if result != nil {
+					addAttachment(result.SessionID, result.Attachment, result.Title)
+				}
+			case tools.BrowserStoredResult:
+				addAttachment(result.SessionID, result.Attachment, result.Summary)
+			case *tools.BrowserStoredResult:
+				if result != nil {
+					addAttachment(result.SessionID, result.Attachment, result.Summary)
+				}
+			case tools.OfferFileStoredResult:
+				uri := "/voice/v1/artifacts/offered/" + url.PathEscape(result.Token)
+				if result.Token != "" {
+					if _, ok := seen[uri]; !ok {
+						seen[uri] = struct{}{}
+						parts = append(parts, voice.Part{MIMEType: result.MIMEType, URI: uri, Metadata: map[string]string{"name": result.Name, "title": result.Title}})
+					}
+				}
+			}
+		}
+	}
+	return parts
 }
 
 func voiceTurnStarted(status chat.Status, active bool) bool {
