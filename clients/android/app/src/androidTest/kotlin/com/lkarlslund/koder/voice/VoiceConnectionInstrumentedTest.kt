@@ -6,6 +6,7 @@ import mockwebserver3.MockWebServer
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+	import okio.ByteString
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -28,6 +29,8 @@ class VoiceConnectionInstrumentedTest {
     fun websocketHandshakeAndUtteranceMatchGoProtocol() {
         val clientReady = CountDownLatch(1)
         val serverReceivedUtterance = CountDownLatch(1)
+		val serverReceivedAudio = CountDownLatch(1)
+		val clientReceivedAudio = CountDownLatch(1)
         var receivedFrame: VoiceServerFrame? = null
         var utteranceText = ""
 
@@ -52,6 +55,20 @@ class VoiceConnectionInstrumentedTest {
                     }
                 }
 
+				override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+					val frame = VoiceProtocol.decodeAudio(bytes.toByteArray())
+					if (frame.kind == VoiceAudioFrameKind.INPUT_PCM && frame.sequence == 0L) {
+						serverReceivedAudio.countDown()
+						webSocket.send(
+							ByteString.of(
+								*VoiceProtocol.encodeAudio(
+									VoiceAudioFrame(VoiceAudioFrameKind.OUTPUT_PCM, 0, 0, byteArrayOf(3, 0, 4, 0)),
+								),
+							),
+						)
+					}
+				}
+
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     webSocket.close(code, reason)
                 }
@@ -65,16 +82,28 @@ class VoiceConnectionInstrumentedTest {
                 receivedFrame = frame
                 clientReady.countDown()
             }
+			override fun onAudioFrame(frame: VoiceAudioFrame) {
+				if (frame.kind == VoiceAudioFrameKind.OUTPUT_PCM && frame.pcm.contentEquals(byteArrayOf(3, 0, 4, 0))) {
+					clientReceivedAudio.countDown()
+				}
+			}
             override fun onDisconnected(reason: String) = Unit
         }).use { connection ->
             connection.connect(server.url("/").toString(), "test-token")
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
             connection.sendUtterance("check the calendar")
             assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
+			val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
+			val utteranceId = connection.startAudio(format)
+			connection.sendAudio(0, byteArrayOf(1, 0, 2, 0))
+			connection.commitAudio(utteranceId)
+			assertTrue("server did not receive binary PCM", serverReceivedAudio.await(5, TimeUnit.SECONDS))
+			assertTrue("client did not receive binary PCM", clientReceivedAudio.await(5, TimeUnit.SECONDS))
         }
 
         val request = server.takeRequest(5, TimeUnit.SECONDS)
         assertEquals("Bearer test-token", request?.headers?.get("Authorization"))
+		assertTrue(request?.target.orEmpty().contains("call_id="))
         assertEquals("ready", receivedFrame?.type)
         assertEquals("check the calendar", utteranceText)
     }

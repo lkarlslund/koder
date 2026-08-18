@@ -58,7 +58,13 @@ class VoiceConnection(
 	@Synchronized
 	private fun openSocket(expectedGeneration: Long) {
 		if (!desired || expectedGeneration != generation) return
-		val url = VoiceProtocol.websocketUrl(server).toHttpUrl().newBuilder()
+		val websocketURL = VoiceProtocol.websocketUrl(server)
+		val requestURL = when {
+			websocketURL.startsWith("ws://") -> "http://" + websocketURL.removePrefix("ws://")
+			websocketURL.startsWith("wss://") -> "https://" + websocketURL.removePrefix("wss://")
+			else -> websocketURL
+		}
+		val url = requestURL.toHttpUrl().newBuilder()
 			.addQueryParameter("call_id", callId)
 			.apply { if (voiceSessionId.isNotBlank()) addQueryParameter("voice_session_id", voiceSessionId) }
 			.build()
