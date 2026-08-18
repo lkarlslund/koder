@@ -712,6 +712,32 @@ func TestChatMarksImageRequirementForUserAttachment(t *testing.T) {
 	}
 }
 
+func TestChatActivityPersistsSeparatelyFromRuntimeStatus(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+	progress := 65
+	updated, err := rt.SetChatActivity(ctx, domain.ChatActivity{
+		Summary:         "Verifying voice delegation",
+		Phase:           "verifying",
+		ProgressPercent: &progress,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Activity.Summary != "Verifying voice delegation" || rt.Snapshot().Status != StatusIdle {
+		t.Fatalf("updated chat=%#v runtime status=%q", updated.Activity, rt.Snapshot().Status)
+	}
+	stored, err := getChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Activity.ProgressPercent == nil || *stored.Activity.ProgressPercent != 65 {
+		t.Fatalf("stored activity = %#v", stored.Activity)
+	}
+}
+
 func TestChatMarksImageRequirementForViewImageResult(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

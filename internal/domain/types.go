@@ -83,6 +83,7 @@ const (
 	ToolKindChatArchive         ToolKind = "chat_archive"
 	ToolKindChatRename          ToolKind = "chat_rename"
 	ToolKindChatCleanup         ToolKind = "chat_cleanup"
+	ToolKindChatStatus          ToolKind = "chat_status"
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
@@ -168,6 +169,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindChatArchive,
 	ToolKindChatRename,
 	ToolKindChatCleanup,
+	ToolKindChatStatus,
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,
@@ -365,6 +367,17 @@ type Chat struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	LastMessage            string
+	Activity               ChatActivity
+}
+
+// ChatActivity is durable model-authored work context. It complements, but
+// never replaces, the runtime execution state of a chat.
+type ChatActivity struct {
+	Summary         string
+	Phase           string
+	ProgressPercent *int
+	Blocked         bool
+	UpdatedAt       time.Time
 }
 
 func (c *Chat) UnmarshalJSON(data []byte) error {
@@ -394,6 +407,7 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		CreatedAt              time.Time
 		UpdatedAt              time.Time
 		LastMessage            string
+		Activity               ChatActivity
 	}
 	var raw chatJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -431,6 +445,7 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		CreatedAt:              raw.CreatedAt,
 		UpdatedAt:              raw.UpdatedAt,
 		LastMessage:            raw.LastMessage,
+		Activity:               raw.Activity,
 	}
 	return nil
 }

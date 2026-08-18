@@ -38,6 +38,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
+	"github.com/lkarlslund/koder/internal/voiceapi"
 )
 
 const defaultOpenDelay = 5 * time.Second
@@ -61,6 +62,7 @@ type Options struct {
 	OpenBrowser           func(string) error
 	Debug                 *debugsrv.Recorder
 	RequestProcessRestart func() error
+	VoiceToken            string
 }
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
@@ -127,6 +129,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.Handle("/voice/v1", voiceapi.Handler{Backend: controller, Token: options.VoiceToken})
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
 		debugServer := debugsrv.NewServer(controller, s.debug)

@@ -392,6 +392,10 @@
                 <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]"></i>
                 <span class="text-truncate" x-text="chatStatusLabel(chat)"></span>
               </div>
+              <div class="chat-activity-line" x-show="chatActivitySummary(chat)" :title="chatActivityLabel(chat)" style="display: none;">
+                <i class="bi bi-signpost-split"></i>
+                <span class="text-truncate" x-text="chatActivityLabel(chat)"></span>
+              </div>
             </div>
           </template>
         </div>

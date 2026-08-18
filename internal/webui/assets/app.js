@@ -3584,6 +3584,21 @@
           };
           return labels[value] || value.replaceAll('_', ' ');
         },
+        chatActivity(chat) {
+          return chat.activity || chat.Activity || {};
+        },
+        chatActivitySummary(chat) {
+          const activity = this.chatActivity(chat);
+          return String(activity.summary || activity.Summary || '').trim();
+        },
+        chatActivityLabel(chat) {
+          const activity = this.chatActivity(chat);
+          const summary = this.chatActivitySummary(chat);
+          const phase = String(activity.phase || activity.Phase || '').trim();
+          const rawProgress = activity.progress_percent ?? activity.ProgressPercent;
+          const progress = rawProgress === null || rawProgress === undefined ? '' : ' · ' + rawProgress + '%';
+          return (phase ? phase + ': ' : '') + summary + progress;
+        },
         statusLabel(status) {
           const value = String(status || '').trim();
           const labels = {

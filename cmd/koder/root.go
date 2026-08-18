@@ -71,10 +71,11 @@ type serveOptions struct {
 	noOpenBrowser bool
 	webBind       string
 	webBindSet    bool
+	voiceToken    string
 }
 
 func newServeCommand(root *rootOptions) *cobra.Command {
-	opts := serveOptions{webBind: defaultWebBind}
+	opts := serveOptions{webBind: defaultWebBind, voiceToken: os.Getenv("KODER_VOICE_TOKEN")}
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the browser web UI server",
@@ -86,6 +87,7 @@ func newServeCommand(root *rootOptions) *cobra.Command {
 	flags := cmd.Flags()
 	flags.BoolVar(&opts.noOpenBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
+	flags.StringVar(&opts.voiceToken, "voice-token", opts.voiceToken, "Bearer token for Android voice connections (or KODER_VOICE_TOKEN)")
 	return cmd
 }
 
@@ -103,6 +105,7 @@ type serveConfig struct {
 	NoOpenBrowser   bool
 	WebBind         string
 	WebBindExplicit bool
+	VoiceToken      string
 }
 
 func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) error {
@@ -153,7 +156,7 @@ func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode a
 		return err
 	}
 	restartRequested := make(chan struct{}, 1)
-	server, err := startWebUI(ctx, controller, bind, serveOpts.NoOpenBrowser, recorder, func() error {
+	server, err := startWebUI(ctx, controller, bind, serveOpts.NoOpenBrowser, serveOpts.VoiceToken, recorder, func() error {
 		select {
 		case restartRequested <- struct{}{}:
 			slog.Info("koder process restart enqueued")
@@ -203,12 +206,13 @@ func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode a
 	}
 }
 
-func startWebUI(ctx context.Context, controller *app.Controller, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder, requestProcessRestart func() error) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, bind string, noOpenBrowser bool, voiceToken string, recorder *debugsrv.Recorder, requestProcessRestart func() error) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
 		Bind:                  bind,
 		NoOpenBrowser:         noOpenBrowser,
 		Debug:                 recorder,
 		RequestProcessRestart: requestProcessRestart,
+		VoiceToken:            voiceToken,
 	})
 }
 
@@ -221,6 +225,7 @@ func serveConfigFromFlags(root *rootOptions, opts serveOptions) serveConfig {
 		NoOpenBrowser:   opts.noOpenBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
+		VoiceToken:      strings.TrimSpace(opts.voiceToken),
 	}
 }
 

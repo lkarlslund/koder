@@ -15,6 +15,19 @@ type TaskControl interface {
 	AddTask(context.Context, id.ID, string, planning.LegacyTaskStatus) (planning.LegacyTask, error)
 }
 
+// ChatStatusControl updates durable descriptive activity for the owning chat.
+type ChatStatusControl interface {
+	SetChatActivity(context.Context, domain.ChatActivity) (domain.Chat, error)
+}
+
+// RequireChatStatusControl returns the activity capability for the current chat.
+func RequireChatStatusControl(runtime Runtime) (ChatStatusControl, error) {
+	if runtime.ChatStatusControl == nil || runtime.SessionID == "" || runtime.ChatID == "" {
+		return nil, errors.New("chat_status requires an active persisted chat")
+	}
+	return runtime.ChatStatusControl, nil
+}
+
 type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)

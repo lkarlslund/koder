@@ -3,6 +3,7 @@ package all
 import (
 	_ "github.com/lkarlslund/koder/internal/tools/bashtool"
 	_ "github.com/lkarlslund/koder/internal/tools/browsertool"
+	_ "github.com/lkarlslund/koder/internal/tools/chatstatustool"
 	_ "github.com/lkarlslund/koder/internal/tools/chattool"
 	_ "github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	_ "github.com/lkarlslund/koder/internal/tools/edittool"

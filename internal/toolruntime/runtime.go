@@ -104,7 +104,9 @@ func (r *Runtime) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runt
 		session = owner.Snapshot().Session
 		rt.SetSession(session)
 	}
-	return r.Runtime(session, chat), nil
+	runtime := r.Runtime(session, chat)
+	runtime.ChatStatusControl = rt
+	return runtime, nil
 }
 
 func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtime {

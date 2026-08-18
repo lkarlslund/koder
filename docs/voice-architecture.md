@@ -1,6 +1,6 @@
 # Voice-first Android architecture
 
-Status: proposed
+Status: accepted; implementation in progress
 
 This document defines the intended architecture and delivery plan for a
 voice-first Android client for Koder. The client behaves like an ongoing voice

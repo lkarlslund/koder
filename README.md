@@ -48,6 +48,17 @@ koder serve --web-bind 127.0.0.1:8080
 koder serve --nobrowser
 ```
 
+To expose the Android voice endpoint on your LAN, bind Koder to the LAN and
+set a dedicated bearer token:
+
+```bash
+KODER_VOICE_TOKEN='replace-with-a-long-random-token' \
+  koder serve --web-bind 0.0.0.0:7979 --nobrowser
+```
+
+The Android client connects to `ws://<computer-address>:7979/voice/v1`. Do not
+expose an unencrypted `ws://` endpoint beyond a trusted private network.
+
 Use a separate data directory when testing another instance:
 
 ```bash
@@ -112,6 +123,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 | Browser-native multi-session workspace | Keep several repositories, chats, and investigations open in one local process without pretending everything is one terminal buffer. |
 | Shared human/agent planning board | Milestones and tasks are editable by both the user in the UI and the model through tools, so planning state is not trapped in chat prose. |
 | Controlled background execution chats | Let an orchestrator chat stay in charge while scoped sub-chats execute work, with limits on concurrent non-idle child chats. |
+| Descriptive chat status | Chats can publish a durable objective, phase, blocked flag, and optional progress independently of runtime states such as reasoning, streaming, or idle. |
 | Queue, steer, and send-now controls | Add normal queued messages, steer a running turn, promote/demote queued messages, or abort the current turn and send a new instruction immediately. |
 | Visual artifact feedback loop | Browse rendered markdown, Mermaid diagrams, images, and generated files so both user and model can iterate on visual output, not just raw text. |
 | Native shared browser automation | Drive one visible authenticated Chrome profile with chat-owned tabs, snapshots, interactions, screenshots, console and network inspection. Screenshots flow directly into model vision and the UI without Node.js or workspace temp files. |

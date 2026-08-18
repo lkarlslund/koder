@@ -34,7 +34,7 @@ func TestServeRegistersBrowserFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"web-bind", "nobrowser"} {
+	for _, name := range []string{"web-bind", "nobrowser", "voice-token"} {
 		if flag := serve.Flags().Lookup(name); flag == nil {
 			t.Fatalf("expected serve flag %s", name)
 		}
@@ -46,8 +46,8 @@ func TestServeRegistersBrowserFlags(t *testing.T) {
 
 func TestServeConfigFromFlags(t *testing.T) {
 	dataDir := t.TempDir()
-	got := serveConfigFromFlags(&rootOptions{dataDir: dataDir}, serveOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true})
-	if got.LoadOptions.DataDir != dataDir || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
+	got := serveConfigFromFlags(&rootOptions{dataDir: dataDir}, serveOptions{noOpenBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true, voiceToken: " token "})
+	if got.LoadOptions.DataDir != dataDir || !got.NoOpenBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit || got.VoiceToken != "token" {
 		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }
@@ -91,7 +91,7 @@ func TestStartWebUISurfacesBindError(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	bind := listener.Addr().String()
 
-	if _, err := startWebUI(ctx, ctrl, bind, true, nil, func() error { return nil }); err == nil {
+	if _, err := startWebUI(ctx, ctrl, bind, true, "", nil, func() error { return nil }); err == nil {
 		t.Fatalf("expected bind error while %q stays busy", bind)
 	}
 }

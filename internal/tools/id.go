@@ -47,6 +47,7 @@ const (
 	ChatArchive         ID = domain.ToolKindChatArchive
 	ChatRename          ID = domain.ToolKindChatRename
 	ChatCleanup         ID = domain.ToolKindChatCleanup
+	ChatStatus          ID = domain.ToolKindChatStatus
 	Skill               ID = domain.ToolKindSkill
 	WebFetch            ID = domain.ToolKindWebFetch
 	WebSearch           ID = domain.ToolKindWebSearch

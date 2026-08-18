@@ -44,6 +44,40 @@ type MetadataUpdate struct {
 	Title    string
 }
 
+// SetChatActivity persists model-authored descriptive work status.
+func (r *Chat) SetChatActivity(ctx context.Context, activity domain.ChatActivity) (domain.Chat, error) {
+	if r == nil {
+		return domain.Chat{}, fmt.Errorf("chat runtime is required")
+	}
+	activity.Summary = strings.TrimSpace(activity.Summary)
+	activity.Phase = strings.TrimSpace(activity.Phase)
+	if activity.Summary == "" {
+		return domain.Chat{}, fmt.Errorf("chat activity summary is required")
+	}
+	if activity.ProgressPercent != nil && (*activity.ProgressPercent < 0 || *activity.ProgressPercent > 100) {
+		return domain.Chat{}, fmt.Errorf("chat activity progress must be between 0 and 100")
+	}
+	activity.UpdatedAt = time.Now().UTC()
+	r.mu.Lock()
+	r.chat.Activity = activity
+	r.chat.UpdatedAt = activity.UpdatedAt
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.Activity = activity
+			chat.UpdatedAt = activity.UpdatedAt
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if err := updateChat(ctx, r.deps.Store, chatRecord); err != nil {
+			return domain.Chat{}, err
+		}
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+	return chatRecord, nil
+}
+
 type Status string
 
 const (
