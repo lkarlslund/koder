@@ -23,6 +23,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -728,6 +729,54 @@ func TestControllerSaveModelConfigValidatesResolvedOverlayOptions(t *testing.T) 
 	pref.Options["reasoning_effort"] = "high"
 	if _, err := ctrl.SaveModelConfig(context.Background(), pref); err == nil || !strings.Contains(err.Error(), "unsupported value high") {
 		t.Fatalf("expected unsupported model option to be rejected, got %v", err)
+	}
+}
+
+func TestControllerSaveModelConfigRemovesLegacyFieldsShadowedByOverlayOptions(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"llamacpp": {Name: "llama.cpp", BaseURL: "http://127.0.0.1:8000/v1"},
+		}
+	})
+	legacyTemperature := 1.0
+	pref := ModelConfigPreference{
+		ProviderID:       "llamacpp",
+		ModelID:          "qwen custom",
+		SourceProviderID: "llamacpp",
+		SourceModelID:    "qwen3.8-27b-q8-mtp",
+		ContextWindow:    262144,
+		ModelPreset:      "qwen3.8",
+		Temperature:      &legacyTemperature,
+		ThinkingMode:     "enabled",
+		ReasoningEffort:  "medium",
+		Options: map[string]any{
+			"temperature":      0.8,
+			"thinking_mode":    "disabled",
+			"reasoning_effort": "none",
+		},
+	}
+
+	if _, err := ctrl.SaveModelConfig(context.Background(), pref); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := ctrl.cfg.ModelConfig("llamacpp", "qwen custom")
+	if !ok {
+		t.Fatal("saved model is missing")
+	}
+	if stored.Temperature != nil || stored.ThinkingMode != "auto" || stored.ReasoningEffort != "" {
+		t.Fatalf("shadowed legacy fields were retained: %#v", stored)
+	}
+	values := provider.ModelOptionValues(stored)
+	if values["temperature"] != 0.8 || values["thinking_mode"] != "disabled" || values["reasoning_effort"] != "none" {
+		t.Fatalf("canonical overlay values changed: %#v", values)
+	}
+	body := provider.RequestExtraBody(ctrl.cfg.Providers["llamacpp"], stored, modeloverlay.Load(ctrl.cfg.ManagedAssetsDir()))
+	if body["temperature"] != 0.8 || body["reasoning_effort"] != "none" {
+		t.Fatalf("request does not use canonical overlay values: %#v", body)
+	}
+	kwargs, ok := body["chat_template_kwargs"].(map[string]any)
+	if !ok || kwargs["enable_thinking"] != false {
+		t.Fatalf("request did not disable thinking: %#v", body)
 	}
 }
 

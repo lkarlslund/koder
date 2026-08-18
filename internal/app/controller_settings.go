@@ -1669,7 +1669,7 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 	if pref.ThinkingBudget < 0 {
 		return config.ModelConfig{}, fmt.Errorf("thinking budget for %s/%s must not be negative", providerID, modelID)
 	}
-	return config.ModelConfig{
+	model := config.ModelConfig{
 		ProviderID:       providerID,
 		ModelID:          modelID,
 		SourceProviderID: sourceProviderID,
@@ -1686,7 +1686,44 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 		ThinkingMode:     strings.TrimSpace(pref.ThinkingMode),
 		ThinkingBudget:   pref.ThinkingBudget,
 		ReasoningEffort:  strings.TrimSpace(pref.ReasoningEffort),
-	}, nil
+	}
+	clearShadowedLegacyModelOptions(&model)
+	return model, nil
+}
+
+// clearShadowedLegacyModelOptions keeps overlay options canonical when a model
+// also carries fields from the pre-overlay settings format. ModelOptionValues
+// intentionally gives Options precedence; clearing only duplicated fields makes
+// the persisted config and the request agree without discarding legacy-only
+// settings that the selected overlay does not expose.
+func clearShadowedLegacyModelOptions(model *config.ModelConfig) {
+	if model == nil || len(model.Options) == 0 {
+		return
+	}
+	if _, ok := model.Options["temperature"]; ok {
+		model.Temperature = nil
+	}
+	if _, ok := model.Options["top_p"]; ok {
+		model.TopP = nil
+	}
+	if _, ok := model.Options["min_p"]; ok {
+		model.MinP = nil
+	}
+	if _, ok := model.Options["top_k"]; ok {
+		model.TopK = 0
+	}
+	if _, ok := model.Options["repeat_penalty"]; ok {
+		model.RepeatPenalty = nil
+	}
+	if _, ok := model.Options["thinking_mode"]; ok {
+		model.ThinkingMode = ""
+	}
+	if _, ok := model.Options["thinking_budget"]; ok {
+		model.ThinkingBudget = 0
+	}
+	if _, ok := model.Options["reasoning_effort"]; ok {
+		model.ReasoningEffort = ""
+	}
 }
 
 func decorateModelConfigPreference(cfg config.Config, catalog modeloverlay.Catalog, pref ModelConfigPreference) ModelConfigPreference {
