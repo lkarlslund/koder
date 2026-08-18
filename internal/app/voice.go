@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -114,6 +115,67 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 		})
 	}
 	return out, nil
+}
+
+// EnsureVoiceSession resolves an explicitly requested durable voice chat or
+// reuses the newest one, creating the user's first voice chat when needed.
+func (c *Controller) EnsureVoiceSession(ctx context.Context, requestedID string) (voice.Session, error) {
+	state, err := c.Sessions(ctx)
+	if err != nil {
+		return voice.Session{}, err
+	}
+	requestedID = strings.TrimSpace(requestedID)
+	var newest domain.Session
+	for _, session := range state.Sessions {
+		if session.Kind != domain.SessionKindVoice {
+			continue
+		}
+		if requestedID != "" && string(session.ID) == requestedID {
+			return voice.Session{ID: string(session.ID), Title: voiceSessionTitle(session), LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt}, nil
+		}
+		if newest.ID == "" || session.UpdatedAt.After(newest.UpdatedAt) {
+			newest = session
+		}
+	}
+	if requestedID != "" {
+		return voice.Session{}, fmt.Errorf("voice session %q was not found", requestedID)
+	}
+	if newest.ID == "" {
+		created, _, err := c.CreateVoiceChat(ctx, "Voice Chat")
+		if err != nil {
+			return voice.Session{}, err
+		}
+		newest = created
+	}
+	return voice.Session{ID: string(newest.ID), Title: voiceSessionTitle(newest), LastMessage: newest.LastMessage, UpdatedAt: newest.UpdatedAt}, nil
+}
+
+// RecordVoiceExchange appends the human transcript and concise spoken result
+// to the durable voice chat without invoking its model.
+func (c *Controller) RecordVoiceExchange(ctx context.Context, voiceSessionID, transcript string, message voice.Message) error {
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return fmt.Errorf("voice transcript is required")
+	}
+	_, session, _, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	if err != nil {
+		return err
+	}
+	if session.Kind != domain.SessionKindVoice {
+		return fmt.Errorf("session %s is not a voice session", session.ID)
+	}
+	if _, err := runtime.AppendUserMessage(ctx, domain.UserMessage{Text: transcript, Source: "voice"}); err != nil {
+		return err
+	}
+	item, err := runtime.AppendTimelineContent(ctx, domain.AssistantMessage{Text: strings.TrimSpace(message.SpokenText)})
+	if err != nil {
+		return err
+	}
+	item.Seal(time.Now().UTC())
+	if _, err := runtime.UpsertTimelineItem(ctx, item); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DelegateVoice sends work to the existing default chat of an ordinary session

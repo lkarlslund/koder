@@ -30,6 +30,7 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
+	"github.com/lkarlslund/koder/internal/voice"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -2385,6 +2386,50 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 		if target.ID == string(voiceSession.ID) {
 			t.Fatal("voice coordination session leaked into delegation targets")
 		}
+	}
+	ensured, err := ctrl.EnsureVoiceSession(ctx, string(voiceSession.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ensured.ID != string(voiceSession.ID) {
+		t.Fatalf("ensured voice session = %#v", ensured)
+	}
+	if err := ctrl.RecordVoiceExchange(ctx, string(voiceSession.ID), "check the laptop", voice.Message{SpokenText: "It is fixed."}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, runtime, err := ctrl.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: voiceSession.ID}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.EnsureTimeline(ctx); err != nil {
+		t.Fatal(err)
+	}
+	timeline := runtime.SnapshotTimeline()
+	if len(timeline) != 2 {
+		t.Fatalf("voice transcript length = %d; timeline=%#v", len(timeline), timeline)
+	}
+	user, userOK := timeline[0].Content.(domain.UserMessage)
+	assistant, assistantOK := timeline[1].Content.(domain.AssistantMessage)
+	if !userOK || user.Text != "check the laptop" || user.Source != "voice" || !assistantOK || assistant.Text != "It is fixed." || !timeline[1].Sealed() {
+		t.Fatalf("unexpected durable voice transcript: %#v", timeline)
+	}
+}
+
+func TestEnsureVoiceSessionCreatesFirstDurableChat(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	created, err := ctrl.EnsureVoiceSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" || created.Title != "Voice Chat" {
+		t.Fatalf("created voice session = %#v", created)
+	}
+	again, err := ctrl.EnsureVoiceSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != created.ID {
+		t.Fatalf("expected newest voice session reuse, got %#v after %#v", again, created)
 	}
 }
 

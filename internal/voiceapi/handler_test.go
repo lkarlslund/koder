@@ -15,9 +15,11 @@ import (
 )
 
 type fakeBackend struct {
-	delegated  bool
-	transcript string
-	spoken     string
+	delegated              bool
+	transcript             string
+	spoken                 string
+	recordedVoiceSessionID string
+	recordedTranscript     string
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error) {
@@ -30,6 +32,19 @@ func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
 		Output:              voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 24000, Channels: 1},
 		MaxUtteranceSeconds: 60,
 	}
+}
+
+func (f *fakeBackend) EnsureVoiceSession(_ context.Context, requestedID string) (voice.Session, error) {
+	if requestedID == "" {
+		requestedID = "voice-1"
+	}
+	return voice.Session{ID: requestedID, Title: "Voice Chat"}, nil
+}
+
+func (f *fakeBackend) RecordVoiceExchange(_ context.Context, voiceSessionID, transcript string, _ voice.Message) error {
+	f.recordedVoiceSessionID = voiceSessionID
+	f.recordedTranscript = transcript
+	return nil
 }
 
 func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
@@ -114,6 +129,9 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	}
 	readType(t, ctx, conn, "tts_end")
 	readType(t, ctx, conn, "ready")
+	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check it" {
+		t.Fatalf("recorded voice exchange = session %q transcript %q", backend.recordedVoiceSessionID, backend.recordedTranscript)
+	}
 }
 
 func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
@@ -165,6 +183,9 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	readType(t, ctx, conn, "ready")
 	if backend.spoken != "Done: check the laptop" {
 		t.Fatalf("synthesized text = %q", backend.spoken)
+	}
+	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check the laptop" {
+		t.Fatalf("recorded voice exchange = session %q transcript %q", backend.recordedVoiceSessionID, backend.recordedTranscript)
 	}
 }
 

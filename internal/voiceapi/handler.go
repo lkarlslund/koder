@@ -24,6 +24,7 @@ const delegationTimeout = 30 * time.Minute
 type backend interface {
 	voice.Backend
 	voice.SpeechBackend
+	voice.VoiceSessionBackend
 }
 
 // Handler serves voice calls for one Koder process.
@@ -91,7 +92,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if callID == "" {
 		callID = string(id.New())
 	}
-	release, err := h.Lease.Acquire(callID, r.URL.Query().Get("voice_session_id"))
+	voiceSession, err := h.Backend.EnsureVoiceSession(r.Context(), r.URL.Query().Get("voice_session_id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	release, err := h.Lease.Acquire(callID, voiceSession.ID)
 	if err != nil {
 		if err == voice.ErrCallActive {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -109,7 +115,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	ctx := r.Context()
-	call := voice.NewCall(h.Backend)
+	call := voice.NewCall(h.Backend, voiceSession.ID)
 	var audio *incomingAudio
 	var writeMu sync.Mutex
 	if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
@@ -166,7 +172,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "select_session":
 			message, err := call.SelectSession(ctx, frame.SessionID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "audio_start":
@@ -211,7 +217,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
 			message, err := call.HandleText(delegationCtx, frame.Text, frame.SessionID)
 			cancel()
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, frame.Text, message, err); err != nil {
 				return
 			}
 		default:
@@ -248,7 +254,7 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 	delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
 	message, callErr := call.HandleText(delegationCtx, transcript, sessionID)
 	cancel()
-	return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, message, callErr)
+	return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, transcript, message, callErr)
 }
 
 func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload []byte) error {
@@ -274,24 +280,36 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 	return nil
 }
 
-func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend, utteranceID string, message voice.Message, callErr error) error {
+func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, utteranceID, transcript string, message voice.Message, callErr error) error {
 	if callErr != nil {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error()}); err != nil {
 			return err
 		}
-		return writeReady(ctx, conn, writeMu, call, speech)
+		return writeReady(ctx, conn, writeMu, call, backend)
+	}
+	state, err := call.State(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(transcript) != "" {
+		if err := backend.RecordVoiceExchange(ctx, state.VoiceSessionID, transcript, message); err != nil {
+			if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "record voice exchange: " + err.Error()}); writeErr != nil {
+				return writeErr
+			}
+			return writeReady(ctx, conn, writeMu, call, backend)
+		}
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "message", UtteranceID: utteranceID, Message: &message}); err != nil {
 		return err
 	}
 	if strings.TrimSpace(message.SpokenText) != "" {
-		if err := writeSpeech(ctx, conn, writeMu, speech, utteranceID, message.SpokenText); err != nil {
+		if err := writeSpeech(ctx, conn, writeMu, backend, utteranceID, message.SpokenText); err != nil {
 			if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "speech synthesis: " + err.Error()}); writeErr != nil {
 				return writeErr
 			}
 		}
 	}
-	return writeReady(ctx, conn, writeMu, call, speech)
+	return writeReady(ctx, conn, writeMu, call, backend)
 }
 
 func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, utteranceID, text string) error {

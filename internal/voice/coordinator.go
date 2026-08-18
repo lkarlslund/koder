@@ -56,6 +56,13 @@ type SpeechBackend interface {
 	StreamVoiceSpeech(context.Context, string, func([]byte) error) error
 }
 
+// VoiceSessionBackend owns the durable coordination chat layered above an
+// ephemeral phone connection.
+type VoiceSessionBackend interface {
+	EnsureVoiceSession(context.Context, string) (Session, error)
+	RecordVoiceExchange(context.Context, string, string, Message) error
+}
+
 // Part is one generic MIME-typed visible response part.
 type Part struct {
 	MIMEType string `json:"mime_type"`
@@ -74,6 +81,7 @@ type Message struct {
 
 // CallState is the current server-owned routing state for one connection.
 type CallState struct {
+	VoiceSessionID  string    `json:"voice_session_id"`
 	ActiveSessionID string    `json:"active_session_id,omitempty"`
 	Sessions        []Session `json:"sessions"`
 }
@@ -81,12 +89,17 @@ type CallState struct {
 // Call is an ephemeral coordinator bound to one voice connection.
 type Call struct {
 	backend         Backend
+	voiceSessionID  string
 	activeSessionID string
 }
 
 // NewCall starts a voice call coordinator.
-func NewCall(backend Backend) *Call {
-	return &Call{backend: backend}
+func NewCall(backend Backend, voiceSessionID ...string) *Call {
+	call := &Call{backend: backend}
+	if len(voiceSessionID) > 0 {
+		call.voiceSessionID = strings.TrimSpace(voiceSessionID[0])
+	}
+	return call
 }
 
 // State returns the available sessions and current target.
@@ -104,7 +117,7 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	if c.activeSessionID != "" && !sessionExists(sessions, c.activeSessionID) {
 		c.activeSessionID = ""
 	}
-	return CallState{ActiveSessionID: c.activeSessionID, Sessions: sessions}, nil
+	return CallState{VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID, Sessions: sessions}, nil
 }
 
 // SelectSession explicitly changes the target for subsequent utterances.
