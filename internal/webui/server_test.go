@@ -1645,11 +1645,17 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) {
 		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, and management")
 	}
-	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && !quickChatMode()`) ||
+	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && workspaceSessionMode()`) ||
 		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
 		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||
-		!strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) {
+		!strings.Contains(fullPage, `x-show="workspaceSessionMode() && milestoneItems().length > 0"`) {
 		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
+	}
+	if !strings.Contains(fullPage, `rpc('new_voice_chat', {title: 'Voice Chat'})`) ||
+		!strings.Contains(fullPage, `voiceChatMode()`) ||
+		!strings.Contains(fullPage, `Voice coordination chat`) ||
+		!strings.Contains(fullPage, `title="New Voice Chat"`) {
+		t.Fatalf("expected durable Voice Chat creation and non-workspace rendering")
 	}
 	if !strings.Contains(fullPage, `class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'"`) ||
 		!strings.Contains(fullPage, `x-text="chatStatusLabel(chat)"`) ||
@@ -2262,7 +2268,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
-	if !strings.Contains(fullPage, `x-show="!quickChatMode() && milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+	if !strings.Contains(fullPage, `x-show="workspaceSessionMode() && milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
 		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
 	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
@@ -2322,7 +2328,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `bi-archive`) {
 		t.Fatalf("expected chat sidebar to archive chats and filter by status")
 	}
-	if !strings.Contains(fullPage, `:draggable="!quickChatMode()"`) ||
+	if !strings.Contains(fullPage, `:draggable="workspaceSessionMode()"`) ||
 		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||
 		!strings.Contains(fullPage, `reorder_chats`) ||
 		!strings.Contains(fullPage, `chat_ids: orderedIDs`) {

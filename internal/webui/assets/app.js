@@ -1036,7 +1036,7 @@
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
-        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, voiceChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -2253,6 +2253,9 @@
         hydratingSessionMode() { return !!this.hydratingSession.active; },
         sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
         quickChatMode() { return this.isQuickSession(this.currentSession()); },
+        voiceChatMode() { return this.isVoiceSession(this.currentSession()); },
+        singleChatMode() { return this.quickChatMode() || this.voiceChatMode(); },
+        workspaceSessionMode() { return !this.singleChatMode(); },
         switchingChatMode() { return !!this.switchingChat.active; },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
         sessionURL(id) {
@@ -4906,6 +4909,7 @@
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
         isQuickSession(session) { return String(session?.kind || session?.Kind || '').toLowerCase() === 'quick'; },
+        isVoiceSession(session) { return String(session?.kind || session?.Kind || '').toLowerCase() === 'voice'; },
         workspaceTitleSuffix() {
           const root = String(this.state.project_root || this.state.ProjectRoot || '').trim();
           return root ? `(${root})` : '';
@@ -4970,6 +4974,21 @@
             if (pendingTab && !pendingTab.closed) pendingTab.close();
             this.showToast(err.message || 'Quick Chat creation failed');
           }).finally(() => { this.quickChatCreating = false; });
+        },
+        newVoiceChat() {
+          if (this.voiceChatCreating) return;
+          this.voiceChatCreating = true;
+          this.rpc('new_voice_chat', {title: 'Voice Chat'}).then(result => {
+            const sessionID = String(result?.session_id || '').trim();
+            if (!sessionID) throw new Error('Voice Chat creation returned no session');
+            this.beginHydratingSession(sessionID);
+            this.allowSessionURLSync = true;
+            return this.rpc('switch_session', {session_id: sessionID}).then(state => {
+              this.applyState(state, {scrollToBottom: true});
+              this.closeSessionDialog();
+            });
+          }).catch(err => this.showToast(err.message || 'Voice Chat creation failed'))
+            .finally(() => { this.voiceChatCreating = false; });
         },
         closeQuickChat(id) {
           id = String(id || '').trim();
