@@ -29,6 +29,20 @@ func TestSessionKindJSONAndZeroValue(t *testing.T) {
 	}
 }
 
+func TestVoiceSessionKindJSON(t *testing.T) {
+	data, err := json.Marshal(Session{Kind: SessionKindVoice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Session
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind != SessionKindVoice || decoded.Kind.String() != "voice" {
+		t.Fatalf("decoded kind = %v, want voice", decoded.Kind)
+	}
+}
+
 func TestUsageContextTokens(t *testing.T) {
 	tests := []struct {
 		name string

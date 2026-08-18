@@ -1214,11 +1214,11 @@ func (i *QueuedInputOrigin) UnmarshalText(text []byte) error {
 	return err
 }
 
-const _SessionKindName = "regularquick"
+const _SessionKindName = "regularquickvoice"
 
-var _SessionKindIndex = [...]uint8{0, 7, 12}
+var _SessionKindIndex = [...]uint8{0, 7, 12, 17}
 
-const _SessionKindLowerName = "regularquick"
+const _SessionKindLowerName = "regularquickvoice"
 
 func (i SessionKind) String() string {
 	if i >= SessionKind(len(_SessionKindIndex)-1) {
@@ -1237,20 +1237,24 @@ func _SessionKindNoOp() {
 	var x [1]struct{}
 	_ = x[SessionKindRegular-(0)]
 	_ = x[SessionKindQuick-(1)]
+	_ = x[SessionKindVoice-(2)]
 }
 
-var _SessionKindValues = []SessionKind{SessionKindRegular, SessionKindQuick}
+var _SessionKindValues = []SessionKind{SessionKindRegular, SessionKindQuick, SessionKindVoice}
 
 var _SessionKindNameToValueMap = map[string]SessionKind{
-	_SessionKindName[0:7]:       SessionKindRegular,
-	_SessionKindLowerName[0:7]:  SessionKindRegular,
-	_SessionKindName[7:12]:      SessionKindQuick,
-	_SessionKindLowerName[7:12]: SessionKindQuick,
+	_SessionKindName[0:7]:        SessionKindRegular,
+	_SessionKindLowerName[0:7]:   SessionKindRegular,
+	_SessionKindName[7:12]:       SessionKindQuick,
+	_SessionKindLowerName[7:12]:  SessionKindQuick,
+	_SessionKindName[12:17]:      SessionKindVoice,
+	_SessionKindLowerName[12:17]: SessionKindVoice,
 }
 
 var _SessionKindNames = []string{
 	_SessionKindName[0:7],
 	_SessionKindName[7:12],
+	_SessionKindName[12:17],
 }
 
 // SessionKindString retrieves an enum value from the enum constants string name.

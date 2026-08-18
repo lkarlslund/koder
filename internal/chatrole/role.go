@@ -16,6 +16,7 @@ const (
 	Execution    Role = domain.WorkflowRoleExecution
 	Compaction   Role = domain.WorkflowRoleCompaction
 	Standalone   Role = domain.WorkflowRoleStandalone
+	Voice        Role = domain.WorkflowRoleVoice
 )
 
 // Spec describes a chat role's behavior contract.
@@ -73,6 +74,15 @@ Answer the user's questions and complete requested work directly. Do not create,
 				"chat_rename",
 				"chat_cleanup",
 			),
+		},
+		Voice: {
+			Registered:  true,
+			Name:        Voice,
+			DisplayName: "Voice",
+			SystemPrompt: strings.TrimSpace(`This is a voice coordination chat.
+
+Keep responses concise and suitable for speech. Coordinate work through the dedicated voice routing and delegation services. Do not perform operational work directly.`),
+			AllowTools: toolSet("chat_status"),
 		},
 		Compaction: {
 			Registered:  true,

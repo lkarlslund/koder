@@ -326,6 +326,7 @@ type SessionKind uint8
 const (
 	SessionKindRegular SessionKind = iota
 	SessionKindQuick
+	SessionKindVoice
 )
 
 type WorkflowRole string
@@ -337,6 +338,7 @@ const (
 	WorkflowRoleExecution    WorkflowRole = "execution"
 	WorkflowRoleCompaction   WorkflowRole = "compaction"
 	WorkflowRoleStandalone   WorkflowRole = "standalone"
+	WorkflowRoleVoice        WorkflowRole = "voice"
 )
 
 func (r WorkflowRole) String() string {
