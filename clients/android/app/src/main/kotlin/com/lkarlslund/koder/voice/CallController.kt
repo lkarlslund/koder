@@ -4,9 +4,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
-class CallController(context: Context, private val listener: Listener) : AutoCloseable {
-    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, PROCESSING, SPEAKING, HELD, ERROR }
+class CallController(
+    context: Context,
+    private val listener: Listener,
+    private val microphone: MicrophoneCapture = AndroidMicrophoneCapture(),
+    detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
+	audioPlayback: StreamingAudioPlayback? = null,
+) : AutoCloseable {
+    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, SPEAKING, HELD, ERROR }
 
     data class Snapshot(
         val stage: Stage = Stage.DISCONNECTED,
@@ -14,6 +22,7 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
         val partialTranscript: String = "",
         val sessions: List<VoiceSession> = emptyList(),
         val activeSessionId: String = "",
+        val voiceSessionId: String = "",
     )
 
     interface Listener {
@@ -24,42 +33,27 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
 
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
+	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback { message ->
+		onMain { update(Stage.ERROR, message) }
+	}
+	private val endpointSampleRate = detector.sampleRate
+	private val endpointFrameSamples = detector.frameSamples
+    private val endpoint = VadEndpointPipeline(detector)
     private val connection = VoiceConnection(object : VoiceConnection.Listener {
-        override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading sessions…") }
+        override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading voice chat…") }
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
+        override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
-            if (running) update(Stage.ERROR, reason)
+            microphone.stop()
+            if (running) update(Stage.CONNECTING, "Reconnecting · $reason")
         }
     })
-    private lateinit var speech: DeviceSpeech
-    private val speechListener = object : DeviceSpeech.Listener {
-        override fun onPartial(text: String) = onMain {
-            snapshot = snapshot.copy(partialTranscript = text)
-            publish()
-        }
-
-        override fun onFinal(text: String) = onMain { submit(text) }
-        override fun onSpeechError(message: String, recoverable: Boolean) = onMain {
-            if (!running || snapshot.stage == Stage.PROCESSING || snapshot.stage == Stage.SPEAKING) return@onMain
-            if (recoverable) {
-                update(Stage.LISTENING, message, "")
-                main.postDelayed({ if (running && snapshot.stage == Stage.LISTENING) speech.start() }, 350)
-            } else {
-                update(Stage.ERROR, message)
-            }
-        }
-    }
-    private val tts = DeviceTts(
-        context,
-        doneCallback = { onMain { resumeListening() } },
-        errorCallback = { message -> onMain { update(Stage.ERROR, message) } },
-    )
     private val telecom = TelecomVoiceCall(context, object : TelecomVoiceCall.Listener {
         override fun onCallReady() = onMain { telecomReady = true; maybeListen() }
         override fun onCallHeld(held: Boolean) = onMain {
             if (held) {
-                speech.stop()
-                tts.stop()
+                microphone.stop()
+                playback.stop()
                 update(Stage.HELD, "Call on hold")
             } else {
                 telecomReady = true
@@ -75,31 +69,35 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
         override fun onCallEnded() = onMain { if (running) end() }
         override fun onTelecomUnavailable(message: String) = onMain {
             audioEndpoint = "default audio"
+            telecomReady = true
             update(Stage.CONNECTING, "$message; using default audio")
+            maybeListen()
         }
     })
 
-    private var snapshot = Snapshot()
-    private var running = false
+	@Volatile private var snapshot = Snapshot()
+    @Volatile private var running = false
     private var serverReady = false
     private var telecomReady = false
     private var audioEndpoint = "call audio"
+    private var audioConfig: VoiceAudioConfig? = null
+    private var utteranceId = ""
+    private var inputSequence = 0L
+    private var outputSequence = 0L
+    @Volatile private var acceptingOutput = false
 
-    init {
-        speech = DeviceSpeech(context, speechListener)
-    }
-
-    fun start(server: String, token: String) {
+    fun start(server: String, token: String, voiceSessionId: String = "") {
         if (running) end()
         running = true
         serverReady = false
         telecomReady = false
-        snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…")
+        audioConfig = null
+        snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
         telecom.start()
         try {
-            connection.connect(server, token)
+            connection.connect(server, token, voiceSessionId)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Connection failed")
         }
@@ -108,7 +106,7 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
     fun submit(text: String) {
         val normalized = text.trim()
         if (!running || normalized.isEmpty()) return
-        speech.stop()
+        microphone.stop()
         listener.onUserMessage(normalized)
         update(Stage.PROCESSING, "Koder is working…", "")
         try {
@@ -119,7 +117,7 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
     }
 
     fun selectSession(sessionId: String) {
-        if (!running) return
+        if (!running || sessionId.isBlank()) return
         try {
             connection.selectSession(sessionId)
         } catch (error: Exception) {
@@ -127,14 +125,15 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
         }
     }
 
-    fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) =
-        connection.loadBytes(url, callback)
+    fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) = connection.loadBytes(url, callback)
 
     fun end() {
         if (!running) return
         running = false
-        speech.stop()
-        tts.stop()
+        serverReady = false
+        microphone.stop()
+        playback.stop()
+        endpoint.reset()
         connection.close()
         telecom.disconnect()
         appContext.stopService(Intent(appContext, VoiceCallService::class.java))
@@ -145,44 +144,133 @@ class CallController(context: Context, private val listener: Listener) : AutoClo
     override fun close() {
         end()
         telecom.close()
-        speech.close()
-        tts.close()
+        microphone.close()
+        playback.close()
+        endpoint.close()
         connection.close()
     }
 
     private fun handleFrame(frame: VoiceServerFrame) {
         frame.callState?.let { state ->
-            snapshot = snapshot.copy(sessions = state.sessions, activeSessionId = state.activeSessionId)
+            snapshot = snapshot.copy(
+                sessions = state.sessions,
+                activeSessionId = state.activeSessionId,
+                voiceSessionId = state.voiceSessionId,
+            )
         }
+        frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {
             "ready" -> {
                 serverReady = true
                 maybeListen()
             }
-            "state" -> if (frame.state == "processing") update(Stage.PROCESSING, "Koder is working…", "")
-            "message" -> frame.message?.let { message ->
-                listener.onAssistantMessage(message)
-                if (message.spokenText.isBlank()) {
-                    resumeListening()
+            "state" -> when (frame.state) {
+                "recording" -> update(Stage.RECORDING, "Listening to you…")
+                "transcribing" -> update(Stage.TRANSCRIBING, "Recognizing speech…", "")
+                "processing" -> update(Stage.PROCESSING, "Koder is working…", "")
+                "speaking" -> update(Stage.SPEAKING, "Koder is speaking…", "")
+            }
+            "transcript" -> if (frame.transcript.isNotBlank()) listener.onUserMessage(frame.transcript)
+            "message" -> frame.message?.let(listener::onAssistantMessage)
+            "tts_start" -> {
+                microphone.stop()
+                val format = frame.audioFormat ?: audioConfig?.output
+                if (format == null) {
+                    update(Stage.ERROR, "Server omitted the speech audio format")
                 } else {
+                    outputSequence = 0
+                    acceptingOutput = true
+                    playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
-                    tts.speak(message.spokenText)
                 }
             }
-            "error" -> update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
+            "tts_end" -> {
+                acceptingOutput = false
+                playback.finish { onMain { maybeListen(force = true) } }
+            }
+            "error" -> {
+                acceptingOutput = false
+                playback.stop()
+                update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
+            }
         }
         publish()
     }
 
-    private fun maybeListen() {
-        if (!running || !serverReady || !telecomReady || snapshot.stage == Stage.PROCESSING || snapshot.stage == Stage.SPEAKING) return
+    @Synchronized
+    private fun handleOutputAudio(frame: VoiceAudioFrame) {
+        if (!running || !acceptingOutput) return
+        if (frame.kind != VoiceAudioFrameKind.OUTPUT_PCM || frame.sequence != outputSequence) {
+            acceptingOutput = false
+            playback.stop()
+            onMain { update(Stage.ERROR, "Speech audio arrived out of order") }
+            return
+        }
+        outputSequence++
+        playback.write(frame.pcm)
+    }
+
+    private fun maybeListen(force: Boolean = false) {
+        if (!running || !serverReady || !telecomReady || audioConfig == null) return
+        if (!force && snapshot.stage in setOf(Stage.RECORDING, Stage.TRANSCRIBING, Stage.PROCESSING, Stage.SPEAKING, Stage.HELD)) return
         resumeListening()
     }
 
     private fun resumeListening() {
-        if (!running || !serverReady || !telecomReady) return
+        val format = audioConfig?.input ?: return
+        if (format.sampleRate != endpointSampleRate || format.channels != 1 || format.encoding != "pcm_s16le") {
+            update(Stage.ERROR, "Server microphone format is not supported by on-device VAD")
+            return
+        }
+        endpoint.reset()
+        utteranceId = ""
+        inputSequence = 0
         update(Stage.LISTENING, "Listening · $audioEndpoint", "")
-        speech.start()
+        try {
+            microphone.start(format, endpointFrameSamples, object : MicrophoneCapture.Listener {
+                override fun onFrame(samples: ShortArray) = processMicrophoneFrame(format, samples)
+                override fun onCaptureError(message: String) = onMain { update(Stage.ERROR, message) }
+            })
+        } catch (error: Exception) {
+            update(Stage.ERROR, error.message ?: "Could not start microphone")
+        }
+    }
+
+    @Synchronized
+    private fun processMicrophoneFrame(format: VoiceAudioFormat, samples: ShortArray) {
+        if (!running) return
+        try {
+            for (event in endpoint.accept(samples)) {
+                when (event) {
+                    is UtteranceEvent.Started -> {
+                        utteranceId = connection.startAudio(format)
+                        inputSequence = 0
+                        event.frames.forEach(::sendPCM)
+                        onMain { update(Stage.RECORDING, "Listening to you…") }
+                    }
+                    is UtteranceEvent.Continued -> sendPCM(event.frame)
+                    is UtteranceEvent.Committed -> {
+                        val completedId = utteranceId
+                        utteranceId = ""
+                        microphone.stop()
+                        connection.commitAudio(completedId, snapshot.activeSessionId)
+                        onMain { update(Stage.TRANSCRIBING, "Recognizing speech…", "") }
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            val failedId = utteranceId
+            utteranceId = ""
+            microphone.stop()
+            connection.cancelAudio(failedId)
+            onMain { update(Stage.ERROR, error.message ?: "Voice capture failed") }
+        }
+    }
+
+    private fun sendPCM(samples: ShortArray) {
+        val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        samples.forEach(pcm::putShort)
+        connection.sendAudio(inputSequence++, pcm.array())
     }
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {

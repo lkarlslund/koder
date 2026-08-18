@@ -32,6 +32,7 @@ import com.lkarlslund.koder.voice.VoiceSession
 @SuppressLint("SetTextI18n")
 class MainActivity : Activity(), CallController.Listener {
     private lateinit var controller: CallController
+	private lateinit var secureSettings: SecureSettings
     private lateinit var server: EditText
     private lateinit var token: EditText
     private lateinit var callButton: Button
@@ -48,6 +49,7 @@ class MainActivity : Activity(), CallController.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+		secureSettings = SecureSettings(this)
         controller = CallController(this, this)
         buildUi()
         restoreSettings()
@@ -289,16 +291,13 @@ class MainActivity : Activity(), CallController.Listener {
     private fun scrollToBottom() = feedScroll.post { feedScroll.fullScroll(View.FOCUS_DOWN) }
 
     private fun restoreSettings() {
-        val preferences = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
-        server.setText(preferences.getString("server", "http://10.0.2.2:7979"))
-        token.setText(preferences.getString("token", ""))
+		val values = secureSettings.load()
+		server.setText(values.server)
+		token.setText(values.token)
     }
 
     private fun saveSettings() {
-        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
-            .putString("server", server.text.toString().trim())
-            .putString("token", token.text.toString())
-            .apply()
+		secureSettings.save(server.text.toString(), token.text.toString())
     }
 
     private fun requiredPermissions(): List<String> = buildList {
@@ -318,6 +317,5 @@ class MainActivity : Activity(), CallController.Listener {
 
     companion object {
         private const val PERMISSION_REQUEST = 80
-        private const val PREFERENCES = "koder_voice"
     }
 }
