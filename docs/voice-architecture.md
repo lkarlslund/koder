@@ -42,9 +42,10 @@ built products joined by a versioned protocol under `protocol/voice`.
 The design separates durable conversation, transient media, and delegated
 work.
 
-### Voice hub
+### Voice chat (voice hub)
 
-The voice hub is a persistent Koder session with a dedicated workflow role. It
+The user-facing object is a voice chat. Internally it is a persistent Koder
+voice-hub session with a dedicated workflow role. It
 holds the durable transcript of final user utterances, spoken responses,
 clarifications, confirmations, and references to delegated work.
 
@@ -59,9 +60,11 @@ SessionKindVoiceHub
 WorkflowRoleVoice
 ```
 
-A voice hub has no project root. Initially, one hub per Koder installation is
-sufficient. The domain model should not prevent multiple identities or hubs in
-the future.
+A voice hub has no project root. A user may create multiple voice chats for
+different ongoing contexts, and each retains its own transcript, routing
+memory, and delegation history. Voice chats are visible and interactive in the
+Web UI: the user can inspect the transcript and routing decisions, type into the
+chat, resume it, rename it, or archive it.
 
 ### Voice call
 
@@ -72,6 +75,11 @@ session.
 
 Call records need only be retained long enough to support reconnection and
 diagnostics. Final utterances and responses belong to the hub timeline.
+
+The first release permits exactly one active voice call per Koder process. A
+call activates one selected voice chat; all other voice chats remain durable,
+visible, and resumable but cannot own live audio until the active call ends.
+This is a server-enforced lease, not merely an Android UI convention.
 
 ### Delegation
 
@@ -734,13 +742,21 @@ Acceptance criteria:
 ### Phase 1: text-only voice hub and delegation
 
 - Add voice session kind and workflow role.
-- Create or load the installation's persistent hub.
+- Create, select, and load persistent voice chats.
+- Show voice chats and their transcripts in the Web UI and allow typed
+  interaction there.
+- Enforce one active voice-call lease while allowing multiple durable voice
+  chats.
 - Implement bounded session search and cross-session delegation.
 - Forward worker completion, input requests, and approvals to the hub.
 - Add generic multimodal response persistence without Android audio.
 
 Acceptance criteria:
 
+- Multiple voice chats can coexist, while a second live call is rejected or
+  offered a handoff until the first ends.
+- A voice chat can be inspected and continued from the Web UI without an
+  Android connection.
 - A text integration test can resume a named existing session.
 - A one-off request can use a temporary session.
 - Worker questions and results return to the originating hub utterance.
@@ -813,6 +829,8 @@ Unless testing disproves them:
 - Use JSON control frames and binary PCM media frames.
 - Use MIME-typed message parts and authenticated artifact references.
 - Keep voice coordination persistent and calls ephemeral.
+- Allow multiple durable voice chats, with only one active voice call at a
+  time initially.
 - Keep delegated work inside ordinary permission-scoped chats.
 - Require explicit application authentication even on a private network.
 
@@ -820,7 +838,8 @@ Unless testing disproves them:
 
 The following should be resolved before or during the indicated phase:
 
-- Whether there is exactly one voice hub or one per configured identity.
+- Whether active-call exclusivity remains process-wide or becomes per-user
+  once Koder has multiple authenticated identities.
 - Whether a temporary session is visible in the browser UI before promotion.
 - The initial Android minimum API level supported by the chosen Core-Telecom
   release.
