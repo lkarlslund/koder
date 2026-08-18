@@ -33,6 +33,41 @@ type Backend interface {
 	DelegateVoice(context.Context, string, string) (DelegationResult, error)
 }
 
+// RouteAction is a constrained decision produced by the voice coordination
+// profile. The coordinator validates every decision before acting on it.
+type RouteAction string
+
+const (
+	RouteExisting      RouteAction = "existing"
+	RouteNewTemporary  RouteAction = "new_temporary"
+	RouteNewPersistent RouteAction = "new_persistent"
+	RouteClarify       RouteAction = "clarify"
+)
+
+// RouteRequest contains only bounded summaries, never full chat transcripts.
+type RouteRequest struct {
+	Text            string
+	ActiveSessionID string
+	Sessions        []Session
+}
+
+// RouteDecision selects a target lifecycle and whether the utterance itself is
+// work to delegate. A selection-only request can set Delegate to false.
+type RouteDecision struct {
+	Action    RouteAction
+	SessionID string
+	Title     string
+	Question  string
+	Delegate  bool
+}
+
+// RoutingBackend is optional so simple embedders can retain deterministic
+// lexical routing. Koder's production controller implements it.
+type RoutingBackend interface {
+	ResolveVoiceRoute(context.Context, RouteRequest) (RouteDecision, error)
+	CreateVoiceTarget(context.Context, string, bool) (Session, error)
+}
+
 const PCM16LE = "pcm_s16le"
 
 // AudioFormat describes raw audio without tying presentations to a fixed set
@@ -161,10 +196,6 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 	if err != nil {
 		return Message{}, err
 	}
-	if len(state.Sessions) == 0 {
-		return textMessage("There are no Koder sessions yet. Create one in the browser first."), nil
-	}
-
 	if targetSessionID = strings.TrimSpace(targetSessionID); targetSessionID != "" {
 		if _, ok := sessionByID(state.Sessions, targetSessionID); !ok {
 			return Message{}, fmt.Errorf("session %q was not found", targetSessionID)
@@ -174,11 +205,25 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 	}
 
 	if asksForSessionList(text) {
+		if len(state.Sessions) == 0 {
+			return textMessage("There are no work sessions yet."), nil
+		}
 		return textMessage(sessionListResponse(state.Sessions)), nil
 	}
 	if session, ok := requestedSession(state.Sessions, text); ok {
 		c.activeSessionID = session.ID
 		return textMessage("I found " + session.Title + ". What should we do there?"), nil
+	}
+	if router, ok := c.backend.(RoutingBackend); ok {
+		decision, routeErr := router.ResolveVoiceRoute(ctx, RouteRequest{
+			Text: text, ActiveSessionID: c.activeSessionID, Sessions: state.Sessions,
+		})
+		if routeErr == nil {
+			return c.applyRoute(ctx, router, state.Sessions, text, decision)
+		}
+	}
+	if len(state.Sessions) == 0 {
+		return textMessage("There are no Koder sessions yet. Create one in the browser first."), nil
 	}
 	if c.activeSessionID == "" {
 		if len(state.Sessions) == 1 {
@@ -190,6 +235,48 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 		}
 	}
 	return c.delegate(ctx, text)
+}
+
+func (c *Call) applyRoute(
+	ctx context.Context,
+	backend RoutingBackend,
+	sessions []Session,
+	text string,
+	decision RouteDecision,
+) (Message, error) {
+	switch decision.Action {
+	case RouteExisting:
+		session, ok := sessionByID(sessions, strings.TrimSpace(decision.SessionID))
+		if !ok {
+			return Message{}, fmt.Errorf("voice router selected unknown session %q", decision.SessionID)
+		}
+		c.activeSessionID = session.ID
+		if !decision.Delegate {
+			return textMessage("Using " + session.Title + ". What should we do there?"), nil
+		}
+		return c.delegate(ctx, text)
+	case RouteNewTemporary, RouteNewPersistent:
+		created, err := backend.CreateVoiceTarget(ctx, strings.TrimSpace(decision.Title), decision.Action == RouteNewPersistent)
+		if err != nil {
+			return Message{}, err
+		}
+		if strings.TrimSpace(created.ID) == "" {
+			return Message{}, fmt.Errorf("voice backend created a target without an id")
+		}
+		c.activeSessionID = created.ID
+		if !decision.Delegate {
+			return textMessage("Created " + created.Title + ". What should we do there?"), nil
+		}
+		return c.delegate(ctx, text)
+	case RouteClarify:
+		question := strings.TrimSpace(decision.Question)
+		if question == "" {
+			question = "Should I use an existing session or start a new one?"
+		}
+		return textMessage(concise(question, 240)), nil
+	default:
+		return Message{}, fmt.Errorf("voice router returned unsupported action %q", decision.Action)
+	}
 }
 
 func (c *Call) delegate(ctx context.Context, text string) (Message, error) {

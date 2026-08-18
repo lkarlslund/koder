@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -105,9 +106,10 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 	if err != nil {
 		return nil, err
 	}
-	out := make([]voice.Session, 0, len(state.Sessions))
-	for _, session := range state.Sessions {
-		if session.Kind != domain.SessionKindRegular {
+	all := append(append([]domain.Session(nil), state.Sessions...), state.QuickChats...)
+	out := make([]voice.Session, 0, len(all))
+	for _, session := range all {
+		if session.Kind != domain.SessionKindRegular && session.Kind != domain.SessionKindQuick {
 			continue
 		}
 		out = append(out, voice.Session{
@@ -118,6 +120,132 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 		})
 	}
 	return out, nil
+}
+
+// ResolveVoiceRoute runs the constrained voice coordination profile against
+// bounded session summaries. The coordinator validates its structured output
+// before it can select or create anything.
+func (c *Controller) ResolveVoiceRoute(ctx context.Context, request voice.RouteRequest) (voice.RouteDecision, error) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	providerID, modelID := cfg.ResolveModel(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok || providerCfg.Disabled || strings.TrimSpace(modelID) == "" {
+		return voice.RouteDecision{}, fmt.Errorf("default model for voice routing is not configured")
+	}
+	client, err := provider.New(providerID, providerCfg, nil)
+	if err != nil {
+		return voice.RouteDecision{}, err
+	}
+	type routeSession struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		LastMessage string `json:"last_message,omitempty"`
+	}
+	sessions := make([]routeSession, 0, min(len(request.Sessions), 20))
+	for _, session := range request.Sessions[:min(len(request.Sessions), 20)] {
+		sessions = append(sessions, routeSession{
+			ID: session.ID, Title: truncateVoiceRouteText(session.Title, 100),
+			LastMessage: truncateVoiceRouteText(session.LastMessage, 240),
+		})
+	}
+	payload, err := json.Marshal(map[string]any{
+		"utterance": request.Text, "active_session_id": request.ActiveSessionID, "sessions": sessions,
+	})
+	if err != nil {
+		return voice.RouteDecision{}, err
+	}
+	response, err := client.CompleteChat(ctx, provider.ChatRequest{
+		Model: modelID,
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: voiceRouterPrompt},
+			{Role: provider.RoleUser, Content: string(payload)},
+		},
+		Stream: false,
+	})
+	if err != nil {
+		return voice.RouteDecision{}, fmt.Errorf("resolve voice route: %w", err)
+	}
+	decision, err := decodeVoiceRoute(response.Text)
+	if err != nil {
+		return voice.RouteDecision{}, fmt.Errorf("decode voice route: %w", err)
+	}
+	return decision, nil
+}
+
+// CreateVoiceTarget creates either a disposable one-chat managed workspace or
+// a normal persistent session in the current workspace.
+func (c *Controller) CreateVoiceTarget(ctx context.Context, title string, persistent bool) (voice.Session, error) {
+	title = truncateVoiceRouteText(strings.TrimSpace(title), 80)
+	if title == "" {
+		title = "Voice task"
+	}
+	var created domain.Session
+	var err error
+	if persistent {
+		created, err = c.CreateSession(ctx, title, "", false)
+	} else {
+		created, _, err = c.CreateQuickChat(ctx)
+		if err == nil {
+			err = c.RenameSession(ctx, created.ID, title)
+			created.Title = title
+		}
+	}
+	if err != nil {
+		return voice.Session{}, fmt.Errorf("create voice target: %w", err)
+	}
+	return voice.Session{
+		ID: string(created.ID), Title: voiceSessionTitle(created), LastMessage: created.LastMessage, UpdatedAt: created.UpdatedAt,
+	}, nil
+}
+
+const voiceRouterPrompt = `You route a phone-style Koder voice request.
+Return exactly one JSON object and no markdown:
+{"action":"existing|new_temporary|new_persistent|clarify","session_id":"","title":"","question":"","delegate":true}
+
+Rules:
+- existing: use only an exact supplied session id. Prefer the active session when this clearly continues it.
+- new_temporary: use for a self-contained one-off task when no supplied session is relevant.
+- new_persistent: use only when the user explicitly asks to create/keep a durable session or the work is clearly an ongoing project.
+- clarify: only when the choice materially changes the result; ask one short voice-friendly question.
+- delegate is false only when the utterance merely selects or creates a session and contains no work request.
+- Give a short descriptive title for a new target. Do not answer or perform the user's task.`
+
+func decodeVoiceRoute(text string) (voice.RouteDecision, error) {
+	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	if start < 0 || end < start {
+		return voice.RouteDecision{}, fmt.Errorf("model did not return a JSON object")
+	}
+	var wire struct {
+		Action    voice.RouteAction `json:"action"`
+		SessionID string            `json:"session_id"`
+		Title     string            `json:"title"`
+		Question  string            `json:"question"`
+		Delegate  bool              `json:"delegate"`
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), &wire); err != nil {
+		return voice.RouteDecision{}, err
+	}
+	switch wire.Action {
+	case voice.RouteExisting, voice.RouteNewTemporary, voice.RouteNewPersistent, voice.RouteClarify:
+	default:
+		return voice.RouteDecision{}, fmt.Errorf("unsupported action %q", wire.Action)
+	}
+	return voice.RouteDecision{
+		Action: wire.Action, SessionID: strings.TrimSpace(wire.SessionID),
+		Title: truncateVoiceRouteText(wire.Title, 80), Question: truncateVoiceRouteText(wire.Question, 240),
+		Delegate: wire.Delegate,
+	}, nil
+}
+
+func truncateVoiceRouteText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit]))
 }
 
 // EnsureVoiceSession resolves an explicitly requested durable voice chat or

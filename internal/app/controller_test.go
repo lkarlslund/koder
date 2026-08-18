@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2431,6 +2432,93 @@ func TestEnsureVoiceSessionCreatesFirstDurableChat(t *testing.T) {
 	if again.ID != created.ID {
 		t.Fatalf("expected newest voice session reuse, got %#v after %#v", again, created)
 	}
+}
+
+func TestDecodeVoiceRouteAcceptsFencedModelOutput(t *testing.T) {
+	decision, err := decodeVoiceRoute("```json\n{\"action\":\"existing\",\"session_id\":\"session-1\",\"delegate\":true}\n```")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != voice.RouteExisting || decision.SessionID != "session-1" || !decision.Delegate {
+		t.Fatalf("decision = %#v", decision)
+	}
+}
+
+func TestDecodeVoiceRouteRejectsUnconstrainedAction(t *testing.T) {
+	if _, err := decodeVoiceRoute(`{"action":"delete_everything","delegate":true}`); err == nil {
+		t.Fatal("expected unsupported action error")
+	}
+}
+
+func TestResolveVoiceRouteUsesDefaultModelAndBoundedSummaries(t *testing.T) {
+	var requestBody string
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected route model path %q", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBody = string(body)
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"action\":\"existing\",\"session_id\":\"mail\",\"delegate\":true}"},"finish_reason":"stop"}]}`)
+	}))
+	defer modelServer.Close()
+	cfg := config.Default()
+	cfg.Defaults.ProviderID = "router"
+	cfg.Defaults.ModelID = "route-model"
+	cfg.Providers = map[string]config.Provider{
+		"router": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+	}
+	ctrl := &Controller{cfg: cfg}
+	sessions := make([]voice.Session, 25)
+	for index := range sessions {
+		sessions[index] = voice.Session{ID: fmt.Sprintf("session-%d", index), Title: strings.Repeat("x", 140)}
+	}
+	sessions[0] = voice.Session{ID: "mail", Title: "Inbox"}
+	decision, err := ctrl.ResolveVoiceRoute(context.Background(), voice.RouteRequest{
+		Text: "Check whether Steen replied", ActiveSessionID: "mail", Sessions: sessions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != voice.RouteExisting || decision.SessionID != "mail" || !decision.Delegate {
+		t.Fatalf("decision = %#v", decision)
+	}
+	if !strings.Contains(requestBody, `"model":"route-model"`) || strings.Contains(requestBody, "session-24") {
+		t.Fatalf("unexpected bounded route request: %s", requestBody)
+	}
+}
+
+func TestCreateVoiceTargetSupportsTemporaryAndPersistentSessions(t *testing.T) {
+	ctrl, _ := newTestControllerWithConfig(t, nil)
+	temporary, err := ctrl.CreateVoiceTarget(context.Background(), "One-off calendar entry", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistent, err := ctrl.CreateVoiceTarget(context.Background(), "Ongoing travel plan", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := ctrl.Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sessionIDIn(state.QuickChats, id.ID(temporary.ID)) {
+		t.Fatalf("temporary target %s missing from quick chats", temporary.ID)
+	}
+	if !sessionIDIn(state.Sessions, id.ID(persistent.ID)) {
+		t.Fatalf("persistent target %s missing from sessions", persistent.ID)
+	}
+}
+
+func sessionIDIn(sessions []domain.Session, target id.ID) bool {
+	for _, session := range sessions {
+		if session.ID == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCloseQuickChatRemovesItFromQuickList(t *testing.T) {

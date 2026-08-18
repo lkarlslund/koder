@@ -11,6 +11,32 @@ type fakeBackend struct {
 	delegations []struct{ sessionID, text string }
 }
 
+type fakeRoutingBackend struct {
+	fakeBackend
+	decision RouteDecision
+	routeErr error
+	request  RouteRequest
+	created  []struct {
+		title      string
+		persistent bool
+	}
+}
+
+func (f *fakeRoutingBackend) ResolveVoiceRoute(_ context.Context, request RouteRequest) (RouteDecision, error) {
+	f.request = request
+	return f.decision, f.routeErr
+}
+
+func (f *fakeRoutingBackend) CreateVoiceTarget(_ context.Context, title string, persistent bool) (Session, error) {
+	f.created = append(f.created, struct {
+		title      string
+		persistent bool
+	}{title, persistent})
+	created := Session{ID: "created", Title: title}
+	f.sessions = append(f.sessions, created)
+	return created, nil
+}
+
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]Session, error) {
 	return append([]Session(nil), f.sessions...), nil
 }
@@ -68,5 +94,70 @@ func TestCallUsesExplicitTarget(t *testing.T) {
 	}
 	if len(backend.delegations) != 1 || backend.delegations[0].sessionID != "two" {
 		t.Fatalf("delegations = %#v", backend.delegations)
+	}
+}
+
+func TestCallUsesSemanticRouteAndDelegates(t *testing.T) {
+	backend := &fakeRoutingBackend{
+		fakeBackend: fakeBackend{sessions: []Session{
+			{ID: "mail", Title: "Inbox maintenance"},
+			{ID: "laptop", Title: "Linux repair"},
+		}},
+		decision: RouteDecision{Action: RouteExisting, SessionID: "mail", Delegate: true},
+	}
+	message, err := NewCall(backend).HandleText(context.Background(), "See whether Steen replied", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.request.Text != "See whether Steen replied" || backend.request.ActiveSessionID != "" {
+		t.Fatalf("route request = %#v", backend.request)
+	}
+	if len(backend.delegations) != 1 || backend.delegations[0].sessionID != "mail" {
+		t.Fatalf("delegations = %#v", backend.delegations)
+	}
+	if message.Delegation == nil {
+		t.Fatalf("message = %#v, want delegation", message)
+	}
+}
+
+func TestCallCreatesTemporaryTargetFromRoute(t *testing.T) {
+	backend := &fakeRoutingBackend{
+		decision: RouteDecision{Action: RouteNewTemporary, Title: "Appointment with Steen", Delegate: true},
+	}
+	_, err := NewCall(backend).HandleText(context.Background(), "I have an appointment tomorrow at ten with Steen", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.created) != 1 || backend.created[0].title != "Appointment with Steen" || backend.created[0].persistent {
+		t.Fatalf("created targets = %#v", backend.created)
+	}
+	if len(backend.delegations) != 1 || backend.delegations[0].sessionID != "created" {
+		t.Fatalf("delegations = %#v", backend.delegations)
+	}
+}
+
+func TestCallCreatesPersistentTargetWithoutDelegatingSelectionCommand(t *testing.T) {
+	backend := &fakeRoutingBackend{
+		decision: RouteDecision{Action: RouteNewPersistent, Title: "Travel planning", Delegate: false},
+	}
+	message, err := NewCall(backend).HandleText(context.Background(), "Start a persistent travel planning session", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.created) != 1 || !backend.created[0].persistent {
+		t.Fatalf("created targets = %#v", backend.created)
+	}
+	if len(backend.delegations) != 0 || message.SpokenText != "Created Travel planning. What should we do there?" {
+		t.Fatalf("message = %#v, delegations = %#v", message, backend.delegations)
+	}
+}
+
+func TestCallRejectsUnknownSemanticSession(t *testing.T) {
+	backend := &fakeRoutingBackend{
+		fakeBackend: fakeBackend{sessions: []Session{{ID: "known", Title: "Known"}}},
+		decision:    RouteDecision{Action: RouteExisting, SessionID: "invented", Delegate: true},
+	}
+	if _, err := NewCall(backend).HandleText(context.Background(), "Do something", ""); err == nil {
+		t.Fatal("expected invalid route error")
 	}
 }
