@@ -63,13 +63,14 @@ type VoiceSessionBackend interface {
 	RecordVoiceExchange(context.Context, string, string, Message) error
 }
 
-// Part is one generic MIME-typed visible response part.
+// Part is one generic MIME-typed presentation. Data may be any JSON value;
+// clients render known MIME types and retain a useful fallback for unknown ones.
 type Part struct {
-	MIMEType string `json:"mime_type"`
-	Text     string `json:"text,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Alt      string `json:"alt,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	MIMEType string            `json:"mime_type"`
+	Data     any               `json:"data,omitempty"`
+	URI      string            `json:"uri,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // Message is the concise response returned to the voice client.
@@ -187,13 +188,13 @@ func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
 	}
 	return Message{
 		SpokenText: spoken,
-		Parts:      []Part{{MIMEType: "text/plain", Text: result.Text}},
+		Parts:      []Part{{MIMEType: "text/plain", Data: result.Text}},
 		Delegation: &result,
 	}, nil
 }
 
 func textMessage(text string) Message {
-	return Message{SpokenText: text, Parts: []Part{{MIMEType: "text/plain", Text: text}}}
+	return Message{SpokenText: text, Parts: []Part{{MIMEType: "text/plain", Data: text}}}
 }
 
 func sessionExists(sessions []Session, id string) bool {

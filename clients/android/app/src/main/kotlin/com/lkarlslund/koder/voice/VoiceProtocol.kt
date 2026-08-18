@@ -15,12 +15,17 @@ data class VoiceSession(
 )
 
 data class VoicePart(
+	val id: String = "",
     val mimeType: String,
-    val text: String = "",
-    val url: String = "",
-    val name: String = "",
-    val alt: String = "",
-)
+	val data: Any? = null,
+	val uri: String = "",
+	val metadata: Map<String, String> = emptyMap(),
+) {
+	val text: String get() = data as? String ?: ""
+	val url: String get() = uri
+	val name: String get() = metadata["name"].orEmpty()
+	val alt: String get() = metadata["alt"].orEmpty()
+}
 
 data class VoiceDelegation(
     val sessionId: String,
@@ -256,11 +261,14 @@ object VoiceProtocol {
         spokenText = optString("spoken_text"),
         parts = optJSONArray("parts").mapObjects { item ->
             VoicePart(
+				id = item.optString("id"),
                 mimeType = item.getString("mime_type"),
-                text = item.optString("text"),
-                url = item.optString("url"),
-                name = item.optString("name"),
-                alt = item.optString("alt"),
+				data = if (item.has("data")) item.get("data") else item.optString("text"),
+				uri = item.optString("uri", item.optString("url")),
+				metadata = mapOf(
+					"name" to item.optString("name"),
+					"alt" to item.optString("alt"),
+				).filterValues { it.isNotBlank() } + item.optJSONObject("metadata")?.toStringMap().orEmpty(),
             )
         },
         delegation = optJSONObject("delegation")?.let { item ->
@@ -277,6 +285,9 @@ object VoiceProtocol {
         if (this == null) return emptyList()
         return List(length()) { index -> transform(getJSONObject(index)) }
     }
+
+	private fun JSONObject.toStringMap(): Map<String, String> = keys().asSequence()
+		.associateWith { key -> optString(key) }
 
 	private val AUDIO_MAGIC = byteArrayOf('K'.code.toByte(), 'V'.code.toByte(), 'A'.code.toByte(), '1'.code.toByte())
 	private const val AUDIO_HEADER_BYTES = 12

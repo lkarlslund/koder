@@ -79,7 +79,7 @@ class MainActivity : Activity(), CallController.Listener {
     override fun onAssistantMessage(message: VoiceMessage) {
         runOnUiThread {
             val visibleParts = message.parts.ifEmpty {
-                listOf(VoicePart(mimeType = "text/plain", text = message.spokenText))
+				listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
             }
             visibleParts.forEach { addPart(it) }
         }
@@ -252,6 +252,7 @@ class MainActivity : Activity(), CallController.Listener {
             append(part.name.ifBlank { "Koder attachment" })
             append("\n")
             append(part.alt.ifBlank { part.mimeType })
+			if (part.data != null) append("\n${part.data}")
             if (part.url.isNotBlank()) append("\nOpen ${part.url}")
         }
         val card = card().apply {
