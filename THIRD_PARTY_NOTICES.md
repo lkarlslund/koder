@@ -54,6 +54,17 @@ The web UI serves static third-party browser assets from
 | marked | 18.0.3 | MIT |
 | Mermaid | 11.10.1 | MIT |
 
+## Android Dependencies And Generated Assets
+
+The Android client downloads the Silero VAD ONNX model from a pinned upstream
+commit during its build and verifies the model digest before packaging it. The
+model is distributed under the MIT license.
+
+| Dependency or asset | Version | License |
+| --- | --- | --- |
+| ONNX Runtime Android | 1.29.0 | MIT |
+| Silero VAD model | commit `806dcba3f0b5d95282d0889a074954a2f8c6397b` | MIT |
+
 ## Research Directory
 
 The `research/` directory contains snapshots of other projects for comparison

@@ -191,14 +191,22 @@ Barge-in transitions speaking to listening after cancelling playback.
 
 ### Voice activity detection
 
-VAD runs on the phone and should:
+VAD runs on the phone. The selected first implementation is Silero VAD through
+ONNX Runtime Android, called directly from Kotlin. The model is pinned by
+upstream commit and SHA-256 during the build rather than checked into Git. It
+consumes 512-sample mono PCM16 frames at 16 kHz (32 ms), preserves the model's
+recurrent state and 64-sample context between frames, and resets both at stream
+boundaries.
 
-- Retain a configurable 300–500 ms pre-roll buffer.
-- Start an utterance with the pre-roll when speech is detected.
-- Commit after a configurable period of silence.
-- Enforce a maximum utterance duration.
-- Stop or duck assistant playback on barge-in.
-- Continue showing an explicit listening indicator whenever the microphone is
+Endpointing is a separate state machine so its policy can be tested without the
+model or Android hardware. It:
+
+- Retains a configurable 300–500 ms pre-roll buffer.
+- Starts an utterance with the pre-roll when speech is detected.
+- Commits after a configurable period of silence.
+- Enforces a maximum utterance duration.
+- Stops or ducks assistant playback on barge-in.
+- Continues showing an explicit listening indicator whenever the microphone is
   active.
 
 The protocol remains compatible with server-side endpointing, but Android VAD
@@ -816,7 +824,6 @@ The following should be resolved before or during the indicated phase:
 - Whether a temporary session is visible in the browser UI before promotion.
 - The initial Android minimum API level supported by the chosen Core-Telecom
   release.
-- The VAD implementation and tuning strategy.
 - The exact binary audio-frame header.
 - Certificate provisioning and server discovery outside private-overlay
   networks.
