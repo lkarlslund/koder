@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -55,6 +56,48 @@ func TestListingTabsDoesNotStartBrowser(t *testing.T) {
 	}
 	if len(tabs) != 0 || m.state != stateStopped || m.browserCtx != nil {
 		t.Fatalf("tab listing started browser: tabs=%#v state=%s", tabs, m.state)
+	}
+}
+
+func TestOperationContextHonorsParentCancellation(t *testing.T) {
+	m := NewManager(config.Browser{OperationTimeout: time.Minute}, t.TempDir())
+	parent, cancelParent := context.WithCancel(context.Background())
+	ctx, cancel := m.operationContext(parent, context.Background())
+	defer cancel()
+	cancelParent()
+	select {
+	case <-ctx.Done():
+		if ctx.Err() != context.Canceled {
+			t.Fatalf("operation error = %v, want context canceled", ctx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("operation context ignored parent cancellation")
+	}
+}
+
+func TestUnresponsiveBrowserIsInvalidated(t *testing.T) {
+	m := NewManager(config.Browser{}, t.TempDir())
+	browserCtx, cancelBrowser := context.WithCancel(context.Background())
+	m.state = stateRunning
+	m.browserCtx = browserCtx
+	m.stop = cancelBrowser
+	m.tabs["tab"] = &ownedTab{id: "tab", cancel: func() {}}
+	m.invalidateUnhealthyBrowser(context.Background(), browserCtx, context.DeadlineExceeded)
+	if m.state != stateError || m.browserCtx != nil || len(m.tabs) != 0 || !strings.Contains(m.lastErr, "was reset") {
+		t.Fatalf("browser was not invalidated: state=%s context=%v tabs=%d error=%q", m.state, m.browserCtx, len(m.tabs), m.lastErr)
+	}
+}
+
+func TestCallerCancellationDoesNotInvalidateBrowser(t *testing.T) {
+	m := NewManager(config.Browser{}, t.TempDir())
+	browserCtx := context.Background()
+	m.state = stateRunning
+	m.browserCtx = browserCtx
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+	m.invalidateUnhealthyBrowser(parent, browserCtx, context.DeadlineExceeded)
+	if m.state != stateRunning || m.browserCtx != browserCtx {
+		t.Fatalf("caller cancellation invalidated browser: state=%s context=%v", m.state, m.browserCtx)
 	}
 }
 

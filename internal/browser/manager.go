@@ -45,6 +45,7 @@ const (
 	stateError          = "error"
 	maxBinarySize       = 25 * 1024 * 1024
 	gracefulStopTimeout = 3 * time.Second
+	tabListTimeout      = 2 * time.Second
 )
 
 type ownedTab struct {
@@ -307,13 +308,18 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 	}
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
+	opCtx, cancel := m.operationContext(ctx, browserCtx)
+	defer cancel()
+	listCtx, listCancel := context.WithTimeout(opCtx, tabListTimeout)
+	defer listCancel()
 	var infos []*target.Info
-	err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+	err := chromedp.Run(listCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var listErr error
 		infos, listErr = target.GetTargets().Do(ctx)
 		return listErr
 	}))
 	if err != nil {
+		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return nil, fmt.Errorf("list browser tabs: %w", err)
 	}
 	m.syncTargets(infos)
@@ -398,7 +404,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	}
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	createCtx, createCancel := context.WithTimeout(browserCtx, m.timeout())
+	createCtx, createCancel := m.operationContext(ctx, browserCtx)
 	var targetID target.ID
 	err := chromedp.Run(createCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var createErr error
@@ -407,12 +413,14 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	}))
 	createCancel()
 	if err != nil {
+		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return browserapi.Tab{}, fmt.Errorf("open browser tab: %w", err)
 	}
 	tabCtx, cancel := chromedp.NewContext(browserCtx, chromedp.WithTargetID(targetID))
 	err = chromedp.Run(tabCtx)
 	if err != nil {
 		cancel()
+		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return browserapi.Tab{}, fmt.Errorf("attach browser tab: %w", err)
 	}
 	tab := &ownedTab{id: newOpaqueID("tab"), targetID: targetID, owner: chat, ctx: tabCtx, cancel: cancel, requests: map[string]*requestState{}}
@@ -1483,6 +1491,40 @@ func (m *Manager) operationContext(parent, tabCtx context.Context) (context.Cont
 		}
 	}()
 	return merged, func() { mergedCancel(); cancel() }
+}
+
+func (m *Manager) invalidateUnhealthyBrowser(parent, browserCtx context.Context, operationErr error) {
+	if operationErr == nil || (parent != nil && parent.Err() != nil) || !errors.Is(operationErr, context.DeadlineExceeded) {
+		return
+	}
+	m.mu.Lock()
+	if m.browserCtx != browserCtx {
+		m.mu.Unlock()
+		return
+	}
+	stop, allocStop := m.stop, m.allocStop
+	tabs := make([]*ownedTab, 0, len(m.tabs))
+	for _, tab := range m.tabs {
+		tabs = append(tabs, tab)
+	}
+	m.browserCtx, m.allocCtx = nil, nil
+	m.stop, m.allocStop = nil, nil
+	m.tabs = map[string]*ownedTab{}
+	m.selected = map[id.ID]string{}
+	m.downloads = map[string]*downloadState{}
+	m.state = stateError
+	m.lastErr = "browser connection became unresponsive and was reset: " + operationErr.Error()
+	m.mu.Unlock()
+	for _, tab := range tabs {
+		tab.cancel()
+	}
+	if stop != nil {
+		stop()
+	}
+	if allocStop != nil {
+		allocStop()
+	}
+	_ = os.RemoveAll(filepath.Join(m.stateDir, "run"))
 }
 
 func (m *Manager) setError(err error) {
