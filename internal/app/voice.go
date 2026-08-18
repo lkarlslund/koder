@@ -8,8 +8,92 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/voice"
 )
+
+// VoiceAudioConfig returns the PCM contract used by the native voice client.
+func (c *Controller) VoiceAudioConfig() voice.AudioConfig {
+	c.mu.RLock()
+	voiceCfg := c.cfg.Voice
+	c.mu.RUnlock()
+	return voice.AudioConfig{
+		Input: voice.AudioFormat{
+			Encoding: voice.PCM16LE, SampleRate: voiceCfg.InputSampleRate, Channels: 1,
+		},
+		Output: voice.AudioFormat{
+			Encoding: voice.PCM16LE, SampleRate: voiceCfg.OutputSampleRate, Channels: 1,
+		},
+		MaxUtteranceSeconds: voiceCfg.MaxUtteranceSeconds,
+	}
+}
+
+// TranscribeVoice sends one VAD-finalized PCM utterance to the configured
+// OpenAI-compatible speech recognition service.
+func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	want := c.VoiceAudioConfig().Input
+	if format != want {
+		return "", fmt.Errorf("unsupported voice input format %#v; expected %#v", format, want)
+	}
+	maxBytes := int64(cfg.Voice.MaxUtteranceSeconds) * int64(format.SampleRate) * int64(format.Channels) * 2
+	if len(pcm) == 0 || int64(len(pcm)) > maxBytes || len(pcm)%2 != 0 {
+		return "", fmt.Errorf("invalid voice PCM payload size %d", len(pcm))
+	}
+	providerID := strings.TrimSpace(cfg.Voice.STTProviderID)
+	modelID := strings.TrimSpace(cfg.Voice.STTModelID)
+	if providerID == "" || modelID == "" {
+		return "", fmt.Errorf("voice STT provider and model are not configured")
+	}
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok || providerCfg.Disabled {
+		return "", fmt.Errorf("voice STT provider %q is not configured", providerID)
+	}
+	client, err := provider.New(providerID, providerCfg, nil)
+	if err != nil {
+		return "", err
+	}
+	result, err := client.TranscribeSpeech(ctx, provider.TranscriptionRequest{
+		Model: modelID, Audio: wavFromPCM16(pcm, format.SampleRate, format.Channels),
+		Filename: "voice-utterance.wav", Language: cfg.Voice.STTLanguage,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// StreamVoiceSpeech streams raw PCM16 from the configured remote speech
+// synthesis service to the WebSocket writer.
+func (c *Controller) StreamVoiceSpeech(ctx context.Context, text string, consume func([]byte) error) error {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	providerID := strings.TrimSpace(cfg.Voice.TTSProviderID)
+	modelID := strings.TrimSpace(cfg.Voice.TTSModelID)
+	if providerID == "" && modelID == "" {
+		providerID = strings.TrimSpace(cfg.UI.TTS.ProviderID)
+		modelID = strings.TrimSpace(cfg.UI.TTS.ModelID)
+	}
+	if providerID == "" || modelID == "" {
+		return fmt.Errorf("voice TTS provider and model are not configured")
+	}
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok || providerCfg.Disabled {
+		return fmt.Errorf("voice TTS provider %q is not configured", providerID)
+	}
+	client, err := provider.New(providerID, providerCfg, nil)
+	if err != nil {
+		return err
+	}
+	_, err = client.StreamSpeech(ctx, provider.SpeechRequest{
+		Model: modelID, Input: text, Voice: cfg.Voice.TTSVoice, Language: cfg.Voice.TTSLanguage,
+		ResponseFormat: "pcm", StreamFormat: "audio",
+	}, consume)
+	return err
+}
 
 // ListVoiceSessions returns bounded summaries suitable for voice routing.
 func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, error) {

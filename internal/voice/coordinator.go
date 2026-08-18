@@ -32,6 +32,30 @@ type Backend interface {
 	DelegateVoice(context.Context, string, string) (DelegationResult, error)
 }
 
+const PCM16LE = "pcm_s16le"
+
+// AudioFormat describes raw audio without tying presentations to a fixed set
+// of UI widgets.
+type AudioFormat struct {
+	Encoding   string `json:"encoding"`
+	SampleRate int    `json:"sample_rate"`
+	Channels   int    `json:"channels"`
+}
+
+// AudioConfig is the server-owned voice transport contract.
+type AudioConfig struct {
+	Input               AudioFormat `json:"input"`
+	Output              AudioFormat `json:"output"`
+	MaxUtteranceSeconds int         `json:"max_utterance_seconds"`
+}
+
+// SpeechBackend connects the voice transport to remote STT and TTS services.
+type SpeechBackend interface {
+	VoiceAudioConfig() AudioConfig
+	TranscribeVoice(context.Context, AudioFormat, []byte) (string, error)
+	StreamVoiceSpeech(context.Context, string, func([]byte) error) error
+}
+
 // Part is one generic MIME-typed visible response part.
 type Part struct {
 	MIMEType string `json:"mime_type"`
