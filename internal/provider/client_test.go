@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1651,6 +1652,94 @@ func TestCreateSpeech(t *testing.T) {
 	}
 	if speech.ContentType != "audio/pcm" || string(speech.Audio) != string([]byte{4, 5, 6}) {
 		t.Fatalf("unexpected speech response: %#v", speech)
+	}
+}
+
+func TestStreamSpeech(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio/speech" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["model"] != "koder-tts" || payload["language"] != "en" || payload["response_format"] != "pcm" || payload["stream_format"] != "audio" {
+			t.Fatalf("unexpected streaming tts payload: %#v", payload)
+		}
+		w.Header().Set("Content-Type", "audio/pcm; rate=44100")
+		_, _ = w.Write([]byte{1, 2, 3})
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte{4, 5, 6})
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audio []byte
+	result, err := client.StreamSpeech(context.Background(), SpeechRequest{
+		Model: "koder-tts", Input: "Hello", Voice: "F1", Language: "en",
+	}, func(chunk []byte) error {
+		audio = append(audio, chunk...)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ContentType != "audio/pcm; rate=44100" || !bytes.Equal(audio, []byte{1, 2, 3, 4, 5, 6}) {
+		t.Fatalf("unexpected streaming response: content-type=%q audio=%v", result.ContentType, audio)
+	}
+}
+
+func TestTranscribeSpeech(t *testing.T) {
+	audio := []byte("RIFF-test-wave")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio/transcriptions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+		if r.FormValue("model") != "koder-stt" || r.FormValue("language") != "en" {
+			t.Fatalf("unexpected stt fields: model=%q language=%q", r.FormValue("model"), r.FormValue("language"))
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = file.Close() }()
+		got, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Filename != "voice.wav" || !bytes.Equal(got, audio) {
+			t.Fatalf("unexpected stt file: name=%q audio=%q", header.Filename, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":" hello from speech ","language":"en"}`)
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.TranscribeSpeech(context.Background(), TranscriptionRequest{
+		Model: "koder-stt", Audio: audio, Filename: "voice.wav", Language: "en",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "hello from speech" || result.Language != "en" {
+		t.Fatalf("unexpected transcription response: %#v", result)
 	}
 }
 

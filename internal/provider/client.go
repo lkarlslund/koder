@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"slices"
@@ -68,8 +69,22 @@ type SpeechRequest struct {
 	Model          string
 	Input          string
 	Voice          string
+	Language       string
 	ResponseFormat string
+	StreamFormat   string
 	Speed          float64
+}
+
+type TranscriptionRequest struct {
+	Model    string
+	Audio    []byte
+	Filename string
+	Language string
+}
+
+type TranscriptionResponse struct {
+	Text     string `json:"text"`
+	Language string `json:"language,omitempty"`
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {
@@ -881,15 +896,88 @@ func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, err
 }
 
 func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechResponse, error) {
+	req, err := c.speechRequest(ctx, input)
+	if err != nil {
+		return SpeechResponse{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return SpeechResponse{}, fmt.Errorf("tts request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := speechResponseError(resp); err != nil {
+		return SpeechResponse{}, err
+	}
+	audio, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return SpeechResponse{}, fmt.Errorf("read tts response: %w", err)
+	}
+	if len(audio) == 0 {
+		return SpeechResponse{}, fmt.Errorf("tts response was empty")
+	}
+	return SpeechResponse{ContentType: speechContentType(resp), Audio: audio}, nil
+}
+
+// StreamSpeech sends provider audio chunks as they arrive.
+func (c *Client) StreamSpeech(ctx context.Context, input SpeechRequest, consume func([]byte) error) (SpeechResponse, error) {
+	if consume == nil {
+		return SpeechResponse{}, fmt.Errorf("tts stream consumer is required")
+	}
+	if strings.TrimSpace(input.ResponseFormat) == "" {
+		input.ResponseFormat = "pcm"
+	}
+	if strings.TrimSpace(input.StreamFormat) == "" {
+		input.StreamFormat = "audio"
+	}
+	req, err := c.speechRequest(ctx, input)
+	if err != nil {
+		return SpeechResponse{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return SpeechResponse{}, fmt.Errorf("tts stream request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := speechResponseError(resp); err != nil {
+		return SpeechResponse{}, err
+	}
+	buffer := make([]byte, 32<<10)
+	var total int64
+	for {
+		n, readErr := resp.Body.Read(buffer)
+		if n > 0 {
+			total += int64(n)
+			if total > 64<<20 {
+				return SpeechResponse{}, fmt.Errorf("tts stream exceeded 64 MiB")
+			}
+			chunk := append([]byte(nil), buffer[:n]...)
+			if err := consume(chunk); err != nil {
+				return SpeechResponse{}, err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return SpeechResponse{}, fmt.Errorf("read tts stream: %w", readErr)
+		}
+	}
+	if total == 0 {
+		return SpeechResponse{}, fmt.Errorf("tts response was empty")
+	}
+	return SpeechResponse{ContentType: speechContentType(resp)}, nil
+}
+
+func (c *Client) speechRequest(ctx context.Context, input SpeechRequest) (*http.Request, error) {
 	input.Model = strings.TrimSpace(input.Model)
 	input.Input = strings.TrimSpace(input.Input)
 	input.Voice = strings.TrimSpace(input.Voice)
 	input.ResponseFormat = strings.TrimSpace(input.ResponseFormat)
 	if input.Model == "" {
-		return SpeechResponse{}, fmt.Errorf("tts model id is required")
+		return nil, fmt.Errorf("tts model id is required")
 	}
 	if input.Input == "" {
-		return SpeechResponse{}, fmt.Errorf("tts input is required")
+		return nil, fmt.Errorf("tts input is required")
 	}
 	if input.Voice == "" {
 		input.Voice = "alloy"
@@ -905,41 +993,104 @@ func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechR
 	if input.Speed > 0 {
 		payload["speed"] = input.Speed
 	}
+	if language := strings.TrimSpace(input.Language); language != "" {
+		payload["language"] = language
+	}
+	if streamFormat := strings.TrimSpace(input.StreamFormat); streamFormat != "" {
+		payload["stream_format"] = streamFormat
+	}
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(payload); err != nil {
-		return SpeechResponse{}, fmt.Errorf("encode tts request: %w", err)
+		return nil, fmt.Errorf("encode tts request: %w", err)
 	}
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/audio/speech"), &body)
 	if err != nil {
-		return SpeechResponse{}, err
+		return nil, err
 	}
 	req.Header.Set("Accept", "audio/*, application/octet-stream")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return SpeechResponse{}, fmt.Errorf("tts request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	return req, nil
+}
+
+func speechResponseError(resp *http.Response) error {
 	if resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return SpeechResponse{}, &APIError{
+		return &APIError{
 			Operation:  "tts",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(bodyBytes)),
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
-	audio, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return SpeechResponse{}, fmt.Errorf("read tts response: %w", err)
-	}
-	if len(audio) == 0 {
-		return SpeechResponse{}, fmt.Errorf("tts response was empty")
-	}
+	return nil
+}
+
+func speechContentType(resp *http.Response) string {
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	return SpeechResponse{ContentType: contentType, Audio: audio}, nil
+	return contentType
+}
+
+// TranscribeSpeech sends one bounded audio utterance to an OpenAI-compatible STT endpoint.
+func (c *Client) TranscribeSpeech(ctx context.Context, input TranscriptionRequest) (TranscriptionResponse, error) {
+	input.Model = strings.TrimSpace(input.Model)
+	if input.Model == "" {
+		return TranscriptionResponse{}, fmt.Errorf("stt model id is required")
+	}
+	if len(input.Audio) == 0 {
+		return TranscriptionResponse{}, fmt.Errorf("stt audio is required")
+	}
+	if len(input.Audio) > 64<<20 {
+		return TranscriptionResponse{}, fmt.Errorf("stt audio exceeds 64 MiB")
+	}
+	filename := strings.TrimSpace(input.Filename)
+	if filename == "" {
+		filename = "utterance.wav"
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("create stt multipart file: %w", err)
+	}
+	if _, err := file.Write(input.Audio); err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("write stt multipart file: %w", err)
+	}
+	if err := writer.WriteField("model", input.Model); err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("write stt model: %w", err)
+	}
+	if language := strings.TrimSpace(input.Language); language != "" {
+		if err := writer.WriteField("language", language); err != nil {
+			return TranscriptionResponse{}, fmt.Errorf("write stt language: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("finish stt multipart body: %w", err)
+	}
+	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/audio/transcriptions"), &body)
+	if err != nil {
+		return TranscriptionResponse{}, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("stt request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return TranscriptionResponse{}, &APIError{Operation: "stt", StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(bodyBytes))}
+	}
+	var result TranscriptionResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return TranscriptionResponse{}, fmt.Errorf("decode stt response: %w", err)
+	}
+	result.Text = strings.TrimSpace(result.Text)
+	if result.Text == "" {
+		return TranscriptionResponse{}, fmt.Errorf("stt response text was empty")
+	}
+	return result, nil
 }
 
 func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan domain.Event, error) {
