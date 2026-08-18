@@ -34,6 +34,7 @@ const (
 	postExitDrainGrace   = 50 * time.Millisecond
 	maxStdinWait         = 5 * time.Minute
 	envSessionRoot       = "KODER_SESSION_ROOT"
+	envTmpDir            = "TMPDIR"
 )
 
 type State string
@@ -331,14 +332,14 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 
 func processEnvironment(key, value string) []string {
 	environ := os.Environ()
-	out := make([]string, 0, len(environ)+1)
+	out := make([]string, 0, len(environ)+2)
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")
-		if name != key {
+		if name != key && name != envTmpDir {
 			out = append(out, entry)
 		}
 	}
-	return append(out, key+"="+value)
+	return append(out, key+"="+value, envTmpDir+"=/tmp")
 }
 
 func (m *Manager) Status(_ context.Context, req StatusRequest) (Snapshot, error) {

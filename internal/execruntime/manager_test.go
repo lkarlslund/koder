@@ -18,11 +18,12 @@ func TestManagerStartExportsSessionRoot(t *testing.T) {
 	if err := os.Mkdir(workdir, 0o755); err != nil {
 		t.Fatalf("create workdir: %v", err)
 	}
+	t.Setenv(envTmpDir, "/host/tmp/hidden/by/sandbox")
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{
 		SessionID:   "session-1",
 		ChatID:      "chat-2",
-		Command:     "printf '%s' \"$KODER_SESSION_ROOT\"",
+		Command:     "printf '%s\\n%s' \"$KODER_SESSION_ROOT\" \"$TMPDIR\"",
 		Workdir:     workdir,
 		SessionRoot: root,
 		YieldTime:   time.Second,
@@ -30,8 +31,8 @@ func TestManagerStartExportsSessionRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if snap.Output != root {
-		t.Fatalf("expected KODER_SESSION_ROOT=%q, got %q", root, snap.Output)
+	if snap.Output != root+"\n/tmp" {
+		t.Fatalf("expected session root and sandbox TMPDIR, got %q", snap.Output)
 	}
 }
 
