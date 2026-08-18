@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	mimepkg "mime"
 	"net/http"
 	urlpkg "net/url"
@@ -38,11 +39,12 @@ import (
 )
 
 const (
-	stateStopped  = "stopped"
-	stateStarting = "starting"
-	stateRunning  = "running"
-	stateError    = "error"
-	maxBinarySize = 25 * 1024 * 1024
+	stateStopped        = "stopped"
+	stateStarting       = "starting"
+	stateRunning        = "running"
+	stateError          = "error"
+	maxBinarySize       = 25 * 1024 * 1024
+	gracefulStopTimeout = 3 * time.Second
 )
 
 type ownedTab struct {
@@ -249,13 +251,17 @@ func (m *Manager) Stop(ctx context.Context) error {
 	var closeErr error
 	var preferenceErr error
 	if browserCtx != nil {
-		timeout := 10 * time.Second
+		timeout := gracefulStopTimeout
 		if deadline, ok := ctx.Deadline(); ok {
 			timeout = min(timeout, max(time.Until(deadline), time.Millisecond))
 		}
 		closeCtx, cancel := context.WithTimeout(browserCtx, timeout)
 		closeErr = chromedp.Cancel(closeCtx)
 		cancel()
+		if errors.Is(closeErr, context.DeadlineExceeded) && ctx.Err() == nil {
+			slog.Warn("browser graceful shutdown timed out; forcing stop", "timeout_ms", timeout.Milliseconds())
+			closeErr = nil
+		}
 		preferenceErr = m.enforceProfilePreferences()
 	}
 	if stop != nil {
