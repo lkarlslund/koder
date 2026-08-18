@@ -21,8 +21,10 @@ class VoiceLiveInstrumentedTest {
         assumeTrue("set voiceLiveServer to enable the live test", server.isNotBlank())
 
         val ready = CountDownLatch(1)
+        val voiceChatSelected = CountDownLatch(1)
         val replied = CountDownLatch(1)
         var sessions = emptyList<VoiceSession>()
+        var voiceSessions = emptyList<VoiceSession>()
         var response: VoiceServerFrame? = null
         var disconnectReason = ""
         var terminalError = ""
@@ -31,11 +33,16 @@ class VoiceLiveInstrumentedTest {
             override fun onFrame(frame: VoiceServerFrame) {
                 if (frame.type == "ready" && frame.callState != null) {
                     sessions = frame.callState.sessions
+                    voiceSessions = frame.callState.voiceSessions
                     ready.countDown()
                 }
                 if (frame.type == "message") {
-                    response = frame
-                    replied.countDown()
+                    if (frame.message?.spokenText?.startsWith("Using voice chat ") == true) {
+                        voiceChatSelected.countDown()
+                    } else {
+                        response = frame
+                        replied.countDown()
+                    }
                 }
                 if (frame.type == "error") {
                     terminalError = frame.error
@@ -54,7 +61,14 @@ class VoiceLiveInstrumentedTest {
             connection.connect(server, arguments.getString("voiceLiveToken").orEmpty())
             assertTrueWithReason("live server did not become ready", ready.await(15, TimeUnit.SECONDS), disconnectReason)
             assertFalse("live server exposed no regular sessions", sessions.isEmpty())
+            assertFalse("live server exposed no durable voice chats", voiceSessions.isEmpty())
             println("Koder live voice sessions: " + sessions.joinToString { "${it.title} (${it.id})" })
+            connection.selectVoiceSession(voiceSessions.first().id)
+            assertTrueWithReason(
+                "live server did not switch its durable voice chat",
+                voiceChatSelected.await(30, TimeUnit.SECONDS),
+                disconnectReason,
+            )
 
             val prompt = arguments.getString("voiceLiveUtterance").orEmpty()
             if (prompt.isBlank()) return
