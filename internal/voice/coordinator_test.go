@@ -9,6 +9,7 @@ import (
 type fakeBackend struct {
 	sessions    []Session
 	delegations []struct{ sessionID, text string }
+	resultText  string
 }
 
 type fakeRoutingBackend struct {
@@ -20,6 +21,19 @@ type fakeRoutingBackend struct {
 		title      string
 		persistent bool
 	}
+}
+
+type fakeSummarizingBackend struct {
+	fakeBackend
+	summary string
+	err     error
+}
+
+func (f *fakeSummarizingBackend) SummarizeVoiceResult(_ context.Context, request string, result DelegationResult) (string, error) {
+	if request == "" || result.Text == "" {
+		return "", context.Canceled
+	}
+	return f.summary, f.err
 }
 
 func (f *fakeRoutingBackend) ResolveVoiceRoute(_ context.Context, request RouteRequest) (RouteDecision, error) {
@@ -43,7 +57,11 @@ func (f *fakeBackend) ListVoiceSessions(context.Context) ([]Session, error) {
 
 func (f *fakeBackend) DelegateVoice(_ context.Context, sessionID, text string) (DelegationResult, error) {
 	f.delegations = append(f.delegations, struct{ sessionID, text string }{sessionID, text})
-	return DelegationResult{SessionID: sessionID, SessionTitle: "Laptop", ChatID: "chat-1", Text: "The laptop now boots."}, nil
+	resultText := f.resultText
+	if resultText == "" {
+		resultText = "The laptop now boots."
+	}
+	return DelegationResult{SessionID: sessionID, SessionTitle: "Laptop", ChatID: "chat-1", Text: resultText}, nil
 }
 
 func TestCallSelectsSessionByConversationSummaryThenDelegates(t *testing.T) {
@@ -94,6 +112,40 @@ func TestCallUsesExplicitTarget(t *testing.T) {
 	}
 	if len(backend.delegations) != 1 || backend.delegations[0].sessionID != "two" {
 		t.Fatalf("delegations = %#v", backend.delegations)
+	}
+}
+
+func TestCallSpeaksSummaryButKeepsFullDelegatedResult(t *testing.T) {
+	backend := &fakeSummarizingBackend{
+		fakeBackend: fakeBackend{sessions: []Session{{ID: "laptop", Title: "Laptop"}}},
+		summary:     "The laptop now boots after resetting its firmware setting.",
+	}
+	message, err := NewCall(backend).HandleText(context.Background(), "What fixed it?", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SpokenText != backend.summary {
+		t.Fatalf("spoken text = %q", message.SpokenText)
+	}
+	if len(message.Parts) == 0 || message.Parts[0].Data != "The laptop now boots." {
+		t.Fatalf("visual parts = %#v", message.Parts)
+	}
+}
+
+func TestCallStripsMarkdownFromSummaryFallback(t *testing.T) {
+	backend := &fakeSummarizingBackend{
+		fakeBackend: fakeBackend{
+			sessions:   []Session{{ID: "laptop", Title: "Laptop"}},
+			resultText: "# Result\n**The laptop** now `boots`.",
+		},
+		err: context.Canceled,
+	}
+	message, err := NewCall(backend).HandleText(context.Background(), "What fixed it?", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SpokenText != "Result The laptop now boots." {
+		t.Fatalf("fallback spoken text = %q", message.SpokenText)
 	}
 }
 

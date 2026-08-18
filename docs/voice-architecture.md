@@ -64,6 +64,9 @@ useful.
 Delegation waits for the target chat's sealed response. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
+The voice profile summarizes a completed answer into one to three plain spoken
+sentences; the full delegated answer remains available as a visual text part.
+If summarization is unavailable, a bounded Markdown-stripping fallback is used.
 
 ## Server boundaries
 

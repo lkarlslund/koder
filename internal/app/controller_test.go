@@ -2490,6 +2490,38 @@ func TestResolveVoiceRouteUsesDefaultModelAndBoundedSummaries(t *testing.T) {
 	}
 }
 
+func TestSummarizeVoiceResultUsesPlainSpeechProfile(t *testing.T) {
+	var requestBody string
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBody = string(body)
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The firmware gate is in UEFI, and the practical unlock sets CMOS bit 2."},"finish_reason":"stop"}]}`)
+	}))
+	defer modelServer.Close()
+	cfg := config.Default()
+	cfg.Defaults.ProviderID = "router"
+	cfg.Defaults.ModelID = "voice-model"
+	cfg.Providers = map[string]config.Provider{
+		"router": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+	}
+	ctrl := &Controller{cfg: cfg}
+	summary, err := ctrl.SummarizeVoiceResult(context.Background(), "What did we find?", voice.DelegationResult{
+		Text: strings.Repeat("# Detailed result\n", 600),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary != "The firmware gate is in UEFI, and the practical unlock sets CMOS bit 2." {
+		t.Fatalf("summary = %q", summary)
+	}
+	if !strings.Contains(requestBody, "Turn the delegated result into a phone-call response") || len(requestBody) > 12_000 {
+		t.Fatalf("unexpected bounded summary request (%d bytes): %s", len(requestBody), requestBody)
+	}
+}
+
 func TestCreateVoiceTargetSupportsTemporaryAndPersistentSessions(t *testing.T) {
 	ctrl, _ := newTestControllerWithConfig(t, nil)
 	temporary, err := ctrl.CreateVoiceTarget(context.Background(), "One-off calendar entry", false)

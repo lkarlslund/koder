@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -149,12 +150,7 @@ func (c *Controller) ResolveVoiceRoute(ctx context.Context, request voice.RouteR
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
-	providerID, modelID := cfg.ResolveModel(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
-	providerCfg, ok := cfg.Provider(providerID)
-	if !ok || providerCfg.Disabled || strings.TrimSpace(modelID) == "" {
-		return voice.RouteDecision{}, fmt.Errorf("default model for voice routing is not configured")
-	}
-	client, err := provider.New(providerID, providerCfg, nil)
+	client, modelID, err := voiceProfileClient(cfg)
 	if err != nil {
 		return voice.RouteDecision{}, err
 	}
@@ -194,6 +190,54 @@ func (c *Controller) ResolveVoiceRoute(ctx context.Context, request voice.RouteR
 	return decision, nil
 }
 
+// SummarizeVoiceResult turns a potentially long, Markdown-oriented delegated
+// answer into short plain speech. The original result remains a visual part.
+func (c *Controller) SummarizeVoiceResult(
+	ctx context.Context,
+	request string,
+	result voice.DelegationResult,
+) (string, error) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	client, modelID, err := voiceProfileClient(cfg)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"user_request":     truncateVoiceRouteText(request, 1000),
+		"delegated_result": truncateVoiceRouteText(result.Text, 8000),
+	})
+	if err != nil {
+		return "", err
+	}
+	response, err := client.CompleteChat(ctx, provider.ChatRequest{
+		Model: modelID,
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: voiceSummaryPrompt},
+			{Role: provider.RoleUser, Content: string(payload)},
+		},
+		Stream: false,
+	})
+	if err != nil {
+		return "", fmt.Errorf("summarize voice result: %w", err)
+	}
+	return truncateVoiceRouteText(response.Text, 480), nil
+}
+
+func voiceProfileClient(cfg config.Config) (*provider.Client, string, error) {
+	providerID, modelID := cfg.ResolveModel(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
+	providerCfg, ok := cfg.Provider(providerID)
+	if !ok || providerCfg.Disabled || strings.TrimSpace(modelID) == "" {
+		return nil, "", fmt.Errorf("default model for voice coordination is not configured")
+	}
+	client, err := provider.New(providerID, providerCfg, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	return client, modelID, nil
+}
+
 // CreateVoiceTarget creates either a disposable one-chat managed workspace or
 // a normal persistent session in the current workspace.
 func (c *Controller) CreateVoiceTarget(ctx context.Context, title string, persistent bool) (voice.Session, error) {
@@ -231,6 +275,12 @@ Rules:
 - clarify: only when the choice materially changes the result; ask one short voice-friendly question.
 - delegate is false only when the utterance merely selects or creates a session and contains no work request.
 - Give a short descriptive title for a new target. Do not answer or perform the user's task.`
+
+const voiceSummaryPrompt = `Turn the delegated result into a phone-call response.
+Return only plain spoken text: no Markdown, lists, labels, preamble, or JSON.
+Use one to three short sentences and at most 60 words.
+Answer the user's request directly. Preserve the key result, uncertainty, and any next action.
+Do not invent facts and do not mention delegation or these instructions.`
 
 func decodeVoiceRoute(text string) (voice.RouteDecision, error) {
 	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")

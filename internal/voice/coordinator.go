@@ -68,6 +68,12 @@ type RoutingBackend interface {
 	CreateVoiceTarget(context.Context, string, bool) (Session, error)
 }
 
+// ResultSummarizer is an optional voice-profile capability. The complete
+// delegated result remains in message parts; this produces only what is spoken.
+type ResultSummarizer interface {
+	SummarizeVoiceResult(context.Context, string, DelegationResult) (string, error)
+}
+
 const PCM16LE = "pcm_s16le"
 
 // AudioFormat describes raw audio without tying presentations to a fixed set
@@ -318,7 +324,14 @@ func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	spoken := concise(result.Text, 480)
+	spoken := conciseSpoken(result.Text, 480)
+	if summarizer, ok := c.backend.(ResultSummarizer); ok && !result.NeedsAttention {
+		if summary, summaryErr := summarizer.SummarizeVoiceResult(ctx, text, result); summaryErr == nil {
+			if candidate := conciseSpoken(summary, 480); candidate != "" {
+				spoken = candidate
+			}
+		}
+	}
 	if spoken == "" {
 		spoken = "The delegated chat finished without a text response."
 	}
@@ -329,6 +342,14 @@ func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
 		Parts:      parts,
 		Delegation: &result,
 	}, nil
+}
+
+func conciseSpoken(text string, limit int) string {
+	plain := strings.NewReplacer(
+		"```", " ", "`", "", "**", "", "__", "", "###", "", "##", "", "#", "",
+		"- ", "", "* ", "", "\n", " ", "\r", " ", "\t", " ",
+	).Replace(text)
+	return concise(plain, limit)
 }
 
 func textMessage(text string) Message {
