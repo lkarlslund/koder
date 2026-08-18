@@ -47,7 +47,7 @@ class VoiceConnection(
 		stopSocket("new call")
         token = bearerToken.trim()
         this.server = server.trim()
-		this.voiceSessionId = voiceSessionId.trim()
+        this.voiceSessionId = voiceSessionId.trim()
 		callId = UUID.randomUUID().toString()
 		desired = true
 		reconnectAttempt = 0

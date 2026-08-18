@@ -2,7 +2,6 @@ package com.lkarlslund.koder.voice
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -49,7 +48,6 @@ class AndroidStreamingAudioPlayback(
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(max(minimum * 2, format.sampleRate / 2))
-            .setSessionId(AudioManager.AUDIO_SESSION_ID_GENERATE)
             .build()
         check(audioTrack.state == AudioTrack.STATE_INITIALIZED) { "Audio playback initialization failed" }
         track = audioTrack

@@ -17,8 +17,8 @@ class SecureSettings(context: Context) {
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     fun load(): Values {
-		// Remove the pre-v1 plaintext credential if this is an upgraded install.
-		if (preferences.contains("token")) preferences.edit().remove("token").apply()
+        // Remove the pre-v1 plaintext credential if this is an upgraded install.
+        if (preferences.contains("token")) preferences.edit().remove("token").apply()
         val server = preferences.getString(SERVER, DEFAULT_SERVER).orEmpty()
         val token = try {
             decrypt(
