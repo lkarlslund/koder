@@ -408,6 +408,28 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 	}
 }
 
+func TestApplyDefaultsFillsVoiceAudioSettings(t *testing.T) {
+	cfg := Default()
+	cfg.Voice = Voice{
+		STTProviderID: " speech ",
+		STTModelID:    " asr ",
+		TTSProviderID: " speech ",
+		TTSModelID:    " tts ",
+	}
+
+	cfg.applyDefaults()
+
+	if cfg.Voice.STTProviderID != "speech" || cfg.Voice.STTModelID != "asr" || cfg.Voice.TTSProviderID != "speech" || cfg.Voice.TTSModelID != "tts" {
+		t.Fatalf("expected voice model ids to be normalized, got %#v", cfg.Voice)
+	}
+	if cfg.Voice.STTLanguage != "en" || cfg.Voice.TTSLanguage != "en" || cfg.Voice.TTSVoice != "alloy" {
+		t.Fatalf("expected voice text defaults, got %#v", cfg.Voice)
+	}
+	if cfg.Voice.InputSampleRate != 16000 || cfg.Voice.OutputSampleRate != 24000 || cfg.Voice.MaxUtteranceSeconds != 60 {
+		t.Fatalf("expected voice audio defaults, got %#v", cfg.Voice)
+	}
+}
+
 func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)

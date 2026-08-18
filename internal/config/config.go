@@ -32,6 +32,22 @@ type TTS struct {
 	PCMSampleRate  int     `toml:"pcm_sample_rate,omitempty"`
 }
 
+// Voice configures the remote speech services and PCM wire formats used by
+// native voice calls. Speech recognition receives a WAV-wrapped, mono PCM16
+// utterance; speech synthesis streams raw mono PCM16 back to the caller.
+type Voice struct {
+	STTProviderID       string `toml:"stt_provider_id"`
+	STTModelID          string `toml:"stt_model_id"`
+	STTLanguage         string `toml:"stt_language"`
+	TTSProviderID       string `toml:"tts_provider_id"`
+	TTSModelID          string `toml:"tts_model_id"`
+	TTSVoice            string `toml:"tts_voice"`
+	TTSLanguage         string `toml:"tts_language"`
+	InputSampleRate     int    `toml:"input_sample_rate"`
+	OutputSampleRate    int    `toml:"output_sample_rate"`
+	MaxUtteranceSeconds int    `toml:"max_utterance_seconds"`
+}
+
 type Store struct {
 	Backend string `toml:"backend"`
 }
@@ -138,6 +154,7 @@ type Config struct {
 	Access           accesssettings.Settings `toml:"access"`
 	Store            Store                   `toml:"store"`
 	UI               UI                      `toml:"ui"`
+	Voice            Voice                   `toml:"voice"`
 	Thinking         Thinking                `toml:"thinking"`
 	Browser          Browser                 `toml:"browser"`
 	path             string
@@ -319,6 +336,14 @@ func Default() Config {
 				PCMSampleRate:  24000,
 			},
 		},
+		Voice: Voice{
+			STTLanguage:         "en",
+			TTSVoice:            "alloy",
+			TTSLanguage:         "en",
+			InputSampleRate:     16000,
+			OutputSampleRate:    24000,
+			MaxUtteranceSeconds: 60,
+		},
 		Thinking: Thinking{
 			CavemanPrompt:      DefaultCavemanThinkingPrompt,
 			CavemanParallelism: defaultCavemanParallelism,
@@ -410,6 +435,31 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.TTS.PCMSampleRate <= 0 {
 		c.UI.TTS.PCMSampleRate = def.UI.TTS.PCMSampleRate
+	}
+	c.Voice.STTProviderID = strings.TrimSpace(c.Voice.STTProviderID)
+	c.Voice.STTModelID = strings.TrimSpace(c.Voice.STTModelID)
+	c.Voice.STTLanguage = strings.TrimSpace(c.Voice.STTLanguage)
+	if c.Voice.STTLanguage == "" {
+		c.Voice.STTLanguage = def.Voice.STTLanguage
+	}
+	c.Voice.TTSProviderID = strings.TrimSpace(c.Voice.TTSProviderID)
+	c.Voice.TTSModelID = strings.TrimSpace(c.Voice.TTSModelID)
+	c.Voice.TTSVoice = strings.TrimSpace(c.Voice.TTSVoice)
+	if c.Voice.TTSVoice == "" {
+		c.Voice.TTSVoice = def.Voice.TTSVoice
+	}
+	c.Voice.TTSLanguage = strings.TrimSpace(c.Voice.TTSLanguage)
+	if c.Voice.TTSLanguage == "" {
+		c.Voice.TTSLanguage = def.Voice.TTSLanguage
+	}
+	if c.Voice.InputSampleRate <= 0 {
+		c.Voice.InputSampleRate = def.Voice.InputSampleRate
+	}
+	if c.Voice.OutputSampleRate <= 0 {
+		c.Voice.OutputSampleRate = def.Voice.OutputSampleRate
+	}
+	if c.Voice.MaxUtteranceSeconds <= 0 {
+		c.Voice.MaxUtteranceSeconds = def.Voice.MaxUtteranceSeconds
 	}
 	c.Thinking.CavemanProviderID = strings.TrimSpace(c.Thinking.CavemanProviderID)
 	c.Thinking.CavemanModelID = strings.TrimSpace(c.Thinking.CavemanModelID)
