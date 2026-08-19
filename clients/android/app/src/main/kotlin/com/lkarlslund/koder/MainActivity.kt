@@ -750,9 +750,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 ellipsize = TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(TextView(this@MainActivity).apply {
-                text = "›"
-                textSize = 30f
-                setTextColor(themeColor(android.R.attr.colorAccent))
+				text = "⋮"
+				textSize = 26f
+				gravity = Gravity.CENTER
+				minWidth = dp(48)
+				minHeight = dp(48)
+				contentDescription = "Options for ${session.title}"
+				isClickable = true
+				setOnClickListener { anchor -> showVoiceSessionMenu(anchor, session) }
             })
         }, matchWrap())
         session.updatedAt?.let { updated ->
@@ -770,6 +775,28 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         setOnClickListener { openChat(session) }
     }
+
+	private fun showVoiceSessionMenu(anchor: View, session: VoiceSession) {
+		PopupMenu(this, anchor).apply {
+			menu.add("Rename")
+			setOnMenuItemClickListener { showRenameVoiceSessionDialog(session); true }
+			show()
+		}
+	}
+
+	private fun showRenameVoiceSessionDialog(session: VoiceSession) {
+		val field = EditText(this).apply { setText(session.title); setSingleLine(); selectAll() }
+		AlertDialog.Builder(this)
+			.setTitle("Rename conversation")
+			.setView(field)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Rename") { _, _ ->
+				sessionClient.rename(settings.server, settings.token, session.id, field.text.toString().trim()) { result ->
+					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }) }
+				}
+			}
+			.show()
+	}
 
     private fun emptyConversationCard() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL

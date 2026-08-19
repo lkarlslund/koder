@@ -174,6 +174,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSessions(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/voice/v1/sessions/") {
+		h.serveVoiceSession(w, r)
+		return
+	}
 	if r.URL.Path == "/voice/v1/server-info" {
 		h.serveServerInfo(w, r)
 		return
@@ -513,6 +517,45 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		return
 	}
+}
+
+func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/voice/v1/sessions/"))
+	if sessionID == "" || strings.Contains(sessionID, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPatch {
+		w.Header().Set("Allow", http.MethodPatch)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request createSessionRequest
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid session request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid session request: expected one JSON object", http.StatusBadRequest)
+		return
+	}
+	renamed, err := h.Backend.RenameVoiceSession(r.Context(), sessionID, request.Title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sessions, err := h.Backend.ListVoiceChats(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &renamed, VoiceSessions: sessions})
 }
 
 func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {

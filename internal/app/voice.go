@@ -242,6 +242,23 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 	}, nil
 }
 
+// RenameVoiceSession changes a durable voice chat title after verifying its kind.
+func (c *Controller) RenameVoiceSession(ctx context.Context, sessionID, title string) (voice.Session, error) {
+	session, err := c.EnsureVoiceSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return voice.Session{}, err
+	}
+	title = truncateVoiceText(strings.TrimSpace(title), 80)
+	if title == "" {
+		return voice.Session{}, fmt.Errorf("voice session title is required")
+	}
+	if err := c.RenameSession(ctx, id.ID(session.ID), title); err != nil {
+		return voice.Session{}, fmt.Errorf("rename voice session: %w", err)
+	}
+	session.Title = title
+	return session, nil
+}
+
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
 // native client reconnecting to an existing voice conversation.
 func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, beforeID string, limit int) (voice.TranscriptPage, error) {

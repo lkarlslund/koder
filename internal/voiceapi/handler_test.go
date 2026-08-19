@@ -94,6 +94,16 @@ func (f *fakeBackend) CreateVoiceSession(_ context.Context, title string) (voice
 	return created, nil
 }
 
+func (f *fakeBackend) RenameVoiceSession(_ context.Context, sessionID, title string) (voice.Session, error) {
+	for index := range f.voiceChats {
+		if f.voiceChats[index].ID == sessionID {
+			f.voiceChats[index].Title = title
+			return f.voiceChats[index], nil
+		}
+	}
+	return voice.Session{}, fmt.Errorf("voice session not found")
+}
+
 func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
 	return voice.AudioConfig{
 		Input:               voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 16000, Channels: 1},
@@ -396,6 +406,29 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	}
 	if len(created.VoiceSessions) != 3 || created.VoiceSessions[2].ID != "voice-created" {
 		t.Fatalf("created voice sessions = %#v", created.VoiceSessions)
+	}
+}
+
+func TestHandlerRenamesVoiceSession(t *testing.T) {
+	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Old"}}}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodPatch, server.URL+"/voice/v1/sessions/voice-1", strings.NewReader(`{"title":"Family"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body sessionsResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || body.VoiceSession == nil || body.VoiceSession.Title != "Family" {
+		t.Fatalf("rename response status=%d body=%#v", response.StatusCode, body)
 	}
 }
 

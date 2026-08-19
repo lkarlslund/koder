@@ -68,6 +68,7 @@ type VoiceSessionBackend interface {
 	ListVoiceChats(context.Context) ([]Session, error)
 	EnsureVoiceSession(context.Context, string) (Session, error)
 	CreateVoiceSession(context.Context, string) (Session, error)
+	RenameVoiceSession(context.Context, string, string) (Session, error)
 	RunVoiceTurn(context.Context, string, string, func(Session) error) (Message, error)
 }
 

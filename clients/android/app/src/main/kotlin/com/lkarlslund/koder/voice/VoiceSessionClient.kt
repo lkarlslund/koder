@@ -27,12 +27,16 @@ class VoiceSessionClient(
         )
     }
 
+	fun rename(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(server, token, "/voice/v1/sessions/$sessionId", VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback, "PATCH")
+	}
+
     fun serverInfo(server: String, token: String, callback: (Result<ServerInfo>) -> Unit) {
         val startedAt = System.nanoTime()
-        request(server, token, "/voice/v1/server-info", null, VoiceProtocol::parseServerInfo) { result ->
+	        request(server, token, "/voice/v1/server-info", null, VoiceProtocol::parseServerInfo, callback = { result ->
             val elapsedMillis = ((System.nanoTime() - startedAt) / 1_000_000).coerceAtLeast(0)
             callback(result.map { it.copy(roundTripMillis = elapsedMillis) })
-        }
+	        })
     }
 
     private fun <T> request(
@@ -42,13 +46,17 @@ class VoiceSessionClient(
         body: String?,
         parse: (String) -> T,
         callback: (Result<T>) -> Unit,
+		method: String = if (body == null) "GET" else "POST",
     ) {
         val request = try {
             Request.Builder()
                 .url(VoiceProtocol.resourceUrl(server, path))
-                .apply {
+				.apply {
                     if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}")
-                    if (body != null) post(body.toRequestBody(JSON))
+					when (method) {
+						"POST" -> post(requireNotNull(body).toRequestBody(JSON))
+						"PATCH" -> patch(requireNotNull(body).toRequestBody(JSON))
+					}
                 }
                 .build()
         } catch (error: Exception) {
