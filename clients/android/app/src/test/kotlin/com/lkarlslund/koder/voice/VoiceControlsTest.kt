@@ -14,6 +14,7 @@ class VoiceControlsTest {
 	fun primaryControlDistinguishesFailureFromPause() {
 		assertEquals("Retry", primaryVoiceControlLabel(CallController.Stage.ERROR, false))
 		assertEquals("Resume", primaryVoiceControlLabel(CallController.Stage.DISCONNECTED, false))
+		assertEquals("Resume", primaryVoiceControlLabel(CallController.Stage.HELD, true))
 		assertEquals("Pause", primaryVoiceControlLabel(CallController.Stage.LISTENING, true))
 	}
 
@@ -32,6 +33,7 @@ class VoiceControlsTest {
 		assertEquals(ConversationAvailability.RETRYING, conversationAvailability(CallController.Stage.CONNECTING, "Reconnecting · network changed"))
 		assertEquals(ConversationAvailability.ONLINE, conversationAvailability(CallController.Stage.LISTENING, "Listening"))
 		assertEquals(ConversationAvailability.PAUSED, conversationAvailability(CallController.Stage.DISCONNECTED, "Conversation paused"))
+		assertEquals(ConversationAvailability.PAUSED, conversationAvailability(CallController.Stage.HELD, "Conversation paused"))
 		assertEquals(ConversationAvailability.OFFLINE, conversationAvailability(CallController.Stage.ERROR, "Connection failed"))
 		assertEquals("Offline · Connection failed", conversationStatusText(CallController.Stage.ERROR, "Connection failed"))
 	}

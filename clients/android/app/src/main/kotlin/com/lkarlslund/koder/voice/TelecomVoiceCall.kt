@@ -50,6 +50,13 @@ class TelecomVoiceCall(context: Context, private val listener: Listener) : AutoC
 		applyPreferredRoute()
 	}
 
+	fun setHeld(held: Boolean) {
+		val callControl = control ?: return
+		scope.launch {
+			if (held) callControl.setInactive() else callControl.setActive()
+		}
+	}
+
 	fun start() {
 		if (callJob != null) return
 		ending = false

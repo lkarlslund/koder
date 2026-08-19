@@ -19,7 +19,7 @@ fun conversationAvailability(stage: CallController.Stage?, detail: String = ""):
 		ConversationAvailability.RETRYING
 	stage == CallController.Stage.CONNECTING -> ConversationAvailability.CONNECTING
 	stage == CallController.Stage.ERROR -> ConversationAvailability.OFFLINE
-	stage == CallController.Stage.DISCONNECTED || stage == null -> ConversationAvailability.PAUSED
+	stage == CallController.Stage.DISCONNECTED || stage == CallController.Stage.HELD || stage == null -> ConversationAvailability.PAUSED
 	else -> ConversationAvailability.ONLINE
 }
 
@@ -33,7 +33,7 @@ fun conversationStatusText(stage: CallController.Stage?, detail: String): String
 
 fun primaryVoiceControlLabel(stage: CallController.Stage?, currentlyActive: Boolean): String = when (stage) {
 	CallController.Stage.ERROR -> "Retry"
-	CallController.Stage.DISCONNECTED -> "Resume"
+	CallController.Stage.DISCONNECTED, CallController.Stage.HELD -> "Resume"
 	null -> if (currentlyActive) "Pause" else "Resume"
 	else -> "Pause"
 }

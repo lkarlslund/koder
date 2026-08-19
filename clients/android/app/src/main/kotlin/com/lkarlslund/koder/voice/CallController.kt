@@ -22,7 +22,8 @@ class CallController(
 	private val interruptionFeedback: InterruptionFeedback = AndroidInterruptionFeedback(context),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
 	private val phoneIdentity: PhoneIdentity? = null,
-) : AutoCloseable {
+	private val onBuiltInAudioRouteSelected: (BuiltInAudioRoute) -> Unit = {},
+) : AutoCloseable, VoiceCallControlTarget {
 	    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, MUTED, HELD, ERROR }
 
     data class Snapshot(
@@ -70,14 +71,19 @@ class CallController(
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
             microphone.stop()
-	            if (running) update(Stage.CONNECTING, reconnectStatus(reason))
+	            if (running) {
+					if (pausedByUser || telecomHeld) update(Stage.HELD, "Conversation paused")
+					else update(Stage.CONNECTING, reconnectStatus(reason))
+				}
         }
 	}, identity = phoneIdentity)
     private val telecom = TelecomVoiceCall(context, object : TelecomVoiceCall.Listener {
         override fun onCallReady() = onMain { telecomReady = true; maybeListen() }
         override fun onCallHeld(held: Boolean) = onMain {
+			telecomHeld = held
             if (held) {
                 microphone.stop()
+				acceptingOutput = false
                 playback.stop()
                 update(Stage.HELD, "Conversation on hold")
             } else {
@@ -119,6 +125,8 @@ class CallController(
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
 		@Volatile private var interruptedPlayback = false
+		@Volatile private var pausedByUser = false
+		@Volatile private var telecomHeld = false
 
     fun start(
 		server: String,
@@ -140,6 +148,8 @@ class CallController(
 			speechLanguages = languages.toSet()
 		microphoneMuted = false
 		interruptedPlayback = false
+		pausedByUser = false
+		telecomHeld = false
 		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
 		endpoint.configure(EndpointConfig(
 			sampleRate = endpointSampleRate,
@@ -149,6 +159,7 @@ class CallController(
 			endSilenceMilliseconds = vadSilenceMilliseconds.coerceIn(300, 1_200),
 		))
 		telecom.setBuiltInAudioRoute(builtInAudioRoute)
+		VoiceCallControlRegistry.attach(this)
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
@@ -174,15 +185,16 @@ class CallController(
 	}
 
 	fun setMicrophoneMuted(muted: Boolean) {
-			if (!running || muted == microphoneMuted) return
-			microphoneMuted = muted
-			if (muted) {
-				cancelCapture()
-				update(Stage.MUTED, "Microphone muted")
-			} else {
-				maybeListen(force = true)
+		if (!running || muted == microphoneMuted) return
+		microphoneMuted = muted
+		if (muted) {
+			cancelCapture()
+			if (pausedByUser || telecomHeld) update(Stage.HELD, "Conversation paused")
+			else update(Stage.MUTED, "Microphone muted")
+		} else {
+			maybeListen(force = true)
 		}
-    }
+	}
 
 	fun loadOlderHistory() {
 		if (!running || snapshot.historyLoading || !snapshot.historyHasMore) return
@@ -211,6 +223,47 @@ class CallController(
 		if (!running || endpointId.isBlank()) return
 		telecom.selectAudioEndpoint(endpointId)
 	}
+
+	fun setPaused(paused: Boolean) {
+		if (!running || (paused && pausedByUser) || (!paused && !pausedByUser && !telecomHeld)) return
+		pausedByUser = paused
+		telecom.setHeld(paused)
+		if (paused) {
+			cancelCapture()
+			acceptingOutput = false
+			playback.stop()
+			update(Stage.HELD, "Conversation paused", "")
+		} else {
+			update(Stage.CONNECTING, "Resuming conversation…", "")
+			maybeListen(force = true)
+		}
+	}
+
+	override fun notificationState(): VoiceCallNotificationState = VoiceCallNotificationState(
+		detail = snapshot.detail,
+		muted = microphoneMuted,
+		paused = pausedByUser || telecomHeld || snapshot.stage == Stage.HELD,
+		audioRoute = snapshot.audioEndpointName.ifBlank { audioEndpoint },
+	)
+
+	override fun toggleMuteFromNotification() = setMicrophoneMuted(!microphoneMuted)
+
+	override fun togglePauseFromNotification() = setPaused(!(pausedByUser || telecomHeld))
+
+	override fun cycleAudioRouteFromNotification() {
+		val endpoints = snapshot.audioEndpoints
+		if (endpoints.size < 2) return
+		val currentIndex = endpoints.indexOfFirst(VoiceAudioEndpoint::current).takeIf { it >= 0 } ?: 0
+		val next = endpoints[(currentIndex + 1) % endpoints.size]
+		when (next.type) {
+			VoiceAudioEndpointType.EARPIECE -> onBuiltInAudioRouteSelected(BuiltInAudioRoute.EARPIECE)
+			VoiceAudioEndpointType.SPEAKER -> onBuiltInAudioRouteSelected(BuiltInAudioRoute.SPEAKER)
+			else -> Unit
+		}
+		selectAudioEndpoint(next.id)
+	}
+
+	override fun endFromNotification() = end()
 
     fun selectVoiceSession(sessionId: String) {
         if (!running || sessionId.isBlank() || sessionId == snapshot.voiceSessionId) return
@@ -253,10 +306,13 @@ class CallController(
         playback.stop()
 		workingSound.stop()
 		interruptedPlayback = false
+		pausedByUser = false
+		telecomHeld = false
         endpoint.reset()
         connection.close()
 		phoneDevice.close()
         telecom.disconnect()
+		VoiceCallControlRegistry.detach(this)
         appContext.stopService(Intent(appContext, VoiceCallService::class.java))
         snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused")
         publish()
@@ -302,7 +358,7 @@ class CallController(
                 serverReady = true
                 maybeListen()
             }
-            "state" -> when (frame.state) {
+			"state" -> if (!pausedByUser && !telecomHeld) when (frame.state) {
                 "recording" -> update(Stage.RECORDING, recordingStatus(interruptedPlayback))
                 "transcribing" -> update(Stage.TRANSCRIBING, "Recognizing speech…", "")
                 "processing" -> update(Stage.PROCESSING, "Choosing a chat…", "")
@@ -333,6 +389,11 @@ class CallController(
 			"history_search" -> listener.onHistorySearch(frame.searchResults, frame.error.takeIf(String::isNotBlank))
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
+				if (pausedByUser || telecomHeld) {
+					acceptingOutput = false
+					update(Stage.HELD, "Conversation paused", "")
+					return
+				}
                 val format = frame.audioFormat ?: audioConfig?.output
                 if (format == null) {
                     update(Stage.ERROR, "Server omitted the speech audio format")
@@ -375,6 +436,10 @@ class CallController(
 
 	    private fun maybeListen(force: Boolean = false) {
 	        if (!running || !serverReady || !telecomReady || audioConfig == null) return
+			if (pausedByUser || telecomHeld) {
+				update(Stage.HELD, "Conversation paused")
+				return
+			}
 			if (microphoneMuted) {
 				update(Stage.MUTED, "Microphone muted")
 				return
@@ -463,7 +528,10 @@ class CallController(
         publish()
     }
 
-    private fun publish() = listener.onSnapshot(snapshot)
+	private fun publish() {
+		listener.onSnapshot(snapshot)
+		if (running) VoiceCallService.refresh(notificationState())
+	}
     private fun onMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post(action)
     }

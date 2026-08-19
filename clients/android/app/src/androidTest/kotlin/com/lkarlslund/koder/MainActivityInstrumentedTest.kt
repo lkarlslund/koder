@@ -1,6 +1,8 @@
 package com.lkarlslund.koder
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -32,6 +34,8 @@ import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
+import com.lkarlslund.koder.voice.VoiceCallService
+import com.lkarlslund.koder.voice.audioRouteChipText
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.Dispatcher
@@ -355,8 +359,24 @@ class MainActivityInstrumentedTest {
 				waitForText(scenario, "Searchable")
 				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
 				waitForText(scenario, "Speaker  ▾")
-				onView(withText("Speaker  ▾")).perform(click())
-				onView(withText("✓  Speaker")).check(matches(isDisplayed()))
+				val notificationManager = context.getSystemService(NotificationManager::class.java)
+				var callNotification = waitForVoiceNotification(notificationManager) { notification ->
+					notification.actions?.map { it.title.toString() } == listOf("Mute", "Pause", "End", "Audio")
+				}
+				callNotification.action("Mute").actionIntent.send()
+				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Unmute") }
+				callNotification.action("Pause").actionIntent.send()
+				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Resume") }
+				callNotification.action("Resume").actionIntent.send()
+				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Pause") }
+				val routeBefore = callNotification.extras.getString(Notification.EXTRA_SUB_TEXT).orEmpty()
+				callNotification.action("Audio").actionIntent.send()
+				val routedNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Audio") }
+				val activeRoute = routedNotification.extras.getString(Notification.EXTRA_SUB_TEXT).orEmpty()
+				assertTrue(activeRoute.isNotBlank())
+				assertTrue(routeBefore.isNotBlank())
+				onView(withText(audioRouteChipText(activeRoute))).perform(click())
+				onView(withText("✓  $activeRoute")).check(matches(isDisplayed()))
 				pressBack()
 				onView(withContentDescription("Search transcript")).perform(click())
 				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
@@ -374,9 +394,14 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
 				onView(withText("Follow up later")).perform(click())
 				onView(withContentDescription("Saved responses")).perform(click())
+				waitForDisplayedText("Saved responses")
 				onView(withText("↗ Newest answer")).inRoot(isDialog()).perform(scrollTo(), click())
+				waitForDisplayedText("Remove")
 				onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click())
 				assertTrue(waitForText(scenario, "Following up on your earlier response").any { it.contains("Newest answer") })
+				waitForVoiceNotification(notificationManager) { it.hasAction("End") }.action("End").actionIntent.send()
+				waitForNoVoiceNotification(notificationManager)
+				waitForText(scenario, "Conversation paused")
 			}
 		} finally {
 			voiceSocket?.close(1000, "test complete")
@@ -396,7 +421,7 @@ class MainActivityInstrumentedTest {
         error("Timed out waiting for $wanted; visible text was $lastLabels")
     }
 
-    private fun waitForDisplayedText(wanted: String) {
+	private fun waitForDisplayedText(wanted: String) {
         repeat(50) {
             val displayed = runCatching {
                 onView(withText(wanted)).check(matches(isDisplayed()))
@@ -434,4 +459,27 @@ class MainActivityInstrumentedTest {
 		}
 		error("No ScrollView found")
 	}
+
+	private fun waitForVoiceNotification(manager: NotificationManager, predicate: (Notification) -> Boolean): Notification {
+		repeat(80) {
+			manager.activeNotifications.firstOrNull { it.id == VoiceCallService.NOTIFICATION_ID }?.notification?.let { notification ->
+				if (predicate(notification)) return notification
+			}
+			Thread.sleep(100)
+		}
+		error("Timed out waiting for Koder voice notification")
+	}
+
+	private fun waitForNoVoiceNotification(manager: NotificationManager) {
+		repeat(80) {
+			if (manager.activeNotifications.none { it.id == VoiceCallService.NOTIFICATION_ID }) return
+			Thread.sleep(100)
+		}
+		error("Koder voice notification was not removed")
+	}
+
+	private fun Notification.hasAction(title: String): Boolean = actions?.any { it.title.toString() == title } == true
+
+	private fun Notification.action(title: String): Notification.Action = actions?.firstOrNull { it.title.toString() == title }
+		?: error("Notification action $title is missing")
 }

@@ -177,7 +177,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		phoneIdentity = PhoneIdentity.from(this)
 		bindingClient = PhoneBindingClient(phoneIdentity)
 		sessionClient = VoiceSessionClient(identity = phoneIdentity)
-        controller = CallController(this, this, phoneIdentity = phoneIdentity)
+		controller = CallController(
+			this,
+			this,
+			phoneIdentity = phoneIdentity,
+			onBuiltInAudioRouteSelected = ::rememberBuiltInAudioRoute,
+		)
         appUpdater = AndroidAppUpdater(this, ::showUpdateStatus)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -1064,7 +1069,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				tag = "Pause"
 				contentDescription = "Pause voice conversation"
 				setOnClickListener {
-					if (tag == "Pause") controller.end()
+					if (tag == "Pause") controller.setPaused(true)
+					else if (latestCallSnapshot.stage == CallController.Stage.HELD) controller.setPaused(false)
 					else pendingCreateTitle?.let(::createSession) ?: requestCallStart()
 				}
 			}.also { addView(it, actionLayout(start = 6)) }
@@ -1257,7 +1263,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun updateConversationMode(stage: CallController.Stage?) {
 		val active = when (stage) {
 			null -> pauseButton?.tag == "Pause"
-			CallController.Stage.DISCONNECTED, CallController.Stage.ERROR -> false
+			CallController.Stage.DISCONNECTED, CallController.Stage.HELD, CallController.Stage.ERROR -> false
 			else -> true
 		}
 		if (active) {
