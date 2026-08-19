@@ -113,6 +113,7 @@ class CallController(
 		voiceSessionId: String = "",
 		languages: Set<String> = emptySet(),
 		vadSensitivityPercent: Int = 50,
+		vadSilenceMilliseconds: Int = 600,
 	) {
         if (running) end()
         running = true
@@ -129,6 +130,7 @@ class CallController(
 			frameSamples = endpointFrameSamples,
 			startThreshold = startThreshold,
 			endThreshold = (startThreshold - 0.15f).coerceAtLeast(0.1f),
+			endSilenceMilliseconds = vadSilenceMilliseconds.coerceIn(300, 1_200),
 		))
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()

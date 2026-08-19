@@ -444,6 +444,24 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
 				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
 			})
+		}, spaced(bottom = 12))
+		val pauseValue = helper("End-of-speech pause · ${settings.vadSilenceMilliseconds} ms")
+		content.addView(pauseValue, matchWrap())
+		content.addView(SeekBar(this).apply {
+			max = 18
+			progress = (settings.vadSilenceMilliseconds - 300) / 50
+			contentDescription = "End of speech pause"
+			setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+				override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+					if (!fromUser) return
+					val value = 300 + progress * 50
+					pauseValue.text = "End-of-speech pause · $value ms"
+					settings = settings.copy(vadSilenceMilliseconds = value)
+					secureSettings.saveVadSilence(value)
+				}
+				override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+			})
 		}, spaced(bottom = 24))
 
         content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
@@ -1120,7 +1138,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun startCall() {
         val session = pendingSession ?: return
-		controller.start(settings.server, settings.token, session.id, settings.speechLanguages, settings.vadSensitivityPercent)
+		controller.start(
+			settings.server,
+			settings.token,
+			session.id,
+			settings.speechLanguages,
+			settings.vadSensitivityPercent,
+			settings.vadSilenceMilliseconds,
+		)
     }
 
     private fun addPart(part: VoicePart) {

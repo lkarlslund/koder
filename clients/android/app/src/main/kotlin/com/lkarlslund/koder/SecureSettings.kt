@@ -17,6 +17,7 @@ class SecureSettings(context: Context) {
         val enabledPhoneCapabilities: Set<String> = emptySet(),
 		val speechLanguages: Set<String> = emptySet(),
 		val vadSensitivityPercent: Int = 50,
+		val vadSilenceMilliseconds: Int = 600,
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -44,6 +45,7 @@ class SecureSettings(context: Context) {
 			preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet(),
 			languages,
 			preferences.getInt(VAD_SENSITIVITY, 50).coerceIn(35, 75),
+			preferences.getInt(VAD_SILENCE, 600).coerceIn(300, 1_200),
 		)
     }
 
@@ -70,6 +72,10 @@ class SecureSettings(context: Context) {
 
 	fun saveVadSensitivity(percent: Int) {
 		preferences.edit().putInt(VAD_SENSITIVITY, percent.coerceIn(35, 75)).apply()
+	}
+
+	fun saveVadSilence(milliseconds: Int) {
+		preferences.edit().putInt(VAD_SILENCE, milliseconds.coerceIn(300, 1_200)).apply()
 	}
 
     private fun decrypt(ciphertext: String, iv: String): String {
@@ -108,6 +114,7 @@ class SecureSettings(context: Context) {
         const val PHONE_CAPABILITIES = "phone_capabilities"
 		const val SPEECH_LANGUAGES = "speech_languages"
 		const val VAD_SENSITIVITY = "vad_sensitivity"
+		const val VAD_SILENCE = "vad_silence"
         const val DEFAULT_SERVER = ""
     }
 }

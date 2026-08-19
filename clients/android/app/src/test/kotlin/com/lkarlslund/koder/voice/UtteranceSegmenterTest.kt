@@ -59,6 +59,16 @@ class UtteranceSegmenterTest {
         )
     }
 
+	@Test
+	fun aLongerEndPauseWaitsForMoreSilentFrames() {
+		val segmenter = UtteranceSegmenter(config.copy(endSilenceMilliseconds = 500))
+		segmenter.accept(frame(1), probability(0.9f))
+		segmenter.accept(frame(2), probability(0.9f))
+
+		repeat(4) { assertTrue(segmenter.accept(frame(10 + it), probability(0.1f)).none { event -> event is UtteranceEvent.Committed }) }
+		assertTrue(segmenter.accept(frame(20), probability(0.1f)).any { it is UtteranceEvent.Committed })
+	}
+
     @Test
     fun hysteresisBandDoesNotAdvanceSilence() {
         val segmenter = startedSegmenter()
