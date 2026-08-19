@@ -58,7 +58,8 @@ Examples:
 
 ## Server text frames
 
-- `ready`: listening state, `audio_config`, and `call_state`.
+- `ready`: listening state, `audio_config`, `call_state`, and an optional signed
+  Android `app_update`.
 - `state`: `recording`, `transcribing`, `processing`, `working`, or `speaking` for an
   utterance.
 - `transcript`: final server STT text.
@@ -93,9 +94,26 @@ are ephemeral and are never persisted as transcript turns.
     "active_session_id": "work-id",
     "sessions": [],
     "voice_sessions": []
+  },
+  "app_update": {
+    "channel": "local",
+    "application_id": "com.lkarlslund.koder.dev",
+    "version_code": 42,
+    "version_name": "0.1.0-local.example",
+    "signing_certificate_sha256": "64 lowercase hex characters",
+    "apk_sha256": "64 lowercase hex characters",
+    "apk_size": 123456,
+    "minimum_voice_protocol": "voice.v1",
+    "download_uri": "/voice/v1/android/koder.apk"
   }
 }
 ```
+
+The update URI uses the same bearer authentication as the WebSocket. Clients
+must only offer an update whose application ID and signing certificate match
+the installed app and whose version code is newer. They must verify the byte
+size, APK SHA-256, package metadata, and APK signer before invoking Android's
+package installer.
 
 ## Binary PCM envelope
 

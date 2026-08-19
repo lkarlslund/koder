@@ -6,6 +6,8 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -31,16 +34,22 @@ type backend interface {
 	voice.ArtifactBackend
 }
 
+type androidUpdateSource interface {
+	Manifest() (androidupdate.Manifest, bool, error)
+	OpenAPK() (fs.File, error)
+}
+
 // Handler serves voice calls for one Koder process.
 type Handler struct {
 	Backend backend
 	Token   string
 	Lease   *voice.CallLease
+	Updates androidUpdateSource
 }
 
 // NewHandler creates a process-scoped voice protocol handler.
 func NewHandler(backend backend, token string) *Handler {
-	return &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease()}
+	return &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded()}
 }
 
 type clientFrame struct {
@@ -55,18 +64,19 @@ type clientFrame struct {
 }
 
 type serverFrame struct {
-	Type        string             `json:"type"`
-	Protocol    string             `json:"protocol"`
-	UtteranceID string             `json:"utterance_id,omitempty"`
-	CallState   *voice.CallState   `json:"call_state,omitempty"`
-	AudioConfig *voice.AudioConfig `json:"audio_config,omitempty"`
-	AudioFormat *voice.AudioFormat `json:"audio_format,omitempty"`
-	Transcript  string             `json:"transcript,omitempty"`
-	State       string             `json:"state,omitempty"`
-	WorkingOn   *voice.Session     `json:"working_on,omitempty"`
-	Message     *voice.Message     `json:"message,omitempty"`
-	Error       string             `json:"error,omitempty"`
-	ServerTime  time.Time          `json:"server_time,omitempty"`
+	Type        string                  `json:"type"`
+	Protocol    string                  `json:"protocol"`
+	UtteranceID string                  `json:"utterance_id,omitempty"`
+	CallState   *voice.CallState        `json:"call_state,omitempty"`
+	AudioConfig *voice.AudioConfig      `json:"audio_config,omitempty"`
+	AudioFormat *voice.AudioFormat      `json:"audio_format,omitempty"`
+	Transcript  string                  `json:"transcript,omitempty"`
+	State       string                  `json:"state,omitempty"`
+	WorkingOn   *voice.Session          `json:"working_on,omitempty"`
+	Message     *voice.Message          `json:"message,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	ServerTime  time.Time               `json:"server_time,omitempty"`
+	AppUpdate   *androidupdate.Manifest `json:"app_update,omitempty"`
 }
 
 type incomingAudio struct {
@@ -97,6 +107,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/voice/v1/artifacts/") {
 		h.serveArtifact(w, r)
+		return
+	}
+	if r.URL.Path == "/voice/v1/android/koder.apk" {
+		h.serveAndroidAPK(w, r)
 		return
 	}
 	if r.URL.Path != "/voice/v1" {
@@ -133,7 +147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	call := voice.NewCall(h.Backend, voiceSession.ID)
 	var audio *incomingAudio
 	var writeMu sync.Mutex
-	if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
+	if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 		return
 	}
 	for {
@@ -151,7 +165,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: err.Error()}); writeErr != nil {
 					return
 				}
-				if writeErr := writeReady(ctx, conn, &writeMu, call, h.Backend); writeErr != nil {
+				if writeErr := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); writeErr != nil {
 					return
 				}
 			}
@@ -178,7 +192,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.TrimSpace(frame.Type) {
 		case "hello":
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 				return
 			}
 		case "ping":
@@ -188,13 +202,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "select_session":
 			audio = nil
 			message, err := call.SelectSession(ctx, frame.SessionID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "select_voice_session":
 			audio = nil
 			message, err := call.SelectVoiceSession(ctx, frame.VoiceSessionID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "create_voice_session":
@@ -205,7 +219,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 				return
 			}
 		case "audio_start":
@@ -228,7 +242,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "audio_cancel":
 			audio = nil
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 				return
 			}
 		case "audio_commit":
@@ -251,7 +265,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			state, stateErr := call.State(delegationCtx)
 			if stateErr != nil {
 				cancel()
-				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
+				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
 					return
 				}
 				continue
@@ -260,7 +274,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return writeWorking(ctx, conn, &writeMu, frame.UtteranceID, session)
 			})
 			cancel()
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, frame.Text, message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, frame.Text, message, err); err != nil {
 				return
 			}
 		default:
@@ -309,12 +323,43 @@ func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, file.Path)
 }
 
+func (h *Handler) serveAndroidAPK(w http.ResponseWriter, r *http.Request) {
+	if h.Updates == nil {
+		http.NotFound(w, r)
+		return
+	}
+	meta, available, err := h.Updates.Manifest()
+	if err != nil {
+		http.Error(w, "embedded Android update is invalid", http.StatusInternalServerError)
+		return
+	}
+	if !available {
+		http.NotFound(w, r)
+		return
+	}
+	apk, err := h.Updates.OpenAPK()
+	if err != nil {
+		http.Error(w, "embedded Android update is unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer apk.Close()
+	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+	w.Header().Set("Content-Disposition", `attachment; filename="koder.apk"`)
+	w.Header().Set("Content-Length", fmt.Sprint(meta.APKSize))
+	w.Header().Set("ETag", `"`+meta.APKSHA256+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if _, err := io.Copy(w, apk); err != nil {
+		return
+	}
+}
+
 func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, _ string) error {
 	if len(audio.pcm) == 0 {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: "audio utterance was empty"}); err != nil {
 			return err
 		}
-		return writeReady(ctx, conn, writeMu, call, h.Backend)
+		return writeReady(ctx, conn, writeMu, call, h.Backend, h.Updates)
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: audio.utteranceID, State: "transcribing"}); err != nil {
 		return err
@@ -324,7 +369,7 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 		if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: err.Error()}); writeErr != nil {
 			return writeErr
 		}
-		return writeReady(ctx, conn, writeMu, call, h.Backend)
+		return writeReady(ctx, conn, writeMu, call, h.Backend, h.Updates)
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "transcript", UtteranceID: audio.utteranceID, Transcript: transcript}); err != nil {
 		return err
@@ -336,13 +381,13 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 	state, stateErr := call.State(delegationCtx)
 	if stateErr != nil {
 		cancel()
-		return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, transcript, voice.Message{}, stateErr)
+		return writeResult(ctx, conn, writeMu, call, h.Backend, h.Updates, audio.utteranceID, transcript, voice.Message{}, stateErr)
 	}
 	message, callErr := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, transcript, func(session voice.Session) error {
 		return writeWorking(ctx, conn, writeMu, audio.utteranceID, session)
 	})
 	cancel()
-	return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, transcript, message, callErr)
+	return writeResult(ctx, conn, writeMu, call, h.Backend, h.Updates, audio.utteranceID, transcript, message, callErr)
 }
 
 func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload []byte) error {
@@ -368,12 +413,12 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 	return nil
 }
 
-func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, utteranceID, _ string, message voice.Message, callErr error) error {
+func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, updates androidUpdateSource, utteranceID, _ string, message voice.Message, callErr error) error {
 	if callErr != nil {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error()}); err != nil {
 			return err
 		}
-		return writeReady(ctx, conn, writeMu, call, backend)
+		return writeReady(ctx, conn, writeMu, call, backend, updates)
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "message", UtteranceID: utteranceID, Message: &message}); err != nil {
 		return err
@@ -385,7 +430,7 @@ func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 			}
 		}
 	}
-	return writeReady(ctx, conn, writeMu, call, backend)
+	return writeReady(ctx, conn, writeMu, call, backend, updates)
 }
 
 func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, utteranceID, text string) error {
@@ -436,13 +481,24 @@ func writeWorking(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex
 	})
 }
 
-func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend) error {
+func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend, updates androidUpdateSource) error {
 	state, err := call.State(ctx)
 	if err != nil {
 		return writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", Error: err.Error()})
 	}
 	audioConfig := speech.VoiceAudioConfig()
-	return writeFrame(ctx, conn, writeMu, serverFrame{Type: "ready", CallState: &state, AudioConfig: &audioConfig, State: "listening"})
+	frame := serverFrame{Type: "ready", CallState: &state, AudioConfig: &audioConfig, State: "listening"}
+	if updates != nil {
+		meta, available, err := updates.Manifest()
+		if err != nil {
+			return writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", Error: "embedded Android update is invalid"})
+		}
+		if available {
+			meta.DownloadURI = "/voice/v1/android/koder.apk"
+			frame.AppUpdate = &meta
+		}
+	}
+	return writeFrame(ctx, conn, writeMu, frame)
 }
 
 func writeFrame(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, frame serverFrame) error {

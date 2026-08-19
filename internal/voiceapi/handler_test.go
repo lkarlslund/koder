@@ -3,6 +3,8 @@ package voiceapi
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,8 +14,20 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/voice"
 )
+
+type fakeUpdateSource struct {
+	meta androidupdate.Manifest
+	path string
+}
+
+func (f fakeUpdateSource) Manifest() (androidupdate.Manifest, bool, error) {
+	return f.meta, true, nil
+}
+
+func (f fakeUpdateSource) OpenAPK() (fs.File, error) { return os.Open(f.path) }
 
 type fakeBackend struct {
 	delegated  bool
@@ -359,6 +373,61 @@ func TestHandlerServesAuthenticatedVoiceArtifact(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "image/png" || !strings.Contains(response.Header.Get("Content-Disposition"), "current-state.png") {
 		t.Fatalf("artifact response status=%d headers=%v", response.StatusCode, response.Header)
+	}
+}
+
+func TestHandlerAdvertisesAndServesAuthenticatedAndroidUpdate(t *testing.T) {
+	apk := []byte("signed-apk")
+	path := filepath.Join(t.TempDir(), "koder.apk")
+	if err := os.WriteFile(path, apk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := androidupdate.Manifest{
+		Channel: "local", ApplicationID: "com.lkarlslund.koder.dev", VersionCode: 42,
+		VersionName: "0.1.0-local.test", APKSHA256: strings.Repeat("a", 64), APKSize: int64(len(apk)),
+	}
+	handler := NewHandler(&fakeBackend{}, "secret")
+	handler.Updates = fakeUpdateSource{meta: meta, path: path}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ctx := context.Background()
+	url := "ws" + server.URL[len("http"):] + "/voice/v1"
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer secret"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := readType(t, ctx, conn, "ready")
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	if ready.AppUpdate == nil || ready.AppUpdate.VersionCode != 42 || ready.AppUpdate.DownloadURI != "/voice/v1/android/koder.apk" {
+		t.Fatalf("ready app update = %#v", ready.AppUpdate)
+	}
+
+	downloadURL := server.URL + ready.AppUpdate.DownloadURI
+	response, err := http.Get(downloadURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated APK status = %d", response.StatusCode)
+	}
+	request, err := http.NewRequest(http.MethodGet, downloadURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != string(apk) || response.Header.Get("ETag") != `"`+meta.APKSHA256+`"` {
+		t.Fatalf("APK response status=%d headers=%v body=%q", response.StatusCode, response.Header, body)
 	}
 }
 

@@ -46,6 +46,16 @@ class VoiceProtocolTest {
 		assertEquals("Phone work", creation.getString("title"))
     }
 
+    @Test
+    fun decodesSignedAppUpdate() {
+        val frame = VoiceProtocol.parse(
+            """{"type":"ready","protocol":"voice.v1","app_update":{"channel":"local","application_id":"com.lkarlslund.koder.dev","version_code":42,"version_name":"0.1.0-local.test","signing_certificate_sha256":"${"a".repeat(64)}","apk_sha256":"${"b".repeat(64)}","apk_size":1234,"download_uri":"/voice/v1/android/koder.apk"}}""",
+        )
+        assertEquals("com.lkarlslund.koder.dev", frame.appUpdate?.applicationId)
+        assertEquals(42L, frame.appUpdate?.versionCode)
+        assertEquals("/voice/v1/android/koder.apk", frame.appUpdate?.downloadUri)
+    }
+
 	@Test
 	fun decodesWorkingTargetForLocalWaitingCue() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/working.json"))

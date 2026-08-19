@@ -59,6 +59,17 @@ data class VoiceAudioConfig(
     val maxUtteranceSeconds: Int,
 )
 
+data class AppUpdate(
+    val channel: String,
+    val applicationId: String,
+    val versionCode: Long,
+    val versionName: String,
+    val signingCertificateSHA256: String,
+    val apkSHA256: String,
+    val apkSize: Long,
+    val downloadUri: String,
+)
+
 enum class VoiceAudioFrameKind(val wireValue: Int) {
     INPUT_PCM(1),
     OUTPUT_PCM(2),
@@ -88,6 +99,7 @@ data class VoiceServerFrame(
 	val audioFormat: VoiceAudioFormat? = null,
 	val transcript: String = "",
     val message: VoiceMessage? = null,
+    val appUpdate: AppUpdate? = null,
     val error: String = "",
 )
 
@@ -191,6 +203,7 @@ object VoiceProtocol {
 			audioFormat = root.optJSONObject("audio_format")?.toAudioFormat(),
 			transcript = root.optString("transcript"),
             message = root.optJSONObject("message")?.toVoiceMessage(),
+            appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
             error = root.optString("error"),
         )
     }
@@ -310,3 +323,14 @@ object VoiceProtocol {
 	private const val MAX_AUDIO_PAYLOAD = 64 * 1024
 	private const val UINT32_MAX = 0xffff_ffffL
 }
+
+private fun JSONObject.toAppUpdate() = AppUpdate(
+    channel = getString("channel"),
+    applicationId = getString("application_id"),
+    versionCode = getLong("version_code"),
+    versionName = getString("version_name"),
+    signingCertificateSHA256 = getString("signing_certificate_sha256"),
+    apkSHA256 = getString("apk_sha256"),
+    apkSize = getLong("apk_size"),
+    downloadUri = getString("download_uri"),
+)
