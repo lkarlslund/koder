@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.TextUtils
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -310,9 +311,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 contentDescription = "Back to conversations"
                 setOnClickListener { leaveChat() }
             })
-            addView(title(session.title.ifBlank { "Conversation" }), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(10)
-            })
+            addView(
+                title(session.title.ifBlank { "Conversation" }).apply {
+                    textSize = 22f
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(10)
+                },
+            )
         }
         root.addView(heading, matchWrap())
         status = body("Preparing conversation…").apply { gravity = Gravity.CENTER_HORIZONTAL }
