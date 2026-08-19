@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/clients/android"
 CHANNEL="${1:-${KODER_ANDROID_CHANNEL:-local}}"
+TARGET_ABIS="${KODER_ANDROID_TARGET_ABIS:-arm64-v8a}"
 CACHE_DIR="$ANDROID_DIR/.update-cache/$CHANNEL"
 SIGNING_DIR="$ANDROID_DIR/.signing"
 BUNDLE_DIR="$ROOT_DIR/internal/androidupdate/bundle"
@@ -91,7 +92,7 @@ if [[ "$CHANNEL" == "release" ]]; then
   : "${KODER_ANDROID_VERSION_NAME:?KODER_ANDROID_VERSION_NAME is required for release APKs}"
   RELEASE_IDENTITY="$KODER_ANDROID_VERSION_CODE $KODER_ANDROID_VERSION_NAME"
 fi
-FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL" "$RELEASE_IDENTITY"; } | sha256sum | cut -d' ' -f1)"
+FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL" "$RELEASE_IDENTITY" "$TARGET_ABIS"; } | sha256sum | cut -d' ' -f1)"
 if [[ -f "$CACHE_DIR/fingerprint" && -f "$CACHE_DIR/koder.apk" && -f "$CACHE_DIR/manifest.json" ]] &&
    [[ "$(<"$CACHE_DIR/fingerprint")" == "$FINGERPRINT" ]]; then
   install -m 0644 "$CACHE_DIR/koder.apk" "$BUNDLE_DIR/koder.apk"
@@ -126,6 +127,7 @@ SIGNING_RELATIVE="$(realpath --relative-to="$ANDROID_DIR" "$SIGNING_PROPERTIES")
   JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}" ./gradlew "$GRADLE_TASK" \
     "-PkoderVersionCode=$VERSION_CODE" \
     "-PkoderVersionName=$VERSION_NAME" \
+    "-PkoderTargetAbis=$TARGET_ABIS" \
     "-P$SIGNING_PROPERTY=$SIGNING_RELATIVE"
 )
 

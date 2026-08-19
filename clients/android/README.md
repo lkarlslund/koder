@@ -66,6 +66,11 @@ adb install -r ../../internal/androidupdate/bundle/koder.apk
 This uses the ignored, stable local-development signing key and the
 `com.lkarlslund.koder.dev` app ID. Back up `.signing/local-development.jks`
 and its properties file: a lost signing key cannot update an installed app.
+Embedded local and official APKs target 64-bit ARM Android phones and compress
+native libraries to keep the APK—and the Koder binary containing it—small.
+Ordinary Gradle builds remain unfiltered so the x86_64 managed emulator keeps
+working. Set `KODER_ANDROID_TARGET_ABIS` only when preparing an embedded APK for
+a different device architecture.
 After this one-time sideload, newer Koder binaries advertise their embedded APK
 in the app. Tap the update offer; the app verifies its ID, version, signer,
 size, and SHA-256 before Android asks for install confirmation. Android may ask

@@ -69,6 +69,11 @@ val sileroVadSHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279
 val sileroVadAssets = layout.buildDirectory.dir("generated/sileroVadAssets")
 val koderVersionCode = providers.gradleProperty("koderVersionCode").getOrElse("1").toInt()
 val koderVersionName = providers.gradleProperty("koderVersionName").getOrElse("0.1.0-dev")
+val koderTargetAbis = providers.gradleProperty("koderTargetAbis").orNull
+    ?.split(',')
+    ?.map(String::trim)
+    ?.filter(String::isNotEmpty)
+    .orEmpty()
 
 fun signingProperties(path: String?): Properties? {
     if (path.isNullOrBlank()) return null
@@ -108,6 +113,11 @@ android {
         versionName = koderVersionName
         resValue("string", "app_name", "Koder")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        if (koderTargetAbis.isNotEmpty()) {
+            ndk {
+                abiFilters += koderTargetAbis
+            }
+        }
     }
 
     compileOptions {
@@ -155,6 +165,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Koder is sideloaded, so favor a smaller embedded/downloaded APK over
+            // mmap-in-place native libraries. Android extracts these at install time.
+            useLegacyPackaging = true
         }
     }
 
