@@ -144,8 +144,37 @@ func TestCallStripsMarkdownFromSummaryFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.SpokenText != "Result The laptop now boots." {
+	if message.SpokenText != "Result. The laptop now boots." {
 		t.Fatalf("fallback spoken text = %q", message.SpokenText)
+	}
+}
+
+func TestCallReportsWorkingOnlyWhenDelegationStarts(t *testing.T) {
+	backend := &fakeBackend{sessions: []Session{{ID: "laptop", Title: "Laptop repair"}}}
+	var working []Session
+	message, err := NewCall(backend).HandleTextWithWorking(context.Background(), "Check it", "laptop", func(session Session) error {
+		if len(backend.delegations) != 0 {
+			t.Fatal("working callback arrived after delegation")
+		}
+		working = append(working, session)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(working) != 1 || working[0].ID != "laptop" || message.Delegation == nil {
+		t.Fatalf("working=%#v message=%#v", working, message)
+	}
+
+	working = nil
+	if _, err := NewCall(backend).HandleTextWithWorking(context.Background(), "What sessions are available?", "", func(session Session) error {
+		working = append(working, session)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(working) != 0 {
+		t.Fatalf("session listing reported working: %#v", working)
 	}
 }
 

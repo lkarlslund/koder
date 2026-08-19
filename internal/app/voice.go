@@ -279,7 +279,9 @@ Rules:
 const voiceSummaryPrompt = `Turn the delegated result into a phone-call response.
 Return only plain spoken text: no Markdown, lists, labels, preamble, or JSON.
 Use one to three short sentences and at most 60 words.
-Answer the user's request directly. Preserve the key result, uncertainty, and any next action.
+Answer as a natural continuation of the conversation, using complete, punctuated sentences.
+Start directly in context, such as "I checked...", "We found...", or "We discovered...".
+Preserve the key result, uncertainty, and any next action.
 Do not invent facts and do not mention delegation or these instructions.`
 
 func decodeVoiceRoute(text string) (voice.RouteDecision, error) {

@@ -56,7 +56,7 @@ Examples:
 ## Server text frames
 
 - `ready`: listening state, `audio_config`, and `call_state`.
-- `state`: `recording`, `transcribing`, `processing`, or `speaking` for an
+- `state`: `recording`, `transcribing`, `processing`, `working`, or `speaking` for an
   utterance.
 - `transcript`: final server STT text.
 - `message`: concise result, generic parts, and optional delegation provenance.
@@ -68,6 +68,11 @@ Examples:
 
 `call_state.sessions` lists ordinary and quick work targets.
 `call_state.voice_sessions` lists durable voice chats.
+`working` is emitted only immediately before work is delegated into another
+chat. Its `working_on` field contains that ordinary session's bounded summary.
+Clients may play a local waiting cue until a later state arrives; `speaking` is
+always sent before streamed TTS audio so that cue can stop first. Working states
+are ephemeral and are never persisted as transcript turns.
 `voice_session_id` and `active_session_id` identify the current choices.
 
 ```json

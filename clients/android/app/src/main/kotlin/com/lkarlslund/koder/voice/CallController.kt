@@ -11,10 +11,11 @@ class CallController(
     context: Context,
     private val listener: Listener,
     private val microphone: MicrophoneCapture = AndroidMicrophoneCapture(),
-    detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
+	detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
 	audioPlayback: StreamingAudioPlayback? = null,
+	private val workingSound: WorkingSound = AndroidWorkingSound(),
 ) : AutoCloseable {
-    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, SPEAKING, HELD, ERROR }
+    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, HELD, ERROR }
 
     data class Snapshot(
         val stage: Stage = Stage.DISCONNECTED,
@@ -109,7 +110,7 @@ class CallController(
         if (!running || normalized.isEmpty()) return
         microphone.stop()
         listener.onUserMessage(normalized)
-        update(Stage.PROCESSING, "Koder is working…", "")
+        update(Stage.PROCESSING, "Understanding…", "")
         try {
             connection.sendUtterance(normalized, snapshot.activeSessionId)
         } catch (error: Exception) {
@@ -154,6 +155,7 @@ class CallController(
         serverReady = false
         microphone.stop()
         playback.stop()
+		workingSound.stop()
         endpoint.reset()
         connection.close()
         telecom.disconnect()
@@ -167,6 +169,7 @@ class CallController(
         telecom.close()
         microphone.close()
         playback.close()
+		workingSound.close()
         endpoint.close()
         connection.close()
     }
@@ -189,7 +192,12 @@ class CallController(
             "state" -> when (frame.state) {
                 "recording" -> update(Stage.RECORDING, "Listening to you…")
                 "transcribing" -> update(Stage.TRANSCRIBING, "Recognizing speech…", "")
-                "processing" -> update(Stage.PROCESSING, "Koder is working…", "")
+                "processing" -> update(Stage.PROCESSING, "Choosing a chat…", "")
+				"working" -> update(
+					Stage.WORKING,
+					frame.workingOn?.title?.takeIf(String::isNotBlank)?.let { "Working in $it…" } ?: "Working…",
+					"",
+				)
                 "speaking" -> update(Stage.SPEAKING, "Koder is speaking…", "")
             }
             "transcript" -> if (frame.transcript.isNotBlank()) listener.onUserMessage(frame.transcript)
@@ -234,7 +242,7 @@ class CallController(
 
     private fun maybeListen(force: Boolean = false) {
         if (!running || !serverReady || !telecomReady || audioConfig == null) return
-        if (!force && snapshot.stage in setOf(Stage.RECORDING, Stage.TRANSCRIBING, Stage.PROCESSING, Stage.SPEAKING, Stage.HELD)) return
+        if (!force && snapshot.stage in setOf(Stage.RECORDING, Stage.TRANSCRIBING, Stage.PROCESSING, Stage.WORKING, Stage.SPEAKING, Stage.HELD)) return
         resumeListening()
     }
 
@@ -296,6 +304,11 @@ class CallController(
     }
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {
+        if (stage == Stage.WORKING) {
+            workingSound.start()
+        } else {
+            workingSound.stop()
+        }
         snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial)
         publish()
     }

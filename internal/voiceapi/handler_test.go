@@ -106,6 +106,17 @@ func TestSharedProtocolFixturesDecode(t *testing.T) {
 	if message.Protocol != protocolVersion || message.Type != "message" || message.Message == nil || len(message.Message.Parts) == 0 {
 		t.Fatalf("message fixture = %#v", message)
 	}
+	workingData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "working.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var working serverFrame
+	if err := json.Unmarshal(workingData, &working); err != nil {
+		t.Fatal(err)
+	}
+	if working.Protocol != protocolVersion || working.State != "working" || working.WorkingOn == nil || working.WorkingOn.ID != "session-fixture-1" {
+		t.Fatalf("working fixture = %#v", working)
+	}
 }
 
 func (f *fakeBackend) DelegateVoice(_ context.Context, sessionID, text string) (voice.DelegationResult, error) {
@@ -133,9 +144,16 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	if err := writeClientFrame(ctx, conn, clientFrame{Type: "utterance", Protocol: protocolVersion, UtteranceID: "utt-1", Text: "check it", SessionID: "session-1"}); err != nil {
 		t.Fatal(err)
 	}
-	readType(t, ctx, conn, "state")
+	processing := readType(t, ctx, conn, "state")
+	if processing.State != "processing" {
+		t.Fatalf("initial state = %#v", processing)
+	}
+	working := readType(t, ctx, conn, "state")
+	if working.State != "working" || working.WorkingOn == nil || working.WorkingOn.ID != "session-1" {
+		t.Fatalf("working state = %#v", working)
+	}
 	message := readType(t, ctx, conn, "message")
-	if message.Message == nil || message.Message.SpokenText != "Done: check it" || !backend.delegated {
+	if message.Message == nil || message.Message.SpokenText != "Done: check it." || !backend.delegated {
 		t.Fatalf("message=%#v delegated=%v", message, backend.delegated)
 	}
 	readType(t, ctx, conn, "state")
@@ -222,8 +240,12 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 		t.Fatalf("transcript = %#v", transcript)
 	}
 	readType(t, ctx, conn, "state") // processing
+	working := readType(t, ctx, conn, "state")
+	if working.State != "working" || working.WorkingOn == nil || working.WorkingOn.Title != "Laptop repair" {
+		t.Fatalf("working state = %#v", working)
+	}
 	message := readType(t, ctx, conn, "message")
-	if message.Message == nil || message.Message.SpokenText != "Done: check the laptop" || !backend.delegated {
+	if message.Message == nil || message.Message.SpokenText != "Done: check the laptop." || !backend.delegated {
 		t.Fatalf("message=%#v backend=%#v", message, backend)
 	}
 	readType(t, ctx, conn, "state") // speaking
@@ -234,7 +256,7 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	}
 	readType(t, ctx, conn, "tts_end")
 	readType(t, ctx, conn, "ready")
-	if backend.spoken != "Done: check the laptop" {
+	if backend.spoken != "Done: check the laptop." {
 		t.Fatalf("synthesized text = %q", backend.spoken)
 	}
 	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check the laptop" {

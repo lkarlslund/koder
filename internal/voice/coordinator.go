@@ -228,6 +228,13 @@ func (c *Call) SelectVoiceSession(ctx context.Context, sessionID string) (Messag
 
 // HandleText routes or delegates one final user utterance.
 func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Message, error) {
+	return c.HandleTextWithWorking(ctx, text, targetSessionID, nil)
+}
+
+// HandleTextWithWorking reports the selected ordinary session immediately
+// before delegation starts. Selection and clarification responses do not invoke
+// the callback because they perform no work in another chat.
+func (c *Call) HandleTextWithWorking(ctx context.Context, text, targetSessionID string, onWorking func(Session) error) (Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Message{}, fmt.Errorf("utterance text is required")
@@ -237,11 +244,12 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 		return Message{}, err
 	}
 	if targetSessionID = strings.TrimSpace(targetSessionID); targetSessionID != "" {
-		if _, ok := sessionByID(state.Sessions, targetSessionID); !ok {
+		session, ok := sessionByID(state.Sessions, targetSessionID)
+		if !ok {
 			return Message{}, fmt.Errorf("session %q was not found", targetSessionID)
 		}
 		c.activeSessionID = targetSessionID
-		return c.delegate(ctx, text)
+		return c.delegate(ctx, text, session, onWorking)
 	}
 
 	if asksForSessionList(text) {
@@ -259,7 +267,7 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 			Text: text, ActiveSessionID: c.activeSessionID, Sessions: state.Sessions,
 		})
 		if routeErr == nil {
-			return c.applyRoute(ctx, router, state.Sessions, text, decision)
+			return c.applyRoute(ctx, router, state.Sessions, text, decision, onWorking)
 		}
 	}
 	if len(state.Sessions) == 0 {
@@ -274,7 +282,11 @@ func (c *Call) HandleText(ctx context.Context, text, targetSessionID string) (Me
 			return textMessage("Which session should I use? " + sessionListResponse(state.Sessions)), nil
 		}
 	}
-	return c.delegate(ctx, text)
+	session, ok := sessionByID(state.Sessions, c.activeSessionID)
+	if !ok {
+		return Message{}, fmt.Errorf("session %q was not found", c.activeSessionID)
+	}
+	return c.delegate(ctx, text, session, onWorking)
 }
 
 func (c *Call) applyRoute(
@@ -283,6 +295,7 @@ func (c *Call) applyRoute(
 	sessions []Session,
 	text string,
 	decision RouteDecision,
+	onWorking func(Session) error,
 ) (Message, error) {
 	switch decision.Action {
 	case RouteExisting:
@@ -294,7 +307,7 @@ func (c *Call) applyRoute(
 		if !decision.Delegate {
 			return textMessage("Using " + session.Title + ". What should we do there?"), nil
 		}
-		return c.delegate(ctx, text)
+		return c.delegate(ctx, text, session, onWorking)
 	case RouteNewTemporary, RouteNewPersistent:
 		created, err := backend.CreateVoiceTarget(ctx, strings.TrimSpace(decision.Title), decision.Action == RouteNewPersistent)
 		if err != nil {
@@ -307,7 +320,7 @@ func (c *Call) applyRoute(
 		if !decision.Delegate {
 			return textMessage("Created " + created.Title + ". What should we do there?"), nil
 		}
-		return c.delegate(ctx, text)
+		return c.delegate(ctx, text, created, onWorking)
 	case RouteClarify:
 		question := strings.TrimSpace(decision.Question)
 		if question == "" {
@@ -319,8 +332,13 @@ func (c *Call) applyRoute(
 	}
 }
 
-func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
-	result, err := c.backend.DelegateVoice(ctx, c.activeSessionID, text)
+func (c *Call) delegate(ctx context.Context, text string, session Session, onWorking func(Session) error) (Message, error) {
+	if onWorking != nil {
+		if err := onWorking(session); err != nil {
+			return Message{}, err
+		}
+	}
+	result, err := c.backend.DelegateVoice(ctx, session.ID, text)
 	if err != nil {
 		return Message{}, err
 	}
@@ -345,11 +363,61 @@ func (c *Call) delegate(ctx context.Context, text string) (Message, error) {
 }
 
 func conciseSpoken(text string, limit int) string {
-	plain := strings.NewReplacer(
-		"```", " ", "`", "", "**", "", "__", "", "###", "", "##", "", "#", "",
-		"- ", "", "* ", "", "\n", " ", "\r", " ", "\t", " ",
-	).Replace(text)
-	return concise(plain, limit)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	var parts []string
+	var paragraph []string
+	flushParagraph := func() {
+		if len(paragraph) == 0 {
+			return
+		}
+		parts = append(parts, strings.Join(paragraph, " "))
+		paragraph = nil
+	}
+	clean := func(line string) string {
+		return strings.Join(strings.Fields(strings.NewReplacer(
+			"```", " ", "`", "", "**", "", "__", "", "\t", " ",
+		).Replace(line)), " ")
+	}
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			flushParagraph()
+			continue
+		}
+		structural := false
+		if strings.HasPrefix(line, "#") {
+			line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+			structural = true
+		} else if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+			line = strings.TrimSpace(line[2:])
+			structural = true
+		}
+		line = clean(line)
+		if line == "" {
+			continue
+		}
+		if structural {
+			flushParagraph()
+			parts = append(parts, ensureSpokenPunctuation(line))
+			continue
+		}
+		paragraph = append(paragraph, line)
+	}
+	flushParagraph()
+	spoken := concise(strings.Join(parts, " "), limit)
+	if spoken != "" && !strings.HasSuffix(spoken, "…") {
+		spoken = ensureSpokenPunctuation(spoken)
+	}
+	return spoken
+}
+
+func ensureSpokenPunctuation(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.ContainsAny(text[len(text)-1:], ".!?") {
+		return text
+	}
+	return text + "."
 }
 
 func textMessage(text string) Message {

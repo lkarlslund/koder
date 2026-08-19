@@ -62,6 +62,7 @@ type serverFrame struct {
 	AudioFormat *voice.AudioFormat `json:"audio_format,omitempty"`
 	Transcript  string             `json:"transcript,omitempty"`
 	State       string             `json:"state,omitempty"`
+	WorkingOn   *voice.Session     `json:"working_on,omitempty"`
 	Message     *voice.Message     `json:"message,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	ServerTime  time.Time          `json:"server_time,omitempty"`
@@ -235,7 +236,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-			message, err := call.HandleText(delegationCtx, frame.Text, frame.SessionID)
+			message, err := call.HandleTextWithWorking(delegationCtx, frame.Text, frame.SessionID, func(session voice.Session) error {
+				return writeWorking(ctx, conn, &writeMu, frame.UtteranceID, session)
+			})
 			cancel()
 			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, frame.Text, message, err); err != nil {
 				return
@@ -310,7 +313,9 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 		return err
 	}
 	delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-	message, callErr := call.HandleText(delegationCtx, transcript, sessionID)
+	message, callErr := call.HandleTextWithWorking(delegationCtx, transcript, sessionID, func(session voice.Session) error {
+		return writeWorking(ctx, conn, writeMu, audio.utteranceID, session)
+	})
 	cancel()
 	return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, transcript, message, callErr)
 }
@@ -407,6 +412,15 @@ func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 		return fmt.Errorf("TTS returned an odd PCM16 byte count")
 	}
 	return writeFrame(ctx, conn, writeMu, serverFrame{Type: "tts_end", UtteranceID: utteranceID})
+}
+
+func writeWorking(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, utteranceID string, session voice.Session) error {
+	return writeFrame(ctx, conn, writeMu, serverFrame{
+		Type:        "state",
+		UtteranceID: utteranceID,
+		State:       "working",
+		WorkingOn:   &session,
+	})
 }
 
 func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend) error {

@@ -44,6 +44,17 @@ class VoiceProtocolTest {
     }
 
 	@Test
+	fun decodesWorkingTargetForLocalWaitingCue() {
+		val payload = checkNotNull(javaClass.getResourceAsStream("/working.json"))
+			.bufferedReader()
+			.use { it.readText() }
+		val frame = VoiceProtocol.parse(payload)
+		assertEquals("working", frame.state)
+		assertEquals("session-fixture-1", frame.workingOn?.id)
+		assertEquals("Laptop repair", frame.workingOn?.title)
+	}
+
+	@Test
 	fun audioFrameMatchesGoWireFixture() {
 		val encoded = VoiceProtocol.encodeAudio(
 			VoiceAudioFrame(

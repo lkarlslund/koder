@@ -83,6 +83,7 @@ data class VoiceServerFrame(
     val utteranceId: String = "",
     val state: String = "",
     val callState: VoiceCallState? = null,
+	val workingOn: VoiceSession? = null,
 	val audioConfig: VoiceAudioConfig? = null,
 	val audioFormat: VoiceAudioFormat? = null,
 	val transcript: String = "",
@@ -179,6 +180,7 @@ object VoiceProtocol {
             utteranceId = root.optString("utterance_id"),
             state = root.optString("state"),
             callState = root.optJSONObject("call_state")?.toCallState(),
+			workingOn = root.optJSONObject("working_on")?.toVoiceSession(),
 			audioConfig = root.optJSONObject("audio_config")?.toAudioConfig(),
 			audioFormat = root.optJSONObject("audio_format")?.toAudioFormat(),
 			transcript = root.optString("transcript"),
@@ -238,21 +240,15 @@ object VoiceProtocol {
     private fun JSONObject.toCallState(): VoiceCallState = VoiceCallState(
 		voiceSessionId = optString("voice_session_id"),
         activeSessionId = optString("active_session_id"),
-        sessions = optJSONArray("sessions").mapObjects { item ->
-            VoiceSession(
-                id = item.getString("id"),
-                title = item.getString("title"),
-                lastMessage = item.optString("last_message"),
-            )
-        },
-        voiceSessions = optJSONArray("voice_sessions").mapObjects { item ->
-            VoiceSession(
-                id = item.getString("id"),
-                title = item.getString("title"),
-                lastMessage = item.optString("last_message"),
-            )
-        },
+		sessions = optJSONArray("sessions").mapObjects { it.toVoiceSession() },
+		voiceSessions = optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() },
     )
+
+	private fun JSONObject.toVoiceSession(): VoiceSession = VoiceSession(
+		id = getString("id"),
+		title = getString("title"),
+		lastMessage = optString("last_message"),
+	)
 
 	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()
 		.put("encoding", encoding)
