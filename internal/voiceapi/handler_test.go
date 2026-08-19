@@ -267,6 +267,82 @@ func TestHandlerCreatesAndSelectsDurableVoiceChat(t *testing.T) {
 	}
 }
 
+func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
+	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Personal"}}}
+	handler := NewHandler(backend, "secret")
+	handler.Lease = nil
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/voice/v1/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var listed sessionsResponse
+	if err := json.NewDecoder(response.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || listed.Protocol != protocolVersion || len(listed.VoiceSessions) != 1 {
+		t.Fatalf("list response status=%d body=%#v", response.StatusCode, listed)
+	}
+
+	request, err = http.NewRequest(http.MethodPost, server.URL+"/voice/v1/sessions", strings.NewReader(`{"title":"Phone work"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var created sessionsResponse
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusCreated || created.VoiceSession == nil || created.VoiceSession.Title != "Phone work" {
+		t.Fatalf("create response status=%d body=%#v", response.StatusCode, created)
+	}
+	if len(created.VoiceSessions) != 2 || created.VoiceSessions[1].ID != "voice-created" {
+		t.Fatalf("created voice sessions = %#v", created.VoiceSessions)
+	}
+}
+
+func TestHandlerProtectsAndValidatesVoiceSessionsEndpoint(t *testing.T) {
+	server := httptest.NewServer(NewHandler(&fakeBackend{}, "secret"))
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/voice/v1/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", response.StatusCode)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/voice/v1/sessions", strings.NewReader(`{"title":"Work","extra":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid request status = %d", response.StatusCode)
+	}
+}
+
 func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	backend := &fakeBackend{}
 	server := httptest.NewServer(NewHandler(backend, ""))

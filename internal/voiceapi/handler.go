@@ -25,6 +25,7 @@ import (
 
 const protocolVersion = "voice.v1"
 const readLimit = 256 * 1024
+const sessionRequestLimit = 4 * 1024
 const delegationTimeout = 30 * time.Minute
 
 type backend interface {
@@ -79,6 +80,17 @@ type serverFrame struct {
 	AppUpdate   *androidupdate.Manifest `json:"app_update,omitempty"`
 }
 
+type sessionsResponse struct {
+	Protocol      string                  `json:"protocol"`
+	VoiceSession  *voice.Session          `json:"voice_session,omitempty"`
+	VoiceSessions []voice.Session         `json:"voice_sessions"`
+	AppUpdate     *androidupdate.Manifest `json:"app_update,omitempty"`
+}
+
+type createSessionRequest struct {
+	Title string `json:"title"`
+}
+
 type incomingAudio struct {
 	utteranceID  string
 	format       voice.AudioFormat
@@ -88,21 +100,22 @@ type incomingAudio struct {
 
 // ServeHTTP accepts one authenticated voice call.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if h.Backend == nil {
 		http.Error(w, "voice backend unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	if h.Lease == nil {
-		http.Error(w, "voice call lease unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !authorized(r, h.Token) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="koder-voice"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.URL.Path == "/voice/v1/sessions" {
+		h.serveSessions(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/voice/v1/artifacts/") {
@@ -115,6 +128,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path != "/voice/v1" {
 		http.NotFound(w, r)
+		return
+	}
+	if h.Lease == nil {
+		http.Error(w, "voice call lease unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	callID := strings.TrimSpace(r.URL.Query().Get("call_id"))
@@ -282,6 +299,64 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+}
+
+func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
+	var created *voice.Session
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPost:
+		r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var request createSessionRequest
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, "invalid session request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			http.Error(w, "invalid session request: expected one JSON object", http.StatusBadRequest)
+			return
+		}
+		session, err := h.Backend.CreateVoiceSession(r.Context(), strings.TrimSpace(request.Title))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		created = &session
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessions, err := h.Backend.ListVoiceChats(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	response := sessionsResponse{
+		Protocol: protocolVersion, VoiceSession: created, VoiceSessions: sessions,
+	}
+	if h.Updates != nil {
+		meta, available, err := h.Updates.Manifest()
+		if err != nil {
+			http.Error(w, "embedded Android update is invalid", http.StatusInternalServerError)
+			return
+		}
+		if available {
+			meta.DownloadURI = "/voice/v1/android/koder.apk"
+			response.AppUpdate = &meta
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if created != nil {
+		w.WriteHeader(http.StatusCreated)
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		return
 	}
 }
 
