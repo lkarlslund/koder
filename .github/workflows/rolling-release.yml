@@ -152,8 +152,7 @@ jobs:
         if: steps.meta.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          timeout 300 sudo apt-get update
-          timeout 300 sudo apt-get install -y --no-install-recommends bubblewrap
+          timeout 120 sudo apt-get install -y --no-install-recommends bubblewrap
           bwrap --version
 
       - name: Run tests
