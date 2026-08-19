@@ -51,6 +51,9 @@ To also delegate a real turn, add an utterance and optionally an exact target:
 ```
 
 The live test is skipped unless `voiceLiveServer` is supplied.
+Add `-Pandroid.testInstrumentationRunnerArguments.voiceLiveRequireAppUpdate=true`
+to require and validate the embedded update advertisement as part of the smoke
+test.
 
 ## Install on a phone
 

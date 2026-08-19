@@ -3,6 +3,7 @@ package com.lkarlslund.koder.voice
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -25,6 +26,7 @@ class VoiceLiveInstrumentedTest {
         var sessions = emptyList<VoiceSession>()
         var voiceSessions = emptyList<VoiceSession>()
         var response: VoiceServerFrame? = null
+        var appUpdate: AppUpdate? = null
         var workingOn: VoiceSession? = null
         var disconnectReason = ""
         var terminalError = ""
@@ -34,6 +36,7 @@ class VoiceLiveInstrumentedTest {
                 if (frame.type == "ready" && frame.callState != null) {
                     sessions = frame.callState.sessions
                     voiceSessions = frame.callState.voiceSessions
+                    appUpdate = frame.appUpdate
                     ready.countDown()
                 }
                 if (frame.type == "message") {
@@ -65,6 +68,14 @@ class VoiceLiveInstrumentedTest {
             assertTrueWithReason("live server did not become ready", ready.await(15, TimeUnit.SECONDS), disconnectReason)
             assertFalse("live server exposed no regular sessions", sessions.isEmpty())
             assertFalse("live server exposed no durable voice chats", voiceSessions.isEmpty())
+            if (arguments.getString("voiceLiveRequireAppUpdate") == "true") {
+                assertNotNull("live server did not advertise an Android update", appUpdate)
+                assertEquals(
+                    InstrumentationRegistry.getInstrumentation().targetContext.packageName,
+                    appUpdate?.applicationId,
+                )
+                assertEquals("/voice/v1/android/koder.apk", appUpdate?.downloadUri)
+            }
             println("Koder live voice sessions: " + sessions.joinToString { "${it.title} (${it.id})" })
             connection.selectVoiceSession(voiceSessions.first().id)
             assertTrueWithReason(
@@ -97,4 +108,5 @@ class VoiceLiveInstrumentedTest {
     private fun assertTrueWithReason(message: String, condition: Boolean, reason: String) {
         if (!condition) throw AssertionError("$message${if (reason.isBlank()) "" else ": $reason"}")
     }
+
 }
