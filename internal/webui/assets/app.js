@@ -1036,6 +1036,7 @@
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
+		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -5226,6 +5227,7 @@
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
             if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
+			if (this.settingsTab === 'security') this.loadVoiceDevices();
           }).finally(() => { this.settingsLoading = false; });
         },
         closeSettingsDialog() {
@@ -5262,17 +5264,19 @@
             this.settingsStatus = err.message; this.settingsStatusKind = 'danger';
           }).finally(() => { this.settingsLoading = false; });
         },
-        settingsTabs() { return ['general', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
+		settingsTabs() { return ['general', 'security', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
+		  if (tab === 'security') this.loadVoiceDevices();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', security: 'Security', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
         settingsTabDescription(tab) {
           return {
             general: 'Defaults for new chats and the interface',
+			security: 'Registered Android phones and device access',
             browser: 'Managed Chromium used by browser tools',
             tts: 'Speech output and playback testing',
             access: 'Default sandbox access for new sessions',
@@ -5285,6 +5289,60 @@
             mcp: 'Model Context Protocol servers',
           }[tab] || '';
         },
+		openPhoneBinding() {
+			this.showPhoneBinding = true;
+			this.refreshPhoneBinding();
+			this.reportClientStateSoon();
+		},
+		closePhoneBinding() {
+			this.showPhoneBinding = false;
+			this.phoneBinding = null;
+			this.phoneBindingError = '';
+			this.reportClientStateSoon();
+		},
+		refreshPhoneBinding() {
+			this.phoneBindingLoading = true;
+			this.phoneBindingError = '';
+			this.rpc('voice_device_invite', {origin: window.location.origin}).then(result => {
+				this.phoneBinding = result;
+			}).catch(error => {
+				this.phoneBinding = null;
+				this.phoneBindingError = error.message || 'Could not create phone binding codes';
+			}).finally(() => { this.phoneBindingLoading = false; });
+		},
+		phoneBindingExpiryLabel() {
+			const raw = this.phoneBinding?.expires_at;
+			if (!raw) return '';
+			const expires = new Date(raw);
+			if (Number.isNaN(expires.getTime())) return 'One-time code';
+			return 'One-time code · expires ' + expires.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+		},
+		loadVoiceDevices() {
+			this.voiceDevicesLoading = true;
+			this.voiceDevicesError = '';
+			this.rpc('voice_device_list', {}).then(result => {
+				this.voiceDevices = Array.isArray(result?.devices) ? result.devices : [];
+			}).catch(error => {
+				this.voiceDevicesError = error.message || 'Could not load Android devices';
+			}).finally(() => { this.voiceDevicesLoading = false; });
+		},
+		voiceDeviceDescription(device) {
+			return [device?.manufacturer, device?.model, device?.android_version ? 'Android ' + device.android_version : '', device?.app_version ? 'Koder ' + device.app_version : ''].filter(Boolean).join(' · ');
+		},
+		voiceDeviceLastSeen(device) {
+			const raw = device?.last_seen_at || device?.registered_at;
+			if (!raw) return '';
+			const date = new Date(raw);
+			if (Number.isNaN(date.getTime())) return '';
+			return (device?.last_seen_at ? 'Last used ' : 'Registered ') + date.toLocaleString();
+		},
+		revokeVoiceDevice(device) {
+			if (!device?.id || device.revoked_at || !confirm('Revoke ' + (device.name || 'this Android phone') + '? It will need to be bound again.')) return;
+			this.rpc('voice_device_revoke', {device_id: device.id}).then(result => {
+				this.voiceDevices = Array.isArray(result?.devices) ? result.devices : this.voiceDevices;
+				this.showToast('Android phone revoked');
+			}).catch(error => { this.voiceDevicesError = error.message || 'Could not revoke Android phone'; });
+		},
 		browserStatusBadgeClass(status) {
 		  const state = String(status?.state || 'unknown');
 		  return state === 'running' ? 'text-bg-success' : state === 'error' ? 'text-bg-danger' : state === 'starting' ? 'text-bg-warning' : 'text-bg-secondary';

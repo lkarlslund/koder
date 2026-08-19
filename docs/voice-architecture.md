@@ -255,11 +255,13 @@ even-sized chunks to Android as they arrive. The local tested provider is
 
 ## Security and deployment
 
-`KODER_VOICE_TOKEN` or `--voice-token` enables constant-time bearer checking
-before both WebSocket upgrade and artifact delivery. Generate a dedicated token
-and keep it separate from browser/debug APIs. Cleartext `ws://` is suitable only
-on a trusted private network; use an HTTPS reverse proxy for Internet access so
-Android connects with `wss://`.
+Android installations use separate revocable bearer tokens created through the
+browser UI's one-time QR binding flow. Koder stores only token digests in its
+state directory, while Android protects the issued token with Android Keystore.
+The legacy `KODER_VOICE_TOKEN` or `--voice-token` value is imported once as a
+device registration for migration and can then be removed. Cleartext `ws://` is
+suitable only on a trusted private network; use an HTTPS reverse proxy for
+Internet access so Android connects with `wss://`.
 
 The voice endpoint is `/voice/v1`; it does not expose the browser or `/debug`
 protocol. The exact transport is documented in

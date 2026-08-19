@@ -48,6 +48,7 @@
 		<button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID() && workspaceSessionMode()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions &amp; Chats" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
+		<button class="btn btn-sm btn-outline-primary" title="Connect Android phone" @click="openPhoneBinding()"><i class="bi bi-phone"></i><span class="visually-hidden">Connect Android phone</span></button>
         <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
@@ -1080,6 +1081,23 @@
     </section>
   </div>
 
+	<div class="modal-backdrop-lite" :class="{'modal-backdrop-nested': showSettings}" x-show="showPhoneBinding" x-transition @click.self="closePhoneBinding()" @keydown.escape.window="closePhoneBinding()" style="display: none;">
+		<section class="bg-body border rounded shadow" style="width: min(760px, 100%); max-height: min(90vh, 820px); overflow: auto;">
+			<header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+				<div><div class="fw-semibold"><i class="bi bi-phone me-1"></i> Connect Android phone</div><div class="small text-secondary">Install Koder Voice, then give this phone its own revocable credential.</div></div>
+				<div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-outline-primary" title="Create fresh binding codes" @click="refreshPhoneBinding()" :disabled="phoneBindingLoading"><i class="bi bi-arrow-clockwise"></i></button><button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closePhoneBinding()"><i class="bi bi-x-lg"></i></button></div>
+			</header>
+			<div class="p-3">
+				<div class="text-center py-5" x-show="phoneBindingLoading"><span class="spinner-border text-primary"></span><div class="small text-secondary mt-2">Creating one-time binding codes…</div></div>
+				<div class="alert alert-danger" x-show="phoneBindingError" x-text="phoneBindingError"></div>
+				<div class="row g-3" x-show="!phoneBindingLoading && phoneBinding">
+					<div class="col-md-6"><div class="card h-100"><div class="card-body text-center"><div class="badge text-bg-secondary mb-2">1</div><h2 class="h6">Install Koder Voice</h2><p class="small text-secondary">Scan with the phone camera to download this Koder server's embedded APK.</p><img class="img-fluid border rounded bg-white p-2" style="max-width: 240px" :src="phoneBinding?.download_qr_uri" alt="QR code to download Koder Voice"><div class="mt-3"><a class="btn btn-sm btn-outline-primary" :href="phoneBinding?.download_uri"><i class="bi bi-download me-1"></i>Download APK</a></div></div></div></div>
+					<div class="col-md-6"><div class="card h-100"><div class="card-body text-center"><div class="badge text-bg-primary mb-2">2</div><h2 class="h6">Bind this phone</h2><p class="small text-secondary">After installation, scan this code. Android opens Koder Voice and registers the handset automatically.</p><img class="img-fluid border rounded bg-white p-2" style="max-width: 240px" :src="phoneBinding?.binding_qr_uri" alt="QR code to bind Koder Voice"><div class="small text-secondary mt-3" x-text="phoneBindingExpiryLabel()"></div></div></div></div>
+				</div>
+			</div>
+		</section>
+	</div>
+
   <div class="modal-backdrop-lite" x-show="showSessionEditor" x-transition @keydown.escape.window="closeSessionEditor()" style="display: none;">
     <section class="bg-body border rounded shadow" style="width: min(560px, 100%);">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
@@ -1176,6 +1194,21 @@
                   <div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.ui.auto_continue"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div>
                 </div>
               </div>
+
+				<div x-show="settingsTab === 'security'">
+					<div class="settings-list-header"><div><div class="fw-semibold">Android devices</div><div class="small text-secondary">Each phone has a separate encrypted credential. Revoking one does not disconnect the others.</div></div><button class="btn btn-sm btn-outline-primary" type="button" @click="openPhoneBinding()"><i class="bi bi-phone me-1"></i>Bind phone</button></div>
+					<div class="text-secondary py-3" x-show="voiceDevicesLoading"><span class="spinner-border spinner-border-sm me-2"></span>Loading devices</div>
+					<div class="alert alert-danger" x-show="voiceDevicesError" x-text="voiceDevicesError"></div>
+					<div class="settings-item-list" x-show="!voiceDevicesLoading">
+						<div class="settings-empty" x-show="voiceDevices.length === 0">No Android phones are registered</div>
+						<template x-for="device in voiceDevices" :key="device.id">
+							<div class="settings-item-row">
+								<div class="settings-item-main"><span class="settings-item-title"><span x-text="device.name || 'Android phone'"></span><span class="badge ms-2" :class="device.revoked_at ? 'text-bg-danger' : 'text-bg-success'" x-text="device.revoked_at ? 'Revoked' : 'Active'"></span></span><span class="settings-item-subtitle" x-text="voiceDeviceDescription(device)"></span><span class="settings-item-subtitle" x-text="voiceDeviceLastSeen(device)"></span></div>
+								<button type="button" class="btn btn-sm btn-outline-danger" title="Revoke phone" @click="revokeVoiceDevice(device)" :disabled="!!device.revoked_at"><i class="bi bi-slash-circle"></i></button>
+							</div>
+						</template>
+					</div>
+				</div>
 
               <div class="settings-section" x-show="settingsTab === 'tts'">
                 <div class="settings-field">

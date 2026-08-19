@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
@@ -34,6 +36,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -76,6 +79,7 @@ type Server struct {
 	debug             *debugsrv.Recorder
 	clientSelectionMu sync.Mutex
 	clientSelections  map[string]clientSelection
+	devices           *deviceauth.Registry
 }
 
 type clientSelection struct {
@@ -107,6 +111,15 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	if err != nil {
 		return nil, fmt.Errorf("listen web ui: %w", err)
 	}
+	devices, err := deviceauth.Open(controller.StateDir())
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("open voice device registry: %w", err)
+	}
+	if _, _, err := devices.ImportLegacy(options.VoiceToken); err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("migrate voice token: %w", err)
+	}
 	s := &Server{
 		controller:       controller,
 		options:          options,
@@ -114,6 +127,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		connected:        make(chan struct{}),
 		debug:            options.Debug,
 		clientSelections: map[string]clientSelection{},
+		devices:          devices,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -128,8 +142,10 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
+	mux.HandleFunc("/api/voice-devices/qr", s.handleVoiceDeviceQR)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	voiceHandler := voiceapi.NewHandler(controller, options.VoiceToken)
+	voiceHandler.Auth = devices
 	mux.Handle("/voice/v1", voiceHandler)
 	mux.Handle("/voice/v1/", voiceHandler)
 	if s.debug != nil {
@@ -359,6 +375,68 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok":         true,
 		"asset_hash": currentAssetHash,
 	})
+}
+
+func (s *Server) handleVoiceDeviceQR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	value := strings.TrimSpace(r.URL.Query().Get("value"))
+	if value == "" || len(value) > 2048 {
+		http.Error(w, "QR value is required and must be at most 2048 bytes", http.StatusBadRequest)
+		return
+	}
+	png, err := qrcode.Encode(value, qrcode.Medium, 320)
+	if err != nil {
+		http.Error(w, "create QR code", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(png)
+}
+
+type voiceDeviceInvitation struct {
+	ExpiresAt   time.Time `json:"expires_at"`
+	DownloadURI string    `json:"download_uri"`
+	BindingURI  string    `json:"binding_uri"`
+	DownloadQR  string    `json:"download_qr_uri"`
+	BindingQR   string    `json:"binding_qr_uri"`
+}
+
+func (s *Server) createVoiceDeviceInvitation(origin string) (voiceDeviceInvitation, error) {
+	if s.devices == nil {
+		return voiceDeviceInvitation{}, errors.New("voice device registry is unavailable")
+	}
+	base, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil {
+		return voiceDeviceInvitation{}, errors.New("browser origin must be an HTTP or HTTPS server URL")
+	}
+	base.Path, base.RawPath, base.RawQuery, base.Fragment = "", "", "", ""
+	invitation, err := s.devices.CreateInvitation()
+	if err != nil {
+		return voiceDeviceInvitation{}, err
+	}
+	download := *base
+	download.Path = "/voice/v1/android/koder.apk"
+	download.RawQuery = url.Values{"bind_code": []string{invitation.Code}}.Encode()
+	binding := url.URL{Scheme: "koder", Host: "bind", RawQuery: url.Values{
+		"server": []string{base.String()},
+		"code":   []string{invitation.Code},
+	}.Encode()}
+	qrPath := func(value string) string {
+		return "/api/voice-devices/qr?value=" + url.QueryEscape(value)
+	}
+	return voiceDeviceInvitation{
+		ExpiresAt:   invitation.ExpiresAt,
+		DownloadURI: download.String(),
+		BindingURI:  binding.String(),
+		DownloadQR:  qrPath(download.String()),
+		BindingQR:   qrPath(binding.String()),
+	}, nil
 }
 
 func (s *Server) handleRestartNeeded(w http.ResponseWriter, r *http.Request) {
@@ -1214,6 +1292,34 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			selection.ChatID = in.ChatID
 		}
 		return s.controller.CompleteComposerForSelection(ctx, selection, in.Text, in.Cursor)
+	case "voice_device_list":
+		if s.devices == nil {
+			return nil, errors.New("voice device registry is unavailable")
+		}
+		return map[string]any{"devices": s.devices.List()}, nil
+	case "voice_device_invite":
+		var in struct {
+			Origin string `json:"origin"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.createVoiceDeviceInvitation(in.Origin)
+	case "voice_device_revoke":
+		var in struct {
+			DeviceID string `json:"device_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if s.devices == nil {
+			return nil, errors.New("voice device registry is unavailable")
+		}
+		device, err := s.devices.Revoke(in.DeviceID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"device": device, "devices": s.devices.List()}, nil
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "browser_action":

@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -688,6 +689,97 @@ func TestHTTPRPCEnvelopeDispatchesWebSocketMethods(t *testing.T) {
 	}
 	if len(payload.Result.Sessions) != 1 {
 		t.Fatalf("unexpected sessions response: %#v", payload.Result)
+	}
+}
+
+func TestWebUIInvitesListsAndRevokesAndroidDevice(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method string, params any, out any) {
+		t.Helper()
+		requestBody, err := json.Marshal(map[string]any{"id": 1, "method": method, "params": params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.Post(srv.URL()+"/api/rpc", "application/json", bytes.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		var envelope struct {
+			OK     bool            `json:"ok"`
+			Result json.RawMessage `json:"result"`
+			Error  string          `json:"error"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		if !envelope.OK {
+			t.Fatalf("rpc %s: %s", method, envelope.Error)
+		}
+		if out != nil {
+			if err := json.Unmarshal(envelope.Result, out); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	var invitation voiceDeviceInvitation
+	call("voice_device_invite", map[string]string{"origin": srv.URL()}, &invitation)
+	if invitation.BindingURI == "" || invitation.DownloadURI == "" || invitation.BindingQR == "" || invitation.DownloadQR == "" {
+		t.Fatalf("invitation = %#v", invitation)
+	}
+	qrResponse, err := http.Get(srv.URL() + invitation.BindingQR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qrBytes, err := io.ReadAll(qrResponse.Body)
+	_ = qrResponse.Body.Close()
+	if err != nil || qrResponse.StatusCode != http.StatusOK || len(qrBytes) < 8 || string(qrBytes[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatalf("QR response status=%d size=%d err=%v", qrResponse.StatusCode, len(qrBytes), err)
+	}
+	bindingURL, err := url.Parse(invitation.BindingURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindBody := fmt.Sprintf(`{"code":%q,"device":{"installation_id":"web-test-phone","name":"Test Pixel","manufacturer":"Google","model":"Pixel 9","android_version":"16","app_version":"0.1.0","app_id":"com.lkarlslund.koder.dev"}}`, bindingURL.Query().Get("code"))
+	bindResponse, err := http.Post(srv.URL()+"/voice/v1/bind", "application/json", strings.NewReader(bindBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = bindResponse.Body.Close()
+	if bindResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("bind status = %d", bindResponse.StatusCode)
+	}
+	var listed struct {
+		Devices []struct {
+			ID        string     `json:"id"`
+			Name      string     `json:"name"`
+			RevokedAt *time.Time `json:"revoked_at"`
+		} `json:"devices"`
+	}
+	call("voice_device_list", map[string]any{}, &listed)
+	if len(listed.Devices) != 1 || listed.Devices[0].Name != "Test Pixel" || listed.Devices[0].RevokedAt != nil {
+		t.Fatalf("listed devices = %#v", listed.Devices)
+	}
+	call("voice_device_revoke", map[string]string{"device_id": listed.Devices[0].ID}, &listed)
+	if len(listed.Devices) != 1 || listed.Devices[0].RevokedAt == nil {
+		t.Fatalf("revoked devices = %#v", listed.Devices)
+	}
+
+	page, err := os.ReadFile(filepath.Join("assets", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Connect Android phone", "settingsTab === 'security'", "Bind phone"} {
+		if !strings.Contains(string(page), expected) {
+			t.Fatalf("web UI omitted %q", expected)
+		}
 	}
 }
 

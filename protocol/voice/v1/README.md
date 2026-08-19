@@ -146,6 +146,38 @@ the installed app and whose version code is newer. They must verify the byte
 size, APK SHA-256, package metadata, and APK signer before invoking Android's
 package installer.
 
+## Android device binding
+
+Koder normally authenticates each Android installation with its own revocable
+bearer token. The browser UI creates a one-time, 30-minute invitation and shows
+two QR codes: an authenticated invitation URL for downloading the embedded APK,
+then a `koder://bind` URI containing the server origin and invitation code.
+
+Android handles the binding URI and sends one unauthenticated request to
+`POST /voice/v1/bind`:
+
+```json
+{
+  "code": "kdb1_one_time_secret",
+  "device": {
+    "installation_id": "app-installation-uuid",
+    "name": "Google Pixel 9",
+    "manufacturer": "Google",
+    "model": "Pixel 9",
+    "android_version": "16",
+    "app_version": "0.1.0-local.example",
+    "app_id": "com.lkarlslund.koder.dev"
+  }
+}
+```
+
+The successful response contains the public device record and the device token
+exactly once. Android encrypts it with Android Keystore. Koder persists only its
+SHA-256 digest in `voice-devices.json` with mode `0600`. Subsequent Android
+requests include the token and bounded `X-Koder-Device-*` identity headers so
+Koder can display last use and current handset/app metadata. Revoking a device
+immediately rejects its token.
+
 ## Connected-phone tool provider
 
 While the main call owns its `call_id`, Android may open a second authenticated
