@@ -48,6 +48,7 @@ data class VoiceDelegation(
 
 data class VoiceMessage(
     val spokenText: String,
+	val transcriptId: String = "",
     val parts: List<VoicePart>,
     val delegation: VoiceDelegation?,
 )
@@ -432,6 +433,7 @@ object VoiceProtocol {
 
     private fun JSONObject.toVoiceMessage(): VoiceMessage = VoiceMessage(
         spokenText = optString("spoken_text"),
+		transcriptId = optString("transcript_id"),
         parts = optJSONArray("parts").mapObjects { item ->
             VoicePart(
 				id = item.optString("id"),

@@ -458,11 +458,11 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 				continue
 			}
 			timeline := runtime.SnapshotTimeline()
-			if response := latestAssistantTextAfter(timeline, initialSeq); response != "" {
+			if responseItem, response := latestAssistantItemAfter(timeline, initialSeq); response != "" {
 				spoken := pacedSpokenResponse(response, pacing)
 				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
 				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
-				return voice.Message{SpokenText: spoken, Parts: parts}, nil
+				return voice.Message{SpokenText: spoken, TranscriptID: string(responseItem.ID), Parts: parts}, nil
 			}
 			if message := latestModelErrorAfter(timeline, initialSeq); message != "" {
 				return voice.Message{}, fmt.Errorf("voice chat stopped with an error: %s", message)
@@ -793,6 +793,11 @@ func latestTimelineSequence(timeline []domain.TimelineItem) int64 {
 }
 
 func latestAssistantTextAfter(timeline []domain.TimelineItem, sequence int64) string {
+	_, text := latestAssistantItemAfter(timeline, sequence)
+	return text
+}
+
+func latestAssistantItemAfter(timeline []domain.TimelineItem, sequence int64) (domain.TimelineItem, string) {
 	for index := len(timeline) - 1; index >= 0; index-- {
 		item := timeline[index]
 		if item.Seq <= sequence {
@@ -800,10 +805,10 @@ func latestAssistantTextAfter(timeline []domain.TimelineItem, sequence int64) st
 		}
 		message, ok := item.Content.(domain.AssistantMessage)
 		if ok && item.Sealed() && strings.TrimSpace(message.Text) != "" {
-			return strings.TrimSpace(message.Text)
+			return item, strings.TrimSpace(message.Text)
 		}
 	}
-	return ""
+	return domain.TimelineItem{}, ""
 }
 
 func latestModelErrorAfter(timeline []domain.TimelineItem, sequence int64) string {

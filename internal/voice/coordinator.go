@@ -183,9 +183,10 @@ type Part struct {
 
 // Message is the concise response returned to the voice client.
 type Message struct {
-	SpokenText string            `json:"spoken_text"`
-	Parts      []Part            `json:"parts,omitempty"`
-	Delegation *DelegationResult `json:"delegation,omitempty"`
+	SpokenText   string            `json:"spoken_text"`
+	TranscriptID string            `json:"transcript_id,omitempty"`
+	Parts        []Part            `json:"parts,omitempty"`
+	Delegation   *DelegationResult `json:"delegation,omitempty"`
 }
 
 // CallState is the current server-owned routing state for one connection.

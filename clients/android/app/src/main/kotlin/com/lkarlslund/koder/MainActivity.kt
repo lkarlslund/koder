@@ -72,6 +72,8 @@ import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceResponsePacing
+import com.lkarlslund.koder.voice.SavedVoiceResponse
+import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.conversationAvailability
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
@@ -128,6 +130,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var muteButton: ImageButton? = null
 	private var audioButton: ImageButton? = null
 	private var searchButton: ImageButton? = null
+	private var savedButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
 	private var transcriptShown = false
 	private var transcriptOpened = false
@@ -137,6 +140,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var renderedHistorySession = ""
 	private val renderedHistoryIDs = linkedSetOf<String>()
 	private var searchContextShown = false
+	private var savedResponses: List<SavedVoiceResponse> = emptyList()
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -288,7 +292,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				presentationShown = true
 				transcriptShown = false
 			}
-			transcriptParts.forEach(::addPart)
+			transcriptParts.forEach { addPart(it, message.transcriptId) }
 			updateConversationMode(null)
         }
     }
@@ -1030,6 +1034,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		renderedHistorySession = ""
 		renderedHistoryIDs.clear()
 		searchContextShown = false
+		savedResponses = secureSettings.savedVoiceResponses(session.id)
         val root = column()
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1098,6 +1103,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}.also { addView(it, actionLayout(start = 8)) }
 			searchButton = iconActionButton(R.drawable.ic_voice_search, "Search transcript", ACTION_BLUE).apply {
 				setOnClickListener { showTranscriptSearchDialog() }
+			}.also { addView(it, actionLayout(start = 8)) }
+			savedButton = iconActionButton(R.drawable.ic_voice_saved, "Saved responses", ACTION_ORANGE).apply {
+				setOnClickListener { showSavedResponses() }
 			}.also { addView(it, actionLayout(start = 8)) }
 		}
 		root.addView(modeActions, matchWrap())
@@ -1281,6 +1289,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		audioButton?.visibility = if (active) View.VISIBLE else View.GONE
 		searchButton?.visibility = if (active) View.VISIBLE else View.GONE
+		savedButton?.visibility = View.VISIBLE
 		placeholderTitle?.text = when {
 			active -> "No transcript yet"
 			stage == CallController.Stage.ERROR -> "Conversation offline"
@@ -1365,6 +1374,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				if (entry.role == "user") "You" else "Koder",
 				entry.text,
 				entry.createdAt,
+				entryId = entry.id,
 				highlighted = entry.id == result.match.id,
 			)
 			targetFeed.addView(bubble, bubbleLayout(entry.role == "user"))
@@ -1397,7 +1407,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		history.forEach { entry ->
 			renderedHistoryIDs += entry.id
 			feed?.addView(
-				conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt),
+				conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt, entry.id),
 				bubbleLayout(entry.role == "user"),
 			)
 		}
@@ -1415,7 +1425,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val previousY = scroll.scrollY
 		older.forEachIndexed { index, entry ->
 			renderedHistoryIDs += entry.id
-			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt), index, bubbleLayout(entry.role == "user"))
+			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt, entry.id), index, bubbleLayout(entry.role == "user"))
 		}
 		scroll.post { scroll.scrollTo(0, previousY + feed.height - previousHeight) }
 	}
@@ -1452,9 +1462,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		)
     }
 
-    private fun addPart(part: VoicePart) {
+    private fun addPart(part: VoicePart, transcriptId: String = "") {
         when {
-            part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addBubble("Koder", part.text)
+			part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addBubble("Koder", part.text, entryId = transcriptId)
             part.mimeType.startsWith("image/") -> addImage(part)
             else -> addGenericPart(part)
         }
@@ -1588,11 +1598,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
     }
 
-    private fun addBubble(who: String, text: String, createdAt: Instant? = Instant.now()) = runOnUiThread {
+    private fun addBubble(who: String, text: String, createdAt: Instant? = Instant.now(), entryId: String = "") = runOnUiThread {
         val feed = feed ?: return@runOnUiThread
         if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
         removeFeedPlaceholder()
-		feed.addView(conversationBubble(who, text, createdAt), bubbleLayout(who == "You"))
+		feed.addView(conversationBubble(who, text, createdAt, entryId), bubbleLayout(who == "You"))
 		if (!followConversationBottom) {
 			unreadConversationMessages++
 			latestButton?.apply {
@@ -1603,9 +1613,96 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		scrollToBottom()
     }
 
-	private fun conversationBubble(who: String, text: String, createdAt: Instant?, highlighted: Boolean = false): View {
+	private fun copyMessage(who: String, text: String) {
+		(getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("$who message", text))
+		Toast.makeText(this, "Message copied", Toast.LENGTH_SHORT).show()
+	}
+
+	private fun showResponseActions(bubble: View, entryId: String, text: String) {
+		val bookmarked = savedResponses.any { it.messageId == entryId && it.kind == SavedVoiceResponseKind.BOOKMARK }
+		val followUp = savedResponses.any { it.messageId == entryId && it.kind == SavedVoiceResponseKind.FOLLOW_UP }
+		val actions = arrayOf("Copy", if (bookmarked) "Remove bookmark" else "Bookmark", if (followUp) "Clear follow-up" else "Follow up later")
+		AlertDialog.Builder(this).setTitle("Response actions").setItems(actions) { _, index ->
+			when (index) {
+				0 -> copyMessage("Koder", text)
+				1 -> toggleSavedResponse(bubble, entryId, text, SavedVoiceResponseKind.BOOKMARK)
+				2 -> toggleSavedResponse(bubble, entryId, text, SavedVoiceResponseKind.FOLLOW_UP)
+			}
+		}.setNegativeButton("Cancel", null).show()
+	}
+
+	private fun toggleSavedResponse(bubble: View?, entryId: String, text: String, kind: SavedVoiceResponseKind) {
+		val sessionId = pendingSession?.id.orEmpty().ifBlank { latestCallSnapshot.voiceSessionId }
+		if (sessionId.isBlank()) return
+		val saved = secureSettings.toggleSavedVoiceResponse(SavedVoiceResponse(sessionId, entryId, text, kind))
+		savedResponses = secureSettings.savedVoiceResponses(sessionId)
+		bubble?.findTaggedView("saved:$entryId")?.let { indicator ->
+			if (indicator is TextView) {
+				indicator.text = savedResponseLabels(entryId)
+				indicator.visibility = if (indicator.text.isBlank()) View.GONE else View.VISIBLE
+			}
+		}
+		Toast.makeText(this, if (saved) "${kind.label} saved" else "${kind.label} removed", Toast.LENGTH_SHORT).show()
+	}
+
+	private fun savedResponseLabels(entryId: String): String = savedResponses
+		.filter { it.messageId == entryId }
+		.map { if (it.kind == SavedVoiceResponseKind.BOOKMARK) "★ Bookmarked" else "↗ Follow up" }
+		.joinToString("  ")
+
+	private fun showSavedResponses() {
+		val sessionId = pendingSession?.id.orEmpty().ifBlank { latestCallSnapshot.voiceSessionId }
+		savedResponses = secureSettings.savedVoiceResponses(sessionId)
+		if (savedResponses.isEmpty()) {
+			AlertDialog.Builder(this).setTitle("Saved responses").setMessage("Long-press a Koder response to bookmark it or mark it for follow-up.").setPositiveButton("OK", null).show()
+			return
+		}
+		val labels = savedResponses.map {
+			(if (it.kind == SavedVoiceResponseKind.BOOKMARK) "★ " else "↗ ") + it.text.replace('\n', ' ').take(90)
+		}.toTypedArray()
+		AlertDialog.Builder(this).setTitle("Saved responses").setItems(labels) { _, index ->
+			showSavedResponse(savedResponses[index])
+		}.setNegativeButton("Close", null).show()
+	}
+
+	private fun showSavedResponse(saved: SavedVoiceResponse) {
+		val action = if (saved.kind == SavedVoiceResponseKind.FOLLOW_UP) "Follow up" else "Show"
+		AlertDialog.Builder(this)
+			.setTitle(saved.kind.label)
+			.setMessage(saved.text)
+			.setPositiveButton(action) { _, _ ->
+				if (saved.kind == SavedVoiceResponseKind.FOLLOW_UP) beginFollowUp(saved)
+				else showTranscriptSearchContext(VoiceTranscriptSearchResult(
+					match = VoiceTranscriptEntry(saved.messageId, "assistant", saved.text),
+					context = listOf(VoiceTranscriptEntry(saved.messageId, "assistant", saved.text)),
+				))
+			}
+			.setNeutralButton("Remove") { _, _ -> toggleSavedResponse(null, saved.messageId, saved.text, saved.kind) }
+			.setNegativeButton("Close", null)
+			.show()
+	}
+
+	private fun beginFollowUp(saved: SavedVoiceResponse) {
+		transcriptShown = true
+		presentationShown = false
+		updateConversationMode(latestCallSnapshot.stage)
+		typedMessage?.apply {
+			setText("Following up on your earlier response, “${saved.text.replace('\n', ' ').take(140)}”: ")
+			setSelection(text.length)
+			requestFocus()
+		}
+	}
+
+	private fun View.findTaggedView(wanted: String): View? {
+		if (tag == wanted) return this
+		if (this is ViewGroup) repeat(childCount) { index -> getChildAt(index).findTaggedView(wanted)?.let { return it } }
+		return null
+	}
+
+	private fun conversationBubble(who: String, text: String, createdAt: Instant?, entryId: String = "", highlighted: Boolean = false): View {
 		val fromUser = who == "You"
 		return LinearLayout(this).apply {
+			tag = entryId.takeIf(String::isNotBlank)?.let { "message:$it" }
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(11))
             background = GradientDrawable().apply {
@@ -1618,11 +1715,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
             elevation = dp(1).toFloat()
 			isLongClickable = true
-			contentDescription = "$who message. Long press to copy"
+			contentDescription = if (!fromUser && entryId.isNotBlank()) "$who message. Long press for actions" else "$who message. Long press to copy"
 			setOnLongClickListener {
-				(getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("$who message", text))
 				performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-				Toast.makeText(this@MainActivity, "Message copied", Toast.LENGTH_SHORT).show()
+				if (!fromUser && entryId.isNotBlank()) showResponseActions(this, entryId, text)
+				else copyMessage(who, text)
 				true
 			}
             addView(helper(who).apply {
@@ -1630,7 +1727,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 alpha = 1f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWrap())
-            addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
+			addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
+			addView(helper(savedResponseLabels(entryId)).apply {
+				tag = "saved:$entryId"
+				visibility = if (text.isBlank()) View.GONE else View.VISIBLE
+				setTextColor(ACTION_ORANGE)
+				alpha = 1f
+			}, spaced(top = 5))
 			conversationTimeLabel(createdAt).takeIf(String::isNotBlank)?.let { time ->
 				addView(helper(time).apply {
 					gravity = Gravity.END
@@ -1743,11 +1846,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		muteButton = null
 		audioButton = null
 		searchButton = null
+		savedButton = null
 		latestCallSnapshot = CallController.Snapshot()
 		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
 		searchContextShown = false
+		savedResponses = emptyList()
     }
 
     internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {

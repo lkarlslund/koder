@@ -6,11 +6,15 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.VoiceResponsePacing
+import com.lkarlslund.koder.voice.SavedVoiceResponse
+import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONArray
+import org.json.JSONObject
 
 class SecureSettings(context: Context) {
     data class Values(
@@ -92,6 +96,45 @@ class SecureSettings(context: Context) {
 		preferences.edit().putString(RESPONSE_PACING, pacing.wireValue).apply()
 	}
 
+	fun savedVoiceResponses(sessionId: String = ""): List<SavedVoiceResponse> {
+		val raw = preferences.getString(SAVED_RESPONSES, "[]").orEmpty()
+		return runCatching {
+			val array = JSONArray(raw)
+			buildList {
+				repeat(array.length()) { index ->
+					val item = array.getJSONObject(index)
+					val kind = SavedVoiceResponseKind.fromWire(item.optString("kind")) ?: return@repeat
+					val saved = SavedVoiceResponse(
+						sessionId = item.optString("session_id"),
+						messageId = item.optString("message_id"),
+						text = item.optString("text"),
+						kind = kind,
+						savedAtMillis = item.optLong("saved_at"),
+					)
+					if (saved.sessionId.isNotBlank() && saved.messageId.isNotBlank() && saved.text.isNotBlank() && (sessionId.isBlank() || saved.sessionId == sessionId)) add(saved)
+				}
+			}.sortedByDescending(SavedVoiceResponse::savedAtMillis)
+		}.getOrDefault(emptyList())
+	}
+
+	fun toggleSavedVoiceResponse(response: SavedVoiceResponse): Boolean {
+		val all = savedVoiceResponses().toMutableList()
+		val index = all.indexOfFirst { it.sessionId == response.sessionId && it.messageId == response.messageId && it.kind == response.kind }
+		val saved = index < 0
+		if (saved) all += response else all.removeAt(index)
+		val array = JSONArray()
+		all.forEach { item ->
+			array.put(JSONObject()
+				.put("session_id", item.sessionId)
+				.put("message_id", item.messageId)
+				.put("text", item.text)
+				.put("kind", item.kind.wireValue)
+				.put("saved_at", item.savedAtMillis))
+		}
+		preferences.edit().putString(SAVED_RESPONSES, array.toString()).apply()
+		return saved
+	}
+
     private fun decrypt(ciphertext: String, iv: String): String {
         if (ciphertext.isBlank() || iv.isBlank()) return ""
         val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -131,6 +174,7 @@ class SecureSettings(context: Context) {
 		const val VAD_SILENCE = "vad_silence"
 		const val AUDIO_ROUTE = "audio_route"
 		const val RESPONSE_PACING = "response_pacing"
+		const val SAVED_RESPONSES = "saved_responses"
         const val DEFAULT_SERVER = ""
     }
 }

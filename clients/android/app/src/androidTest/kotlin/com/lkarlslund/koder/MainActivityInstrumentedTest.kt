@@ -15,17 +15,22 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.longClick
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.swipeDown
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
+import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
+import com.lkarlslund.koder.voice.SavedVoiceResponse
+import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.Dispatcher
@@ -60,6 +65,17 @@ class MainActivityInstrumentedTest {
 		assertEquals(BuiltInAudioRoute.SPEAKER, secureSettings.load().builtInAudioRoute)
 		secureSettings.saveBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)
 		assertEquals(BuiltInAudioRoute.EARPIECE, secureSettings.load().builtInAudioRoute)
+	}
+
+	@Test
+	fun savedResponsesPersistBySessionMessageAndKind() {
+		val first = SecureSettings(context)
+		assertTrue(first.toggleSavedVoiceResponse(SavedVoiceResponse("voice-1", "message-1", "Remember this", SavedVoiceResponseKind.BOOKMARK)))
+		assertTrue(first.toggleSavedVoiceResponse(SavedVoiceResponse("voice-1", "message-1", "Remember this", SavedVoiceResponseKind.FOLLOW_UP)))
+		val restored = SecureSettings(context).savedVoiceResponses("voice-1")
+		assertEquals(setOf(SavedVoiceResponseKind.BOOKMARK, SavedVoiceResponseKind.FOLLOW_UP), restored.map { it.kind }.toSet())
+		assertTrue(first.toggleSavedVoiceResponse(restored.first()).not())
+		assertEquals(1, SecureSettings(context).savedVoiceResponses("voice-1").size)
 	}
 
     @Test
@@ -347,6 +363,15 @@ class MainActivityInstrumentedTest {
 				assertTrue(labels.contains("Back to latest"))
 				onView(withText("Back to latest")).perform(click())
 				assertTrue(waitForText(scenario, "Newest answer").contains("Newest answer"))
+				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
+				onView(withText("Bookmark")).perform(click())
+				waitForDisplayedText("★ Bookmarked")
+				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
+				onView(withText("Follow up later")).perform(click())
+				onView(withContentDescription("Saved responses")).perform(click())
+				onView(withText("↗ Newest answer")).inRoot(isDialog()).perform(scrollTo(), click())
+				onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click())
+				assertTrue(waitForText(scenario, "Following up on your earlier response").any { it.contains("Newest answer") })
 			}
 		} finally {
 			voiceSocket?.close(1000, "test complete")

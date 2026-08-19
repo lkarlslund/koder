@@ -243,6 +243,7 @@ or out-of-order frames. Total input is bounded by `max_utterance_seconds`.
   "utterance_id": "uuid",
   "message": {
     "spoken_text": "Here is the screenshot.",
+    "transcript_id": "durable-timeline-item-id",
     "parts": [{
       "id": "optional-id",
       "mime_type": "image/png",
@@ -271,6 +272,11 @@ When a voice-active client normally hides the transcript, receiving either
 kind must open a separate presentation surface without making the transcript
 visible. A user can close that surface independently or explicitly open the
 transcript.
+
+`transcript_id`, when present, is the stable ID of the durable assistant
+timeline entry represented by this live message. Clients use it to attach
+bookmarks, follow-ups, and transcript navigation to the same response after a
+reconnect. It is omitted when no durable assistant entry exists.
 
 ## Reconnect and compatibility
 

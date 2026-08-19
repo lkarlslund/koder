@@ -2465,6 +2465,9 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if message.SpokenText != "We found that the laptop now boots normally." {
 		t.Fatalf("voice response = %#v", message)
 	}
+	if message.TranscriptID == "" {
+		t.Fatalf("voice response omitted durable transcript id: %#v", message)
+	}
 	if working.ID != targetID || working.Title != "Laptop repair" {
 		t.Fatalf("working target = %#v", working)
 	}

@@ -27,6 +27,14 @@ class VoiceProtocolTest {
 		assertEquals("m2", frame.searchResults.single().match.id)
 		assertEquals(listOf("m1", "m2"), frame.searchResults.single().context.map { it.id })
 	}
+
+	@Test
+	fun messageCarriesDurableTranscriptIdentity() {
+		val frame = VoiceProtocol.parse(
+			"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Done.","transcript_id":"assistant-42","parts":[]}}""",
+		)
+		assertEquals("assistant-42", frame.message?.transcriptId)
+	}
 	@Test
 	fun decodesHistoryPageAndEncodesCursorRequest() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/history.json"))
