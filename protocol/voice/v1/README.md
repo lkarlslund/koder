@@ -61,6 +61,9 @@ are PCM envelopes described below.
 - `audio_cancel`: discard the current audio utterance.
 - `history` with `before_id` and `limit`: request older durable voice-chat
   turns. Native clients use a limit of five.
+- `search_history` with `query` and an optional limit up to 20: search the
+  complete durable transcript on Koder. Each result includes nearby messages
+  so the client can jump to it without loading every intervening page.
 
 Only one audio utterance may be open. Selecting a work or voice session cancels
 any server-side partial audio.
@@ -82,6 +85,7 @@ Examples:
 {"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"languages":["da","en"]}
 {"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}
 {"type":"history","protocol":"voice.v1","before_id":"oldest-visible-message-id","limit":5}
+{"type":"search_history","protocol":"voice.v1","query":"laptop BIOS","limit":20}
 ```
 
 ## Server text frames
@@ -93,6 +97,8 @@ Examples:
 - `transcript`: final server STT text.
 - `message`: concise result, generic parts, and optional delegation provenance.
 - `history`: chronological older transcript entries plus `has_more`.
+- `history_search`: recent matches, each with the exact `match` and a small
+  chronological `context` window for anchored display.
 - `tts_start`: output audio format follows in binary frames.
 - `tts_end`: all output audio has been sent.
 - `error`: user-presentable failure. The connection normally remains usable and

@@ -77,25 +77,27 @@ type clientFrame struct {
 	Languages      []string           `json:"languages,omitempty"`
 	BeforeID       string             `json:"before_id,omitempty"`
 	Limit          int                `json:"limit,omitempty"`
+	Query          string             `json:"query,omitempty"`
 	ResponsePacing string             `json:"response_pacing,omitempty"`
 }
 
 type serverFrame struct {
-	Type        string                  `json:"type"`
-	Protocol    string                  `json:"protocol"`
-	UtteranceID string                  `json:"utterance_id,omitempty"`
-	CallState   *voice.CallState        `json:"call_state,omitempty"`
-	AudioConfig *voice.AudioConfig      `json:"audio_config,omitempty"`
-	AudioFormat *voice.AudioFormat      `json:"audio_format,omitempty"`
-	Transcript  string                  `json:"transcript,omitempty"`
-	State       string                  `json:"state,omitempty"`
-	WorkingOn   *voice.Session          `json:"working_on,omitempty"`
-	Message     *voice.Message          `json:"message,omitempty"`
-	Error       string                  `json:"error,omitempty"`
-	ServerTime  time.Time               `json:"server_time,omitempty"`
-	AppUpdate   *androidupdate.Manifest `json:"app_update,omitempty"`
-	History     []voice.TranscriptEntry `json:"history,omitempty"`
-	HasMore     bool                    `json:"has_more,omitempty"`
+	Type          string                         `json:"type"`
+	Protocol      string                         `json:"protocol"`
+	UtteranceID   string                         `json:"utterance_id,omitempty"`
+	CallState     *voice.CallState               `json:"call_state,omitempty"`
+	AudioConfig   *voice.AudioConfig             `json:"audio_config,omitempty"`
+	AudioFormat   *voice.AudioFormat             `json:"audio_format,omitempty"`
+	Transcript    string                         `json:"transcript,omitempty"`
+	State         string                         `json:"state,omitempty"`
+	WorkingOn     *voice.Session                 `json:"working_on,omitempty"`
+	Message       *voice.Message                 `json:"message,omitempty"`
+	Error         string                         `json:"error,omitempty"`
+	ServerTime    time.Time                      `json:"server_time,omitempty"`
+	AppUpdate     *androidupdate.Manifest        `json:"app_update,omitempty"`
+	History       []voice.TranscriptEntry        `json:"history,omitempty"`
+	SearchResults []voice.TranscriptSearchResult `json:"search_results,omitempty"`
+	HasMore       bool                           `json:"has_more,omitempty"`
 }
 
 type sessionsResponse struct {
@@ -341,6 +343,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history", History: page.Entries, HasMore: page.HasMore}); err != nil {
+				return
+			}
+		case "search_history":
+			search, ok := h.Backend.(voice.VoiceHistorySearchBackend)
+			if !ok {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: "transcript search is unavailable"}); err != nil {
+					return
+				}
+				continue
+			}
+			state, stateErr := call.State(ctx)
+			if stateErr != nil {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: stateErr.Error()}); err != nil {
+					return
+				}
+				continue
+			}
+			results, searchErr := search.SearchVoiceSessionHistory(ctx, state.VoiceSessionID, frame.Query, frame.Limit)
+			if searchErr != nil {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: searchErr.Error()}); err != nil {
+					return
+				}
+				continue
+			}
+			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", SearchResults: results}); err != nil {
 				return
 			}
 		case "select_session":

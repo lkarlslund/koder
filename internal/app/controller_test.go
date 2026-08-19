@@ -2486,6 +2486,13 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if userTurns != 1 {
 		t.Fatalf("voice transcript has %d user turns: %#v", userTurns, timeline)
 	}
+	searchResults, err := ctrl.SearchVoiceSessionHistory(ctx, string(voiceSession.ID), "boots normally", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searchResults) != 1 || !strings.Contains(searchResults[0].Match.Text, "boots normally") || len(searchResults[0].Context) < 2 {
+		t.Fatalf("voice transcript search = %#v", searchResults)
+	}
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
 	requestsMu.Unlock()

@@ -131,6 +131,11 @@ type VoiceHistoryBackend interface {
 	VoiceSessionHistory(context.Context, string, string, int) (TranscriptPage, error)
 }
 
+// VoiceHistorySearchBackend performs explicit full-history search for native clients.
+type VoiceHistorySearchBackend interface {
+	SearchVoiceSessionHistory(context.Context, string, string, int) ([]TranscriptSearchResult, error)
+}
+
 // TranscriptEntry is one user-visible turn from a durable voice chat.
 type TranscriptEntry struct {
 	ID        string    `json:"id"`
@@ -144,6 +149,12 @@ type TranscriptEntry struct {
 type TranscriptPage struct {
 	Entries []TranscriptEntry `json:"entries"`
 	HasMore bool              `json:"has_more"`
+}
+
+// TranscriptSearchResult carries the exact match and a small jump context.
+type TranscriptSearchResult struct {
+	Match   TranscriptEntry   `json:"match"`
+	Context []TranscriptEntry `json:"context"`
 }
 
 // ArtifactFile is an authenticated presentation resource resolved by Koder.

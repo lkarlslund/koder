@@ -194,6 +194,13 @@ class VoiceConnection(
 		}
 	}
 
+	fun searchHistory(query: String, limit: Int = 20) {
+		require(query.isNotBlank()) { "Transcript search query is required" }
+		check(socket?.send(VoiceProtocol.searchHistory(query, limit)) == true) {
+			"Voice connection is not open"
+		}
+	}
+
 	@Synchronized
 	fun resumeVoiceSession(voiceSessionId: String) {
 		if (voiceSessionId.isNotBlank()) this.voiceSessionId = voiceSessionId.trim()

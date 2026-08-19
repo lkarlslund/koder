@@ -69,6 +69,7 @@ import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
+import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.conversationAvailability
@@ -126,6 +127,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var transcriptButton: ImageButton? = null
 	private var muteButton: ImageButton? = null
 	private var audioButton: ImageButton? = null
+	private var searchButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
 	private var transcriptShown = false
 	private var transcriptOpened = false
@@ -134,6 +136,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var latestButton: Button? = null
 	private var renderedHistorySession = ""
 	private val renderedHistoryIDs = linkedSetOf<String>()
+	private var searchContextShown = false
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -292,6 +295,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	override fun onHistoryPage(entries: List<VoiceTranscriptEntry>) {
 		runOnUiThread { prependHistory(entries) }
+	}
+
+	override fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) {
+		runOnUiThread {
+			if (screen != Screen.CHAT) return@runOnUiThread
+			if (error != null) {
+				Toast.makeText(this, error, Toast.LENGTH_LONG).show()
+				return@runOnUiThread
+			}
+			showTranscriptSearchResults(results)
+		}
 	}
 
     private fun showSetup(error: String = "") {
@@ -1015,6 +1029,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationShown = false
 		renderedHistorySession = ""
 		renderedHistoryIDs.clear()
+		searchContextShown = false
         val root = column()
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1081,6 +1096,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				isEnabled = false
 				setOnClickListener(::showAudioRouteMenu)
 			}.also { addView(it, actionLayout(start = 8)) }
+			searchButton = iconActionButton(R.drawable.ic_voice_search, "Search transcript", ACTION_BLUE).apply {
+				setOnClickListener { showTranscriptSearchDialog() }
+			}.also { addView(it, actionLayout(start = 8)) }
 		}
 		root.addView(modeActions, matchWrap())
 
@@ -1139,7 +1157,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			isAllCaps = false
 			visibility = View.GONE
 			contentDescription = "Jump to latest message"
-			setOnClickListener { scrollToBottom(force = true) }
+			setOnClickListener {
+				if (searchContextShown) renderHistory(latestCallSnapshot.voiceSessionId, latestCallSnapshot.history)
+				else scrollToBottom(force = true)
+			}
 		}
 		root.addView(latestButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
 			gravity = Gravity.CENTER_HORIZONTAL
@@ -1259,6 +1280,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			ViewCompat.setTooltipText(this, contentDescription)
 		}
 		audioButton?.visibility = if (active) View.VISIBLE else View.GONE
+		searchButton?.visibility = if (active) View.VISIBLE else View.GONE
 		placeholderTitle?.text = when {
 			active -> "No transcript yet"
 			stage == CallController.Stage.ERROR -> "Conversation offline"
@@ -1297,6 +1319,68 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
+	private fun showTranscriptSearchDialog() {
+		val query = EditText(this).apply {
+			hint = "Words in this conversation"
+			contentDescription = "Transcript search query"
+			setSingleLine()
+		}
+		AlertDialog.Builder(this)
+			.setTitle("Search transcript")
+			.setView(query)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Search") { _, _ ->
+				val text = query.text.toString().trim()
+				if (text.isNotBlank()) controller.searchHistory(text)
+			}
+			.show()
+	}
+
+	private fun showTranscriptSearchResults(results: List<VoiceTranscriptSearchResult>) {
+		if (results.isEmpty()) {
+			AlertDialog.Builder(this).setTitle("No matches").setMessage("Nothing in this conversation matched your search.").setPositiveButton("OK", null).show()
+			return
+		}
+		val labels = results.map { result ->
+			val speaker = if (result.match.role == "user") "You" else "Koder"
+			"$speaker · ${result.match.text.replace('\n', ' ').take(90)}"
+		}.toTypedArray()
+		AlertDialog.Builder(this)
+			.setTitle("Transcript matches")
+			.setItems(labels) { _, index -> showTranscriptSearchContext(results[index]) }
+			.setNegativeButton("Close", null)
+			.show()
+	}
+
+	private fun showTranscriptSearchContext(result: VoiceTranscriptSearchResult) {
+		val targetFeed = feed ?: return
+		targetFeed.removeAllViews()
+		targetFeed.gravity = Gravity.NO_GRAVITY
+		feedPlaceholder = null
+		renderedHistoryIDs.clear()
+		var target: View? = null
+		result.context.forEach { entry ->
+			renderedHistoryIDs += entry.id
+			val bubble = conversationBubble(
+				if (entry.role == "user") "You" else "Koder",
+				entry.text,
+				entry.createdAt,
+				highlighted = entry.id == result.match.id,
+			)
+			targetFeed.addView(bubble, bubbleLayout(entry.role == "user"))
+			if (entry.id == result.match.id) target = bubble
+		}
+		searchContextShown = true
+		transcriptShown = true
+		presentationShown = false
+		updateConversationMode(latestCallSnapshot.stage)
+		latestButton?.apply {
+			text = "Back to latest"
+			visibility = View.VISIBLE
+		}
+		feedScroll?.post { target?.let { feedScroll?.smoothScrollTo(0, it.top) } }
+	}
+
 	private fun rememberBuiltInAudioRoute(route: BuiltInAudioRoute) {
 		settings = settings.copy(builtInAudioRoute = route)
 		secureSettings.saveBuiltInAudioRoute(route)
@@ -1305,14 +1389,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun renderHistory(voiceSessionId: String, history: List<VoiceTranscriptEntry>) {
 		renderedHistorySession = voiceSessionId
 		if (history.isEmpty()) return
+		searchContextShown = false
 		feed?.removeAllViews()
 		feedPlaceholder = null
 		feed?.gravity = Gravity.NO_GRAVITY
 		renderedHistoryIDs.clear()
 		history.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			addBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt)
+			feed?.addView(
+				conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt),
+				bubbleLayout(entry.role == "user"),
+			)
 		}
+		latestButton?.visibility = View.GONE
+		scrollToBottom(force = true)
 	}
 
 	private fun prependHistory(entries: List<VoiceTranscriptEntry>) {
@@ -1513,14 +1603,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		scrollToBottom()
     }
 
-	private fun conversationBubble(who: String, text: String, createdAt: Instant?): View {
+	private fun conversationBubble(who: String, text: String, createdAt: Instant?, highlighted: Boolean = false): View {
 		val fromUser = who == "You"
 		return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(11))
             background = GradientDrawable().apply {
                 setColor(
-                    if (fromUser) withAlpha(themeColor(android.R.attr.colorAccent), 46)
+					if (highlighted) withAlpha(ACTION_ORANGE, 72)
+					else if (fromUser) withAlpha(themeColor(android.R.attr.colorAccent), 46)
                     else themeColor(android.R.attr.colorBackgroundFloating),
                 )
                 cornerRadius = dp(16).toFloat()
@@ -1651,10 +1742,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		transcriptButton = null
 		muteButton = null
 		audioButton = null
+		searchButton = null
 		latestCallSnapshot = CallController.Snapshot()
 		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
+		searchContextShown = false
     }
 
     internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {

@@ -1,9 +1,11 @@
 package com.lkarlslund.koder
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -28,6 +30,9 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.Dispatcher
 import mockwebserver3.RecordedRequest
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -295,6 +300,59 @@ class MainActivityInstrumentedTest {
             server.close()
         }
     }
+
+	@Test
+	fun transcriptSearchJumpsToServerSideMatch() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		val permissions = buildList {
+			add(Manifest.permission.RECORD_AUDIO)
+			if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
+			if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+		}
+		permissions.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
+		val server = MockWebServer()
+		var voiceSocket: WebSocket? = null
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-search","title":"Searchable"}]}""",
+		).build())
+		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+			override fun onOpen(webSocket: WebSocket, response: Response) {
+				voiceSocket = webSocket
+				webSocket.send(
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-search","active_session_id":"","sessions":[],"voice_sessions":[{"id":"voice-search","title":"Searchable"}],"history":[{"id":"latest","role":"assistant","text":"Newest answer"}]}}""",
+				)
+			}
+
+			override fun onMessage(webSocket: WebSocket, text: String) {
+				if (org.json.JSONObject(text).optString("type") == "search_history") {
+					webSocket.send(
+						"""{"type":"history_search","protocol":"voice.v1","search_results":[{"match":{"id":"match","role":"assistant","text":"BIOS gate found"},"context":[{"id":"before","role":"user","text":"What blocked it?"},{"id":"match","role":"assistant","text":"BIOS gate found"}]}]}""",
+					)
+				}
+			}
+		}).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Searchable")
+				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
+				onView(withContentDescription("Search transcript")).perform(click())
+				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
+				onView(withText("Search")).perform(click())
+				waitForDisplayedText("Transcript matches")
+				onView(withText("Koder · BIOS gate found")).perform(click())
+				val labels = waitForText(scenario, "BIOS gate found")
+				assertTrue(labels.contains("What blocked it?"))
+				assertTrue(labels.contains("Back to latest"))
+				onView(withText("Back to latest")).perform(click())
+				assertTrue(waitForText(scenario, "Newest answer").contains("Newest answer"))
+			}
+		} finally {
+			voiceSocket?.close(1000, "test complete")
+			server.close()
+		}
+	}
 
     private fun waitForText(scenario: ActivityScenario<MainActivity>, wanted: String): List<String> {
         var lastLabels = emptyList<String>()

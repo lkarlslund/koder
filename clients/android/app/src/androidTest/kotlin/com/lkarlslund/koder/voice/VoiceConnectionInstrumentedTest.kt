@@ -31,13 +31,16 @@ class VoiceConnectionInstrumentedTest {
         val clientReady = CountDownLatch(1)
         val serverReceivedUtterance = CountDownLatch(1)
 		val serverReceivedHistory = CountDownLatch(1)
+		val serverReceivedSearch = CountDownLatch(1)
+		val clientReceivedSearch = CountDownLatch(1)
 		val serverReceivedVoiceCreation = CountDownLatch(1)
 		val serverReceivedAudio = CountDownLatch(1)
 		val clientReceivedAudio = CountDownLatch(1)
-        var receivedFrame: VoiceServerFrame? = null
+		var readyFrame: VoiceServerFrame? = null
         var utteranceText = ""
 		var voiceTitle = ""
 		var historyCursor = ""
+		var searchQuery = ""
 		var responsePacing = ""
 
         server.enqueue(
@@ -63,6 +66,11 @@ class VoiceConnectionInstrumentedTest {
 					if (message.getString("type") == "history") {
 						historyCursor = message.getString("before_id")
 						serverReceivedHistory.countDown()
+					}
+					if (message.getString("type") == "search_history") {
+						searchQuery = message.getString("query")
+						serverReceivedSearch.countDown()
+						webSocket.send("""{"type":"history_search","protocol":"voice.v1","search_results":[{"match":{"id":"match-1","role":"assistant","text":"Found it"},"context":[{"id":"match-1","role":"assistant","text":"Found it"}]}]}""")
 					}
 					if (message.getString("type") == "create_voice_session") {
 						voiceTitle = message.getString("title")
@@ -94,8 +102,9 @@ class VoiceConnectionInstrumentedTest {
         VoiceConnection(object : VoiceConnection.Listener {
             override fun onConnected() = Unit
             override fun onFrame(frame: VoiceServerFrame) {
-                receivedFrame = frame
+				if (frame.type == "ready") readyFrame = frame
                 clientReady.countDown()
+				if (frame.type == "history_search" && frame.searchResults.singleOrNull()?.match?.id == "match-1") clientReceivedSearch.countDown()
             }
 			override fun onAudioFrame(frame: VoiceAudioFrame) {
 				if (frame.kind == VoiceAudioFrameKind.OUTPUT_PCM && frame.pcm.contentEquals(byteArrayOf(3, 0, 4, 0))) {
@@ -110,6 +119,9 @@ class VoiceConnectionInstrumentedTest {
 			assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
 			connection.requestHistory("message-5")
 			assertTrue("server did not receive history cursor", serverReceivedHistory.await(5, TimeUnit.SECONDS))
+			connection.searchHistory("boots")
+			assertTrue("server did not receive search", serverReceivedSearch.await(5, TimeUnit.SECONDS))
+			assertTrue("client did not receive search results", clientReceivedSearch.await(5, TimeUnit.SECONDS))
 			connection.createVoiceSession("Phone work")
 			assertTrue("server did not receive voice-chat creation", serverReceivedVoiceCreation.await(5, TimeUnit.SECONDS))
 			val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
@@ -123,9 +135,10 @@ class VoiceConnectionInstrumentedTest {
         val request = server.takeRequest(5, TimeUnit.SECONDS)
         assertEquals("Bearer test-token", request?.headers?.get("Authorization"))
 		assertTrue(request?.target.orEmpty().contains("call_id="))
-        assertEquals("ready", receivedFrame?.type)
+		assertEquals("ready", readyFrame?.type)
         assertEquals("check the calendar", utteranceText)
 		assertEquals("message-5", historyCursor)
+		assertEquals("boots", searchQuery)
 		assertEquals("Phone work", voiceTitle)
 		assertEquals("detailed", responsePacing)
     }

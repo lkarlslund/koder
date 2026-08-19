@@ -36,14 +36,23 @@ func (f fakeUpdateSource) Manifest() (androidupdate.Manifest, bool, error) {
 func (f fakeUpdateSource) OpenAPK() (fs.File, error) { return os.Open(f.path) }
 
 type fakeBackend struct {
-	delegated  bool
-	transcript string
-	languages  []string
-	spoken     string
-	artifact   voice.ArtifactFile
-	voiceChats []voice.Session
-	history    []voice.TranscriptEntry
-	pacing     voice.ResponsePacing
+	delegated   bool
+	transcript  string
+	languages   []string
+	spoken      string
+	artifact    voice.ArtifactFile
+	voiceChats  []voice.Session
+	history     []voice.TranscriptEntry
+	pacing      voice.ResponsePacing
+	searchQuery string
+}
+
+func (f *fakeBackend) SearchVoiceSessionHistory(_ context.Context, _ string, query string, _ int) ([]voice.TranscriptSearchResult, error) {
+	f.searchQuery = query
+	match := voice.TranscriptEntry{ID: "message-2", Role: "assistant", Text: "The laptop boots normally."}
+	return []voice.TranscriptSearchResult{{Match: match, Context: []voice.TranscriptEntry{
+		{ID: "message-1", Role: "user", Text: "Check the laptop"}, match,
+	}}}, nil
 }
 
 func (f *fakeBackend) VoiceSessionHistory(_ context.Context, _ string, beforeID string, limit int) (voice.TranscriptPage, error) {
@@ -282,6 +291,13 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	readType(t, ctx, conn, "ready")
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "search_history", Protocol: protocolVersion, Query: "boots", Limit: 20}); err != nil {
+		t.Fatal(err)
+	}
+	search := readType(t, ctx, conn, "history_search")
+	if backend.searchQuery != "boots" || len(search.SearchResults) != 1 || search.SearchResults[0].Match.ID != "message-2" || len(search.SearchResults[0].Context) != 2 {
+		t.Fatalf("history search = %#v query=%q", search.SearchResults, backend.searchQuery)
+	}
 	if err := writeClientFrame(ctx, conn, clientFrame{Type: "hello", Protocol: protocolVersion, ResponsePacing: "detailed"}); err != nil {
 		t.Fatal(err)
 	}

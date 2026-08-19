@@ -304,6 +304,43 @@ func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, be
 	return voice.TranscriptPage{Entries: entries[start:], HasMore: start > 0 || hasMore}, nil
 }
 
+// SearchVoiceSessionHistory searches the complete durable voice transcript and
+// returns recent matches with enough neighboring messages for an anchored jump.
+func (c *Controller) SearchVoiceSessionHistory(ctx context.Context, voiceSessionID, query string, limit int) ([]voice.TranscriptSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("transcript search query is required")
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 20
+	}
+	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	if err != nil {
+		return nil, err
+	}
+	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return nil, fmt.Errorf("session %s is not a voice chat", session.ID)
+	}
+	timeline, err := runtime.FullTimeline(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load voice transcript for search: %w", err)
+	}
+	entries := voiceTranscriptEntries(timeline)
+	foldedQuery := strings.ToLower(query)
+	results := make([]voice.TranscriptSearchResult, 0, min(limit, len(entries)))
+	for index := len(entries) - 1; index >= 0 && len(results) < limit; index-- {
+		if !strings.Contains(strings.ToLower(entries[index].Text), foldedQuery) {
+			continue
+		}
+		start := max(0, index-3)
+		end := min(len(entries), index+4)
+		results = append(results, voice.TranscriptSearchResult{
+			Match: entries[index], Context: append([]voice.TranscriptEntry(nil), entries[start:end]...),
+		})
+	}
+	return results, nil
+}
+
 func voiceTranscriptEntries(items []domain.TimelineItem) []voice.TranscriptEntry {
 	entries := make([]voice.TranscriptEntry, 0, len(items))
 	for _, item := range items {

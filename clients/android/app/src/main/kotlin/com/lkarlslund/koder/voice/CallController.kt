@@ -47,6 +47,7 @@ class CallController(
         fun onUserMessage(text: String)
         fun onAssistantMessage(message: VoiceMessage)
 		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
+		fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) = Unit
     }
 
     private val appContext = context.applicationContext
@@ -197,6 +198,15 @@ class CallController(
 		}
 	}
 
+	fun searchHistory(query: String) {
+		if (!running || query.isBlank()) return
+		try {
+			connection.searchHistory(query)
+		} catch (error: Exception) {
+			listener.onHistorySearch(emptyList(), error.message ?: "Could not search transcript")
+		}
+	}
+
 	fun selectAudioEndpoint(endpointId: String) {
 		if (!running || endpointId.isBlank()) return
 		telecom.selectAudioEndpoint(endpointId)
@@ -320,6 +330,7 @@ class CallController(
 				listener.onHistoryPage(older)
 				publish()
 			}
+			"history_search" -> listener.onHistorySearch(frame.searchResults, frame.error.takeIf(String::isNotBlank))
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
                 val format = frame.audioFormat ?: audioConfig?.output

@@ -15,6 +15,18 @@ class VoiceProtocolTest {
 		assertEquals("concise", hello.getString("response_pacing"))
 		assertFalse(hello.has("text"))
 	}
+
+	@Test
+	fun transcriptSearchEncodesQueryAndDecodesJumpContext() {
+		val request = JSONObject(VoiceProtocol.searchHistory("boots normally"))
+		assertEquals("search_history", request.getString("type"))
+		assertEquals("boots normally", request.getString("query"))
+		val frame = VoiceProtocol.parse(
+			"""{"type":"history_search","protocol":"voice.v1","search_results":[{"match":{"id":"m2","role":"assistant","text":"It boots normally."},"context":[{"id":"m1","role":"user","text":"Check it"},{"id":"m2","role":"assistant","text":"It boots normally."}]}]}""",
+		)
+		assertEquals("m2", frame.searchResults.single().match.id)
+		assertEquals(listOf("m1", "m2"), frame.searchResults.single().context.map { it.id })
+	}
 	@Test
 	fun decodesHistoryPageAndEncodesCursorRequest() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/history.json"))
