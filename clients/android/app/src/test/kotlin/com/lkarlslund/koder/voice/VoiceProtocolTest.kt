@@ -59,10 +59,11 @@ class VoiceProtocolTest {
     @Test
     fun decodesVoiceHomeAndCreatesSessionRequest() {
         val home = VoiceProtocol.parseHome(
-            """{"protocol":"voice.v1","voice_session":{"id":"voice-2","title":"New work"},"voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"See you tomorrow"},{"id":"voice-2","title":"New work"}]}""",
+            """{"protocol":"voice.v1","voice_session":{"id":"voice-2","title":"New work"},"voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"See you tomorrow","updated_at":"2026-08-18T12:00:00Z"},{"id":"voice-2","title":"New work","updated_at":"2026-08-19T12:00:00Z"}]}""",
         )
-        assertEquals(listOf("voice-1", "voice-2"), home.voiceSessions.map { it.id })
-        assertEquals("See you tomorrow", home.voiceSessions.first().lastMessage)
+        assertEquals(listOf("voice-2", "voice-1"), home.voiceSessions.map { it.id })
+        assertEquals("See you tomorrow", home.voiceSessions.last().lastMessage)
+        assertEquals("2026-08-19T12:00:00Z", home.voiceSessions.first().updatedAt.toString())
         assertEquals("voice-2", home.createdVoiceSession?.id)
 
         val request = JSONObject(VoiceProtocol.createSessionRequest("  Phone work  "))

@@ -3,15 +3,18 @@ package com.lkarlslund.koder
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.TextUtils
 import android.text.InputType
+import android.text.format.DateUtils
 import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
 import android.view.Gravity
@@ -21,6 +24,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -31,6 +35,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
@@ -40,6 +45,7 @@ import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import java.io.File
+import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
@@ -215,18 +221,34 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         screen = Screen.HOME
         clearCallViews()
         val root = column()
-        val heading = LinearLayout(this).apply {
+
+        val appBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(title("Conversations"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(this@MainActivity).apply {
-                text = "Settings"
-                contentDescription = "Connection settings"
-                setOnClickListener { showSetup() }
+            addView(logo(), LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
+            addView(title("Koder Voice").apply { textSize = 24f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "⋮"
+                textSize = 30f
+                gravity = Gravity.CENTER
+                minWidth = dp(48)
+                minHeight = dp(48)
+                contentDescription = "More options"
+                isClickable = true
+                isFocusable = true
+                val selectable = TypedValue()
+                if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+                    setBackgroundResource(selectable.resourceId)
+                }
+                setOnClickListener(::showHomeMenu)
             })
         }
-        root.addView(heading, matchWrap())
-        root.addView(body("Continue a conversation or start a new one."), spaced(bottom = 14))
+        root.addView(appBar, matchWrap())
+        root.addView(title("Conversations").apply {
+            textSize = 30f
+            setTypeface(typeface, Typeface.BOLD)
+        }, spaced(top = 24))
+        root.addView(body("Pick up where you left off, or begin something new."), spaced(top = 4, bottom = 18))
 
         updateButton = Button(this).apply {
             visibility = View.GONE
@@ -236,14 +258,23 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (home.voiceSessions.isEmpty()) {
-            list.addView(helper("No voice conversations yet."), spaced(top = 20, bottom = 20))
+            list.addView(emptyConversationCard(), spaced(top = 8, bottom = 12))
         } else {
-            home.voiceSessions.forEach { session -> list.addView(sessionButton(session), spaced(bottom = 8)) }
+            home.voiceSessions.forEach { session -> list.addView(sessionCard(session), spaced(bottom = 12)) }
         }
-        root.addView(ScrollView(this).apply { addView(list, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val sessionScroll = ScrollView(this).apply { addView(list, matchWrap()) }
+        val refresh = SwipeRefreshLayout(this).apply {
+            contentDescription = "Conversation list"
+            setColorSchemeColors(themeColor(android.R.attr.colorAccent))
+            addView(sessionScroll, matchWrap())
+            setOnRefreshListener { refreshHome(this) }
+        }
+        root.addView(refresh, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(Button(this).apply {
-            text = "New conversation"
+            text = "+  New conversation"
             contentDescription = "Create a new voice conversation"
+            backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
+            setTextColor(themeColor(android.R.attr.colorBackground))
             setOnClickListener { showCreateVoiceSessionDialog() }
         }, spaced(top = 12))
         showContent(root)
@@ -252,17 +283,129 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         appUpdater.consider(home.appUpdate, settings.server, settings.token)
     }
 
-    private fun sessionButton(session: VoiceSession) = Button(this).apply {
-        text = buildString {
-            append(session.title.ifBlank { "Untitled conversation" })
-            if (session.lastMessage.isNotBlank()) append("\n${session.lastMessage}")
+    private fun showHomeMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("Settings")
+            menu.add("About")
+            setOnMenuItemClickListener { item ->
+                when (item.title.toString()) {
+                    "Settings" -> showSetup()
+                    "About" -> showAbout()
+                }
+                true
+            }
+            show()
         }
-        gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        isAllCaps = false
-        minHeight = dp(64)
+    }
+
+    private fun showAbout() {
+        val version = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+        AlertDialog.Builder(this)
+            .setTitle("About Koder Voice")
+            .setMessage("Native voice conversations for Koder.\n\nVersion ${version.ifBlank { "development" }}")
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun sessionCard(session: VoiceSession) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(15), dp(16), dp(15))
+        background = cardBackground()
+        elevation = dp(2).toFloat()
+        isClickable = true
+        isFocusable = true
         contentDescription = "Open voice conversation ${session.title.ifBlank { "Untitled" }}"
+        val selectable = TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
+            foreground = getDrawable(selectable.resourceId)
+        }
+
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = session.title.ifBlank { "Untitled conversation" }
+                textSize = 19f
+                setTypeface(typeface, Typeface.BOLD)
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "›"
+                textSize = 30f
+                setTextColor(themeColor(android.R.attr.colorAccent))
+            })
+        }, matchWrap())
+        session.updatedAt?.let { updated ->
+            addView(helper(lastUsedText(updated.toEpochMilli())).apply {
+                setTextColor(themeColor(android.R.attr.colorAccent))
+                alpha = 1f
+            }, spaced(top = 3))
+        }
+        if (session.lastMessage.isNotBlank()) {
+            addView(body(session.lastMessage).apply {
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                alpha = 0.78f
+            }, spaced(top = 8))
+        }
         setOnClickListener { openChat(session) }
     }
+
+    private fun emptyConversationCard() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(dp(24), dp(30), dp(24), dp(30))
+        background = cardBackground()
+        addView(logo(), centeredSquare(58, bottom = 16))
+        addView(body("Your conversations will live here.").apply {
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+        }, matchWrap())
+        addView(helper("Start one below, then return whenever you want to continue.").apply {
+            gravity = Gravity.CENTER
+        }, spaced(top = 6))
+    }
+
+    private fun refreshHome(indicator: SwipeRefreshLayout) {
+        val generation = ++requestGeneration
+        indicator.isRefreshing = true
+        sessionClient.list(settings.server, settings.token) { result ->
+            runOnUiThread {
+                if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                result.fold(
+                    onSuccess = ::showHome,
+                    onFailure = {
+                        indicator.isRefreshing = false
+                        Toast.makeText(this, it.message ?: "Could not refresh conversations", Toast.LENGTH_LONG).show()
+                    },
+                )
+            }
+        }
+    }
+
+    private fun lastUsedText(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val relative = if (abs(now - timestamp) < DateUtils.MINUTE_IN_MILLIS) {
+            "just now"
+        } else {
+            DateUtils.getRelativeTimeSpanString(
+                timestamp,
+                now,
+                DateUtils.MINUTE_IN_MILLIS,
+                DateUtils.FORMAT_ABBREV_RELATIVE,
+            )
+        }
+        return "Last used $relative"
+    }
+
+    private fun cardBackground() = GradientDrawable().apply {
+        setColor(themeColor(android.R.attr.colorBackgroundFloating))
+        setStroke(dp(1), withAlpha(themeColor(android.R.attr.colorAccent), 72))
+        cornerRadius = dp(16).toFloat()
+    }
+
+    private fun withAlpha(color: Int, alpha: Int) = (color and 0x00ffffff) or (alpha.coerceIn(0, 255) shl 24)
 
     private fun showCreateVoiceSessionDialog() {
         val titleField = EditText(this).apply {

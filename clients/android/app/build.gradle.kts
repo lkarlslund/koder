@@ -180,6 +180,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.12.2")
     implementation("androidx.core:core:1.17.0")
     implementation("androidx.core:core-telecom:1.0.1")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
@@ -190,5 +191,6 @@ dependencies {
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.3.0")
 }

@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.time.Instant
 
 const val VOICE_PROTOCOL = "voice.v1"
 
@@ -12,6 +13,7 @@ data class VoiceSession(
     val id: String,
     val title: String,
     val lastMessage: String = "",
+    val updatedAt: Instant? = null,
 )
 
 data class VoicePart(
@@ -119,7 +121,8 @@ object VoiceProtocol {
 		val protocol = root.optString("protocol")
 		require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
 		return VoiceHome(
-			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() },
+			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() }
+				.sortedByDescending { it.updatedAt ?: Instant.MIN },
 			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
 			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
 		)
@@ -288,6 +291,9 @@ object VoiceProtocol {
 		id = getString("id"),
 		title = getString("title"),
 		lastMessage = optString("last_message"),
+		updatedAt = optString("updated_at").takeIf(String::isNotBlank)?.let {
+			runCatching { Instant.parse(it) }.getOrNull()
+		},
 	)
 
 	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()

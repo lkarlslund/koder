@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -336,6 +337,9 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	slices.SortStableFunc(sessions, func(a, b voice.Session) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
 	response := sessionsResponse{
 		Protocol: protocolVersion, VoiceSession: created, VoiceSessions: sessions,
 	}

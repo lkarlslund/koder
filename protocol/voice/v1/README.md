@@ -82,7 +82,8 @@ Examples:
 - `pong`: UTC `server_time`.
 
 `call_state.sessions` lists ordinary and quick work targets.
-`call_state.voice_sessions` lists durable voice chats.
+`call_state.voice_sessions` lists durable voice chats. Session summaries carry
+an RFC 3339 `updated_at` timestamp and are ordered most recently used first.
 `working` is emitted only immediately before work is delegated into another
 chat. Its `working_on` field contains that ordinary session's bounded summary.
 Clients may play a local waiting cue until a later state arrives; `speaking` is

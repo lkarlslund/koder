@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -268,7 +269,11 @@ func TestHandlerCreatesAndSelectsDurableVoiceChat(t *testing.T) {
 }
 
 func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
-	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Personal"}}}
+	now := time.Now().UTC()
+	backend := &fakeBackend{voiceChats: []voice.Session{
+		{ID: "voice-older", Title: "Older", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "voice-newer", Title: "Newer", UpdatedAt: now},
+	}}
 	handler := NewHandler(backend, "secret")
 	handler.Lease = nil
 	server := httptest.NewServer(handler)
@@ -288,8 +293,11 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&listed); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || listed.Protocol != protocolVersion || len(listed.VoiceSessions) != 1 {
+	if response.StatusCode != http.StatusOK || listed.Protocol != protocolVersion || len(listed.VoiceSessions) != 2 {
 		t.Fatalf("list response status=%d body=%#v", response.StatusCode, listed)
+	}
+	if listed.VoiceSessions[0].ID != "voice-newer" || listed.VoiceSessions[1].ID != "voice-older" {
+		t.Fatalf("voice sessions are not newest first: %#v", listed.VoiceSessions)
 	}
 
 	request, err = http.NewRequest(http.MethodPost, server.URL+"/voice/v1/sessions", strings.NewReader(`{"title":"Phone work"}`))
@@ -310,7 +318,7 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	if response.StatusCode != http.StatusCreated || created.VoiceSession == nil || created.VoiceSession.Title != "Phone work" {
 		t.Fatalf("create response status=%d body=%#v", response.StatusCode, created)
 	}
-	if len(created.VoiceSessions) != 2 || created.VoiceSessions[1].ID != "voice-created" {
+	if len(created.VoiceSessions) != 3 || created.VoiceSessions[2].ID != "voice-created" {
 		t.Fatalf("created voice sessions = %#v", created.VoiceSessions)
 	}
 }

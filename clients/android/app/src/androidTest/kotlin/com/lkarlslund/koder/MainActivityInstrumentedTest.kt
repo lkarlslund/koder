@@ -1,21 +1,31 @@
 package com.lkarlslund.koder
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.swipeDown
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
+import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.MessageDigest
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -70,11 +80,52 @@ class MainActivityInstrumentedTest {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 val labels = waitForText(scenario, "Personal")
                 assertTrue(labels.contains("Conversations"))
+                assertTrue(labels.contains("Koder Voice"))
                 assertTrue(labels.any { it.startsWith("Personal") })
-                assertTrue(labels.contains("New conversation"))
-                assertTrue(labels.contains("Settings"))
+                assertTrue(labels.any { it.contains("New conversation") })
+                assertTrue(labels.contains("⋮"))
                 assertFalse(labels.contains("Send"))
                 assertFalse(labels.any { it.contains("Message Koder") })
+                onView(withContentDescription("More options")).perform(click())
+                onView(withText("Settings")).check(matches(isDisplayed()))
+                onView(withText("About")).check(matches(isDisplayed()))
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun pullingConversationListRefreshesAndShowsNewestFirst() {
+        val server = MockWebServer()
+        val packageInfo = context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+        )
+        val signer = MessageDigest.getInstance("SHA-256")
+            .digest(requireNotNull(packageInfo.signingInfo).apkContentsSigners.single().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val update = """"app_update":{"channel":"local","application_id":"${context.packageName}","version_code":${packageInfo.longVersionCode + 1},"version_name":"next-dev","signing_certificate_sha256":"$signer","apk_sha256":"${"a".repeat(64)}","apk_size":1,"download_uri":"/voice/v1/android/koder.apk"}"""
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Older","updated_at":"2026-08-18T12:00:00Z"}]}""",
+            ).build(),
+        )
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Older","updated_at":"2026-08-18T12:00:00Z"},{"id":"voice-2","title":"Newest","updated_at":"2026-08-19T12:00:00Z"}],$update}""",
+            ).build(),
+        )
+        server.start()
+        try {
+            SecureSettings(context).save(server.url("/").toString(), "")
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                waitForText(scenario, "Older")
+                onView(withContentDescription("Conversation list")).perform(swipeDown())
+                val labels = waitForText(scenario, "Newest")
+                assertTrue(labels.indexOf("Newest") < labels.indexOf("Older"))
+                assertEquals(2, labels.count { it.startsWith("Last used") })
+                assertTrue(waitForText(scenario, "Update Koder").any { it.contains("next-dev") })
             }
         } finally {
             server.close()

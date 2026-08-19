@@ -100,8 +100,9 @@ proxy and enter its `https://` URL for `wss://` transport elsewhere.
 The welcome screen explains both fields; the access token is optional when the
 server has no voice token configured. The token is encrypted using Android
 Keystore. The app then connects without activating audio and presents existing
-voice conversations plus a New Conversation action. Selecting a conversation
-opens its dedicated voice/text screen. On the first conversation, grant
+voice conversations plus a New Conversation action. Conversations show their
+last-used time in newest-first order; pull down on the list to refresh it.
+Selecting a conversation opens its dedicated voice/text screen. On the first conversation, grant
 microphone, notification, and nearby-device permissions. Android Core Telecom
 then owns earpiece, speaker, wired headset, hold, and Bluetooth routing as an
 internal audio implementation detail.
