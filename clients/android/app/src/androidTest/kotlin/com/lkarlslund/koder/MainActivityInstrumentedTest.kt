@@ -15,6 +15,7 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.swipeDown
+import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
@@ -25,6 +26,8 @@ import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.Dispatcher
+import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +37,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.net.InetAddress
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -207,6 +211,41 @@ class MainActivityInstrumentedTest {
             server.close()
         }
     }
+
+	@Test
+	fun newConversationOpensWhileServerCreatesIt() {
+		val allowCreateResponse = CountDownLatch(1)
+		val server = MockWebServer()
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse = when {
+				request.method == "POST" && request.target == "/voice/v1/sessions" -> {
+					allowCreateResponse.await()
+					MockResponse.Builder().code(201).body(
+						"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-new","title":"Trip planning"}],"voice_session":{"id":"voice-new","title":"Trip planning"}}""",
+					).build()
+				}
+				else -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""",
+				).build()
+			}
+		}
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Personal")
+				onView(withContentDescription("Create a new voice conversation")).perform(click())
+				onView(withContentDescription("Conversation name")).perform(replaceText("Trip planning"))
+				onView(withText("Create")).perform(click())
+				val labels = waitForText(scenario, "Creating conversation…")
+				assertTrue(labels.contains("Trip planning"))
+				onView(withContentDescription("Conversation connecting")).check(matches(isDisplayed()))
+			}
+		} finally {
+			allowCreateResponse.countDown()
+			server.close()
+		}
+	}
 
     @Test
     fun pullingConversationListRefreshesAndShowsNewestFirst() {

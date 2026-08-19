@@ -25,4 +25,14 @@ class VoiceControlsTest {
 		assertEquals("Voice connection unavailable · reconnecting", reconnectStatus("Expected HTTP 101 response but was '500'"))
 		assertEquals("Reconnecting · network changed", reconnectStatus("network changed"))
 	}
+
+	@Test
+	fun conversationAvailabilityDistinguishesStartupRetryAndOffline() {
+		assertEquals(ConversationAvailability.CONNECTING, conversationAvailability(CallController.Stage.CONNECTING, "Connecting…"))
+		assertEquals(ConversationAvailability.RETRYING, conversationAvailability(CallController.Stage.CONNECTING, "Reconnecting · network changed"))
+		assertEquals(ConversationAvailability.ONLINE, conversationAvailability(CallController.Stage.LISTENING, "Listening"))
+		assertEquals(ConversationAvailability.PAUSED, conversationAvailability(CallController.Stage.DISCONNECTED, "Conversation paused"))
+		assertEquals(ConversationAvailability.OFFLINE, conversationAvailability(CallController.Stage.ERROR, "Connection failed"))
+		assertEquals("Offline · Connection failed", conversationStatusText(CallController.Stage.ERROR, "Connection failed"))
+	}
 }

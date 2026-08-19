@@ -55,6 +55,7 @@ import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
+import com.lkarlslund.koder.voice.ConversationAvailability
 import com.lkarlslund.koder.voice.ConversationSurface
 import com.lkarlslund.koder.voice.ServerInfo
 import com.lkarlslund.koder.voice.SpeechLanguage
@@ -67,7 +68,9 @@ import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
+import com.lkarlslund.koder.voice.conversationAvailability
 import com.lkarlslund.koder.voice.conversationSurface
+import com.lkarlslund.koder.voice.conversationStatusText
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
@@ -96,6 +99,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var settings = SecureSettings.Values("", "")
     private var requestGeneration = 0L
     private var pendingSession: VoiceSession? = null
+	private var pendingCreateTitle: String? = null
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
     private var lastAppUpdate: AppUpdate? = null
@@ -135,7 +139,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startCall()
         } else {
-            status?.text = "Microphone permission is required for voice conversations"
+			updateConversationStatus(CallController.Stage.ERROR, "Microphone permission is required for voice conversations")
+			updateConversationMode(CallController.Stage.ERROR)
         }
     }
     private val phonePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -233,7 +238,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
 			latestCallSnapshot = snapshot
-            status?.text = snapshot.detail
+			updateConversationStatus(snapshot.stage, snapshot.detail)
             transcript?.apply {
                 text = snapshot.partialTranscript
 				visibility = if (transcriptShown && snapshot.partialTranscript.isNotBlank()) View.VISIBLE else View.GONE
@@ -955,31 +960,33 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     private fun createSession(title: String) {
-        screen = Screen.LOADING
+		val normalizedTitle = title.trim().ifBlank { "Voice Chat" }
+		pendingCreateTitle = normalizedTitle
         val generation = ++requestGeneration
-        val content = column(Gravity.CENTER_HORIZONTAL).apply {
-            gravity = Gravity.CENTER
-            addView(ProgressBar(this@MainActivity))
-            addView(body("Creating conversation…"), spaced(top = 18))
-        }
-        showContent(content)
-        sessionClient.create(settings.server, settings.token, title.trim().ifBlank { "Voice Chat" }) { result ->
+		openChat(VoiceSession(id = "", title = normalizedTitle), startConnection = false, initialDetail = "Creating conversation…")
+        sessionClient.create(settings.server, settings.token, normalizedTitle) { result ->
             runOnUiThread {
                 if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
                     onSuccess = { home ->
-                        home.createdVoiceSession?.let(::openChat) ?: showHome(home)
+						home.createdVoiceSession?.let { created ->
+							pendingCreateTitle = null
+							pendingSession = created
+							updateConversationStatus(CallController.Stage.CONNECTING, "Connecting…")
+							requestCallStart()
+						} ?: showCreateFailure(IllegalStateException("Koder did not return the new conversation"))
                     },
-                    onFailure = ::showConnectionError,
+					onFailure = ::showCreateFailure,
                 )
             }
         }
     }
 
-    private fun openChat(session: VoiceSession) {
+    private fun openChat(session: VoiceSession, startConnection: Boolean = true, initialDetail: String = "Connecting…") {
         screen = Screen.CHAT
         clearCallViews()
         pendingSession = session
+		if (startConnection) pendingCreateTitle = null
 		transcriptShown = false
 		transcriptOpened = false
 		followConversationBottom = true
@@ -1009,7 +1016,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				tag = "Pause"
 				contentDescription = "Pause voice conversation"
 				setOnClickListener {
-					if (tag == "Pause") controller.end() else requestCallStart()
+					if (tag == "Pause") controller.end()
+					else pendingCreateTitle?.let(::createSession) ?: requestCallStart()
 				}
 			}.also { addView(it, actionLayout(start = 6)) }
 			muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
@@ -1018,14 +1026,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}.also { addView(it, actionLayout(start = 6)) }
 			}
         root.addView(heading, matchWrap())
-        status = helper("Preparing conversation…").apply {
-            setTextColor(themeColor(android.R.attr.colorAccent))
-            background = GradientDrawable().apply {
-                setColor(withAlpha(themeColor(android.R.attr.colorAccent), 30))
-                cornerRadius = dp(18).toFloat()
-            }
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-        }
+		status = helper(initialDetail).apply {
+			accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+			alpha = 1f
+			setTextColor(themeColor(android.R.attr.colorAccent))
+			background = GradientDrawable().apply {
+				setColor(withAlpha(themeColor(android.R.attr.colorAccent), 30))
+				cornerRadius = dp(18).toFloat()
+			}
+			setPadding(dp(14), dp(7), dp(14), dp(7))
+		}
         root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(10)
@@ -1148,8 +1158,41 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		composerView = composer
         root.addView(composer, matchWrap())
         showContent(root)
-        requestCallStart()
+		updateConversationStatus(CallController.Stage.CONNECTING, initialDetail)
+		updateConversationMode(CallController.Stage.CONNECTING)
+        if (startConnection) requestCallStart()
     }
+
+	private fun showCreateFailure(failure: Throwable) {
+		if (screen != Screen.CHAT) return
+		updateConversationStatus(CallController.Stage.ERROR, failure.message ?: "Could not create conversation")
+		updateConversationMode(CallController.Stage.ERROR)
+	}
+
+	private fun updateConversationStatus(stage: CallController.Stage?, detail: String) {
+		val availability = conversationAvailability(stage, detail)
+		status?.apply {
+			text = conversationStatusText(stage, detail)
+			contentDescription = when (availability) {
+				ConversationAvailability.CONNECTING -> "Conversation connecting"
+				ConversationAvailability.RETRYING -> "Conversation retrying connection"
+				ConversationAvailability.ONLINE -> "Conversation online"
+				ConversationAvailability.PAUSED -> "Conversation paused"
+				ConversationAvailability.OFFLINE -> "Conversation offline"
+			}
+			val color = when (availability) {
+				ConversationAvailability.ONLINE -> ACTION_GREEN
+				ConversationAvailability.OFFLINE -> ACTION_RED
+				ConversationAvailability.RETRYING, ConversationAvailability.CONNECTING -> ACTION_ORANGE
+				ConversationAvailability.PAUSED -> ACTION_NEUTRAL
+			}
+			setTextColor(color)
+			background = GradientDrawable().apply {
+				setColor(withAlpha(color, 30))
+				cornerRadius = dp(18).toFloat()
+			}
+		}
+	}
 
 	private fun updateConversationMode(stage: CallController.Stage?) {
 		val active = when (stage) {
@@ -1195,9 +1238,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			ViewCompat.setTooltipText(this, contentDescription)
 		}
 		audioButton?.visibility = if (active) View.VISIBLE else View.GONE
-		placeholderTitle?.text = if (active) "No transcript yet" else "Conversation paused"
+		placeholderTitle?.text = when {
+			active -> "No transcript yet"
+			stage == CallController.Stage.ERROR -> "Conversation offline"
+			else -> "Conversation paused"
+		}
 		placeholderDetail?.text = if (active) {
 			"Your conversation will appear here as you speak."
+		} else if (stage == CallController.Stage.ERROR) {
+			"Check the connection, then tap retry."
 		} else {
 			"Resume when you want to keep talking."
 		}
@@ -1263,6 +1312,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun leaveChat() {
         pendingStart = false
         pendingSession = null
+		pendingCreateTitle = null
         controller.end()
 		window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         loadHome("Refreshing conversations…")
@@ -1278,6 +1328,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun startCall() {
         val session = pendingSession ?: return
+		if (session.id.isBlank()) return
 		controller.start(
 			settings.server,
 			settings.token,
