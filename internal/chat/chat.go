@@ -503,6 +503,12 @@ func (r *Chat) AppendUserMessageForInput(ctx context.Context, input domain.Queue
 	if r == nil {
 		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
 	}
+	// Sequence allocation depends on the complete persisted timeline. Metadata-only
+	// runtimes must hydrate before appending or every process restart can allocate
+	// sequence one again.
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return domain.TimelineItem{}, err
+	}
 	now := time.Now().UTC()
 	text := strings.TrimSpace(user.Text)
 	r.mu.Lock()

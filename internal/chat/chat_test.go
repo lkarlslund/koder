@@ -2239,6 +2239,35 @@ func TestLoadMetadataDefersTimelineUntilNeeded(t *testing.T) {
 	}
 }
 
+func TestAppendUserMessageHydratesMetadataRuntimeBeforeAllocatingSequence(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	ctx := context.Background()
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.AssistantMessage{Text: "already stored"}); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := LoadMetadata(ctx, session, chatRecord, Deps{Store: st}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(runtime.Close)
+
+	item, err := runtime.AppendUserMessage(ctx, domain.UserMessage{Text: "new voice turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Seq != 2 {
+		t.Fatalf("appended sequence = %d, want 2", item.Seq)
+	}
+	timeline, err := timelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline) != 2 || timeline[0].Seq != 1 || timeline[1].Seq != 2 {
+		t.Fatalf("persisted timeline = %#v", timeline)
+	}
+}
+
 func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

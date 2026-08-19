@@ -365,6 +365,9 @@ func (c *Controller) RecordVoiceExchange(ctx context.Context, voiceSessionID, tr
 	if session.Kind != domain.SessionKindVoice {
 		return fmt.Errorf("session %s is not a voice session", session.ID)
 	}
+	if err := runtime.EnsureTimeline(ctx); err != nil {
+		return err
+	}
 	if _, err := runtime.AppendUserMessage(ctx, domain.UserMessage{Text: transcript, Source: "voice"}); err != nil {
 		return err
 	}
