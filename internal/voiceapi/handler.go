@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -88,6 +90,31 @@ type sessionsResponse struct {
 	AppUpdate     *androidupdate.Manifest `json:"app_update,omitempty"`
 }
 
+type serverInfoResponse struct {
+	Protocol              string     `json:"protocol"`
+	ServerTime            time.Time  `json:"server_time"`
+	Version               string     `json:"version"`
+	Commit                string     `json:"commit"`
+	Dirty                 string     `json:"dirty"`
+	BuildTime             string     `json:"build_time"`
+	StartedAt             time.Time  `json:"started_at"`
+	UptimeSeconds         int64      `json:"uptime_seconds"`
+	Platform              string     `json:"platform"`
+	GoVersion             string     `json:"go_version"`
+	LogicalCPUs           int        `json:"logical_cpus"`
+	MaxProcs              int        `json:"max_procs"`
+	Goroutines            int        `json:"goroutines"`
+	HeapAllocBytes        uint64     `json:"heap_alloc_bytes"`
+	HeapSysBytes          uint64     `json:"heap_sys_bytes"`
+	HeapObjects           uint64     `json:"heap_objects"`
+	GCCycles              uint32     `json:"gc_cycles"`
+	SessionCount          int        `json:"session_count"`
+	VoiceSessionCount     int        `json:"voice_session_count"`
+	VoiceConnectionActive bool       `json:"voice_connection_active"`
+	VoiceConnectionSince  *time.Time `json:"voice_connection_since,omitempty"`
+	TokenRequired         bool       `json:"token_required"`
+}
+
 type createSessionRequest struct {
 	Title string `json:"title"`
 }
@@ -112,6 +139,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/voice/v1/sessions" {
 		h.serveSessions(w, r)
+		return
+	}
+	if r.URL.Path == "/voice/v1/server-info" {
+		h.serveServerInfo(w, r)
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -300,6 +331,59 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+}
+
+func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessions, err := h.Backend.ListVoiceSessions(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	voiceSessions, err := h.Backend.ListVoiceChats(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	build := version.Current()
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	response := serverInfoResponse{
+		Protocol:          protocolVersion,
+		ServerTime:        now,
+		Version:           build.Version,
+		Commit:            build.Commit,
+		Dirty:             build.Dirty,
+		BuildTime:         build.BuildTime,
+		StartedAt:         build.StartedAt,
+		UptimeSeconds:     max(0, int64(now.Sub(build.StartedAt)/time.Second)),
+		Platform:          runtime.GOOS + "/" + runtime.GOARCH,
+		GoVersion:         build.GoVersion,
+		LogicalCPUs:       runtime.NumCPU(),
+		MaxProcs:          runtime.GOMAXPROCS(0),
+		Goroutines:        runtime.NumGoroutine(),
+		HeapAllocBytes:    memory.Alloc,
+		HeapSysBytes:      memory.HeapSys,
+		HeapObjects:       memory.HeapObjects,
+		GCCycles:          memory.NumGC,
+		SessionCount:      len(sessions),
+		VoiceSessionCount: len(voiceSessions),
+		TokenRequired:     strings.TrimSpace(h.Token) != "",
+	}
+	if active, ok := h.Lease.Snapshot(); ok {
+		response.VoiceConnectionActive = true
+		response.VoiceConnectionSince = &active.StartedAt
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		return
 	}
 }
 

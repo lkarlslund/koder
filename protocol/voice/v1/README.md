@@ -23,6 +23,10 @@ conversation endpoint:
   optional signed Android update;
 - `POST /voice/v1/sessions` with `{"title":"Personal"}` creates a durable
   conversation and returns it as `voice_session` alongside the refreshed list.
+- `GET /voice/v1/server-info` returns a live, authenticated diagnostics snapshot
+  with build/runtime identity, uptime, memory and concurrency counters, session
+  counts, and current voice-connection state. Clients measure request round-trip
+  time themselves so the displayed latency includes the network path.
 
 These requests do not acquire the single-live-voice-connection lease, start
 audio routing, or request microphone permission.

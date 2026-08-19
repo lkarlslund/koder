@@ -351,6 +351,47 @@ func TestHandlerProtectsAndValidatesVoiceSessionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
+	handler := NewHandler(&fakeBackend{}, "secret")
+	release, err := handler.Lease.Acquire("phone-1", "voice-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/voice/v1/server-info", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var info serverInfoResponse
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || info.Protocol != protocolVersion {
+		t.Fatalf("server info status=%d body=%#v", response.StatusCode, info)
+	}
+	if info.Version == "" || info.Commit == "" || info.StartedAt.IsZero() || info.ServerTime.IsZero() {
+		t.Fatalf("server info omitted build identity: %#v", info)
+	}
+	if info.Platform == "" || info.GoVersion == "" || info.LogicalCPUs < 1 || info.MaxProcs < 1 {
+		t.Fatalf("server info omitted runtime identity: %#v", info)
+	}
+	if info.SessionCount != 1 || info.VoiceSessionCount != 2 {
+		t.Fatalf("server info session counts = %d, %d", info.SessionCount, info.VoiceSessionCount)
+	}
+	if !info.TokenRequired || !info.VoiceConnectionActive || info.VoiceConnectionSince == nil {
+		t.Fatalf("server info connection state = %#v", info)
+	}
+}
+
 func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	backend := &fakeBackend{}
 	server := httptest.NewServer(NewHandler(backend, ""))
