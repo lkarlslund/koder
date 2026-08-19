@@ -307,6 +307,14 @@ type OfferFileStoredResult struct {
 	Summary  string `json:"summary,omitempty"`
 }
 
+// PresentationStoredResult is deliberate inline visual material for a voice
+// client. It remains MIME-typed so clients can provide generic fallbacks.
+type PresentationStoredResult struct {
+	Title    string `json:"title,omitempty"`
+	MIMEType string `json:"mime_type"`
+	Content  string `json:"content"`
+}
+
 // ShowImageStoredResult is retained for decoding old show_image results.
 type ShowImageStoredResult = ShowMediaStoredResult
 
@@ -364,6 +372,7 @@ func (WebSearchStoredResult) storedResultPayload()     {}
 func (ViewImageStoredResult) storedResultPayload()     {}
 func (ShowMediaStoredResult) storedResultPayload()     {}
 func (OfferFileStoredResult) storedResultPayload()     {}
+func (PresentationStoredResult) storedResultPayload()  {}
 func (BrowserStoredResult) storedResultPayload()       {}
 func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
@@ -470,6 +479,8 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[ShowMediaStoredResult](env.Payload, compactShowMediaStoredResult)
 	case OfferFile:
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
+	case Present:
+		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
 	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
@@ -901,6 +912,8 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ShowMediaStoredResult](env.Payload, formatShowMediaStoredResult)
 	case OfferFile:
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
+	case Present:
+		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
 	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
@@ -1411,6 +1424,13 @@ func formatOfferFileStoredResult(result OfferFileStoredResult) string {
 		return "Offered file " + name
 	}
 	return "Offered file"
+}
+
+func formatPresentationStoredResult(result PresentationStoredResult) string {
+	if title := strings.TrimSpace(result.Title); title != "" {
+		return "Presented " + title
+	}
+	return "Presented visual content"
 }
 
 func ParseReadStoredLines(output string) ([]ReadStoredLine, string) {

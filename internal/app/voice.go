@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -328,9 +329,10 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 			}
 			timeline := runtime.SnapshotTimeline()
 			if response := latestAssistantTextAfter(timeline, initialSeq); response != "" {
-				parts := []voice.Part{{MIMEType: "text/plain", Data: response}}
+				spoken := conciseSpokenResponse(response)
+				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
 				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
-				return voice.Message{SpokenText: conciseSpokenResponse(response), Parts: parts}, nil
+				return voice.Message{SpokenText: spoken, Parts: parts}, nil
 			}
 			if message := latestModelErrorAfter(timeline, initialSeq); message != "" {
 				return voice.Message{}, fmt.Errorf("voice chat stopped with an error: %s", message)
@@ -344,7 +346,10 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 
 func conciseSpokenResponse(text string) string {
 	const maxWords = 60
-	text = strings.TrimSpace(text)
+	text = conversationalVoiceText(text)
+	if text == "" {
+		return "I've put the details in the conversation."
+	}
 	words := strings.Fields(text)
 	if len(words) <= maxWords {
 		return text
@@ -359,6 +364,61 @@ func conciseSpokenResponse(text string) string {
 		}
 	}
 	return strings.TrimRight(cut, ",;:-") + "…"
+}
+
+var (
+	voiceMarkdownImage = regexp.MustCompile(`!\[([^]]*)\]\([^)]+\)`)
+	voiceMarkdownLink  = regexp.MustCompile(`\[([^]]+)\]\([^)]+\)`)
+	voiceNumberedItem  = regexp.MustCompile(`^\d+[.)]\s+`)
+	voiceRawURL        = regexp.MustCompile(`https?://\S+`)
+	voiceTableDivider  = regexp.MustCompile(`^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$`)
+)
+
+// conversationalVoiceText is a defensive last mile for TTS. The voice role
+// prompt should already produce plain speech, but provider output must never
+// make a synthesizer recite Markdown punctuation or raw table delimiters.
+func conversationalVoiceText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	spoken := make([]string, 0, len(lines))
+	inFence := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || line == "" || voiceTableDivider.MatchString(line) {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimLeft(line, "#>"))
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* "), "+ "))
+		line = voiceNumberedItem.ReplaceAllString(line, "")
+		if strings.Count(line, "|") >= 2 {
+			cells := strings.Split(strings.Trim(line, "|"), "|")
+			values := cells[:0]
+			for _, cell := range cells {
+				if cell = strings.TrimSpace(cell); cell != "" {
+					values = append(values, cell)
+				}
+			}
+			line = strings.Join(values, ", ")
+		}
+		line = voiceMarkdownImage.ReplaceAllString(line, "$1")
+		line = voiceMarkdownLink.ReplaceAllString(line, "$1")
+		line = voiceRawURL.ReplaceAllString(line, "the link")
+		line = strings.NewReplacer("**", "", "__", "", "~~", "", "`", "", "*", "").Replace(line)
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			continue
+		}
+		last := line[len(line)-1]
+		if !strings.ContainsRune(".!?;:", rune(last)) {
+			line += "."
+		}
+		spoken = append(spoken, line)
+	}
+	return strings.TrimSpace(strings.Join(spoken, " "))
 }
 
 func (c *Controller) describeVoiceTarget(ctx context.Context, target voice.Session) voice.Session {
@@ -526,6 +586,16 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 				continue
 			}
 			switch result := call.Result.Data.(type) {
+			case tools.PresentationStoredResult:
+				parts = append(parts, voice.Part{MIMEType: result.MIMEType, Data: result.Content, Metadata: map[string]string{
+					"title": result.Title, "presentation": "true",
+				}})
+			case *tools.PresentationStoredResult:
+				if result != nil {
+					parts = append(parts, voice.Part{MIMEType: result.MIMEType, Data: result.Content, Metadata: map[string]string{
+						"title": result.Title, "presentation": "true",
+					}})
+				}
 			case tools.ShowMediaStoredResult:
 				addAttachment(result.SessionID, result.Attachment, result.Title)
 			case *tools.ShowMediaStoredResult:

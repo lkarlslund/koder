@@ -52,6 +52,7 @@ const (
 	SessionDelegate     ID = domain.ToolKindSessionDelegate
 	SessionStart        ID = domain.ToolKindSessionStart
 	Phone               ID = domain.ToolKindPhone
+	Present             ID = domain.ToolKindPresent
 	Skill               ID = domain.ToolKindSkill
 	WebFetch            ID = domain.ToolKindWebFetch
 	WebSearch           ID = domain.ToolKindWebSearch

@@ -281,6 +281,23 @@ func TestDisplayTextForPartStillReadsLegacyMilestoneKeys(t *testing.T) {
 	}
 }
 
+func TestPresentationStoredResultHasConciseModelText(t *testing.T) {
+	part := toolOutputPart(domain.ToolKindPresent, tools.StoredResultStatusOK, "Presented Appointments", tools.PresentationStoredResult{
+		Title:    "Appointments",
+		MIMEType: "text/markdown",
+		Content:  "| Time | Person |\n|---|---|\n| 10:00 | Steen |",
+	})
+
+	text, ok := tools.ModelTextForPart(part, "")
+	if !ok || text != "Presented Appointments" {
+		t.Fatalf("ModelTextForPart() = %q, %v", text, ok)
+	}
+	compact, ok := tools.CompactModelTextForPart(part, "", tools.DefaultCompactFormatLimits())
+	if !ok || compact != "Presented Appointments" {
+		t.Fatalf("CompactModelTextForPart() = %q, %v", compact, ok)
+	}
+}
+
 func toolOutputPart(tool domain.ToolKind, status tools.StoredResultStatus, text string, result any) domain.Part {
 	return domain.Part{
 		Kind: domain.PartKindToolOutput,

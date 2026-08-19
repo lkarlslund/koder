@@ -111,6 +111,19 @@ func TestConciseSpokenResponseKeepsVisualDetailOutOfSpeech(t *testing.T) {
 	}
 }
 
+func TestConciseSpokenResponseRemovesDocumentFormatting(t *testing.T) {
+	formatted := "## Result\n\n- **First** item\n- [Second](https://example.com) item\n\n| Time | Person |\n|---|---|\n| 10:00 | Steen |\n\n```go\nfmt.Println(\"not spoken\")\n```"
+	got := conciseSpokenResponse(formatted)
+	if got != "Result. First item. Second item. Time, Person. 10:00, Steen." {
+		t.Fatalf("spoken response = %q", got)
+	}
+	for _, marker := range []string{"#", "*", "|", "```", "http"} {
+		if strings.Contains(got, marker) {
+			t.Fatalf("spoken response retained %q: %q", marker, got)
+		}
+	}
+}
+
 func TestLatestAssistantTextAfterRequiresNewSealedAssistant(t *testing.T) {
 	timeline := []domain.TimelineItem{
 		{Seq: 1, Content: domain.AssistantMessage{Text: "old"}, SealedAt: time.Now()},
@@ -147,9 +160,18 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 				}},
 			}}},
 		},
+		{
+			Seq: 3,
+			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+				Tool: domain.ToolKindPresent,
+				Result: &domain.ToolResult{Data: tools.PresentationStoredResult{
+					Title: "Appointments", MIMEType: "text/markdown", Content: "| Time | Person |",
+				}},
+			}}},
+		},
 	}
 	parts := voicePresentationParts(timeline, 0)
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		t.Fatalf("presentation parts = %#v", parts)
 	}
 	if parts[0].MIMEType != "image/png" || parts[0].URI != "/voice/v1/artifacts/session/session-1/012345678901234567890123" || parts[0].Metadata["name"] != "screen.png" {
@@ -157,6 +179,9 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 	}
 	if parts[1].MIMEType != "text/calendar" || parts[1].URI != "/voice/v1/artifacts/offered/download-token" {
 		t.Fatalf("offered file part = %#v", parts[1])
+	}
+	if parts[2].MIMEType != "text/markdown" || parts[2].Data != "| Time | Person |" || parts[2].Metadata["presentation"] != "true" {
+		t.Fatalf("inline presentation part = %#v", parts[2])
 	}
 }
 

@@ -59,6 +59,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"compaction rejects chat send", Compaction, testTool("chat_send"), false},
 		{"voice allows chat status", Voice, testTool("chat_status"), true},
 		{"voice allows session delegation", Voice, testTool("session_delegate"), true},
+		{"voice allows presentation", Voice, testTool("present"), true},
 		{"voice rejects file read", Voice, testTool("file_read"), false},
 		{"unknown rejects read", Role("unknown"), testTool("file_read"), false},
 	}
@@ -68,5 +69,21 @@ func TestRoleAllowsTool(t *testing.T) {
 				t.Fatalf("AllowsTool(%q, %q) = %v, want %v", tt.role, tt.tool, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVoicePromptOverridesDocumentFormatting(t *testing.T) {
+	spec, ok := DefaultRegistry().Lookup(Voice)
+	if !ok {
+		t.Fatal("voice role not registered")
+	}
+	for _, requirement := range []string{
+		"plain conversational sentences",
+		"This overrides general formatting guidance",
+		"Never put a list, table, code, or other visual material in the spoken response",
+	} {
+		if !strings.Contains(spec.SystemPrompt, requirement) {
+			t.Fatalf("voice prompt does not contain %q: %s", requirement, spec.SystemPrompt)
+		}
 	}
 }

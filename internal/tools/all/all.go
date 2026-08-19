@@ -15,6 +15,7 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/milestonetool"
 	_ "github.com/lkarlslund/koder/internal/tools/offerfiletool"
 	_ "github.com/lkarlslund/koder/internal/tools/phonetool"
+	_ "github.com/lkarlslund/koder/internal/tools/presenttool"
 	_ "github.com/lkarlslund/koder/internal/tools/questiontool"
 	_ "github.com/lkarlslund/koder/internal/tools/readtool"
 	_ "github.com/lkarlslund/koder/internal/tools/sessiontool"
