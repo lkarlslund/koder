@@ -244,19 +244,19 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
 // native client reconnecting to an existing voice conversation.
-func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID string, limit int) ([]voice.TranscriptEntry, error) {
+func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, beforeID string, limit int) (voice.TranscriptPage, error) {
 	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
 	if err != nil {
-		return nil, err
+		return voice.TranscriptPage{}, err
 	}
 	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
-		return nil, fmt.Errorf("session %s is not a voice chat", session.ID)
+		return voice.TranscriptPage{}, fmt.Errorf("session %s is not a voice chat", session.ID)
 	}
 	if err := runtime.EnsureTimeline(ctx); err != nil {
-		return nil, err
+		return voice.TranscriptPage{}, err
 	}
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	if limit <= 0 || limit > 20 {
+		limit = 5
 	}
 	entries := make([]voice.TranscriptEntry, 0, limit)
 	for _, item := range runtime.SnapshotTimeline() {
@@ -275,10 +275,38 @@ func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID str
 			ID: string(item.ID), Role: role, Text: text, CreatedAt: item.CreatedAt,
 		})
 	}
-	if len(entries) > limit {
-		entries = entries[len(entries)-limit:]
+	end := len(entries)
+	if beforeID = strings.TrimSpace(beforeID); beforeID != "" {
+		end = -1
+		for index, entry := range entries {
+			if entry.ID == beforeID {
+				end = index
+				break
+			}
+		}
+		if end < 0 {
+			return voice.TranscriptPage{}, fmt.Errorf("voice history cursor %q was not found", beforeID)
+		}
 	}
-	return entries, nil
+	start := transcriptPageStart(entries[:end], limit)
+	return voice.TranscriptPage{Entries: entries[start:end], HasMore: start > 0}, nil
+}
+
+func transcriptPageStart(entries []voice.TranscriptEntry, turns int) int {
+	seenTurns := 0
+	for index := len(entries) - 1; index >= 0; index-- {
+		if entries[index].Role != "user" {
+			continue
+		}
+		seenTurns++
+		if seenTurns == turns {
+			return index
+		}
+	}
+	if seenTurns > 0 {
+		return 0
+	}
+	return max(0, len(entries)-turns)
 }
 
 // RunVoiceTurn executes an utterance through the durable voice chat's normal

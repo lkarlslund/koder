@@ -9,14 +9,17 @@ import (
 type fakeBackend struct {
 	sessions []Session
 	history  []TranscriptEntry
+	before   string
+	limit    int
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]Session, error) {
 	return append([]Session(nil), f.sessions...), nil
 }
 
-func (f *fakeBackend) VoiceSessionHistory(context.Context, string, int) ([]TranscriptEntry, error) {
-	return append([]TranscriptEntry(nil), f.history...), nil
+func (f *fakeBackend) VoiceSessionHistory(_ context.Context, _ string, before string, limit int) (TranscriptPage, error) {
+	f.before, f.limit = before, limit
+	return TranscriptPage{Entries: append([]TranscriptEntry(nil), f.history...), HasMore: true}, nil
 }
 
 func TestCallStateSortsAndSelectsWorkSessions(t *testing.T) {
@@ -44,8 +47,19 @@ func TestCallStateIncludesDurableVoiceHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.History) != 1 || state.History[0].Text != "What happened?" {
+	if len(state.History) != 1 || state.History[0].Text != "What happened?" || !state.HistoryHasMore || backend.limit != 5 || backend.before != "" {
 		t.Fatalf("history = %#v", state.History)
+	}
+}
+
+func TestCallRequestsOlderHistoryWithCursor(t *testing.T) {
+	backend := &fakeBackend{history: []TranscriptEntry{{ID: "older"}}}
+	page, err := NewCall(backend, "voice-1").History(context.Background(), "newer", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) != 1 || backend.before != "newer" || backend.limit != 5 {
+		t.Fatalf("page=%#v before=%q limit=%d", page, backend.before, backend.limit)
 	}
 }
 

@@ -72,6 +72,8 @@ type clientFrame struct {
 	Title          string             `json:"title,omitempty"`
 	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
 	Languages      []string           `json:"languages,omitempty"`
+	BeforeID       string             `json:"before_id,omitempty"`
+	Limit          int                `json:"limit,omitempty"`
 }
 
 type serverFrame struct {
@@ -88,6 +90,8 @@ type serverFrame struct {
 	Error       string                  `json:"error,omitempty"`
 	ServerTime  time.Time               `json:"server_time,omitempty"`
 	AppUpdate   *androidupdate.Manifest `json:"app_update,omitempty"`
+	History     []voice.TranscriptEntry `json:"history,omitempty"`
+	HasMore     bool                    `json:"has_more,omitempty"`
 }
 
 type sessionsResponse struct {
@@ -291,6 +295,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "ping":
 			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "pong", ServerTime: time.Now().UTC()}); err != nil {
+				return
+			}
+		case "history":
+			page, err := call.History(ctx, frame.BeforeID, frame.Limit)
+			if err != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
+					return
+				}
+				continue
+			}
+			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history", History: page.Entries, HasMore: page.HasMore}); err != nil {
 				return
 			}
 		case "select_session":

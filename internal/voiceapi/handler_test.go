@@ -3,6 +3,7 @@ package voiceapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -42,8 +43,18 @@ type fakeBackend struct {
 	history    []voice.TranscriptEntry
 }
 
-func (f *fakeBackend) VoiceSessionHistory(context.Context, string, int) ([]voice.TranscriptEntry, error) {
-	return append([]voice.TranscriptEntry(nil), f.history...), nil
+func (f *fakeBackend) VoiceSessionHistory(_ context.Context, _ string, beforeID string, limit int) (voice.TranscriptPage, error) {
+	end := len(f.history)
+	if beforeID != "" {
+		for index, entry := range f.history {
+			if entry.ID == beforeID {
+				end = index
+				break
+			}
+		}
+	}
+	start := max(0, end-limit)
+	return voice.TranscriptPage{Entries: append([]voice.TranscriptEntry(nil), f.history[start:end]...), HasMore: start > 0}, nil
 }
 
 func (f *fakeBackend) VoiceSessionArtifact(_, _ string) (voice.ArtifactFile, error) {
@@ -586,9 +597,12 @@ func TestPhoneDeviceSidecarRequiresAndServesActiveCall(t *testing.T) {
 }
 
 func TestHandlerReconnectsSameCallAndRestoresHistory(t *testing.T) {
-	backend := &fakeBackend{history: []voice.TranscriptEntry{{
-		ID: "message-1", Role: "user", Text: "What happened?", CreatedAt: time.Now().UTC(),
-	}}}
+	backend := &fakeBackend{}
+	for index := 1; index <= 7; index++ {
+		backend.history = append(backend.history, voice.TranscriptEntry{
+			ID: fmt.Sprintf("message-%d", index), Role: "user", Text: fmt.Sprintf("Message %d", index), CreatedAt: time.Now().UTC(),
+		})
+	}
 	server := httptest.NewServer(NewHandler(backend, ""))
 	defer server.Close()
 	ctx := context.Background()
@@ -609,8 +623,15 @@ func TestHandlerReconnectsSameCallAndRestoresHistory(t *testing.T) {
 	}
 	defer func() { _ = second.Close(websocket.StatusNormalClosure, "") }()
 	ready := readType(t, ctx, second, "ready")
-	if ready.CallState == nil || len(ready.CallState.History) != 1 || ready.CallState.History[0].Text != "What happened?" {
+	if ready.CallState == nil || len(ready.CallState.History) != 5 || ready.CallState.History[0].Text != "Message 3" || !ready.CallState.HistoryHasMore {
 		t.Fatalf("restored history = %#v", ready.CallState)
+	}
+	if err := writeClientFrame(ctx, second, clientFrame{Type: "history", BeforeID: ready.CallState.History[0].ID, Limit: 5}); err != nil {
+		t.Fatal(err)
+	}
+	page := readType(t, ctx, second, "history")
+	if len(page.History) != 2 || page.History[0].Text != "Message 1" || page.HasMore {
+		t.Fatalf("older history page = %#v", page)
 	}
 
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

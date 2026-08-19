@@ -74,7 +74,7 @@ type VoiceSessionBackend interface {
 // VoiceHistoryBackend exposes the user-visible transcript of a durable voice
 // chat. It is optional so non-persistent coordinator backends stay small.
 type VoiceHistoryBackend interface {
-	VoiceSessionHistory(context.Context, string, int) ([]TranscriptEntry, error)
+	VoiceSessionHistory(context.Context, string, string, int) (TranscriptPage, error)
 }
 
 // TranscriptEntry is one user-visible turn from a durable voice chat.
@@ -83,6 +83,13 @@ type TranscriptEntry struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+// TranscriptPage is a newest-edge or cursor-bounded page of complete voice
+// turns, returned in chronological order.
+type TranscriptPage struct {
+	Entries []TranscriptEntry `json:"entries"`
+	HasMore bool              `json:"has_more"`
 }
 
 // ArtifactFile is an authenticated presentation resource resolved by Koder.
@@ -123,6 +130,7 @@ type CallState struct {
 	Sessions        []Session         `json:"sessions"`
 	VoiceSessions   []Session         `json:"voice_sessions"`
 	History         []TranscriptEntry `json:"history,omitempty"`
+	HistoryHasMore  bool              `json:"history_has_more,omitempty"`
 }
 
 // Call is an ephemeral coordinator bound to one voice connection.
@@ -166,10 +174,10 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	if c.activeSessionID != "" && !sessionExists(sessions, c.activeSessionID) {
 		c.activeSessionID = ""
 	}
-	var history []TranscriptEntry
+	var history TranscriptPage
 	if c.voiceSessionID != "" {
 		if backend, ok := c.backend.(VoiceHistoryBackend); ok {
-			history, err = backend.VoiceSessionHistory(ctx, c.voiceSessionID, 50)
+			history, err = backend.VoiceSessionHistory(ctx, c.voiceSessionID, "", 5)
 			if err != nil {
 				return CallState{}, err
 			}
@@ -177,8 +185,21 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	}
 	return CallState{
 		VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID,
-		Sessions: sessions, VoiceSessions: voiceSessions, History: history,
+		Sessions: sessions, VoiceSessions: voiceSessions,
+		History: history.Entries, HistoryHasMore: history.HasMore,
 	}, nil
+}
+
+// History returns older transcript turns for the selected durable voice chat.
+func (c *Call) History(ctx context.Context, beforeID string, limit int) (TranscriptPage, error) {
+	if c == nil || c.backend == nil || c.voiceSessionID == "" {
+		return TranscriptPage{}, nil
+	}
+	backend, ok := c.backend.(VoiceHistoryBackend)
+	if !ok {
+		return TranscriptPage{}, nil
+	}
+	return backend.VoiceSessionHistory(ctx, c.voiceSessionID, strings.TrimSpace(beforeID), limit)
 }
 
 // SelectSession explicitly changes the target for subsequent utterances.

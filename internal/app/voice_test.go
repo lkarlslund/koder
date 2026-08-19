@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,6 +97,20 @@ func TestTranscriptionLanguageSupportsAutomaticDetection(t *testing.T) {
 		if got := transcriptionLanguage(test.configured); got != test.want {
 			t.Fatalf("transcriptionLanguage(%q) = %q, want %q", test.configured, got, test.want)
 		}
+	}
+}
+
+func TestTranscriptPageStartKeepsCompleteRecentTurns(t *testing.T) {
+	entries := make([]voice.TranscriptEntry, 0, 14)
+	for turn := 1; turn <= 7; turn++ {
+		entries = append(entries,
+			voice.TranscriptEntry{ID: fmt.Sprintf("user-%d", turn), Role: "user"},
+			voice.TranscriptEntry{ID: fmt.Sprintf("assistant-%d", turn), Role: "assistant"},
+		)
+	}
+	start := transcriptPageStart(entries, 5)
+	if start != 4 || entries[start].ID != "user-3" {
+		t.Fatalf("transcriptPageStart() = %d (%s), want 4 (user-3)", start, entries[start].ID)
 	}
 }
 
