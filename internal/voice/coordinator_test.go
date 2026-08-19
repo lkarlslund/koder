@@ -28,14 +28,41 @@ func TestResponsePacingValidationAndLimits(t *testing.T) {
 }
 
 type fakeBackend struct {
-	sessions []Session
-	history  []TranscriptEntry
-	before   string
-	limit    int
+	sessions      []Session
+	voiceSessions []Session
+	history       []TranscriptEntry
+	before        string
+	limit         int
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]Session, error) {
 	return append([]Session(nil), f.sessions...), nil
+}
+
+func (f *fakeBackend) ListVoiceChats(context.Context) ([]Session, error) {
+	return append([]Session(nil), f.voiceSessions...), nil
+}
+
+func (f *fakeBackend) EnsureVoiceSession(context.Context, string) (Session, error) {
+	return Session{}, nil
+}
+
+func (f *fakeBackend) CreateVoiceSession(context.Context, string) (Session, error) {
+	return Session{}, nil
+}
+
+func (f *fakeBackend) RenameVoiceSession(context.Context, string, string) (Session, error) {
+	return Session{}, nil
+}
+
+func (f *fakeBackend) UpdateVoiceSession(context.Context, string, SessionUpdate) (Session, error) {
+	return Session{}, nil
+}
+
+func (f *fakeBackend) DeleteVoiceSession(context.Context, string) error { return nil }
+
+func (f *fakeBackend) RunVoiceTurn(context.Context, string, string, TurnOptions, func(Session) error) (Message, error) {
+	return Message{}, nil
 }
 
 func (f *fakeBackend) VoiceSessionHistory(_ context.Context, _ string, before string, limit int) (TranscriptPage, error) {
@@ -70,6 +97,23 @@ func TestCallStateIncludesDurableVoiceHistory(t *testing.T) {
 	}
 	if len(state.History) != 1 || state.History[0].Text != "What happened?" || !state.HistoryHasMore || backend.limit != 5 || backend.before != "" {
 		t.Fatalf("history = %#v", state.History)
+	}
+}
+
+func TestCallStateOnlyOffersActiveVoiceSessionsAndSortsPinnedFirst(t *testing.T) {
+	now := time.Now().UTC()
+	backend := &fakeBackend{voiceSessions: []Session{
+		{ID: "newer", UpdatedAt: now},
+		{ID: "pinned", Pinned: true, UpdatedAt: now.Add(-time.Hour)},
+		{ID: "archived", Archived: true, UpdatedAt: now.Add(time.Hour)},
+		{ID: "deleted", Deleted: true, UpdatedAt: now.Add(2 * time.Hour)},
+	}}
+	state, err := NewCall(backend).State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.VoiceSessions) != 2 || state.VoiceSessions[0].ID != "pinned" || state.VoiceSessions[1].ID != "newer" {
+		t.Fatalf("voice sessions = %#v", state.VoiceSessions)
 	}
 }
 

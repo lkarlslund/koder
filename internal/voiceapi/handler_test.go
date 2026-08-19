@@ -133,9 +133,27 @@ func (f *fakeBackend) CreateVoiceSession(_ context.Context, title string) (voice
 }
 
 func (f *fakeBackend) RenameVoiceSession(_ context.Context, sessionID, title string) (voice.Session, error) {
+	return f.UpdateVoiceSession(context.Background(), sessionID, voice.SessionUpdate{Title: &title})
+}
+
+func (f *fakeBackend) UpdateVoiceSession(_ context.Context, sessionID string, update voice.SessionUpdate) (voice.Session, error) {
 	for index := range f.voiceChats {
 		if f.voiceChats[index].ID == sessionID {
-			f.voiceChats[index].Title = title
+			if update.Title != nil {
+				f.voiceChats[index].Title = *update.Title
+			}
+			if update.Archived != nil {
+				f.voiceChats[index].Archived = *update.Archived
+			}
+			if update.Pinned != nil {
+				f.voiceChats[index].Pinned = *update.Pinned
+			}
+			if update.Favorite != nil {
+				f.voiceChats[index].Favorite = *update.Favorite
+			}
+			if update.Deleted != nil {
+				f.voiceChats[index].Deleted = *update.Deleted
+			}
 			return f.voiceChats[index], nil
 		}
 	}
@@ -145,7 +163,7 @@ func (f *fakeBackend) RenameVoiceSession(_ context.Context, sessionID, title str
 func (f *fakeBackend) DeleteVoiceSession(_ context.Context, sessionID string) error {
 	for index := range f.voiceChats {
 		if f.voiceChats[index].ID == sessionID {
-			f.voiceChats = append(f.voiceChats[:index], f.voiceChats[index+1:]...)
+			f.voiceChats[index].Deleted = true
 			return nil
 		}
 	}
@@ -492,6 +510,36 @@ func TestHandlerRenamesVoiceSession(t *testing.T) {
 	}
 }
 
+func TestHandlerUpdatesVoiceSessionOrganizationAndSortsPinsFirst(t *testing.T) {
+	now := time.Now().UTC()
+	backend := &fakeBackend{voiceChats: []voice.Session{
+		{ID: "voice-1", Title: "Older", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "voice-2", Title: "Newer", UpdatedAt: now},
+	}}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodPatch, server.URL+"/voice/v1/sessions/voice-1", strings.NewReader(`{"pinned":true,"favorite":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var body sessionsResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || body.VoiceSession == nil || !body.VoiceSession.Pinned || !body.VoiceSession.Favorite {
+		t.Fatalf("organization response status=%d body=%#v", response.StatusCode, body)
+	}
+	if body.VoiceSessions[0].ID != "voice-1" {
+		t.Fatalf("pinned session was not sorted first: %#v", body.VoiceSessions)
+	}
+}
+
 func TestHandlerDeletesVoiceSession(t *testing.T) {
 	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Old"}, {ID: "voice-2", Title: "Keep"}}}
 	server := httptest.NewServer(NewHandler(backend, "secret"))
@@ -510,7 +558,7 @@ func TestHandlerDeletesVoiceSession(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || len(body.VoiceSessions) != 1 || body.VoiceSessions[0].ID != "voice-2" {
+	if response.StatusCode != http.StatusOK || len(body.VoiceSessions) != 2 || !body.VoiceSessions[0].Deleted {
 		t.Fatalf("delete response status=%d body=%#v", response.StatusCode, body)
 	}
 }

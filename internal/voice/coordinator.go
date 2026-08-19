@@ -15,6 +15,19 @@ type Session struct {
 	Title       string    `json:"title"`
 	LastMessage string    `json:"last_message,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	Archived    bool      `json:"archived,omitempty"`
+	Pinned      bool      `json:"pinned,omitempty"`
+	Favorite    bool      `json:"favorite,omitempty"`
+	Deleted     bool      `json:"deleted,omitempty"`
+}
+
+// SessionUpdate changes user-managed voice conversation metadata.
+type SessionUpdate struct {
+	Title    *string
+	Archived *bool
+	Pinned   *bool
+	Favorite *bool
+	Deleted  *bool
 }
 
 // DelegationResult is the public outcome of work performed in an ordinary chat.
@@ -69,6 +82,7 @@ type VoiceSessionBackend interface {
 	EnsureVoiceSession(context.Context, string) (Session, error)
 	CreateVoiceSession(context.Context, string) (Session, error)
 	RenameVoiceSession(context.Context, string, string) (Session, error)
+	UpdateVoiceSession(context.Context, string, SessionUpdate) (Session, error)
 	DeleteVoiceSession(context.Context, string) error
 	RunVoiceTurn(context.Context, string, string, TurnOptions, func(Session) error) (Message, error)
 }
@@ -233,7 +247,16 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 		if err != nil {
 			return CallState{}, err
 		}
+		voiceSessions = slices.DeleteFunc(voiceSessions, func(session Session) bool {
+			return session.Archived || session.Deleted
+		})
 		slices.SortStableFunc(voiceSessions, func(a, b Session) int {
+			if a.Pinned != b.Pinned {
+				if a.Pinned {
+					return -1
+				}
+				return 1
+			}
 			return b.UpdatedAt.Compare(a.UpdatedAt)
 		})
 	}

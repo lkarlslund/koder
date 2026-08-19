@@ -329,6 +329,10 @@ type Session struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	LastMessage        string
+	Archived           bool
+	Pinned             bool
+	Favorite           bool
+	DeletedAt          time.Time
 }
 
 type SessionKind uint8

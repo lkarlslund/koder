@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
@@ -143,18 +144,19 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 // ListVoiceChats returns the durable coordination transcripts available to a
 // native voice call. These are separate from work-session routing targets.
 func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error) {
-	state, err := c.Sessions(ctx)
+	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]voice.Session, 0)
-	for _, session := range state.Sessions {
+	for _, session := range sessions {
 		if session.Kind != domain.SessionKindVoice {
 			continue
 		}
 		out = append(out, voice.Session{
 			ID: string(session.ID), Title: voiceSessionTitle(session),
 			LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
+			Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite, Deleted: !session.DeletedAt.IsZero(),
 		})
 	}
 	return out, nil
@@ -208,8 +210,11 @@ func (c *Controller) EnsureVoiceSession(ctx context.Context, requestedID string)
 		if session.Kind != domain.SessionKindVoice {
 			continue
 		}
+		if session.Archived || !session.DeletedAt.IsZero() {
+			continue
+		}
 		if requestedID != "" && string(session.ID) == requestedID {
-			return voice.Session{ID: string(session.ID), Title: voiceSessionTitle(session), LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt}, nil
+			return voiceSessionSummary(session), nil
 		}
 		if newest.ID == "" || session.UpdatedAt.After(newest.UpdatedAt) {
 			newest = session
@@ -225,7 +230,7 @@ func (c *Controller) EnsureVoiceSession(ctx context.Context, requestedID string)
 		}
 		newest = created
 	}
-	return voice.Session{ID: string(newest.ID), Title: voiceSessionTitle(newest), LastMessage: newest.LastMessage, UpdatedAt: newest.UpdatedAt}, nil
+	return voiceSessionSummary(newest), nil
 }
 
 // CreateVoiceSession creates a durable voice chat for a native voice client.
@@ -234,41 +239,82 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 	if err != nil {
 		return voice.Session{}, err
 	}
-	return voice.Session{
-		ID:          string(session.ID),
-		Title:       voiceSessionTitle(session),
-		LastMessage: session.LastMessage,
-		UpdatedAt:   session.UpdatedAt,
-	}, nil
+	return voiceSessionSummary(session), nil
+}
+
+// UpdateVoiceSession changes durable organization metadata after verifying the
+// session belongs to this workspace and is a voice conversation.
+func (c *Controller) UpdateVoiceSession(ctx context.Context, sessionID string, update voice.SessionUpdate) (voice.Session, error) {
+	if c.agent == nil {
+		return voice.Session{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return voice.Session{}, err
+	}
+	current := owner.Snapshot().Session
+	if !c.sessionInWorkspace(current) || current.Kind != domain.SessionKindVoice {
+		return voice.Session{}, fmt.Errorf("session %s is not a voice chat in this workspace", current.ID)
+	}
+	var title *string
+	if update.Title != nil {
+		normalized := truncateVoiceText(strings.TrimSpace(*update.Title), 80)
+		if normalized == "" {
+			return voice.Session{}, fmt.Errorf("voice session title is required")
+		}
+		title = &normalized
+	}
+	updated, err := owner.UpdateSessionMetadata(ctx, func(session *domain.Session) {
+		if title != nil {
+			session.Title = *title
+			session.TitleGeneratedAt = time.Time{}
+			session.TitleRefreshCount = 0
+		}
+		if update.Archived != nil {
+			session.Archived = *update.Archived
+			if session.Archived {
+				session.Pinned = false
+			}
+		}
+		if update.Pinned != nil {
+			session.Pinned = *update.Pinned
+			if session.Pinned {
+				session.Archived = false
+			}
+		}
+		if update.Favorite != nil {
+			session.Favorite = *update.Favorite
+		}
+		if update.Deleted != nil {
+			if *update.Deleted {
+				session.DeletedAt = time.Now().UTC()
+				session.Pinned = false
+			} else {
+				session.DeletedAt = time.Time{}
+			}
+		}
+	})
+	if err != nil {
+		return voice.Session{}, fmt.Errorf("update voice session: %w", err)
+	}
+	sessionState, err := c.Sessions(ctx)
+	if err != nil {
+		return voice.Session{}, fmt.Errorf("list sessions after voice session update: %w", err)
+	}
+	c.broadcast("sessions_delta", sessionListPayload(sessionState, ""))
+	return voiceSessionSummary(updated), nil
 }
 
 // RenameVoiceSession changes a durable voice chat title after verifying its kind.
 func (c *Controller) RenameVoiceSession(ctx context.Context, sessionID, title string) (voice.Session, error) {
-	session, err := c.EnsureVoiceSession(ctx, strings.TrimSpace(sessionID))
-	if err != nil {
-		return voice.Session{}, err
-	}
-	title = truncateVoiceText(strings.TrimSpace(title), 80)
-	if title == "" {
-		return voice.Session{}, fmt.Errorf("voice session title is required")
-	}
-	if err := c.RenameSession(ctx, id.ID(session.ID), title); err != nil {
-		return voice.Session{}, fmt.Errorf("rename voice session: %w", err)
-	}
-	session.Title = title
-	return session, nil
+	return c.UpdateVoiceSession(ctx, sessionID, voice.SessionUpdate{Title: &title})
 }
 
-// DeleteVoiceSession removes an idle durable voice chat after verifying its kind.
+// DeleteVoiceSession moves a durable voice chat into the recoverable deleted state.
 func (c *Controller) DeleteVoiceSession(ctx context.Context, sessionID string) error {
-	session, err := c.EnsureVoiceSession(ctx, strings.TrimSpace(sessionID))
-	if err != nil {
-		return err
-	}
-	if err := c.DeleteSession(ctx, id.ID(session.ID)); err != nil {
-		return fmt.Errorf("delete voice session: %w", err)
-	}
-	return nil
+	deleted := true
+	_, err := c.UpdateVoiceSession(ctx, sessionID, voice.SessionUpdate{Deleted: &deleted})
+	return err
 }
 
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
@@ -782,6 +828,13 @@ func voiceSessionTitle(session domain.Session) string {
 		return title
 	}
 	return "Untitled session"
+}
+
+func voiceSessionSummary(session domain.Session) voice.Session {
+	return voice.Session{
+		ID: string(session.ID), Title: voiceSessionTitle(session), LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
+		Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite, Deleted: !session.DeletedAt.IsZero(),
+	}
 }
 
 func latestTimelineSequence(timeline []domain.TimelineItem) int64 {

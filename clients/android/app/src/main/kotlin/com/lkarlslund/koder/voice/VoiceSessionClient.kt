@@ -30,7 +30,29 @@ class VoiceSessionClient(
     }
 
 	fun rename(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
-		request(server, token, "/voice/v1/sessions/$sessionId", VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback, "PATCH")
+		update(server, token, sessionId, title = title, callback = callback)
+	}
+
+	fun update(
+		server: String,
+		token: String,
+		sessionId: String,
+		title: String? = null,
+		archived: Boolean? = null,
+		pinned: Boolean? = null,
+		favorite: Boolean? = null,
+		deleted: Boolean? = null,
+		callback: (Result<VoiceHome>) -> Unit,
+	) {
+		request(
+			server,
+			token,
+			"/voice/v1/sessions/$sessionId",
+			VoiceProtocol.updateSessionRequest(title, archived, pinned, favorite, deleted),
+			VoiceProtocol::parseHome,
+			callback,
+			"PATCH",
+		)
 	}
 
 	fun delete(server: String, token: String, sessionId: String, callback: (Result<VoiceHome>) -> Unit) {

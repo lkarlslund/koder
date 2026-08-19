@@ -1665,6 +1665,9 @@ func splitSessions(items []domain.Session) ([]domain.Session, []domain.Session) 
 	regular := make([]domain.Session, 0, len(items))
 	quick := make([]domain.Session, 0)
 	for _, item := range items {
+		if item.Archived || !item.DeletedAt.IsZero() {
+			continue
+		}
 		if item.Kind == domain.SessionKindQuick {
 			quick = append(quick, item)
 		} else {

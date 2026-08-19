@@ -729,6 +729,16 @@ func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
 
 // UpdateSession mutates live and persisted session metadata.
 func (s *Session) UpdateSession(ctx context.Context, update func(*domain.Session)) (domain.Session, error) {
+	return s.updateSession(ctx, update, true)
+}
+
+// UpdateSessionMetadata persists organization metadata without changing the
+// activity timestamp shown as the session's last-used time.
+func (s *Session) UpdateSessionMetadata(ctx context.Context, update func(*domain.Session)) (domain.Session, error) {
+	return s.updateSession(ctx, update, false)
+}
+
+func (s *Session) updateSession(ctx context.Context, update func(*domain.Session), touch bool) (domain.Session, error) {
 	if s == nil {
 		return domain.Session{}, fmt.Errorf("session is required")
 	}
@@ -738,7 +748,9 @@ func (s *Session) UpdateSession(ctx context.Context, update func(*domain.Session
 	s.mu.Lock()
 	updated := s.session
 	update(&updated)
-	updated.UpdatedAt = time.Now().UTC()
+	if touch {
+		updated.UpdatedAt = time.Now().UTC()
+	}
 	if err := putSessionRecord(ctx, s.store, updated); err != nil {
 		s.mu.Unlock()
 		return domain.Session{}, err
@@ -900,7 +912,7 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	if title == "" {
 		return domain.Session{}, fmt.Errorf("session title is required")
 	}
-	updated, err := s.UpdateSession(ctx, func(session *domain.Session) {
+	updated, err := s.UpdateSessionMetadata(ctx, func(session *domain.Session) {
 		session.Title = strings.TrimSpace(title)
 		session.TitleGeneratedAt = time.Time{}
 		session.TitleRefreshCount = 0

@@ -98,6 +98,7 @@ import kotlin.math.abs
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
     private enum class Screen { SETUP, SETTINGS, LOADING, HOME, CHAT }
+	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
 
     private lateinit var controller: CallController
     private lateinit var secureSettings: SecureSettings
@@ -114,6 +115,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
     private var lastAppUpdate: AppUpdate? = null
+	private var conversationFilter = ConversationFilter.ACTIVE
 
     private var updateButton: Button? = null
     private var updateProgress: ProgressBar? = null
@@ -446,6 +448,41 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             setTypeface(typeface, Typeface.BOLD)
         }, spaced(top = 24))
         root.addView(body("Pick up where you left off, or begin something new."), spaced(top = 4, bottom = 18))
+		val counts = mapOf(
+			ConversationFilter.ACTIVE to home.voiceSessions.count { !it.archived && !it.deleted },
+			ConversationFilter.FAVORITES to home.voiceSessions.count { it.favorite && !it.archived && !it.deleted },
+			ConversationFilter.ARCHIVED to home.voiceSessions.count { it.archived && !it.deleted },
+			ConversationFilter.DELETED to home.voiceSessions.count { it.deleted },
+		)
+		root.addView(LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			ConversationFilter.entries.forEach { filter ->
+				val label = when (filter) {
+					ConversationFilter.ACTIVE -> "Active"
+					ConversationFilter.FAVORITES -> "Starred"
+					ConversationFilter.ARCHIVED -> "Archived"
+					ConversationFilter.DELETED -> "Deleted"
+				}
+				addView(TextView(this@MainActivity).apply {
+					text = "$label ${counts[filter]}"
+					gravity = Gravity.CENTER
+					textSize = 13f
+					setTypeface(typeface, if (conversationFilter == filter) Typeface.BOLD else Typeface.NORMAL)
+					setPadding(dp(5), dp(9), dp(5), dp(9))
+					contentDescription = "$label conversations, ${counts[filter]}"
+					isClickable = true
+					isFocusable = true
+					background = GradientDrawable().apply {
+						cornerRadius = dp(13).toFloat()
+						setColor(if (conversationFilter == filter) withAlpha(themeColor(android.R.attr.colorAccent), 42) else 0x00000000)
+					}
+					setOnClickListener {
+						conversationFilter = filter
+						showHome(home)
+					}
+				}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+			}
+		}, spaced(bottom = 12))
 
         updateButton = Button(this).apply {
             visibility = View.GONE
@@ -459,11 +496,19 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         root.addView(updateProgress, spaced(top = 6, bottom = 10))
 
+		val visibleSessions = home.voiceSessions.filter { session ->
+			when (conversationFilter) {
+				ConversationFilter.ACTIVE -> !session.archived && !session.deleted
+				ConversationFilter.FAVORITES -> session.favorite && !session.archived && !session.deleted
+				ConversationFilter.ARCHIVED -> session.archived && !session.deleted
+				ConversationFilter.DELETED -> session.deleted
+			}
+		}
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        if (home.voiceSessions.isEmpty()) {
-            list.addView(emptyConversationCard(), spaced(top = 8, bottom = 12))
+		if (visibleSessions.isEmpty()) {
+			list.addView(emptyConversationCard(conversationFilter), spaced(top = 8, bottom = 12))
         } else {
-            home.voiceSessions.forEach { session -> list.addView(sessionCard(session), spaced(bottom = 12)) }
+			visibleSessions.forEach { session -> list.addView(sessionCard(session), spaced(bottom = 10)) }
         }
         val sessionScroll = ScrollView(this).apply { addView(list, matchWrap()) }
         val refresh = SwipeRefreshLayout(this).apply {
@@ -938,7 +983,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = session.title.ifBlank { "Untitled conversation" }
+				val markers = buildString {
+					if (session.pinned) append("◆ ")
+					if (session.favorite) append("★ ")
+				}
+				text = markers + session.title.ifBlank { "Untitled conversation" }
                 textSize = 19f
                 setTypeface(typeface, Typeface.BOLD)
                 maxLines = 1
@@ -955,6 +1004,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				setOnClickListener { anchor -> showVoiceSessionMenu(anchor, session) }
             })
         }, matchWrap())
+		if (session.archived || session.deleted) {
+			addView(helper(if (session.deleted) "Deleted · tap to restore or manage" else "Archived · tap to restore or manage").apply {
+				setTextColor(if (session.deleted) ACTION_RED else themeColor(android.R.attr.colorAccent))
+			}, spaced(top = 2))
+		}
         session.updatedAt?.let { updated ->
             addView(helper(lastUsedText(updated.toEpochMilli())).apply {
                 setTextColor(themeColor(android.R.attr.colorAccent))
@@ -968,15 +1022,36 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 alpha = 0.78f
             }, spaced(top = 8))
         }
-        setOnClickListener { openChat(session) }
+		setOnClickListener { view ->
+			if (session.archived || session.deleted) showVoiceSessionMenu(view, session) else openChat(session)
+		}
     }
 
 	private fun showVoiceSessionMenu(anchor: View, session: VoiceSession) {
 		PopupMenu(this, anchor).apply {
-			menu.add("Rename")
-			menu.add("Delete")
+			when {
+				session.deleted -> menu.add("Undo delete")
+				session.archived -> menu.add("Restore from archive")
+				else -> menu.add(if (session.pinned) "Unpin" else "Pin to top")
+			}
+			if (!session.deleted) {
+				menu.add(if (session.favorite) "Remove star" else "Add star")
+				if (!session.archived) menu.add("Archive")
+				menu.add("Rename")
+				menu.add("Delete")
+			}
 			setOnMenuItemClickListener {
 				when (it.title.toString()) {
+					"Pin to top" -> updateVoiceSession(session, pinned = true)
+					"Unpin" -> updateVoiceSession(session, pinned = false)
+					"Add star" -> updateVoiceSession(session, favorite = true)
+					"Remove star" -> updateVoiceSession(session, favorite = false)
+					"Archive" -> updateVoiceSession(session, archived = true) { home ->
+						showHome(home)
+						showOrganizationUndo("Conversation archived", session) { updateVoiceSession(session, archived = false) }
+					}
+					"Restore from archive" -> updateVoiceSession(session, archived = false)
+					"Undo delete" -> updateVoiceSession(session, deleted = false)
 					"Rename" -> showRenameVoiceSessionDialog(session)
 					"Delete" -> showDeleteVoiceSessionDialog(session)
 				}
@@ -989,13 +1064,45 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun showDeleteVoiceSessionDialog(session: VoiceSession) {
 		AlertDialog.Builder(this)
 			.setTitle("Delete conversation?")
-			.setMessage("${session.title.ifBlank { "This conversation" }} and its transcript will be permanently deleted.")
+			.setMessage("${session.title.ifBlank { "This conversation" }} will move to Deleted. Its transcript remains recoverable.")
 			.setNegativeButton("Cancel", null)
 			.setPositiveButton("Delete") { _, _ ->
-				sessionClient.delete(settings.server, settings.token, session.id) { result ->
-					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }) }
-				}
+					sessionClient.delete(settings.server, settings.token, session.id) { result ->
+						runOnUiThread {
+							result.fold(onSuccess = { home ->
+								showHome(home)
+								showOrganizationUndo("Conversation deleted", session) { updateVoiceSession(session, deleted = false) }
+							}, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() })
+						}
+					}
 			}
+			.show()
+	}
+
+	private fun updateVoiceSession(
+		session: VoiceSession,
+		archived: Boolean? = null,
+		pinned: Boolean? = null,
+		favorite: Boolean? = null,
+		deleted: Boolean? = null,
+		onSuccess: ((VoiceHome) -> Unit)? = null,
+	) {
+		sessionClient.update(
+			settings.server, settings.token, session.id,
+			archived = archived, pinned = pinned, favorite = favorite, deleted = deleted,
+		) { result ->
+			runOnUiThread {
+				result.fold(onSuccess = onSuccess ?: ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() })
+			}
+		}
+	}
+
+	private fun showOrganizationUndo(title: String, session: VoiceSession, undo: () -> Unit) {
+		AlertDialog.Builder(this)
+			.setTitle(title)
+			.setMessage(session.title.ifBlank { "Voice conversation" })
+			.setPositiveButton("Undo") { _, _ -> undo() }
+			.setNegativeButton("Done", null)
 			.show()
 	}
 
@@ -1013,17 +1120,23 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			.show()
 	}
 
-    private fun emptyConversationCard() = LinearLayout(this).apply {
+    private fun emptyConversationCard(filter: ConversationFilter = ConversationFilter.ACTIVE) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         setPadding(dp(24), dp(30), dp(24), dp(30))
         background = cardBackground()
         addView(logo(), centeredSquare(58, bottom = 16))
-        addView(body("Your conversations will live here.").apply {
+		val heading = when (filter) {
+			ConversationFilter.ACTIVE -> "Your conversations will live here."
+			ConversationFilter.FAVORITES -> "No starred conversations yet."
+			ConversationFilter.ARCHIVED -> "Nothing is archived."
+			ConversationFilter.DELETED -> "Deleted conversations will appear here."
+		}
+		addView(body(heading).apply {
             gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
         }, matchWrap())
-        addView(helper("Start one below, then return whenever you want to continue.").apply {
+		addView(helper(if (filter == ConversationFilter.ACTIVE) "Start one below, then return whenever you want to continue." else "Use a conversation’s ⋮ menu to organize it.").apply {
             gravity = Gravity.CENTER
         }, spaced(top = 6))
     }

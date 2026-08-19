@@ -2400,6 +2400,72 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	}
 }
 
+func TestVoiceChatOrganizationIsDurableRecoverableAndDoesNotChangeLastUsed(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	created, _, err := ctrl.CreateVoiceChat(ctx, "Organize me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalUpdatedAt := created.UpdatedAt
+	value := true
+	organized, err := ctrl.UpdateVoiceSession(ctx, string(created.ID), voice.SessionUpdate{Pinned: &value, Favorite: &value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !organized.Pinned || !organized.Favorite || !organized.UpdatedAt.Equal(originalUpdatedAt) {
+		t.Fatalf("organized voice session = %#v, original updated_at=%s", organized, originalUpdatedAt)
+	}
+	archived, err := ctrl.UpdateVoiceSession(ctx, string(created.ID), voice.SessionUpdate{Archived: &value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archived.Archived || archived.Pinned {
+		t.Fatalf("archived voice session = %#v", archived)
+	}
+	if _, err := ctrl.EnsureVoiceSession(ctx, string(created.ID)); err == nil {
+		t.Fatal("archived voice session remained selectable")
+	}
+	visible, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionIDIn(visible.Sessions, created.ID) {
+		t.Fatal("archived voice session remained visible in the active browser list")
+	}
+	listed, err := ctrl.ListVoiceChats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || !listed[0].Archived {
+		t.Fatalf("archived voice session was not manageable: %#v", listed)
+	}
+	if err := ctrl.DeleteVoiceSession(ctx, string(created.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.EnsureVoiceSession(ctx, string(created.ID)); err == nil {
+		t.Fatal("deleted voice session remained selectable")
+	}
+	listed, err = ctrl.ListVoiceChats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || !listed[0].Deleted {
+		t.Fatalf("deleted voice session was not recoverable: %#v", listed)
+	}
+	value = false
+	restored, err := ctrl.UpdateVoiceSession(ctx, string(created.ID), voice.SessionUpdate{Deleted: &value, Archived: &value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Deleted || restored.Archived {
+		t.Fatalf("restored voice session = %#v", restored)
+	}
+	if _, err := ctrl.EnsureVoiceSession(ctx, string(created.ID)); err != nil {
+		t.Fatalf("restored voice session is not selectable: %v", err)
+	}
+}
+
 func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	var targetID string
 	var requestsMu sync.Mutex

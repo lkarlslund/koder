@@ -14,6 +14,10 @@ data class VoiceSession(
     val title: String,
     val lastMessage: String = "",
     val updatedAt: Instant? = null,
+	val archived: Boolean = false,
+	val pinned: Boolean = false,
+	val favorite: Boolean = false,
+	val deleted: Boolean = false,
 )
 
 data class VoicePart(
@@ -169,13 +173,27 @@ object VoiceProtocol {
 		.put("title", title.trim())
 		.toString()
 
+	fun updateSessionRequest(
+		title: String? = null,
+		archived: Boolean? = null,
+		pinned: Boolean? = null,
+		favorite: Boolean? = null,
+		deleted: Boolean? = null,
+	): String = JSONObject().apply {
+		title?.let { put("title", it.trim()) }
+		archived?.let { put("archived", it) }
+		pinned?.let { put("pinned", it) }
+		favorite?.let { put("favorite", it) }
+		deleted?.let { put("deleted", it) }
+	}.toString()
+
 	fun parseHome(payload: String): VoiceHome {
 		val root = JSONObject(payload)
 		val protocol = root.optString("protocol")
 		require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
 		return VoiceHome(
 			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() }
-				.sortedByDescending { it.updatedAt ?: Instant.MIN },
+				.sortedWith(compareByDescending<VoiceSession> { it.pinned }.thenByDescending { it.updatedAt ?: Instant.MIN }),
 			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
 			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
 		)
@@ -417,6 +435,10 @@ object VoiceProtocol {
 		updatedAt = optString("updated_at").takeIf(String::isNotBlank)?.let {
 			runCatching { Instant.parse(it) }.getOrNull()
 		},
+		archived = optBoolean("archived"),
+		pinned = optBoolean("pinned"),
+		favorite = optBoolean("favorite"),
+		deleted = optBoolean("deleted"),
 	)
 
 	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()

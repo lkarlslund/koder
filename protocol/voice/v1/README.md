@@ -22,7 +22,12 @@ conversation endpoint:
 - `GET /voice/v1/sessions` lists durable voice conversations and advertises an
   optional signed Android update;
 - `POST /voice/v1/sessions` with `{"title":"Personal"}` creates a durable
-  conversation and returns it as `voice_session` alongside the refreshed list.
+  conversation and returns it as `voice_session` alongside the refreshed list;
+- `PATCH /voice/v1/sessions/<id>` changes any supplied `title`, `archived`,
+  `pinned`, `favorite`, or `deleted` field and returns the updated conversation
+  alongside the refreshed list;
+- `DELETE /voice/v1/sessions/<id>` moves the conversation to the recoverable
+  deleted state. Restore it with `PATCH` and `{"deleted":false}`; and
 - `GET /voice/v1/server-info` returns a live, authenticated diagnostics snapshot
   with build/runtime identity, uptime, memory and concurrency counters, session
   counts, and current voice-connection state. Clients measure request round-trip
@@ -115,8 +120,13 @@ Examples:
 - `pong`: UTC `server_time`.
 
 `call_state.sessions` lists ordinary and quick work targets.
-`call_state.voice_sessions` lists durable voice chats. Session summaries carry
-an RFC 3339 `updated_at` timestamp and are ordered most recently used first.
+`call_state.voice_sessions` lists selectable durable voice chats and omits
+archived and deleted ones. The REST list includes every state so a
+native client can present management views and undo destructive actions.
+Session summaries carry `archived`, `pinned`, `favorite`, and `deleted` flags
+plus an RFC 3339 `updated_at` timestamp. Pinned chats are ordered first and each
+group is then ordered most recently used first. Organization changes do not
+change `updated_at`; it remains the conversation's actual last-activity time.
 `call_state.history` contains only the newest five complete conversational
 turns, and `history_has_more` indicates whether the client can request an older
 page. A history cursor is the first visible transcript entry ID; pages remain

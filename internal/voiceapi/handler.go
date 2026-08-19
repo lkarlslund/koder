@@ -138,6 +138,14 @@ type createSessionRequest struct {
 	Title string `json:"title"`
 }
 
+type updateSessionRequest struct {
+	Title    *string `json:"title,omitempty"`
+	Archived *bool   `json:"archived,omitempty"`
+	Pinned   *bool   `json:"pinned,omitempty"`
+	Favorite *bool   `json:"favorite,omitempty"`
+	Deleted  *bool   `json:"deleted,omitempty"`
+}
+
 type bindDeviceRequest struct {
 	Code   string                `json:"code"`
 	Device deviceauth.DeviceInfo `json:"device"`
@@ -625,9 +633,7 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slices.SortStableFunc(sessions, func(a, b voice.Session) int {
-		return b.UpdatedAt.Compare(a.UpdatedAt)
-	})
+	sortVoiceSessions(sessions)
 	response := sessionsResponse{
 		Protocol: protocolVersion, VoiceSession: created, VoiceSessions: sessions,
 	}
@@ -673,7 +679,7 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+		sortVoiceSessions(sessions)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSessions: sessions})
@@ -682,7 +688,7 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	var request createSessionRequest
+	var request updateSessionRequest
 	if err := decoder.Decode(&request); err != nil {
 		http.Error(w, "invalid session request: "+err.Error(), http.StatusBadRequest)
 		return
@@ -691,7 +697,13 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session request: expected one JSON object", http.StatusBadRequest)
 		return
 	}
-	renamed, err := h.Backend.RenameVoiceSession(r.Context(), sessionID, request.Title)
+	if request.Title == nil && request.Archived == nil && request.Pinned == nil && request.Favorite == nil && request.Deleted == nil {
+		http.Error(w, "voice session update is empty", http.StatusBadRequest)
+		return
+	}
+	updated, err := h.Backend.UpdateVoiceSession(r.Context(), sessionID, voice.SessionUpdate{
+		Title: request.Title, Archived: request.Archived, Pinned: request.Pinned, Favorite: request.Favorite, Deleted: request.Deleted,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -701,10 +713,22 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	sortVoiceSessions(sessions)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &renamed, VoiceSessions: sessions})
+	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &updated, VoiceSessions: sessions})
+}
+
+func sortVoiceSessions(sessions []voice.Session) {
+	slices.SortStableFunc(sessions, func(a, b voice.Session) int {
+		if a.Pinned != b.Pinned {
+			if a.Pinned {
+				return -1
+			}
+			return 1
+		}
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
 }
 
 func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {

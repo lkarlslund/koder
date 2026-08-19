@@ -285,6 +285,72 @@ class MainActivityInstrumentedTest {
 		}
 	}
 
+	@Test
+	fun conversationsCanBePinnedStarredArchivedDeletedAndUndone() {
+		val server = MockWebServer()
+		var pinned = false
+		var favorite = false
+		var archived = false
+		var deleted = false
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse {
+				if (request.method == "PATCH") {
+					val body = org.json.JSONObject(request.body?.utf8().orEmpty())
+					if (body.has("pinned")) pinned = body.getBoolean("pinned")
+					if (body.has("favorite")) favorite = body.getBoolean("favorite")
+					if (body.has("archived")) {
+						archived = body.getBoolean("archived")
+						if (archived) pinned = false
+					}
+					if (body.has("deleted")) deleted = body.getBoolean("deleted")
+				}
+				if (request.method == "DELETE") {
+					deleted = true
+					pinned = false
+				}
+				val session = buildString {
+					append("""{"id":"voice-1","title":"Personal","updated_at":"2026-08-20T12:00:00Z"""")
+					if (pinned) append(",\"pinned\":true")
+					if (favorite) append(",\"favorite\":true")
+					if (archived) append(",\"archived\":true")
+					if (deleted) append(",\"deleted\":true")
+					append("}")
+				}
+				return MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[$session],"voice_session":$session}""").build()
+			}
+		}
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Personal")
+				onView(withContentDescription("Options for Personal")).perform(click())
+				onView(withText("Pin to top")).perform(click())
+				waitForDisplayedText("◆ Personal")
+				onView(withContentDescription("Options for Personal")).perform(click())
+				onView(withText("Add star")).perform(click())
+				waitForDisplayedText("◆ ★ Personal")
+				onView(withContentDescription("Starred conversations, 1")).perform(click())
+				onView(withContentDescription("Options for Personal")).perform(click())
+				onView(withText("Archive")).perform(click())
+				waitForDisplayedText("Conversation archived")
+				onView(withText("Undo")).inRoot(isDialog()).perform(click())
+				waitForText(scenario, "★ Personal")
+				onView(withContentDescription("Options for Personal")).perform(click())
+				onView(withText("Delete")).perform(click())
+				onView(withText("Delete")).inRoot(isDialog()).perform(click())
+				waitForDisplayedText("Conversation deleted")
+				onView(withText("Undo")).inRoot(isDialog()).perform(click())
+				waitForText(scenario, "★ Personal")
+				assertTrue(favorite)
+				assertFalse(archived)
+				assertFalse(deleted)
+			}
+		} finally {
+			server.close()
+		}
+	}
+
     @Test
     fun pullingConversationListRefreshesAndShowsNewestFirst() {
         val server = MockWebServer()
@@ -396,8 +462,13 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
 				onView(withText("Bookmark")).perform(click())
 				waitForDisplayedText("★ Bookmarked")
+				Thread.sleep(350) // Let the native action dialog's dim layer disappear.
 				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
 				onView(withText("Follow up later")).perform(click())
+				// AlertDialog's dim layer outlives its item click briefly on API 36;
+				// wait for that native dismissal animation so it cannot reject the
+				// next real tap as an occluded/untrusted touch.
+				Thread.sleep(350)
 				onView(withContentDescription("Saved responses")).perform(click())
 				waitForDisplayedText("Saved responses")
 				onView(withText("↗ Newest answer")).inRoot(isDialog()).perform(scrollTo(), click())
