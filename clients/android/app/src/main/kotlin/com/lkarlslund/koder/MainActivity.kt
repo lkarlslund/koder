@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var latestButton: Button? = null
 	private var renderedHistorySession = ""
 	private val renderedHistoryIDs = linkedSetOf<String>()
+	private var cachedConversationHistory = emptyList<VoiceTranscriptEntry>()
 	private var searchContextShown = false
 	private var savedResponses: List<SavedVoiceResponse> = emptyList()
 	private var placeholderTitle: TextView? = null
@@ -255,7 +256,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				visibility = if (transcriptShown && snapshot.partialTranscript.isNotBlank()) View.VISIBLE else View.GONE
             }
 			if (snapshot.voiceSessionId.isNotBlank() && snapshot.history.isNotEmpty() && renderedHistorySession != snapshot.voiceSessionId) {
+				cachedConversationHistory = snapshot.history
 				renderHistory(snapshot.voiceSessionId, snapshot.history)
+			} else if (snapshot.history.isNotEmpty()) {
+				cachedConversationHistory = snapshot.history
 			}
 			updateConversationMode(snapshot.stage)
 			muteButton?.apply {
@@ -1035,6 +1039,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationShown = false
 		renderedHistorySession = ""
 		renderedHistoryIDs.clear()
+		cachedConversationHistory = emptyList()
 		searchContextShown = false
 		savedResponses = secureSettings.savedVoiceResponses(session.id)
         val root = column()
@@ -1168,7 +1173,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			visibility = View.GONE
 			contentDescription = "Jump to latest message"
 			setOnClickListener {
-				if (searchContextShown) renderHistory(latestCallSnapshot.voiceSessionId, latestCallSnapshot.history)
+				if (searchContextShown) renderHistory(
+					latestCallSnapshot.voiceSessionId,
+					latestCallSnapshot.history.ifEmpty { cachedConversationHistory },
+				)
 				else scrollToBottom(force = true)
 			}
 		}
@@ -1402,6 +1410,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		renderedHistorySession = voiceSessionId
 		if (history.isEmpty()) return
 		searchContextShown = false
+		cachedConversationHistory = history
 		feed?.removeAllViews()
 		feedPlaceholder = null
 		feed?.gravity = Gravity.NO_GRAVITY
@@ -1884,6 +1893,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		placeholderTitle = null
 		placeholderDetail = null
 		searchContextShown = false
+		cachedConversationHistory = emptyList()
 		savedResponses = emptyList()
     }
 
