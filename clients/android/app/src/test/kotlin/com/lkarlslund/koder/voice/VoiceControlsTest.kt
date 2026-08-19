@@ -35,4 +35,10 @@ class VoiceControlsTest {
 		assertEquals(ConversationAvailability.OFFLINE, conversationAvailability(CallController.Stage.ERROR, "Connection failed"))
 		assertEquals("Offline · Connection failed", conversationStatusText(CallController.Stage.ERROR, "Connection failed"))
 	}
+
+	@Test
+	fun bargeInHasDistinctSpokenPlaybackFeedback() {
+		assertEquals("Listening to you…", recordingStatus(false))
+		assertEquals("Interrupted · listening to you…", recordingStatus(true))
+	}
 }

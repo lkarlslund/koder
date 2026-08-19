@@ -19,6 +19,7 @@ class CallController(
 	detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
 	audioPlayback: StreamingAudioPlayback? = null,
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
+	private val interruptionFeedback: InterruptionFeedback = AndroidInterruptionFeedback(context),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
 	private val phoneIdentity: PhoneIdentity? = null,
 ) : AutoCloseable {
@@ -116,6 +117,7 @@ class CallController(
 	    @Volatile private var acceptingOutput = false
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
+		@Volatile private var interruptedPlayback = false
 
     fun start(
 		server: String,
@@ -134,7 +136,8 @@ class CallController(
 		connectedServer = server
 		connectedToken = token
 			speechLanguages = languages.toSet()
-			microphoneMuted = false
+		microphoneMuted = false
+		interruptedPlayback = false
 		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
 		endpoint.configure(EndpointConfig(
 			sampleRate = endpointSampleRate,
@@ -225,6 +228,7 @@ class CallController(
     private fun cancelCapture() {
         microphone.stop()
         endpoint.reset()
+		interruptedPlayback = false
         val pending = utteranceId
         utteranceId = ""
         if (pending.isNotBlank()) connection.cancelAudio(pending)
@@ -237,6 +241,7 @@ class CallController(
         microphone.stop()
         playback.stop()
 		workingSound.stop()
+		interruptedPlayback = false
         endpoint.reset()
         connection.close()
 		phoneDevice.close()
@@ -252,6 +257,7 @@ class CallController(
         microphone.close()
         playback.close()
 		workingSound.close()
+		interruptionFeedback.close()
         endpoint.close()
         connection.close()
 		phoneDevice.close()
@@ -286,7 +292,7 @@ class CallController(
                 maybeListen()
             }
             "state" -> when (frame.state) {
-                "recording" -> update(Stage.RECORDING, "Listening to you…")
+                "recording" -> update(Stage.RECORDING, recordingStatus(interruptedPlayback))
                 "transcribing" -> update(Stage.TRANSCRIBING, "Recognizing speech…", "")
                 "processing" -> update(Stage.PROCESSING, "Choosing a chat…", "")
 				"working" -> update(
@@ -396,14 +402,17 @@ class CallController(
             for (event in endpoint.accept(samples)) {
                 when (event) {
                     is UtteranceEvent.Started -> {
-						if (acceptingOutput) {
+						val wasInterruption = acceptingOutput
+						interruptedPlayback = wasInterruption
+						if (wasInterruption) {
 							acceptingOutput = false
 							playback.stop()
+							interruptionFeedback.acknowledge()
 						}
 						utteranceId = connection.startAudio(format, speechLanguages)
                         inputSequence = 0
                         event.frames.forEach(::sendPCM)
-                        onMain { update(Stage.RECORDING, "Listening to you…") }
+						onMain { update(Stage.RECORDING, recordingStatus(wasInterruption)) }
                     }
                     is UtteranceEvent.Continued -> sendPCM(event.frame)
                     is UtteranceEvent.Committed -> {
@@ -411,6 +420,7 @@ class CallController(
                         utteranceId = ""
                         microphone.stop()
                         connection.commitAudio(completedId)
+						interruptedPlayback = false
                         onMain { update(Stage.TRANSCRIBING, "Recognizing speech…", "") }
                     }
                 }
@@ -418,6 +428,7 @@ class CallController(
         } catch (error: Exception) {
             val failedId = utteranceId
             utteranceId = ""
+			interruptedPlayback = false
             microphone.stop()
             connection.cancelAudio(failedId)
             onMain { update(Stage.ERROR, error.message ?: "Voice capture failed") }
