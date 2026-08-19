@@ -78,6 +78,31 @@ data class VoiceHome(
     val appUpdate: AppUpdate? = null,
 )
 
+data class ServerInfo(
+    val serverTime: Instant,
+    val version: String,
+    val commit: String,
+    val dirty: String,
+    val buildTime: String,
+    val startedAt: Instant,
+    val uptimeSeconds: Long,
+    val platform: String,
+    val goVersion: String,
+    val logicalCPUs: Int,
+    val maxProcs: Int,
+    val goroutines: Int,
+    val heapAllocBytes: Long,
+    val heapSysBytes: Long,
+    val heapObjects: Long,
+    val gcCycles: Long,
+    val sessionCount: Int,
+    val voiceSessionCount: Int,
+    val voiceConnectionActive: Boolean,
+    val voiceConnectionSince: Instant?,
+    val tokenRequired: Boolean,
+    val roundTripMillis: Long = 0,
+)
+
 enum class VoiceAudioFrameKind(val wireValue: Int) {
     INPUT_PCM(1),
     OUTPUT_PCM(2),
@@ -127,6 +152,36 @@ object VoiceProtocol {
 			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
 		)
 	}
+
+    fun parseServerInfo(payload: String): ServerInfo {
+        val root = JSONObject(payload)
+        val protocol = root.optString("protocol")
+        require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
+        return ServerInfo(
+            serverTime = Instant.parse(root.getString("server_time")),
+            version = root.getString("version"),
+            commit = root.getString("commit"),
+            dirty = root.getString("dirty"),
+            buildTime = root.getString("build_time"),
+            startedAt = Instant.parse(root.getString("started_at")),
+            uptimeSeconds = root.getLong("uptime_seconds"),
+            platform = root.getString("platform"),
+            goVersion = root.getString("go_version"),
+            logicalCPUs = root.getInt("logical_cpus"),
+            maxProcs = root.getInt("max_procs"),
+            goroutines = root.getInt("goroutines"),
+            heapAllocBytes = root.getLong("heap_alloc_bytes"),
+            heapSysBytes = root.getLong("heap_sys_bytes"),
+            heapObjects = root.getLong("heap_objects"),
+            gcCycles = root.getLong("gc_cycles"),
+            sessionCount = root.getInt("session_count"),
+            voiceSessionCount = root.getInt("voice_session_count"),
+            voiceConnectionActive = root.getBoolean("voice_connection_active"),
+            voiceConnectionSince = root.optString("voice_connection_since")
+                .takeIf(String::isNotBlank)?.let(Instant::parse),
+            tokenRequired = root.getBoolean("token_required"),
+        )
+    }
 
     fun hello(): String = JSONObject()
         .put("type", "hello")

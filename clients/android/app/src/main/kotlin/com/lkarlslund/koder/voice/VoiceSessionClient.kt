@@ -13,22 +13,39 @@ class VoiceSessionClient(
     private val client: OkHttpClient = OkHttpClient(),
 ) : AutoCloseable {
     fun list(server: String, token: String, callback: (Result<VoiceHome>) -> Unit) {
-        request(server, token, null, callback)
+        request(server, token, "/voice/v1/sessions", null, VoiceProtocol::parseHome, callback)
     }
 
     fun create(server: String, token: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
-        request(server, token, VoiceProtocol.createSessionRequest(title), callback)
+        request(
+            server,
+            token,
+            "/voice/v1/sessions",
+            VoiceProtocol.createSessionRequest(title),
+            VoiceProtocol::parseHome,
+            callback,
+        )
     }
 
-    private fun request(
+    fun serverInfo(server: String, token: String, callback: (Result<ServerInfo>) -> Unit) {
+        val startedAt = System.nanoTime()
+        request(server, token, "/voice/v1/server-info", null, VoiceProtocol::parseServerInfo) { result ->
+            val elapsedMillis = ((System.nanoTime() - startedAt) / 1_000_000).coerceAtLeast(0)
+            callback(result.map { it.copy(roundTripMillis = elapsedMillis) })
+        }
+    }
+
+    private fun <T> request(
         server: String,
         token: String,
+        path: String,
         body: String?,
-        callback: (Result<VoiceHome>) -> Unit,
+        parse: (String) -> T,
+        callback: (Result<T>) -> Unit,
     ) {
         val request = try {
             Request.Builder()
-                .url(VoiceProtocol.resourceUrl(server, "/voice/v1/sessions"))
+                .url(VoiceProtocol.resourceUrl(server, path))
                 .apply {
                     if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}")
                     if (body != null) post(body.toRequestBody(JSON))
@@ -51,7 +68,7 @@ class VoiceSessionClient(
                         callback(Result.failure(IOException("Koder returned $detail")))
                         return
                     }
-                    callback(runCatching { VoiceProtocol.parseHome(payload) })
+                    callback(runCatching { parse(payload) })
                 }
             }
         })

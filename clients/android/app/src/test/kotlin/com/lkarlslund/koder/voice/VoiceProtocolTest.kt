@@ -70,6 +70,21 @@ class VoiceProtocolTest {
         assertEquals("Phone work", request.getString("title"))
     }
 
+    @Test
+    fun decodesServerDiagnostics() {
+        val info = VoiceProtocol.parseServerInfo(
+            """{"protocol":"voice.v1","server_time":"2026-08-19T12:00:05Z","version":"0.1.0","commit":"abc123","dirty":"false","build_time":"2026-08-19T11:00:00Z","started_at":"2026-08-19T12:00:00Z","uptime_seconds":5,"platform":"linux/amd64","go_version":"go1.26.6","logical_cpus":16,"max_procs":12,"goroutines":42,"heap_alloc_bytes":1048576,"heap_sys_bytes":4194304,"heap_objects":1234,"gc_cycles":9,"session_count":7,"voice_session_count":3,"voice_connection_active":true,"voice_connection_since":"2026-08-19T12:00:01Z","token_required":true}""",
+        )
+        assertEquals("abc123", info.commit)
+        assertEquals("linux/amd64", info.platform)
+        assertEquals(42, info.goroutines)
+        assertEquals(7, info.sessionCount)
+        assertEquals(3, info.voiceSessionCount)
+        assertTrue(info.voiceConnectionActive)
+        assertTrue(info.tokenRequired)
+        assertEquals("2026-08-19T12:00:01Z", info.voiceConnectionSince.toString())
+    }
+
 	@Test
 	fun decodesWorkingTargetForLocalWaitingCue() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/working.json"))
