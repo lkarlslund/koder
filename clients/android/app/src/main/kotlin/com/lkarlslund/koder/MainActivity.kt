@@ -3,6 +3,8 @@ package com.lkarlslund.koder
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -39,12 +41,15 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
+import com.lkarlslund.koder.voice.ServerInfo
+import com.lkarlslund.koder.voice.VOICE_PROTOCOL
 import com.lkarlslund.koder.voice.VoiceHome
 import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import java.io.File
+import java.util.Locale
 import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
@@ -294,10 +299,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun showHomeMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
+            menu.add("Server info")
             menu.add("Settings")
             menu.add("About")
             setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
+                    "Server info" -> loadServerInfo()
                     "Settings" -> showSetup()
                     "About" -> showAbout()
                 }
@@ -305,6 +312,157 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
             show()
         }
+    }
+
+    private fun loadServerInfo() {
+        val loading = AlertDialog.Builder(this)
+            .setTitle("Server info")
+            .setView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(24), dp(12), dp(24), dp(12))
+                addView(ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(32), dp(32)))
+                addView(body("Pinging Koder…"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(16)
+                })
+            })
+            .setNegativeButton("Cancel", null)
+            .show()
+        sessionClient.serverInfo(settings.server, settings.token) { result ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed || !loading.isShowing) return@runOnUiThread
+                loading.dismiss()
+                result.fold(::showServerInfo, ::showServerInfoError)
+            }
+        }
+    }
+
+    private fun showServerInfo(info: ServerInfo) {
+        val content = column().apply {
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            addView(TextView(this@MainActivity).apply {
+                text = "●  ${info.roundTripMillis} ms round trip"
+                textSize = 18f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(themeColor(android.R.attr.colorAccent))
+                background = GradientDrawable().apply {
+                    setColor(withAlpha(themeColor(android.R.attr.colorAccent), 28))
+                    cornerRadius = dp(14).toFloat()
+                }
+                setPadding(dp(14), dp(10), dp(14), dp(10))
+            }, spaced(bottom = 16))
+
+            addDiagnosticsSection("Connection", listOf(
+                "Server" to settings.server,
+                "Protocol" to VOICE_PROTOCOL,
+                "Authentication" to if (info.tokenRequired) "Bearer token required" else "No token required",
+                "Server time" to info.serverTime.toString(),
+            ))
+            addDiagnosticsSection("Koder", listOf(
+                "Version" to info.version,
+                "Commit" to info.commit.take(12) + if (info.dirty == "true") " · dirty" else "",
+                "Built" to info.buildTime,
+                "Uptime" to formatUptime(info.uptimeSeconds),
+                "Started" to info.startedAt.toString(),
+            ))
+            addDiagnosticsSection("Sessions", listOf(
+                "Regular" to info.sessionCount.toString(),
+                "Voice" to info.voiceSessionCount.toString(),
+                "Live voice" to if (info.voiceConnectionActive) {
+                    "Active${info.voiceConnectionSince?.let { " since $it" }.orEmpty()}"
+                } else {
+                    "Idle"
+                },
+            ))
+            addDiagnosticsSection("Runtime", listOf(
+                "Platform" to info.platform,
+                "Go" to info.goVersion,
+                "CPU" to "${info.logicalCPUs} logical · ${info.maxProcs} available",
+                "Goroutines" to info.goroutines.toString(),
+                "Heap" to "${formatBytes(info.heapAllocBytes)} live · ${formatBytes(info.heapSysBytes)} reserved",
+                "Heap objects" to String.format(Locale.US, "%,d", info.heapObjects),
+                "GC cycles" to String.format(Locale.US, "%,d", info.gcCycles),
+            ))
+            val installedVersion = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+            addDiagnosticsSection("Android client", buildList {
+                add("Installed" to installedVersion.ifBlank { "development" })
+                lastAppUpdate?.let { update ->
+                    add("Server APK" to "${update.versionName} · ${formatBytes(update.apkSize)}")
+                    add("Channel" to update.channel)
+                }
+            }, bottom = 0)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Server info")
+            .setView(ScrollView(this).apply { addView(content, matchWrap()) })
+            .setPositiveButton("Copy") { _, _ -> copyServerInfo(info) }
+            .setNeutralButton("Refresh") { _, _ -> loadServerInfo() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun showServerInfoError(failure: Throwable) {
+        AlertDialog.Builder(this)
+            .setTitle("Server info unavailable")
+            .setMessage(failure.message ?: "Koder could not be reached.")
+            .setPositiveButton("Retry") { _, _ -> loadServerInfo() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun LinearLayout.addDiagnosticsSection(
+        heading: String,
+        rows: List<Pair<String, String>>,
+        bottom: Int = 18,
+    ) {
+        addView(label(heading).apply {
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(themeColor(android.R.attr.colorAccent))
+        }, spaced(bottom = 5))
+        rows.forEach { (name, value) ->
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.TOP
+                addView(helper(name).apply { alpha = 0.65f }, LinearLayout.LayoutParams(dp(108), ViewGroup.LayoutParams.WRAP_CONTENT))
+                addView(body(value).apply {
+                    textSize = 14f
+                    typeface = Typeface.MONOSPACE
+                    setTextIsSelectable(true)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }, spaced(bottom = 5))
+        }
+        if (bottom > 0) addView(View(this@MainActivity), spaced(height = dp(bottom)))
+    }
+
+    private fun copyServerInfo(info: ServerInfo) {
+        val text = buildString {
+            appendLine("Koder ${info.version} (${info.commit}${if (info.dirty == "true") ", dirty" else ""})")
+            appendLine("Server: ${settings.server}")
+            appendLine("Round trip: ${info.roundTripMillis} ms")
+            appendLine("Uptime: ${formatUptime(info.uptimeSeconds)}")
+            appendLine("Platform: ${info.platform} · ${info.goVersion}")
+            appendLine("CPU: ${info.logicalCPUs} logical · ${info.maxProcs} available")
+            appendLine("Goroutines: ${info.goroutines}")
+            appendLine("Heap: ${formatBytes(info.heapAllocBytes)} live · ${formatBytes(info.heapSysBytes)} reserved")
+            appendLine("Sessions: ${info.sessionCount} regular · ${info.voiceSessionCount} voice")
+            append("Voice connection: ${if (info.voiceConnectionActive) "active" else "idle"}")
+        }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Koder server info", text))
+        Toast.makeText(this, "Server info copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun formatUptime(totalSeconds: Long): String {
+        val safeSeconds = totalSeconds.coerceAtLeast(0)
+        val days = safeSeconds / 86_400
+        val clock = DateUtils.formatElapsedTime(safeSeconds % 86_400)
+        return if (days > 0) "${days}d $clock" else clock
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f GiB", bytes / (1024.0 * 1024.0 * 1024.0))
+        bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MiB", bytes / (1024.0 * 1024.0))
+        bytes >= 1024L -> String.format(Locale.US, "%.1f KiB", bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     private fun showAbout() {

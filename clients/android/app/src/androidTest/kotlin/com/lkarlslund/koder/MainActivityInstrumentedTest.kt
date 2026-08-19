@@ -77,6 +77,12 @@ class MainActivityInstrumentedTest {
                 .body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"Calendar updated"}]}""")
                 .build(),
         )
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("""{"protocol":"voice.v1","server_time":"2026-08-19T12:00:05Z","version":"0.1.0","commit":"abc123","dirty":"false","build_time":"2026-08-19T11:00:00Z","started_at":"2026-08-19T12:00:00Z","uptime_seconds":5,"platform":"linux/amd64","go_version":"go1.26.6","logical_cpus":16,"max_procs":12,"goroutines":42,"heap_alloc_bytes":1048576,"heap_sys_bytes":4194304,"heap_objects":1234,"gc_cycles":9,"session_count":7,"voice_session_count":3,"voice_connection_active":false,"token_required":true}""")
+                .build(),
+        )
         server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
         try {
             SecureSettings(context).save(server.url("/").toString(), "")
@@ -101,8 +107,14 @@ class MainActivityInstrumentedTest {
                     )
                 }
                 onView(withContentDescription("More options")).perform(click())
+                onView(withText("Server info")).check(matches(isDisplayed()))
                 onView(withText("Settings")).check(matches(isDisplayed()))
                 onView(withText("About")).check(matches(isDisplayed()))
+                onView(withText("Server info")).perform(click())
+                waitForDisplayedText("Runtime")
+                onView(withText("linux/amd64")).check(matches(isDisplayed()))
+                onView(withText("7")).check(matches(isDisplayed()))
+                onView(withText("Close")).perform(click())
             }
         } finally {
             server.close()
@@ -156,6 +168,17 @@ class MainActivityInstrumentedTest {
             Thread.sleep(100)
         }
         error("Timed out waiting for $wanted; visible text was $lastLabels")
+    }
+
+    private fun waitForDisplayedText(wanted: String) {
+        repeat(50) {
+            val displayed = runCatching {
+                onView(withText(wanted)).check(matches(isDisplayed()))
+            }.isSuccess
+            if (displayed) return
+            Thread.sleep(100)
+        }
+        error("Timed out waiting for displayed text $wanted")
     }
 
     private fun View.allText(): List<String> = buildList {
