@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,31 @@ type fakeBackend struct {
 	history     []voice.TranscriptEntry
 	pacing      voice.ResponsePacing
 	searchQuery string
+}
+
+type handoffBackend struct {
+	fakeBackend
+	turnCalls       atomic.Int32
+	firstAudioReady chan struct{}
+	continueAudio   chan struct{}
+}
+
+func (b *handoffBackend) RunVoiceTurn(_ context.Context, _ string, _ string, _ voice.TurnOptions, _ func(voice.Session) error) (voice.Message, error) {
+	b.turnCalls.Add(1)
+	return voice.Message{SpokenText: "The handoff worked.", TranscriptID: "answer-1"}, nil
+}
+
+func (b *handoffBackend) StreamVoiceSpeech(ctx context.Context, _ string, consume func([]byte) error) error {
+	if err := consume([]byte{1, 0}); err != nil {
+		return err
+	}
+	close(b.firstAudioReady)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.continueAudio:
+	}
+	return consume([]byte{2, 0})
 }
 
 func (f *fakeBackend) SearchVoiceSessionHistory(_ context.Context, _ string, query string, _ int) ([]voice.TranscriptSearchResult, error) {
@@ -746,6 +772,61 @@ func TestHandlerReconnectsSameCallAndRestoresHistory(t *testing.T) {
 	}
 	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
 		t.Fatalf("different-owner dial response=%v err=%v", response, err)
+	}
+}
+
+func TestHandlerResumesInFlightTurnWithoutDuplicateOutput(t *testing.T) {
+	backend := &handoffBackend{firstAudioReady: make(chan struct{}), continueAudio: make(chan struct{})}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	baseURL := "ws" + server.URL[len("http"):] + "/voice/v1?call_id=handoff&voice_session_id=voice-1"
+
+	first, _, err := websocket.Dial(ctx, baseURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, first, "ready")
+	request := clientFrame{Type: "utterance", Protocol: protocolVersion, UtteranceID: "turn-1", Text: "continue after handoff"}
+	if err := writeClientFrame(ctx, first, request); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, first, "state")
+	readType(t, ctx, first, "message")
+	readType(t, ctx, first, "state")
+	readType(t, ctx, first, "tts_start")
+	if frame := readAudioFrame(t, ctx, first); frame.Sequence != 0 {
+		t.Fatalf("first output sequence = %d, want 0", frame.Sequence)
+	}
+	select {
+	case <-backend.firstAudioReady:
+	case <-ctx.Done():
+		t.Fatal("TTS did not produce its first frame")
+	}
+	_ = first.CloseNow()
+
+	resumeURL := baseURL + "&resume_utterance_id=turn-1&resume_message=true&resume_output_sequence=1"
+	second, _, err := websocket.Dial(ctx, resumeURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.CloseNow() }()
+	readType(t, ctx, second, "ready")
+	if err := writeClientFrame(ctx, second, request); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, second, "state")
+	readType(t, ctx, second, "state")
+	readType(t, ctx, second, "tts_start")
+	close(backend.continueAudio)
+	if frame := readAudioFrame(t, ctx, second); frame.Sequence != 1 || !slices.Equal(frame.PCM, []byte{2, 0}) {
+		t.Fatalf("resumed output = %#v, want sequence 1 only", frame)
+	}
+	readType(t, ctx, second, "tts_end")
+	readType(t, ctx, second, "ready")
+	if got := backend.turnCalls.Load(); got != 1 {
+		t.Fatalf("RunVoiceTurn calls = %d, want 1", got)
 	}
 }
 

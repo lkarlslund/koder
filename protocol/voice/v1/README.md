@@ -35,7 +35,16 @@ Optional query parameters:
 
 - `call_id`: stable client-generated ID for reconnects;
 - `voice_session_id`: durable voice chat to resume. With no value, Koder uses
-  the most recently updated voice chat or creates the first one.
+  the most recently updated voice chat or creates the first one;
+- `resume_utterance_id`: the in-flight utterance the client will resend after
+  `ready` on a replacement socket;
+- `resume_transcript` and `resume_message`: whether those text events already
+  reached the client; and
+- `resume_output_sequence`: the first output PCM sequence the client still
+  needs. Earlier output frames are not replayed.
+
+Resume cursors are meaningful only with `resume_utterance_id`. Invalid cursors
+are rejected during the HTTP handshake.
 
 Text frames are UTF-8 JSON and include `"protocol":"voice.v1"`. Binary frames
 are PCM envelopes described below.
@@ -281,9 +290,15 @@ reconnect. It is omitted when no durable assistant entry exists.
 ## Reconnect and compatibility
 
 Clients reconnect with the same `call_id` and `voice_session_id`, then wait for
-`ready`. V1 does not replay an in-flight utterance; clients must not blindly
-resend committed work. Final exchanges already accepted by Koder are in the
-durable voice-chat transcript.
+`ready` and resend the same in-flight utterance with its original
+`utterance_id`. Koder owns the work independently of either WebSocket and
+deduplicates that resend. The resume query cursor suppresses transcript,
+message, and PCM output the client already received. An audio utterance is
+replayed as its original `audio_start`, contiguous binary input frames, and
+`audio_commit`; a recording interrupted before commit may continue appending
+frames after reconnect. Reusing an utterance ID with different text or audio is
+an error. Final exchanges already accepted by Koder remain in the durable
+voice-chat transcript.
 
 Unknown JSON fields are ignored. Unknown frame types receive `error`. Shared
 fixtures in `testdata` are decoded by both Go and Kotlin tests, including the

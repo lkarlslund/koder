@@ -71,6 +71,8 @@ class CallController(
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
             microphone.stop()
+			acceptingOutput = false
+			playback.stop()
 	            if (running) {
 					if (pausedByUser || telecomHeld) update(Stage.HELD, "Conversation paused")
 					else update(Stage.CONNECTING, reconnectStatus(reason))
@@ -121,6 +123,7 @@ class CallController(
     private var utteranceId = ""
     private var inputSequence = 0L
     private var outputSequence = 0L
+	private var outputUtteranceId = ""
 	    @Volatile private var acceptingOutput = false
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
@@ -398,7 +401,8 @@ class CallController(
                 if (format == null) {
                     update(Stage.ERROR, "Server omitted the speech audio format")
                 } else {
-                    outputSequence = 0
+					if (outputUtteranceId != frame.utteranceId) outputSequence = 0
+					outputUtteranceId = frame.utteranceId
                     acceptingOutput = true
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
@@ -410,9 +414,13 @@ class CallController(
 					acceptingOutput = false
 					playback.finish { onMain { maybeListen(force = true) } }
 				}
+				outputUtteranceId = ""
+				outputSequence = 0
             }
             "error" -> {
                 acceptingOutput = false
+				outputUtteranceId = ""
+				outputSequence = 0
                 playback.stop()
 				snapshot = snapshot.copy(historyLoading = false)
                 update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })

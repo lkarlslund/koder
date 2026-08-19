@@ -24,6 +24,28 @@ class VoiceConnection(
         .build(),
 	private val identity: PhoneIdentity? = null,
 ) : AutoCloseable {
+	private sealed class PendingTurn(open val id: String) {
+		var transcriptReceived = false
+		var messageReceived = false
+		var nextOutputSequence = 0L
+	}
+
+	private class PendingText(
+		override val id: String,
+		val text: String,
+		val sessionId: String,
+	) : PendingTurn(id)
+
+	private class PendingAudio(
+		override val id: String,
+		val format: VoiceAudioFormat,
+		val languages: List<String>,
+	) : PendingTurn(id) {
+		val frames = mutableListOf<ByteString>()
+		var committed = false
+		var sessionId = ""
+	}
+
     interface Listener {
         fun onConnected()
 		fun onCallIdentity(callId: String) = Unit
@@ -41,6 +63,10 @@ class VoiceConnection(
 	private var desired = false
 	private var generation = 0L
 	private var reconnectAttempt = 0
+	private var socketAttempt = 0L
+	private var replayedSocketAttempt = -1L
+	private var pendingTurn: PendingTurn? = null
+	private var activeOutputUtteranceId = ""
 	private var reconnect: ScheduledFuture<*>? = null
 	private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
 		Thread(runnable, "koder-voice-reconnect").apply { isDaemon = true }
@@ -54,6 +80,8 @@ class VoiceConnection(
         this.voiceSessionId = voiceSessionId.trim()
 		this.responsePacing = responsePacing
 		callId = UUID.randomUUID().toString()
+		pendingTurn = null
+		activeOutputUtteranceId = ""
 		desired = true
 		reconnectAttempt = 0
 		generation++
@@ -63,6 +91,7 @@ class VoiceConnection(
 	@Synchronized
 	private fun openSocket(expectedGeneration: Long) {
 		if (!desired || expectedGeneration != generation) return
+		val expectedSocketAttempt = ++socketAttempt
 		val websocketURL = VoiceProtocol.websocketUrl(server)
 		val requestURL = when {
 			websocketURL.startsWith("ws://") -> "http://" + websocketURL.removePrefix("ws://")
@@ -72,6 +101,14 @@ class VoiceConnection(
 		val url = requestURL.toHttpUrl().newBuilder()
 			.addQueryParameter("call_id", callId)
 			.apply { if (voiceSessionId.isNotBlank()) addQueryParameter("voice_session_id", voiceSessionId) }
+			.apply {
+				pendingTurn?.let { turn ->
+					addQueryParameter("resume_utterance_id", turn.id)
+					if (turn.transcriptReceived) addQueryParameter("resume_transcript", "true")
+					if (turn.messageReceived) addQueryParameter("resume_message", "true")
+					if (turn.nextOutputSequence > 0) addQueryParameter("resume_output_sequence", turn.nextOutputSequence.toString())
+				}
+			}
 			.build()
 		val request = Request.Builder().also { builder -> identity?.applyTo(builder) }
 			.url(url)
@@ -93,7 +130,12 @@ class VoiceConnection(
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
-                    listener.onFrame(VoiceProtocol.parse(text))
+					val frame = VoiceProtocol.parse(text)
+					synchronized(this@VoiceConnection) {
+						observe(frame)
+						if (frame.type == "ready") replayPending(webSocket, expectedSocketAttempt)
+					}
+					listener.onFrame(frame)
                 } catch (error: Exception) {
                     listener.onDisconnected("Invalid server response: ${error.message}")
                 }
@@ -101,7 +143,9 @@ class VoiceConnection(
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
 				try {
-					listener.onAudioFrame(VoiceProtocol.decodeAudio(bytes.toByteArray()))
+					val frame = VoiceProtocol.decodeAudio(bytes.toByteArray())
+					val deliver = synchronized(this@VoiceConnection) { observe(frame) }
+					if (deliver) listener.onAudioFrame(frame)
 				} catch (error: Exception) {
 					listener.onDisconnected("Invalid audio frame: ${error.message}")
 				}
@@ -137,16 +181,21 @@ class VoiceConnection(
 
     fun sendUtterance(text: String, sessionId: String = ""): String {
         val id = UUID.randomUUID().toString()
-        check(socket?.send(VoiceProtocol.utterance(id, text, sessionId)) == true) {
-            "Voice connection is not open"
-        }
+		synchronized(this) {
+			check(desired) { "Voice conversation is not active" }
+			pendingTurn = PendingText(id, text, sessionId)
+			socket?.send(VoiceProtocol.utterance(id, text, sessionId))
+		}
         return id
     }
 
 	fun startAudio(format: VoiceAudioFormat, languages: Collection<String> = emptyList()): String {
 		val id = UUID.randomUUID().toString()
-		check(socket?.send(VoiceProtocol.audioStart(id, format, languages)) == true) {
-			"Voice connection is not open"
+		synchronized(this) {
+			check(desired) { "Voice conversation is not active" }
+			val pending = PendingAudio(id, format, languages.map(String::lowercase).distinct().sorted())
+			pendingTurn = pending
+			socket?.send(VoiceProtocol.audioStart(id, format, pending.languages))
 		}
 		return id
 	}
@@ -155,17 +204,71 @@ class VoiceConnection(
 		val payload = VoiceProtocol.encodeAudio(
 			VoiceAudioFrame(VoiceAudioFrameKind.INPUT_PCM, 0, sequence, pcm),
 		)
-		check(socket?.send(ByteString.of(*payload)) == true) { "Voice connection is not open" }
+		val encoded = ByteString.of(*payload)
+		synchronized(this) {
+			val pending = pendingTurn as? PendingAudio ?: error("No audio utterance is active")
+			check(!pending.committed) { "Audio utterance is already committed" }
+			check(sequence == pending.frames.size.toLong()) { "Audio sequence $sequence is out of order" }
+			pending.frames += encoded
+			socket?.send(encoded)
+		}
 	}
 
 	fun commitAudio(utteranceId: String, sessionId: String = "") {
-		check(socket?.send(VoiceProtocol.audioCommit(utteranceId, sessionId)) == true) {
-			"Voice connection is not open"
+		synchronized(this) {
+			val pending = pendingTurn as? PendingAudio
+			check(pending?.id == utteranceId) { "Audio utterance is not active" }
+			pending.committed = true
+			pending.sessionId = sessionId
+			socket?.send(VoiceProtocol.audioCommit(utteranceId, sessionId))
 		}
 	}
 
 	fun cancelAudio(utteranceId: String) {
-		if (utteranceId.isNotBlank()) socket?.send(VoiceProtocol.audioCancel(utteranceId))
+		if (utteranceId.isBlank()) return
+		synchronized(this) {
+			if (pendingTurn?.id == utteranceId) pendingTurn = null
+			socket?.send(VoiceProtocol.audioCancel(utteranceId))
+		}
+	}
+
+	private fun observe(frame: VoiceServerFrame) {
+		if (frame.type == "tts_start") activeOutputUtteranceId = frame.utteranceId
+		val pending = pendingTurn ?: return
+		if (frame.utteranceId != pending.id) return
+		when (frame.type) {
+			"transcript" -> pending.transcriptReceived = true
+			"message" -> {
+				pending.messageReceived = true
+				if (frame.message?.spokenText.isNullOrBlank()) pendingTurn = null
+			}
+			"tts_end", "error" -> {
+				pendingTurn = null
+				activeOutputUtteranceId = ""
+			}
+		}
+	}
+
+	private fun observe(frame: VoiceAudioFrame): Boolean {
+		val pending = pendingTurn ?: return true
+		if (activeOutputUtteranceId != pending.id || frame.kind != VoiceAudioFrameKind.OUTPUT_PCM) return true
+		if (frame.sequence < pending.nextOutputSequence) return false
+		if (frame.sequence == pending.nextOutputSequence) pending.nextOutputSequence++
+		return true
+	}
+
+	private fun replayPending(webSocket: WebSocket, expectedSocketAttempt: Long) {
+		if (replayedSocketAttempt == expectedSocketAttempt || socket !== webSocket) return
+		val pending = pendingTurn ?: return
+		replayedSocketAttempt = expectedSocketAttempt
+		when (pending) {
+			is PendingText -> webSocket.send(VoiceProtocol.utterance(pending.id, pending.text, pending.sessionId))
+			is PendingAudio -> {
+				webSocket.send(VoiceProtocol.audioStart(pending.id, pending.format, pending.languages))
+				pending.frames.forEach(webSocket::send)
+				if (pending.committed) webSocket.send(VoiceProtocol.audioCommit(pending.id, pending.sessionId))
+			}
+		}
 	}
 
     fun selectSession(sessionId: String) {
@@ -244,6 +347,8 @@ class VoiceConnection(
 		generation++
 		reconnect?.cancel(false)
 		reconnect = null
+		pendingTurn = null
+		activeOutputUtteranceId = ""
 		stopSocket("call ended")
 	}
 

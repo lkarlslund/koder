@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,11 +55,12 @@ type Handler struct {
 	Updates androidUpdateSource
 	Devices *phonedevice.Hub
 	Auth    *deviceauth.Registry
+	turns   *turnRegistry
 }
 
 // NewHandler creates a process-scoped voice protocol handler.
 func NewHandler(backend backend, token string) *Handler {
-	handler := &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded()}
+	handler := &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded(), turns: newTurnRegistry()}
 	if source, ok := backend.(interface{ PhoneDeviceHub() *phonedevice.Hub }); ok {
 		handler.Devices = source.PhoneDeviceHub()
 	}
@@ -175,6 +177,36 @@ func normalizeLanguages(values []string) ([]string, error) {
 	return normalized, nil
 }
 
+func parseTurnResume(r *http.Request) (turnResume, error) {
+	query := r.URL.Query()
+	resume := turnResume{utteranceID: strings.TrimSpace(query.Get("resume_utterance_id"))}
+	for key, target := range map[string]*bool{
+		"resume_transcript": &resume.transcriptReceived,
+		"resume_message":    &resume.messageReceived,
+	} {
+		value := strings.TrimSpace(query.Get(key))
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return turnResume{}, fmt.Errorf("invalid %s: %w", key, err)
+		}
+		*target = parsed
+	}
+	if value := strings.TrimSpace(query.Get("resume_output_sequence")); value != "" {
+		parsed, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return turnResume{}, fmt.Errorf("invalid resume_output_sequence: %w", err)
+		}
+		resume.outputSequence = uint32(parsed)
+	}
+	if resume.utteranceID == "" && (resume.transcriptReceived || resume.messageReceived || resume.outputSequence != 0) {
+		return turnResume{}, errors.New("resume cursor requires resume_utterance_id")
+	}
+	return resume, nil
+}
+
 // ServeHTTP accepts one authenticated voice call.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Backend == nil {
@@ -234,6 +266,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	callID := strings.TrimSpace(r.URL.Query().Get("call_id"))
 	if callID == "" {
 		callID = string(id.New())
+	}
+	resume, err := parseTurnResume(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	voiceSession, err := h.Backend.EnsureVoiceSession(r.Context(), r.URL.Query().Get("voice_session_id"))
 	if err != nil {
@@ -432,27 +469,65 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			completed := audio
 			audio = nil
-			if err := h.handleAudio(ctx, conn, &writeMu, call, completed, responsePacing); err != nil {
-				return
-			}
-		case "utterance":
-			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "state", UtteranceID: frame.UtteranceID, State: "processing"}); err != nil {
-				return
-			}
-			delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-			state, stateErr := call.State(delegationCtx)
-			if stateErr != nil {
-				cancel()
-				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
+			if len(completed.pcm) == 0 {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: completed.utteranceID, Error: "audio utterance was empty"}); err != nil {
+					return
+				}
+				if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 					return
 				}
 				continue
 			}
-			message, err := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, frame.Text, voice.TurnOptions{ResponsePacing: responsePacing}, func(session voice.Session) error {
-				return writeWorking(ctx, conn, &writeMu, frame.UtteranceID, session)
+			state, stateErr := call.State(ctx)
+			if stateErr != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, completed.utteranceID, "", voice.Message{}, stateErr); err != nil {
+					return
+				}
+				continue
+			}
+			turn, _, startErr := h.turns.start(callID, completed.utteranceID, audioTurnFingerprint(completed), state.VoiceSessionID, func(turn *cachedTurn) {
+				h.runAudioTurn(turn, completed, responsePacing)
 			})
-			cancel()
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, frame.Text, message, err); err != nil {
+			if startErr != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, completed.utteranceID, "", voice.Message{}, startErr); err != nil {
+					return
+				}
+				continue
+			}
+			if err := streamCachedTurn(ctx, conn, &writeMu, turn, resume); err != nil {
+				return
+			}
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+				return
+			}
+		case "utterance":
+			utteranceID := strings.TrimSpace(frame.UtteranceID)
+			if utteranceID == "" || strings.TrimSpace(frame.Text) == "" {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, "", voice.Message{}, errors.New("utterance requires an id and text")); err != nil {
+					return
+				}
+				continue
+			}
+			state, stateErr := call.State(ctx)
+			if stateErr != nil {
+				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
+					return
+				}
+				continue
+			}
+			turn, _, startErr := h.turns.start(callID, utteranceID, textTurnFingerprint(frame.Text), state.VoiceSessionID, func(turn *cachedTurn) {
+				h.runTextTurn(turn, frame.Text, responsePacing)
+			})
+			if startErr != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, frame.Text, voice.Message{}, startErr); err != nil {
+					return
+				}
+				continue
+			}
+			if err := streamCachedTurn(ctx, conn, &writeMu, turn, resume); err != nil {
+				return
+			}
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 				return
 			}
 		default:
@@ -738,42 +813,6 @@ func (h *Handler) serveBindDevice(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(bindDeviceResponse{Protocol: protocolVersion, Binding: binding})
 }
 
-func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, responsePacing voice.ResponsePacing) error {
-	if len(audio.pcm) == 0 {
-		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: "audio utterance was empty"}); err != nil {
-			return err
-		}
-		return writeReady(ctx, conn, writeMu, call, h.Backend, h.Updates)
-	}
-	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: audio.utteranceID, State: "transcribing"}); err != nil {
-		return err
-	}
-	transcript, err := h.Backend.TranscribeVoice(ctx, audio.format, audio.pcm, voice.TranscriptionHints{Languages: audio.languages})
-	if err != nil {
-		if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: err.Error()}); writeErr != nil {
-			return writeErr
-		}
-		return writeReady(ctx, conn, writeMu, call, h.Backend, h.Updates)
-	}
-	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "transcript", UtteranceID: audio.utteranceID, Transcript: transcript}); err != nil {
-		return err
-	}
-	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: audio.utteranceID, State: "processing"}); err != nil {
-		return err
-	}
-	delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-	state, stateErr := call.State(delegationCtx)
-	if stateErr != nil {
-		cancel()
-		return writeResult(ctx, conn, writeMu, call, h.Backend, h.Updates, audio.utteranceID, transcript, voice.Message{}, stateErr)
-	}
-	message, callErr := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, transcript, voice.TurnOptions{ResponsePacing: responsePacing}, func(session voice.Session) error {
-		return writeWorking(ctx, conn, writeMu, audio.utteranceID, session)
-	})
-	cancel()
-	return writeResult(ctx, conn, writeMu, call, h.Backend, h.Updates, audio.utteranceID, transcript, message, callErr)
-}
-
 func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload []byte) error {
 	if incoming == nil {
 		return fmt.Errorf("binary audio arrived without audio_start")
@@ -854,15 +893,6 @@ func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 		return fmt.Errorf("TTS returned an odd PCM16 byte count")
 	}
 	return writeFrame(ctx, conn, writeMu, serverFrame{Type: "tts_end", UtteranceID: utteranceID})
-}
-
-func writeWorking(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, utteranceID string, session voice.Session) error {
-	return writeFrame(ctx, conn, writeMu, serverFrame{
-		Type:        "state",
-		UtteranceID: utteranceID,
-		State:       "working",
-		WorkingOn:   &session,
-	})
 }
 
 func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend, updates androidUpdateSource) error {

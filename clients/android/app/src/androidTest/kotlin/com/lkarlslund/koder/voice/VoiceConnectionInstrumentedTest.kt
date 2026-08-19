@@ -6,7 +6,7 @@ import mockwebserver3.MockWebServer
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-	import okio.ByteString
+import okio.ByteString
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -16,6 +16,8 @@ import org.junit.runner.RunWith
 import java.net.InetAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+	import java.util.concurrent.CopyOnWriteArrayList
+	import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class VoiceConnectionInstrumentedTest {
@@ -142,4 +144,98 @@ class VoiceConnectionInstrumentedTest {
 		assertEquals("Phone work", voiceTitle)
 		assertEquals("detailed", responsePacing)
     }
+
+	@Test
+	fun reconnectReplaysPendingTurnWithResumeCursor() {
+		val firstReady = CountDownLatch(1)
+		val firstAudio = CountDownLatch(1)
+		val replayReceived = CountDownLatch(1)
+		val completed = CountDownLatch(1)
+		val utteranceIds = CopyOnWriteArrayList<String>()
+		val deliveredAudio = CopyOnWriteArrayList<Long>()
+		val assistantMessages = AtomicInteger()
+
+		server.enqueue(
+			MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+				override fun onOpen(webSocket: WebSocket, response: Response) {
+					webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+				}
+
+				override fun onMessage(webSocket: WebSocket, text: String) {
+					val message = JSONObject(text)
+					if (message.getString("type") != "utterance") return
+					val id = message.getString("utterance_id")
+					utteranceIds += id
+					webSocket.send("""{"type":"message","protocol":"voice.v1","utterance_id":"$id","message":{"spoken_text":"Still working."}}""")
+					webSocket.send("""{"type":"tts_start","protocol":"voice.v1","utterance_id":"$id","audio_format":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1}}""")
+					webSocket.send(ByteString.of(*outputAudio(0)))
+					check(firstAudio.await(2, TimeUnit.SECONDS))
+					webSocket.cancel()
+				}
+
+				override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+					webSocket.close(code, reason)
+				}
+			}).build(),
+		)
+		server.enqueue(
+			MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+				override fun onOpen(webSocket: WebSocket, response: Response) {
+					webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+				}
+
+				override fun onMessage(webSocket: WebSocket, text: String) {
+					val message = JSONObject(text)
+					if (message.getString("type") != "utterance") return
+					val id = message.getString("utterance_id")
+					utteranceIds += id
+					replayReceived.countDown()
+					webSocket.send("""{"type":"tts_start","protocol":"voice.v1","utterance_id":"$id","audio_format":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1}}""")
+					webSocket.send(ByteString.of(*outputAudio(0))) // Defensive duplicate.
+					webSocket.send(ByteString.of(*outputAudio(1)))
+					webSocket.send("""{"type":"tts_end","protocol":"voice.v1","utterance_id":"$id"}""")
+				}
+
+				override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+					webSocket.close(code, reason)
+				}
+			}).build(),
+		)
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+
+		VoiceConnection(object : VoiceConnection.Listener {
+			override fun onConnected() = Unit
+			override fun onFrame(frame: VoiceServerFrame) {
+				if (frame.type == "ready") firstReady.countDown()
+				if (frame.type == "message") assistantMessages.incrementAndGet()
+				if (frame.type == "tts_end") completed.countDown()
+			}
+			override fun onAudioFrame(frame: VoiceAudioFrame) {
+				deliveredAudio += frame.sequence
+				if (frame.sequence == 0L) firstAudio.countDown()
+			}
+			override fun onDisconnected(reason: String) = Unit
+		}).use { connection ->
+			connection.connect(server.url("/").toString(), "")
+			assertTrue("initial socket was not ready", firstReady.await(5, TimeUnit.SECONDS))
+			connection.sendUtterance("keep this turn alive")
+			assertTrue("pending turn was not replayed", replayReceived.await(8, TimeUnit.SECONDS))
+			assertTrue("resumed turn did not complete", completed.await(5, TimeUnit.SECONDS))
+			assertEquals(listOf(0L, 1L), deliveredAudio.toList())
+			assertEquals(1, assistantMessages.get())
+			assertEquals(2, utteranceIds.size)
+			assertEquals(utteranceIds[0], utteranceIds[1])
+		}
+
+		server.takeRequest(5, TimeUnit.SECONDS)
+		val resumed = server.takeRequest(5, TimeUnit.SECONDS)
+		val target = resumed?.target.orEmpty()
+		assertTrue(target.contains("resume_utterance_id="))
+		assertTrue(target.contains("resume_message=true"))
+		assertTrue(target.contains("resume_output_sequence=1"))
+	}
+
+	private fun outputAudio(sequence: Long): ByteArray = VoiceProtocol.encodeAudio(
+		VoiceAudioFrame(VoiceAudioFrameKind.OUTPUT_PCM, 0, sequence, byteArrayOf((sequence + 1).toByte(), 0)),
+	)
 }
