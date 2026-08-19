@@ -29,3 +29,34 @@ func TestCallLeaseAllowsExactlyOneActiveCall(t *testing.T) {
 		t.Fatal("lease remained active after release")
 	}
 }
+
+func TestCallLeaseReconnectReplacesSameOwner(t *testing.T) {
+	lease := NewCallLease()
+	oldRelease, oldReplaced, err := lease.AcquireConnection("call-1", "voice-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRelease, newReplaced, err := lease.AcquireConnection("call-1", "voice-1")
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	select {
+	case <-oldReplaced:
+	default:
+		t.Fatal("previous connection was not notified of replacement")
+	}
+	select {
+	case <-newReplaced:
+		t.Fatal("new connection was incorrectly marked replaced")
+	default:
+	}
+
+	oldRelease()
+	if active, ok := lease.Snapshot(); !ok || active.CallID != "call-1" {
+		t.Fatalf("old release cleared replacement: %#v, %v", active, ok)
+	}
+	newRelease()
+	if _, ok := lease.Snapshot(); ok {
+		t.Fatal("lease remained active after replacement release")
+	}
+}

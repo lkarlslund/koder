@@ -175,7 +175,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	release, err := h.Lease.Acquire(callID, voiceSession.ID)
+	release, replaced, err := h.Lease.AcquireConnection(callID, voiceSession.ID)
 	if err != nil {
 		if err == voice.ErrCallActive {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -191,6 +191,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(readLimit)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
+	go func() {
+		select {
+		case <-replaced:
+			_ = conn.Close(websocket.StatusGoingAway, "reconnected")
+		case <-connectionDone:
+		}
+	}()
 
 	ctx := r.Context()
 	call := voice.NewCall(h.Backend, voiceSession.ID)
