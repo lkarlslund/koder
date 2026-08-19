@@ -31,6 +31,10 @@ class VoiceSessionClient(
 		request(server, token, "/voice/v1/sessions/$sessionId", VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback, "PATCH")
 	}
 
+	fun delete(server: String, token: String, sessionId: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(server, token, "/voice/v1/sessions/$sessionId", null, VoiceProtocol::parseHome, callback, "DELETE")
+	}
+
     fun serverInfo(server: String, token: String, callback: (Result<ServerInfo>) -> Unit) {
         val startedAt = System.nanoTime()
 	        request(server, token, "/voice/v1/server-info", null, VoiceProtocol::parseServerInfo, callback = { result ->
@@ -56,6 +60,7 @@ class VoiceSessionClient(
 					when (method) {
 						"POST" -> post(requireNotNull(body).toRequestBody(JSON))
 						"PATCH" -> patch(requireNotNull(body).toRequestBody(JSON))
+						"DELETE" -> delete()
 					}
                 }
                 .build()

@@ -104,6 +104,16 @@ func (f *fakeBackend) RenameVoiceSession(_ context.Context, sessionID, title str
 	return voice.Session{}, fmt.Errorf("voice session not found")
 }
 
+func (f *fakeBackend) DeleteVoiceSession(_ context.Context, sessionID string) error {
+	for index := range f.voiceChats {
+		if f.voiceChats[index].ID == sessionID {
+			f.voiceChats = append(f.voiceChats[:index], f.voiceChats[index+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("voice session not found")
+}
+
 func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
 	return voice.AudioConfig{
 		Input:               voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 16000, Channels: 1},
@@ -429,6 +439,29 @@ func TestHandlerRenamesVoiceSession(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || body.VoiceSession == nil || body.VoiceSession.Title != "Family" {
 		t.Fatalf("rename response status=%d body=%#v", response.StatusCode, body)
+	}
+}
+
+func TestHandlerDeletesVoiceSession(t *testing.T) {
+	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Old"}, {ID: "voice-2", Title: "Keep"}}}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodDelete, server.URL+"/voice/v1/sessions/voice-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body sessionsResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(body.VoiceSessions) != 1 || body.VoiceSessions[0].ID != "voice-2" {
+		t.Fatalf("delete response status=%d body=%#v", response.StatusCode, body)
 	}
 }
 

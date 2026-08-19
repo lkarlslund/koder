@@ -525,9 +525,25 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodPatch {
-		w.Header().Set("Allow", http.MethodPatch)
+	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodPatch+", "+http.MethodDelete)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := h.Backend.DeleteVoiceSession(r.Context(), sessionID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		sessions, err := h.Backend.ListVoiceChats(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSessions: sessions})
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)

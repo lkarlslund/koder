@@ -69,6 +69,7 @@ type VoiceSessionBackend interface {
 	EnsureVoiceSession(context.Context, string) (Session, error)
 	CreateVoiceSession(context.Context, string) (Session, error)
 	RenameVoiceSession(context.Context, string, string) (Session, error)
+	DeleteVoiceSession(context.Context, string) error
 	RunVoiceTurn(context.Context, string, string, func(Session) error) (Message, error)
 }
 

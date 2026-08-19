@@ -259,6 +259,18 @@ func (c *Controller) RenameVoiceSession(ctx context.Context, sessionID, title st
 	return session, nil
 }
 
+// DeleteVoiceSession removes an idle durable voice chat after verifying its kind.
+func (c *Controller) DeleteVoiceSession(ctx context.Context, sessionID string) error {
+	session, err := c.EnsureVoiceSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	if err := c.DeleteSession(ctx, id.ID(session.ID)); err != nil {
+		return fmt.Errorf("delete voice session: %w", err)
+	}
+	return nil
+}
+
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
 // native client reconnecting to an existing voice conversation.
 func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, beforeID string, limit int) (voice.TranscriptPage, error) {

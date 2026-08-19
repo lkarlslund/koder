@@ -779,9 +779,29 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun showVoiceSessionMenu(anchor: View, session: VoiceSession) {
 		PopupMenu(this, anchor).apply {
 			menu.add("Rename")
-			setOnMenuItemClickListener { showRenameVoiceSessionDialog(session); true }
+			menu.add("Delete")
+			setOnMenuItemClickListener {
+				when (it.title.toString()) {
+					"Rename" -> showRenameVoiceSessionDialog(session)
+					"Delete" -> showDeleteVoiceSessionDialog(session)
+				}
+				true
+			}
 			show()
 		}
+	}
+
+	private fun showDeleteVoiceSessionDialog(session: VoiceSession) {
+		AlertDialog.Builder(this)
+			.setTitle("Delete conversation?")
+			.setMessage("${session.title.ifBlank { "This conversation" }} and its transcript will be permanently deleted.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Delete") { _, _ ->
+				sessionClient.delete(settings.server, settings.token, session.id) { result ->
+					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }) }
+				}
+			}
+			.show()
 	}
 
 	private fun showRenameVoiceSessionDialog(session: VoiceSession) {
