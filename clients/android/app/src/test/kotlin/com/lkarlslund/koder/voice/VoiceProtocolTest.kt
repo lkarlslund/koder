@@ -8,6 +8,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceProtocolTest {
+	@Test
+	fun deliberatePresentationTakesOverWithoutOpeningTranscript() {
+		val payload = checkNotNull(javaClass.getResourceAsStream("/presentation.json"))
+			.bufferedReader()
+			.use { it.readText() }
+		val frame = VoiceProtocol.parse(payload)
+		val presentation = requireNotNull(frame.message).parts.last()
+		assertTrue(presentation.isPresentation)
+		assertEquals("Appointment", presentation.title)
+		assertEquals(
+			ConversationSurface.PRESENTATION,
+			conversationSurface(active = true, transcriptShown = false, presentationShown = true),
+		)
+		assertEquals(
+			ConversationSurface.TRANSCRIPT,
+			conversationSurface(active = true, transcriptShown = true, presentationShown = true),
+		)
+	}
+
     @Test
     fun decodesSharedGoMessageFixture() {
         val payload = checkNotNull(javaClass.getResourceAsStream("/message.json"))

@@ -119,8 +119,11 @@ conversation. Speech and typed input share the same server path.
 Android runs on-device Silero VAD, streams microphone PCM to Koder, plays
 Koder's streamed PCM reply, and displays text, images, and generic MIME
 attachments. Koder—not Android—calls the configured remote STT and TTS
-endpoints. Generic authenticated files are downloaded to a cache-only content
-URI before opening in another Android app.
+endpoints. While voice is active, ordinary transcript text stays hidden. A
+deliberate visual response automatically opens a separate presentation panel;
+closing it returns to the voice-active screen without exposing the transcript.
+Generic authenticated files are downloaded to a cache-only content URI before
+opening in another Android app.
 
 See `../../docs/voice-architecture.md` for the as-built design and
 `../../protocol/voice/v1/README.md` for the wire contract.

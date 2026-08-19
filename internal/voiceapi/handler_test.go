@@ -153,6 +153,17 @@ func TestSharedProtocolFixturesDecode(t *testing.T) {
 	if message.Protocol != protocolVersion || message.Type != "message" || message.Message == nil || len(message.Message.Parts) == 0 {
 		t.Fatalf("message fixture = %#v", message)
 	}
+	presentationData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "presentation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var presentation serverFrame
+	if err := json.Unmarshal(presentationData, &presentation); err != nil {
+		t.Fatal(err)
+	}
+	if presentation.Message == nil || len(presentation.Message.Parts) != 2 || presentation.Message.Parts[1].Metadata["presentation"] != "true" {
+		t.Fatalf("presentation fixture = %#v", presentation)
+	}
 	workingData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "working.json"))
 	if err != nil {
 		t.Fatal(err)

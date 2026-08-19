@@ -46,6 +46,7 @@ import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
+import com.lkarlslund.koder.voice.ConversationSurface
 import com.lkarlslund.koder.voice.ServerInfo
 import com.lkarlslund.koder.voice.VOICE_PROTOCOL
 import com.lkarlslund.koder.voice.VoiceHome
@@ -54,12 +55,14 @@ import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
+import com.lkarlslund.koder.voice.conversationSurface
 import java.io.File
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import org.json.JSONTokener
 import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
@@ -88,6 +91,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var feedPlaceholder: View? = null
     private var typedMessage: EditText? = null
 	private var activePanel: View? = null
+	private var presentationPanel: View? = null
+	private var presentationFeed: LinearLayout? = null
+	private var presentationShown = false
 	private var composerView: View? = null
 	private var pauseButton: Button? = null
 	private var transcriptButton: Button? = null
@@ -176,11 +182,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val parts = message.parts.ifEmpty {
                 listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
 			}
-			if (parts.any { it.mimeType !in DISPLAYABLE_TEXT_TYPES }) {
-				transcriptShown = true
-				updateConversationMode(null)
+			val (visualParts, transcriptParts) = parts.partition {
+				it.isPresentation || it.uri.isNotBlank() || it.mimeType !in DISPLAYABLE_TEXT_TYPES
 			}
-			parts.forEach(::addPart)
+			if (visualParts.isNotEmpty()) {
+				presentationFeed?.removeAllViews()
+				visualParts.forEach(::addPresentationPart)
+				presentationShown = true
+				transcriptShown = false
+			}
+			transcriptParts.forEach(::addPart)
+			updateConversationMode(null)
         }
     }
 
@@ -754,6 +766,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         clearCallViews()
         pendingSession = session
 		transcriptShown = false
+		presentationShown = false
 		renderedHistorySession = ""
         val root = column()
         val heading = LinearLayout(this).apply {
@@ -837,6 +850,28 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		root.addView(activePanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+		presentationFeed = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(0, dp(4), 0, dp(8))
+		}
+		presentationPanel = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			visibility = View.GONE
+			addView(LinearLayout(this@MainActivity).apply {
+				orientation = LinearLayout.HORIZONTAL
+				gravity = Gravity.CENTER_VERTICAL
+				addView(title("Shown by Koder").apply { textSize = 22f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+				addView(Button(this@MainActivity).apply {
+					text = "Close"
+					isAllCaps = false
+					contentDescription = "Close presentation"
+					setOnClickListener { presentationShown = false; updateConversationMode(null) }
+				})
+			}, matchWrap())
+			addView(ScrollView(this@MainActivity).apply { addView(presentationFeed, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+		}
+		root.addView(presentationPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
         feed = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -894,10 +929,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			text = if (active) "Pause" else "Resume"
 			contentDescription = if (active) "Pause voice conversation" else "Resume voice conversation"
 		}
-		val showTranscript = !active || transcriptShown
-		activePanel?.visibility = if (active && !transcriptShown) View.VISIBLE else View.GONE
-		feedScroll?.visibility = if (showTranscript) View.VISIBLE else View.GONE
-		composerView?.visibility = if (showTranscript) View.VISIBLE else View.GONE
+		val surface = conversationSurface(active, transcriptShown, presentationShown)
+		activePanel?.visibility = if (surface == ConversationSurface.ACTIVE) View.VISIBLE else View.GONE
+		presentationPanel?.visibility = if (surface == ConversationSurface.PRESENTATION) View.VISIBLE else View.GONE
+		feedScroll?.visibility = if (surface == ConversationSurface.TRANSCRIPT) View.VISIBLE else View.GONE
+		composerView?.visibility = if (surface == ConversationSurface.TRANSCRIPT) View.VISIBLE else View.GONE
 		transcriptButton?.apply {
 			visibility = if (active) View.VISIBLE else View.GONE
 			text = if (transcriptShown) "Hide transcript" else "Show transcript"
@@ -947,51 +983,101 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
     }
 
-    private fun addImage(part: VoicePart) {
-        val feed = feed ?: return
-        removeFeedPlaceholder()
-        val card = card()
-        val title = helper(part.name.ifBlank { part.alt.ifBlank { part.mimeType } })
-        val image = ImageView(this).apply {
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            minimumHeight = dp(120)
-            contentDescription = part.alt
-        }
-        card.addView(title, matchWrap())
-        card.addView(image, matchWrap())
-        feed.addView(card, spaced(top = 5, bottom = 5))
-        if (part.url.isBlank()) {
-            title.text = "${title.text} · no image URL"
-        } else {
-            controller.loadBytes(part.url) { bytes, error ->
-                runOnUiThread {
-                    val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-                    if (bitmap != null) image.setImageBitmap(bitmap)
-                    else title.text = "${title.text} · ${error ?: "invalid image"}"
-                }
-            }
-        }
+	private fun addPresentationPart(part: VoicePart) {
+		when {
+			part.mimeType.startsWith("image/") -> addImage(part, presentationFeed)
+			part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addInlinePresentation(part)
+			else -> addGenericPart(part, presentationFeed)
+		}
+	}
+
+	private fun addInlinePresentation(part: VoicePart) {
+		val target = presentationFeed ?: return
+		val shown = when (part.mimeType) {
+			"text/markdown" -> renderPresentationMarkdown(part.text)
+			else -> part.text
+		}
+		val card = card()
+		val heading = part.title.ifBlank { part.name }.ifBlank { "Details" }
+		card.addView(label(heading), matchWrap())
+		card.addView(body(shown).apply {
+			if (part.mimeType == "text/markdown") typeface = Typeface.MONOSPACE
+			setTextIsSelectable(true)
+			contentDescription = "Koder presentation"
+		}, spaced(top = 8))
+		target.addView(card, spaced(top = 6, bottom = 6))
+	}
+
+    private fun addImage(part: VoicePart, target: LinearLayout? = feed) {
+		val target = target ?: return
+		if (target === feed) removeFeedPlaceholder()
+		val card = card()
+		val title = helper(part.title.ifBlank { part.name }.ifBlank { part.alt.ifBlank { part.mimeType } })
+		val image = ImageView(this).apply {
+			adjustViewBounds = true
+			scaleType = ImageView.ScaleType.CENTER_INSIDE
+			minimumHeight = dp(120)
+			contentDescription = part.alt
+		}
+		card.addView(title, matchWrap())
+		card.addView(image, matchWrap())
+		target.addView(card, spaced(top = 5, bottom = 5))
+		if (part.url.isBlank()) {
+			title.text = "${title.text} · no image URL"
+		} else {
+			controller.loadBytes(part.url) { bytes, error ->
+				runOnUiThread {
+					val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+					if (bitmap != null) image.setImageBitmap(bitmap)
+					else title.text = "${title.text} · ${error ?: "invalid image"}"
+				}
+			}
+		}
+		scrollToBottom()
+    }
+
+    private fun addGenericPart(part: VoicePart, target: LinearLayout? = feed) {
+		val target = target ?: return
+		if (target === feed) removeFeedPlaceholder()
+		val text = buildString {
+			append(part.title.ifBlank { part.name }.ifBlank { "Koder attachment" })
+			append("\n")
+			append(part.alt.ifBlank { part.mimeType })
+			if (part.data != null) append("\n${formatGenericPresentationData(part)}")
+			if (part.url.isNotBlank()) append("\nOpen ${part.url}")
+		}
+		val card = card().apply {
+			addView(body(text), matchWrap())
+			if (part.url.isNotBlank()) setOnClickListener { downloadAndOpen(part) }
+		}
+		target.addView(card, spaced(top = 5, bottom = 5))
         scrollToBottom()
     }
 
-    private fun addGenericPart(part: VoicePart) {
-        val feed = feed ?: return
-        removeFeedPlaceholder()
-        val text = buildString {
-            append(part.name.ifBlank { "Koder attachment" })
-            append("\n")
-            append(part.alt.ifBlank { part.mimeType })
-            if (part.data != null) append("\n${part.data}")
-            if (part.url.isNotBlank()) append("\nOpen ${part.url}")
-        }
-        val card = card().apply {
-            addView(body(text), matchWrap())
-            if (part.url.isNotBlank()) setOnClickListener { downloadAndOpen(part) }
-        }
-        feed.addView(card, spaced(top = 5, bottom = 5))
-        scrollToBottom()
-    }
+	private fun formatGenericPresentationData(part: VoicePart): String {
+		val raw = part.data?.toString().orEmpty()
+		if (part.mimeType != "application/json") return raw
+		return runCatching {
+			when (val parsed = JSONTokener(raw).nextValue()) {
+				is org.json.JSONObject -> parsed.toString(2)
+				is org.json.JSONArray -> parsed.toString(2)
+				else -> parsed.toString()
+			}
+		}.getOrDefault(raw)
+	}
+
+	private fun renderPresentationMarkdown(markdown: String): String {
+		return markdown.lineSequence().mapNotNull { raw ->
+			var line = raw.trimEnd()
+			if (line.trim().matches(Regex("\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?"))) return@mapNotNull null
+			line = line.replace(Regex("^\\s{0,3}#{1,6}\\s+"), "")
+			line = line.replace(Regex("^\\s*[-*+]\\s+"), "• ")
+			if (line.count { it == '|' } >= 2) {
+				line = line.trim().trim('|').split('|').joinToString("    ") { it.trim() }
+			}
+			line.replace("**", "").replace("__", "").replace("`", "")
+		}.joinToString("\n").trim()
+	}
 
     private fun downloadAndOpen(part: VoicePart) {
         controller.loadBytes(part.url) { bytes, error ->
@@ -1108,6 +1194,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         feedPlaceholder = null
         typedMessage = null
 		activePanel = null
+		presentationPanel = null
+		presentationFeed = null
 		composerView = null
 		pauseButton = null
 		transcriptButton = null

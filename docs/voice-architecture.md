@@ -63,9 +63,17 @@ promoted in the Web UI.
 Delegation waits for the target chat's sealed response. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
-The Voice role returns one to three short spoken sentences after tool work.
-Tool results and offered artifacts remain in the durable voice timeline and
-can also be surfaced as generic visual parts.
+The Voice role returns one or two short, plain conversational sentences after
+tool work. Its final response explicitly overrides the shared document-format
+guidance: Markdown, headings, lists, tables, code, link syntax, and raw URLs do
+not belong in speech. The server also strips accidental formatting before TTS
+and before sending the primary text part to Android.
+
+When the user asks to see something, or visual structure is materially useful,
+the voice chat deliberately calls the voice-only `present` tool. Tool results
+and offered artifacts remain in the durable voice timeline and can also be
+surfaced as generic visual parts. The tool's own description contains the
+mechanics; the role prompt only defines the generic conversational behavior.
 
 ## Server boundaries
 
@@ -190,6 +198,14 @@ generic attachment card for everything else. Same-origin artifacts are fetched
 with the bearer credential; generic files are copied into a cache-only
 `FileProvider` URI before another Android app is allowed to read them. Unknown
 MIME types remain usable instead of invalidating the message.
+
+An inline part created by `present` carries `metadata.presentation = "true"`.
+While voice is active, Android switches from the quiet voice surface to a
+separate presentation surface automatically. The spoken response remains in
+the hidden conversation history; showing a table, image, or attachment does
+not reveal the transcript. Closing the presentation returns to the voice
+surface, while the existing Show transcript control remains an explicit user
+choice.
 
 Koder only exposes artifacts already surfaced by a delegated tool result.
 Artifact URLs share the voice bearer boundary and cannot read arbitrary paths.

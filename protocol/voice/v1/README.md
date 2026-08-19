@@ -208,6 +208,14 @@ resource reference; clients must retain a generic fallback for unknown MIME
 types. Relative URIs resolve against the Koder HTTP origin. Send the bearer
 token only to the same origin.
 
+`spoken_text` and the primary `text/plain` part contain conversational speech,
+not Markdown or document formatting. A deliberate inline visual uses
+`metadata.presentation = "true"`; artifact parts with a `uri` are also visual.
+When a voice-active client normally hides the transcript, receiving either
+kind must open a separate presentation surface without making the transcript
+visible. A user can close that surface independently or explicitly open the
+transcript.
+
 ## Reconnect and compatibility
 
 Clients reconnect with the same `call_id` and `voice_session_id`, then wait for

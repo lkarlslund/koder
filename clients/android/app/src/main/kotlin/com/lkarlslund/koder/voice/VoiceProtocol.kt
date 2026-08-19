@@ -26,7 +26,17 @@ data class VoicePart(
 	val text: String get() = data as? String ?: ""
 	val url: String get() = uri
 	val name: String get() = metadata["name"].orEmpty()
+	val title: String get() = metadata["title"].orEmpty()
 	val alt: String get() = metadata["alt"].orEmpty()
+	val isPresentation: Boolean get() = metadata["presentation"] == "true"
+}
+
+enum class ConversationSurface { ACTIVE, PRESENTATION, TRANSCRIPT }
+
+fun conversationSurface(active: Boolean, transcriptShown: Boolean, presentationShown: Boolean): ConversationSurface = when {
+	!active || transcriptShown -> ConversationSurface.TRANSCRIPT
+	presentationShown -> ConversationSurface.PRESENTATION
+	else -> ConversationSurface.ACTIVE
 }
 
 data class VoiceDelegation(
