@@ -33,6 +33,7 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -423,6 +424,27 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		content.addView(speechAutomaticRow(), spaced(bottom = 8))
 		SpeechLanguages.all.forEach { language -> content.addView(speechLanguageRow(language), spaced(bottom = 8)) }
 		content.addView(helper("Language choices apply the next time a conversation connects. Multiple choices are recognition hints because compatible speech services accept only one hard language setting."), spaced(top = 3, bottom = 24))
+
+		content.addView(title("Voice detection").apply { textSize = 24f }, matchWrap())
+		val sensitivityValue = helper("Sensitivity · ${settings.vadSensitivityPercent}%")
+		content.addView(body("Increase this if your voice is missed. Reduce it when background noise starts conversations."), spaced(top = 6, bottom = 10))
+		content.addView(sensitivityValue, matchWrap())
+		content.addView(SeekBar(this).apply {
+			max = 40
+			progress = settings.vadSensitivityPercent - 35
+			contentDescription = "Voice detection sensitivity"
+			setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+				override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+					if (!fromUser) return
+					val value = progress + 35
+					sensitivityValue.text = "Sensitivity · $value%"
+					settings = settings.copy(vadSensitivityPercent = value)
+					secureSettings.saveVadSensitivity(value)
+				}
+				override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+			})
+		}, spaced(bottom = 24))
 
         content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
         content.addView(body("Choose what the active Koder voice conversation may ask this phone to do. Disabled groups disappear from Koder's available tools. Actions that change something or contact a person are confirmed here first."), spaced(top = 6, bottom = 14))
@@ -1098,7 +1120,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun startCall() {
         val session = pendingSession ?: return
-		controller.start(settings.server, settings.token, session.id, settings.speechLanguages)
+		controller.start(settings.server, settings.token, session.id, settings.speechLanguages, settings.vadSensitivityPercent)
     }
 
     private fun addPart(part: VoicePart) {

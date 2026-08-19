@@ -107,7 +107,13 @@ class CallController(
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
 
-    fun start(server: String, token: String, voiceSessionId: String = "", languages: Set<String> = emptySet()) {
+    fun start(
+		server: String,
+		token: String,
+		voiceSessionId: String = "",
+		languages: Set<String> = emptySet(),
+		vadSensitivityPercent: Int = 50,
+	) {
         if (running) end()
         running = true
         serverReady = false
@@ -117,6 +123,13 @@ class CallController(
 		connectedToken = token
 			speechLanguages = languages.toSet()
 			microphoneMuted = false
+		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
+		endpoint.configure(EndpointConfig(
+			sampleRate = endpointSampleRate,
+			frameSamples = endpointFrameSamples,
+			startThreshold = startThreshold,
+			endThreshold = (startThreshold - 0.15f).coerceAtLeast(0.1f),
+		))
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))

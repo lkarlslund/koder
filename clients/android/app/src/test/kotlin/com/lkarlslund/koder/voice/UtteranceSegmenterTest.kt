@@ -110,6 +110,17 @@ class UtteranceSegmenterTest {
         assertEquals(1, detector.resetCount)
     }
 
+	@Test
+	fun pipelineCanApplyNewSensitivity() {
+		val detector = FakeDetector(ArrayDeque(listOf(0.6f, 0.6f)))
+		val pipeline = VadEndpointPipeline(detector, UtteranceSegmenter(config))
+		pipeline.configure(config.copy(startThreshold = 0.7f, endThreshold = 0.5f))
+
+		assertTrue(pipeline.accept(frame(1)).isEmpty())
+		assertTrue(pipeline.accept(frame(2)).isEmpty())
+		assertEquals(1, detector.resetCount)
+	}
+
     private fun startedSegmenter(): UtteranceSegmenter = UtteranceSegmenter(config).also {
         it.accept(frame(1), probability(0.9f))
         it.accept(frame(2), probability(0.9f))

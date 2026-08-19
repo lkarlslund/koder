@@ -128,13 +128,21 @@ class UtteranceSegmenter(private val config: EndpointConfig = EndpointConfig()) 
 /** Runs model inference and endpointing as one serial audio-stage operation. */
 class VadEndpointPipeline(
     private val detector: VoiceActivityDetector,
-    private val segmenter: UtteranceSegmenter = UtteranceSegmenter(
+	segmenter: UtteranceSegmenter = UtteranceSegmenter(
         EndpointConfig(
             sampleRate = detector.sampleRate,
             frameSamples = detector.frameSamples,
         ),
     ),
 ) : AutoCloseable {
+	private var segmenter = segmenter
+
+	fun configure(config: EndpointConfig) {
+		require(config.sampleRate == detector.sampleRate && config.frameSamples == detector.frameSamples)
+		detector.reset()
+		segmenter = UtteranceSegmenter(config)
+	}
+
     fun accept(samples: ShortArray): List<UtteranceEvent> =
         segmenter.accept(samples, detector.evaluate(samples))
 
