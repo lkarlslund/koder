@@ -214,11 +214,12 @@ object VoiceProtocol {
         .apply { if (sessionId.isNotBlank()) put("session_id", sessionId) }
         .toString()
 
-    fun audioStart(id: String, format: VoiceAudioFormat): String = JSONObject()
+    fun audioStart(id: String, format: VoiceAudioFormat, languages: Collection<String> = emptyList()): String = JSONObject()
         .put("type", "audio_start")
         .put("protocol", VOICE_PROTOCOL)
         .put("utterance_id", id)
         .put("audio_format", format.toJSON())
+		.apply { if (languages.isNotEmpty()) put("languages", JSONArray(languages.sorted())) }
         .toString()
 
     fun audioCommit(id: String, sessionId: String = ""): String = JSONObject()

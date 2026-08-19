@@ -15,6 +15,7 @@ class SecureSettings(context: Context) {
         val server: String,
         val token: String,
         val enabledPhoneCapabilities: Set<String> = emptySet(),
+		val speechLanguages: Set<String> = emptySet(),
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -33,7 +34,15 @@ class SecureSettings(context: Context) {
             preferences.edit().remove(TOKEN).remove(TOKEN_IV).apply()
             ""
         }
-        return Values(server, token, preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet())
+		val languages = preferences.getStringSet(SPEECH_LANGUAGES, emptySet()).orEmpty()
+			.map(String::lowercase)
+			.filterTo(linkedSetOf()) { it in com.lkarlslund.koder.voice.SpeechLanguages.codes }
+		return Values(
+			server,
+			token,
+			preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet(),
+			languages,
+		)
     }
 
     fun save(server: String, token: String) {
@@ -52,6 +61,10 @@ class SecureSettings(context: Context) {
     fun savePhoneCapabilities(enabled: Set<String>) {
         preferences.edit().putStringSet(PHONE_CAPABILITIES, enabled.toSet()).apply()
     }
+
+	fun saveSpeechLanguages(languages: Set<String>) {
+		preferences.edit().putStringSet(SPEECH_LANGUAGES, languages.toSet()).apply()
+	}
 
     private fun decrypt(ciphertext: String, iv: String): String {
         if (ciphertext.isBlank() || iv.isBlank()) return ""
@@ -87,6 +100,7 @@ class SecureSettings(context: Context) {
         const val TOKEN = "token_encrypted"
         const val TOKEN_IV = "token_iv"
         const val PHONE_CAPABILITIES = "phone_capabilities"
+		const val SPEECH_LANGUAGES = "speech_languages"
         const val DEFAULT_SERVER = ""
     }
 }

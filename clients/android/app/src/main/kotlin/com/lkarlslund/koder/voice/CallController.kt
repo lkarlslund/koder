@@ -100,8 +100,9 @@ class CallController(
     private var inputSequence = 0L
     private var outputSequence = 0L
     @Volatile private var acceptingOutput = false
+	private var speechLanguages: Set<String> = emptySet()
 
-    fun start(server: String, token: String, voiceSessionId: String = "") {
+    fun start(server: String, token: String, voiceSessionId: String = "", languages: Set<String> = emptySet()) {
         if (running) end()
         running = true
         serverReady = false
@@ -109,6 +110,7 @@ class CallController(
         audioConfig = null
 		connectedServer = server
 		connectedToken = token
+		speechLanguages = languages.toSet()
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
@@ -305,7 +307,7 @@ class CallController(
 							acceptingOutput = false
 							playback.stop()
 						}
-                        utteranceId = connection.startAudio(format)
+						utteranceId = connection.startAudio(format, speechLanguages)
                         inputSequence = 0
                         event.frames.forEach(::sendPCM)
                         onMain { update(Stage.RECORDING, "Listening to you…") }

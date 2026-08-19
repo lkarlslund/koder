@@ -24,6 +24,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -48,6 +49,8 @@ import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.ConversationSurface
 import com.lkarlslund.koder.voice.ServerInfo
+import com.lkarlslund.koder.voice.SpeechLanguage
+import com.lkarlslund.koder.voice.SpeechLanguages
 import com.lkarlslund.koder.voice.VOICE_PROTOCOL
 import com.lkarlslund.koder.voice.VoiceHome
 import com.lkarlslund.koder.voice.VoiceMessage
@@ -94,6 +97,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var presentationPanel: View? = null
 	private var presentationFeed: LinearLayout? = null
 	private var presentationShown = false
+	private var speechAutomaticCheck: CheckBox? = null
 	private var composerView: View? = null
 	private var pauseButton: Button? = null
 	private var transcriptButton: Button? = null
@@ -238,7 +242,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     serverField.error = "Server address is required"
                     return@setOnClickListener
                 }
-                settings = SecureSettings.Values(serverAddress, tokenField.text.toString(), settings.enabledPhoneCapabilities)
+				settings = settings.copy(server = serverAddress, token = tokenField.text.toString())
                 secureSettings.save(settings.server, settings.token)
                 loadHome()
             }
@@ -393,12 +397,49 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             text = "Edit connection"; isAllCaps = false; setOnClickListener { showSetup() }
         }, spaced(top = 8, bottom = 24))
 
+		content.addView(title("Speech recognition").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Automatic can recognize any language. Select one language for the strongest recognition hint, or several to focus automatic detection on languages you actually speak."), spaced(top = 6, bottom = 12))
+		content.addView(speechAutomaticRow(), spaced(bottom = 8))
+		SpeechLanguages.all.forEach { language -> content.addView(speechLanguageRow(language), spaced(bottom = 8)) }
+		content.addView(helper("Language choices apply the next time a conversation connects. Multiple choices are recognition hints because compatible speech services accept only one hard language setting."), spaced(top = 3, bottom = 24))
+
         content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
         content.addView(body("Choose what the active Koder voice conversation may ask this phone to do. Disabled groups disappear from Koder's available tools. Actions that change something or contact a person are confirmed here first."), spaced(top = 6, bottom = 14))
         PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
         content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
         showScrollable(content)
     }
+
+	private fun speechAutomaticRow() = CheckBox(this).apply {
+		speechAutomaticCheck = this
+		text = "Automatic (all languages)"
+		contentDescription = "Use automatic speech language detection"
+		isChecked = settings.speechLanguages.isEmpty()
+		setPadding(dp(12), dp(10), dp(12), dp(10))
+		background = cardBackground()
+		setOnCheckedChangeListener { _, checked ->
+			if (checked && settings.speechLanguages.isNotEmpty()) updateSpeechLanguages(emptySet(), refresh = true)
+			else if (!checked && settings.speechLanguages.isEmpty()) isChecked = true
+		}
+	}
+
+	private fun speechLanguageRow(language: SpeechLanguage) = CheckBox(this).apply {
+		text = "${language.name} (${language.code})"
+		contentDescription = "Recognize ${language.name}"
+		isChecked = language.code in settings.speechLanguages
+		setPadding(dp(12), dp(10), dp(12), dp(10))
+		background = cardBackground()
+		setOnCheckedChangeListener { _, checked ->
+			val selected = if (checked) settings.speechLanguages + language.code else settings.speechLanguages - language.code
+			updateSpeechLanguages(selected)
+		}
+	}
+
+	private fun updateSpeechLanguages(languages: Set<String>, refresh: Boolean = false) {
+		secureSettings.saveSpeechLanguages(languages)
+		settings = settings.copy(speechLanguages = languages)
+		if (refresh) showSettings() else speechAutomaticCheck?.isChecked = languages.isEmpty()
+	}
 
     private fun phoneCapabilityRow(capability: PhoneCapability) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -972,7 +1013,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun startCall() {
         val session = pendingSession ?: return
-        controller.start(settings.server, settings.token, session.id)
+		controller.start(settings.server, settings.token, session.id, settings.speechLanguages)
     }
 
     private fun addPart(part: VoicePart) {
@@ -1196,6 +1237,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		activePanel = null
 		presentationPanel = null
 		presentationFeed = null
+		speechAutomaticCheck = null
 		composerView = null
 		pauseButton = null
 		transcriptButton = null

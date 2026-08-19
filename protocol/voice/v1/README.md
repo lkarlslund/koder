@@ -52,8 +52,8 @@ are PCM envelopes described below.
   ID restores semantic automatic selection.
 - `utterance` with unique `utterance_id`, final `text`, and optional
   `session_id`: submit typed or already-transcribed input.
-- `audio_start` with unique `utterance_id` and the exact advertised
-  `audio_format`: begin one endpointed utterance.
+- `audio_start` with unique `utterance_id`, the exact advertised
+  `audio_format`, and optional `languages`: begin one endpointed utterance.
 - `audio_commit` with matching `utterance_id` and optional `session_id`: finish
   audio and start STT/routing.
 - `audio_cancel`: discard the current audio utterance.
@@ -61,13 +61,20 @@ are PCM envelopes described below.
 Only one audio utterance may be open. Selecting a work or voice session cancels
 any server-side partial audio.
 
+`languages` is a sorted list of up to eight lowercase ISO 639-1 codes selected
+by this client. Omit it for server-configured or unrestricted automatic
+detection. One value becomes the STT service's hard language hint; multiple
+values keep detection automatic and provide the selected languages as
+recognition context. This reflects the OpenAI-compatible transcription API,
+which has one `language` field rather than a native allow-list.
+
 Examples:
 
 ```json
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
 {"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
-{"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1}}
+{"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"languages":["da","en"]}
 {"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}
 ```
 

@@ -170,6 +170,13 @@ key. Reconnect uses a stable call ID for the logical call and exponential
 backoff. An in-flight utterance is not automatically replayed, preventing
 duplicate delegated work.
 
+Speech-language preference belongs to the phone rather than the durable voice
+chat or server. Android can leave detection automatic, select one language for
+a hard STT hint, or select several expected languages. The latter are sent as
+recognition context because the OpenAI-compatible API exposes only one hard
+`language` value. The preference applies to every utterance on the next
+connection and is validated as bounded ISO 639-1 codes at the server boundary.
+
 ## Generic presentations
 
 The voice protocol does not enumerate calendar, email, diff, screenshot, or

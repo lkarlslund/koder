@@ -75,7 +75,7 @@ func transcriptionHints(configured string, requested []string) (language, prompt
 		return requested[0], ""
 	}
 	if len(requested) > 1 {
-		return "", "Expected spoken languages: " + strings.Join(requested, ", ") + ". Transcribe the speech in the language spoken."
+		return "", "The speaker will use only these languages: " + strings.Join(requested, ", ") + ". Do not identify the speech as another language. Transcribe it in the language spoken."
 	}
 	return transcriptionLanguage(configured), ""
 }

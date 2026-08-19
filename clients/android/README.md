@@ -116,6 +116,11 @@ The persistent user concept is a conversation, not a phone call. Returning to
 the home screen pauses the live voice connection without ending or deleting its
 conversation. Speech and typed input share the same server path.
 
+Settings also contains the phone's speech-language preference. Leave it on
+Automatic for unrestricted detection, choose one language for the strongest
+hint, or choose several languages you actually speak to bias detection away
+from unrelated languages. Changes apply on the next conversation connection.
+
 Android runs on-device Silero VAD, streams microphone PCM to Koder, plays
 Koder's streamed PCM reply, and displays text, images, and generic MIME
 attachments. Koder—not Android—calls the configured remote STT and TTS

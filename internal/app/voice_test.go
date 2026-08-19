@@ -109,7 +109,7 @@ func TestTranscriptionHintsUseHardSingleAndPromptedMultipleLanguages(t *testing.
 	}{
 		{name: "server default", configured: "da", language: "da"},
 		{name: "single selection", configured: "auto", requested: []string{"en"}, language: "en"},
-		{name: "multiple selection", configured: "de", requested: []string{"da", "en"}, prompt: "Expected spoken languages: da, en. Transcribe the speech in the language spoken."},
+		{name: "multiple selection", configured: "de", requested: []string{"da", "en"}, prompt: "The speaker will use only these languages: da, en. Do not identify the speech as another language. Transcribe it in the language spoken."},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			language, prompt := transcriptionHints(test.configured, test.requested)

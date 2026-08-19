@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.swipeDown
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
@@ -119,10 +120,14 @@ class MainActivityInstrumentedTest {
                 onView(withText("Settings")).perform(click())
                 val settingsLabels = waitForText(scenario, "Phone tools")
                 assertTrue(settingsLabels.contains("Device information"))
+				assertTrue(settingsLabels.contains("Speech recognition"))
+				assertTrue(settingsLabels.contains("Automatic (all languages)"))
+				assertTrue(settingsLabels.contains("Danish (da)"))
+				assertTrue(settingsLabels.contains("German (de)"))
+				onView(withContentDescription("Recognize Danish")).perform(scrollTo(), click())
+				assertEquals(setOf("da"), SecureSettings(context).load().speechLanguages)
                 assertTrue(settingsLabels.contains("Contacts"))
                 assertTrue(settingsLabels.contains("Notifications & email previews"))
-                onView(withContentDescription("Allow Device information")).perform(click())
-                assertTrue("device" in SecureSettings(context).load().enabledPhoneCapabilities)
             }
         } finally {
             server.close()

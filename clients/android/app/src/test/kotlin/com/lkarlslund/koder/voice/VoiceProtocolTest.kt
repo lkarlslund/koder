@@ -136,9 +136,12 @@ class VoiceProtocolTest {
 	@Test
 	fun encodesAudioLifecycle() {
 		val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
-		val start = JSONObject(VoiceProtocol.audioStart("utterance-1", format))
+		val expected = checkNotNull(javaClass.getResourceAsStream("/audio_start.json"))
+			.bufferedReader().use { JSONObject(it.readText()) }
+		val start = JSONObject(VoiceProtocol.audioStart("utterance-audio-1", format, setOf("en", "da")))
 		assertEquals("audio_start", start.getString("type"))
 		assertEquals(16_000, start.getJSONObject("audio_format").getInt("sample_rate"))
+		assertEquals(expected.toString(), start.toString())
 		val commit = JSONObject(VoiceProtocol.audioCommit("utterance-1", "session-1"))
 		assertEquals("audio_commit", commit.getString("type"))
 		assertEquals("session-1", commit.getString("session_id"))

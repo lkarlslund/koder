@@ -139,9 +139,9 @@ class VoiceConnection(
         return id
     }
 
-	fun startAudio(format: VoiceAudioFormat): String {
+	fun startAudio(format: VoiceAudioFormat, languages: Collection<String> = emptyList()): String {
 		val id = UUID.randomUUID().toString()
-		check(socket?.send(VoiceProtocol.audioStart(id, format)) == true) {
+		check(socket?.send(VoiceProtocol.audioStart(id, format, languages)) == true) {
 			"Voice connection is not open"
 		}
 		return id

@@ -1,0 +1,1 @@
+{"type":"audio_start","protocol":"voice.v1","utterance_id":"utterance-audio-1","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"languages":["da","en"]}

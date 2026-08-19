@@ -37,7 +37,11 @@ class PhoneDeviceConnectionInstrumentedTest {
                                 .put("arguments", JSONObject().put("query", "Steen")).toString(),
                         )
                     }
-                    "device_tool_result" -> { response = frame; resultReceived.countDown() }
+					"device_tool_result" -> {
+						response = frame
+						webSocket.close(1000, "test complete")
+						resultReceived.countDown()
+					}
                 }
             }
         }).build())

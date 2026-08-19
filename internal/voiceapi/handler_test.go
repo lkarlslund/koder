@@ -134,6 +134,17 @@ func (f *fakeBackend) StreamVoiceSpeech(_ context.Context, text string, consume 
 }
 
 func TestSharedProtocolFixturesDecode(t *testing.T) {
+	audioStartData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "audio_start.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audioStart clientFrame
+	if err := json.Unmarshal(audioStartData, &audioStart); err != nil {
+		t.Fatal(err)
+	}
+	if audioStart.Type != "audio_start" || !slices.Equal(audioStart.Languages, []string{"da", "en"}) {
+		t.Fatalf("audio_start fixture = %#v", audioStart)
+	}
 	utteranceData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "utterance.json"))
 	if err != nil {
 		t.Fatal(err)
