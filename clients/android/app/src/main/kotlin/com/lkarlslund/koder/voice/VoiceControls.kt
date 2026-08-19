@@ -8,3 +8,12 @@ fun primaryVoiceControlLabel(stage: CallController.Stage?, currentlyActive: Bool
 	null -> if (currentlyActive) "Pause" else "Resume"
 	else -> "Pause"
 }
+
+fun reconnectStatus(reason: String): String = when {
+	reason.contains("HTTP 401", ignoreCase = true) || reason.contains("unauthorized", ignoreCase = true) ->
+		"Authorization failed · check Settings"
+	reason.contains("HTTP 404", ignoreCase = true) -> "Voice endpoint unavailable · reconnecting"
+	reason.contains("HTTP 409", ignoreCase = true) || reason.contains("busy", ignoreCase = true) ->
+		"Conversation is busy · reconnecting"
+	else -> "Reconnecting · " + reason.substringBefore(" (HTTP").take(72).ifBlank { "connection lost" }
+}

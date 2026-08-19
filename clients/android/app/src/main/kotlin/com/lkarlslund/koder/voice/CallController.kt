@@ -64,7 +64,7 @@ class CallController(
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
             microphone.stop()
-            if (running) update(Stage.CONNECTING, "Reconnecting · $reason")
+	            if (running) update(Stage.CONNECTING, reconnectStatus(reason))
         }
     })
     private val telecom = TelecomVoiceCall(context, object : TelecomVoiceCall.Listener {
