@@ -103,6 +103,7 @@ type SpeechBackend interface {
 type VoiceSessionBackend interface {
 	ListVoiceChats(context.Context) ([]Session, error)
 	EnsureVoiceSession(context.Context, string) (Session, error)
+	CreateVoiceSession(context.Context, string) (Session, error)
 	RecordVoiceExchange(context.Context, string, string, Message) error
 }
 
@@ -224,6 +225,24 @@ func (c *Call) SelectVoiceSession(ctx context.Context, sessionID string) (Messag
 	}
 	c.voiceSessionID = session.ID
 	return textMessage("Using voice chat " + session.Title + "."), nil
+}
+
+// CreateVoiceSession creates and selects a durable coordination transcript for
+// this call.
+func (c *Call) CreateVoiceSession(ctx context.Context, title string) (Session, error) {
+	backend, ok := c.backend.(VoiceSessionBackend)
+	if !ok {
+		return Session{}, fmt.Errorf("voice session backend is unavailable")
+	}
+	session, err := backend.CreateVoiceSession(ctx, strings.TrimSpace(title))
+	if err != nil {
+		return Session{}, err
+	}
+	if strings.TrimSpace(session.ID) == "" {
+		return Session{}, fmt.Errorf("voice backend created a voice session without an id")
+	}
+	c.voiceSessionID = session.ID
+	return session, nil
 }
 
 // HandleText routes or delegates one final user utterance.

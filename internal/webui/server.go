@@ -1040,16 +1040,6 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"session_id": session.ID, "chat_id": chatRecord.ID}, nil
-	case "new_voice_chat":
-		var in struct {
-			Title string `json:"title"`
-		}
-		_ = decodeParams(params, &in)
-		session, chatRecord, err := s.controller.CreateVoiceChat(ctx, in.Title)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"session_id": session.ID, "chat_id": chatRecord.ID}, nil
 	case "close_quick_chat":
 		var in struct {
 			SessionID    id.ID `json:"session_id"`

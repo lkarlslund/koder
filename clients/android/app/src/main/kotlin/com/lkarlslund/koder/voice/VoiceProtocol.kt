@@ -170,6 +170,12 @@ object VoiceProtocol {
         .put("voice_session_id", sessionId)
         .toString()
 
+	fun createVoiceSession(title: String): String = JSONObject()
+		.put("type", "create_voice_session")
+		.put("protocol", VOICE_PROTOCOL)
+		.put("title", title.trim())
+		.toString()
+
     fun parse(payload: String): VoiceServerFrame {
         val root = JSONObject(payload)
         val protocol = root.optString("protocol")

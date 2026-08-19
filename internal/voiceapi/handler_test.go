@@ -22,6 +22,7 @@ type fakeBackend struct {
 	recordedVoiceSessionID string
 	recordedTranscript     string
 	artifact               voice.ArtifactFile
+	voiceChats             []voice.Session
 }
 
 func (f *fakeBackend) VoiceSessionArtifact(_, _ string) (voice.ArtifactFile, error) {
@@ -40,10 +41,25 @@ func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error
 }
 
 func (f *fakeBackend) ListVoiceChats(context.Context) ([]voice.Session, error) {
+	if f.voiceChats != nil {
+		return append([]voice.Session(nil), f.voiceChats...), nil
+	}
 	return []voice.Session{
 		{ID: "voice-1", Title: "Personal"},
 		{ID: "voice-2", Title: "Work"},
 	}, nil
+}
+
+func (f *fakeBackend) CreateVoiceSession(_ context.Context, title string) (voice.Session, error) {
+	if strings.TrimSpace(title) == "" {
+		title = "Voice Chat"
+	}
+	created := voice.Session{ID: "voice-created", Title: title}
+	if f.voiceChats == nil {
+		f.voiceChats, _ = f.ListVoiceChats(context.Background())
+	}
+	f.voiceChats = append(f.voiceChats, created)
+	return created, nil
 }
 
 func (f *fakeBackend) VoiceAudioConfig() voice.AudioConfig {
@@ -202,6 +218,31 @@ func TestHandlerSwitchesDurableVoiceChat(t *testing.T) {
 	ready = readType(t, ctx, conn, "ready")
 	if ready.CallState == nil || ready.CallState.VoiceSessionID != "voice-2" {
 		t.Fatalf("switched call state = %#v", ready.CallState)
+	}
+}
+
+func TestHandlerCreatesAndSelectsDurableVoiceChat(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, conn, "ready")
+	if err := writeClientFrame(ctx, conn, clientFrame{
+		Type: "create_voice_session", Protocol: protocolVersion, Title: "Phone work",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ready := readType(t, ctx, conn, "ready")
+	if ready.CallState == nil || ready.CallState.VoiceSessionID != "voice-created" {
+		t.Fatalf("created call state = %#v", ready.CallState)
+	}
+	if len(ready.CallState.VoiceSessions) != 3 || ready.CallState.VoiceSessions[2].Title != "Phone work" {
+		t.Fatalf("voice chats = %#v", ready.CallState.VoiceSessions)
 	}
 }
 

@@ -29,10 +29,12 @@ class VoiceConnectionInstrumentedTest {
     fun websocketHandshakeAndUtteranceMatchGoProtocol() {
         val clientReady = CountDownLatch(1)
         val serverReceivedUtterance = CountDownLatch(1)
+		val serverReceivedVoiceCreation = CountDownLatch(1)
 		val serverReceivedAudio = CountDownLatch(1)
 		val clientReceivedAudio = CountDownLatch(1)
         var receivedFrame: VoiceServerFrame? = null
         var utteranceText = ""
+		var voiceTitle = ""
 
         server.enqueue(
             MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
@@ -53,6 +55,10 @@ class VoiceConnectionInstrumentedTest {
                         utteranceText = message.getString("text")
                         serverReceivedUtterance.countDown()
                     }
+					if (message.getString("type") == "create_voice_session") {
+						voiceTitle = message.getString("title")
+						serverReceivedVoiceCreation.countDown()
+					}
                 }
 
 				override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -93,6 +99,8 @@ class VoiceConnectionInstrumentedTest {
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
             connection.sendUtterance("check the calendar")
             assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
+			connection.createVoiceSession("Phone work")
+			assertTrue("server did not receive voice-chat creation", serverReceivedVoiceCreation.await(5, TimeUnit.SECONDS))
 			val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
 			val utteranceId = connection.startAudio(format)
 			connection.sendAudio(0, byteArrayOf(1, 0, 2, 0))
@@ -106,5 +114,6 @@ class VoiceConnectionInstrumentedTest {
 		assertTrue(request?.target.orEmpty().contains("call_id="))
         assertEquals("ready", receivedFrame?.type)
         assertEquals("check the calendar", utteranceText)
+		assertEquals("Phone work", voiceTitle)
     }
 }

@@ -77,7 +77,7 @@ grant microphone, notification, and nearby-device permissions. Android Core
 Telecom then owns earpiece, speaker, wired headset, hold, and Bluetooth routing.
 
 The first selector chooses the durable voice chat whose transcript is being
-continued. Create additional voice chats in Koder's Web UI. The second selector
+continued; its adjacent New button creates and selects another one. The second selector
 chooses an ordinary work session or returns to automatic semantic routing.
 Speech and typed input share the same server path.
 

@@ -1036,7 +1036,7 @@
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
-        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, voiceChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -4869,7 +4869,7 @@
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
-          this.sessionTab = this.quickChatMode() ? 'chats' : 'sessions';
+          this.sessionTab = this.quickChatMode() ? 'chats' : (this.voiceChatMode() ? 'voice' : 'sessions');
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });
@@ -4897,6 +4897,12 @@
           };
         },
         sessionRows() {
+          return this.allSessionRows().filter(session => !this.isVoiceSession(session));
+        },
+        voiceSessionRows() {
+          return this.allSessionRows().filter(session => this.isVoiceSession(session));
+        },
+        allSessionRows() {
           if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
           return this.normalizeSessionState(this.state).sessions || this.sessionState.sessions || [];
         },
@@ -4918,7 +4924,7 @@
         beginHydratingSession(id) {
           id = String(id || '').trim();
           if (!id) return;
-          const session = [...this.sessionRows(), ...this.quickChatRows()].find(row => this.sessionID(row) === id) || {};
+          const session = [...this.allSessionRows(), ...this.quickChatRows()].find(row => this.sessionID(row) === id) || {};
           this.hydratingSession = {active: true, id, title: this.sessionTitle(session), error: ''};
           this.showSessions = false;
           this.closeSessionEditor();
@@ -4974,21 +4980,6 @@
             if (pendingTab && !pendingTab.closed) pendingTab.close();
             this.showToast(err.message || 'Quick Chat creation failed');
           }).finally(() => { this.quickChatCreating = false; });
-        },
-        newVoiceChat() {
-          if (this.voiceChatCreating) return;
-          this.voiceChatCreating = true;
-          this.rpc('new_voice_chat', {title: 'Voice Chat'}).then(result => {
-            const sessionID = String(result?.session_id || '').trim();
-            if (!sessionID) throw new Error('Voice Chat creation returned no session');
-            this.beginHydratingSession(sessionID);
-            this.allowSessionURLSync = true;
-            return this.rpc('switch_session', {session_id: sessionID}).then(state => {
-              this.applyState(state, {scrollToBottom: true});
-              this.closeSessionDialog();
-            });
-          }).catch(err => this.showToast(err.message || 'Voice Chat creation failed'))
-            .finally(() => { this.voiceChatCreating = false; });
         },
         closeQuickChat(id) {
           id = String(id || '').trim();

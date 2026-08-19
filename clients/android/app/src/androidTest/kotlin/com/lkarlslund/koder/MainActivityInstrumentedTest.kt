@@ -19,6 +19,7 @@ class MainActivityInstrumentedTest {
                 assertTrue(labels.contains("Koder voice"))
                 assertTrue(labels.contains("Start call"))
                 assertTrue(labels.contains("Automatic chat selection"))
+				assertTrue(labels.contains("New"))
                 assertTrue(labels.contains("Type to test without speech"))
                 assertTrue(labels.contains("Send"))
             }

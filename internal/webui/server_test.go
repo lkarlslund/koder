@@ -1651,11 +1651,15 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `x-show="workspaceSessionMode() && milestoneItems().length > 0"`) {
 		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
 	}
-	if !strings.Contains(fullPage, `rpc('new_voice_chat', {title: 'Voice Chat'})`) ||
-		!strings.Contains(fullPage, `voiceChatMode()`) ||
+	if !strings.Contains(fullPage, `voiceChatMode()`) ||
 		!strings.Contains(fullPage, `Voice coordination chat`) ||
-		!strings.Contains(fullPage, `title="New Voice Chat"`) {
-		t.Fatalf("expected durable Voice Chat creation and non-workspace rendering")
+		!strings.Contains(fullPage, `sessionRows().length`) ||
+		!strings.Contains(fullPage, `quickChatRows().length`) ||
+		!strings.Contains(fullPage, `voiceSessionRows().length`) ||
+		!strings.Contains(fullPage, `sessionTab === 'voice'`) ||
+		strings.Contains(fullPage, `newVoiceChat()`) ||
+		strings.Contains(fullPage, `new_voice_chat`) {
+		t.Fatalf("expected counted session tabs and voice-chat rendering without browser creation controls")
 	}
 	if !strings.Contains(fullPage, `class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'"`) ||
 		!strings.Contains(fullPage, `x-text="chatStatusLabel(chat)"`) ||
@@ -3336,58 +3340,6 @@ func TestWebSocketQuickChatCreationDoesNotChangeCurrentSelection(t *testing.T) {
 	}
 	if !closeResp.OK {
 		t.Fatalf("close quick chat failed: %s", closeResp.Error)
-	}
-}
-
-func TestWebSocketCreatesAndSelectsVoiceChat(t *testing.T) {
-	ctrl := newTestController(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"new_voice_chat","params":{"title":"Phone work"}}`)); err != nil {
-		t.Fatal(err)
-	}
-	msg := readRPCResponse(t, ctx, conn, 1)
-	var created struct {
-		OK     bool `json:"ok"`
-		Result struct {
-			SessionID id.ID `json:"session_id"`
-			ChatID    id.ID `json:"chat_id"`
-		} `json:"result"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(msg, &created); err != nil {
-		t.Fatal(err)
-	}
-	if !created.OK || created.Result.SessionID == "" || created.Result.ChatID == "" {
-		t.Fatalf("create voice chat: %#v", created)
-	}
-	request := fmt.Sprintf(`{"id":2,"method":"switch_session","params":{"session_id":"%s"}}`, created.Result.SessionID)
-	if err := conn.Write(ctx, websocket.MessageText, []byte(request)); err != nil {
-		t.Fatal(err)
-	}
-	msg = readRPCResponse(t, ctx, conn, 2)
-	var selected struct {
-		OK     bool `json:"ok"`
-		Result struct {
-			Session      domain.Session `json:"session"`
-			ActiveChatID id.ID          `json:"active_chat_id"`
-		} `json:"result"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(msg, &selected); err != nil {
-		t.Fatal(err)
-	}
-	if !selected.OK || selected.Result.Session.Kind != domain.SessionKindVoice || selected.Result.ActiveChatID != created.Result.ChatID {
-		t.Fatalf("select voice chat: %#v", selected)
 	}
 }
 

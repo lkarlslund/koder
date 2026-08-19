@@ -31,6 +31,8 @@ are PCM envelopes described below.
 - `ping`: request `pong`.
 - `select_voice_session` with `voice_session_id`: switch the durable voice-chat
   transcript owned by the current live call.
+- `create_voice_session` with an optional `title`: create and select a durable
+  voice chat. Native clients own creation; the browser only lists voice chats.
 - `select_session` with `session_id`: select an ordinary work target. An empty
   ID restores semantic automatic selection.
 - `utterance` with unique `utterance_id`, final `text`, and optional
@@ -48,6 +50,7 @@ Examples:
 
 ```json
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
+{"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
 {"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1}}
 {"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}

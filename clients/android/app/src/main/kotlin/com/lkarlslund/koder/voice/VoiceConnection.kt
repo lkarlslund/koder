@@ -175,6 +175,12 @@ class VoiceConnection(
         }
     }
 
+	fun createVoiceSession(title: String) {
+		check(socket?.send(VoiceProtocol.createVoiceSession(title)) == true) {
+			"Voice connection is not open"
+		}
+	}
+
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) {
         val resolved = try {
             VoiceProtocol.resourceUrl(server, url)

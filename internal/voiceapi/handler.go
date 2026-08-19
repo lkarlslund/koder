@@ -50,6 +50,7 @@ type clientFrame struct {
 	Text           string             `json:"text,omitempty"`
 	SessionID      string             `json:"session_id,omitempty"`
 	VoiceSessionID string             `json:"voice_session_id,omitempty"`
+	Title          string             `json:"title,omitempty"`
 	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
 }
 
@@ -194,6 +195,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			audio = nil
 			message, err := call.SelectVoiceSession(ctx, frame.VoiceSessionID)
 			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, "", message, err); err != nil {
+				return
+			}
+		case "create_voice_session":
+			audio = nil
+			if _, err := call.CreateVoiceSession(ctx, frame.Title); err != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
+					return
+				}
+				continue
+			}
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend); err != nil {
 				return
 			}
 		case "audio_start":

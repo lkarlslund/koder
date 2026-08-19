@@ -353,6 +353,20 @@ func (c *Controller) EnsureVoiceSession(ctx context.Context, requestedID string)
 	return voice.Session{ID: string(newest.ID), Title: voiceSessionTitle(newest), LastMessage: newest.LastMessage, UpdatedAt: newest.UpdatedAt}, nil
 }
 
+// CreateVoiceSession creates a durable voice chat for a native voice client.
+func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voice.Session, error) {
+	session, _, err := c.CreateVoiceChat(ctx, strings.TrimSpace(title))
+	if err != nil {
+		return voice.Session{}, err
+	}
+	return voice.Session{
+		ID:          string(session.ID),
+		Title:       voiceSessionTitle(session),
+		LastMessage: session.LastMessage,
+		UpdatedAt:   session.UpdatedAt,
+	}, nil
+}
+
 // RecordVoiceExchange appends the human transcript and concise spoken result
 // to the durable voice chat without invoking its model.
 func (c *Controller) RecordVoiceExchange(ctx context.Context, voiceSessionID, transcript string, message voice.Message) error {

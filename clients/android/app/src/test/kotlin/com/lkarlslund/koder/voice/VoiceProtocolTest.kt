@@ -41,6 +41,9 @@ class VoiceProtocolTest {
         val selection = JSONObject(VoiceProtocol.selectVoiceSession("voice-1"))
         assertEquals("select_voice_session", selection.getString("type"))
         assertEquals("voice-1", selection.getString("voice_session_id"))
+		val creation = JSONObject(VoiceProtocol.createVoiceSession("Phone work"))
+		assertEquals("create_voice_session", creation.getString("type"))
+		assertEquals("Phone work", creation.getString("title"))
     }
 
 	@Test

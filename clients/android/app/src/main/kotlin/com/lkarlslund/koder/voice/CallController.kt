@@ -139,6 +139,17 @@ class CallController(
         }
     }
 
+	fun createVoiceSession(title: String) {
+		if (!running) return
+		cancelCapture()
+		try {
+			connection.createVoiceSession(title)
+			update(Stage.PROCESSING, "Creating voice chat…", "")
+		} catch (error: Exception) {
+			update(Stage.ERROR, error.message ?: "Could not create voice chat")
+		}
+	}
+
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) = connection.loadBytes(url, callback)
 
     private fun cancelCapture() {

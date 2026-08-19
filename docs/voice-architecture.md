@@ -17,8 +17,8 @@ There are three distinct objects:
 
 - A **voice chat** is a durable `SessionKindVoice` session with one
   `WorkflowRoleVoice` chat. It records final user transcripts and concise
-  assistant results. A user can create and inspect multiple voice chats in the
-  Web UI and switch among them during an Android call.
+  assistant results. A user creates and selects voice chats in Android, while
+  the Web UI lists them in a separate Voice Chats tab for inspection.
 - A **voice call** is one ephemeral authenticated WebSocket connection. Koder
   enforces one live call process-wide while allowing any number of durable
   voice chats.

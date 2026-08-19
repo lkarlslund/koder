@@ -3,6 +3,7 @@ package com.lkarlslund.koder
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -42,6 +43,7 @@ class MainActivity : Activity(), CallController.Listener {
     private lateinit var transcript: TextView
     private lateinit var sessionSpinner: Spinner
     private lateinit var voiceSessionSpinner: Spinner
+	private lateinit var newVoiceSessionButton: Button
     private lateinit var feed: LinearLayout
     private lateinit var feedScroll: ScrollView
     private lateinit var typedMessage: EditText
@@ -76,6 +78,7 @@ class MainActivity : Activity(), CallController.Listener {
             callButton.text = if (connected) "Hang up" else "Start call"
             server.isEnabled = !connected
             token.isEnabled = !connected
+			newVoiceSessionButton.isEnabled = connected
             updateSessions(snapshot.sessions, snapshot.activeSessionId)
             if (snapshot.voiceSessionId.isNotBlank()) selectedVoiceSessionId = snapshot.voiceSessionId
             updateVoiceSessions(snapshot.voiceSessions, snapshot.voiceSessionId)
@@ -138,7 +141,16 @@ class MainActivity : Activity(), CallController.Listener {
                 }
             }
         }
-        root.addView(voiceSessionSpinner, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
+		newVoiceSessionButton = Button(this).apply {
+			text = "New"
+			isEnabled = false
+			contentDescription = "Create voice chat"
+			setOnClickListener { showCreateVoiceSessionDialog() }
+		}
+		val voiceSessionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+		voiceSessionRow.addView(voiceSessionSpinner, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+		voiceSessionRow.addView(newVoiceSessionButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+		root.addView(voiceSessionRow, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
 
         status = TextView(this).apply {
             text = "Ready"
@@ -219,6 +231,21 @@ class MainActivity : Activity(), CallController.Listener {
         }
         controller.start(address, token.text.toString(), selectedVoiceSessionId)
     }
+
+	private fun showCreateVoiceSessionDialog() {
+		val title = EditText(this).apply {
+			hint = "Voice chat name"
+			setSingleLine()
+		}
+		AlertDialog.Builder(this)
+			.setTitle("New voice chat")
+			.setView(title)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Create") { _, _ ->
+				controller.createVoiceSession(title.text.toString().trim().ifBlank { "Voice Chat" })
+			}
+			.show()
+	}
 
     private fun updateSessions(next: List<VoiceSession>, activeId: String) {
         if (next == sessions && sessionSpinner.selectedItemPosition == next.indexOfFirst { it.id == activeId } + 1) return
