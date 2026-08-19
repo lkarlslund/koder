@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.max
@@ -22,6 +23,7 @@ class AndroidMicrophoneCapture : MicrophoneCapture {
     private val running = AtomicBoolean(false)
     private var record: AudioRecord? = null
     private var captureThread: Thread? = null
+	private var echoCanceler: AcousticEchoCanceler? = null
 
     @SuppressLint("MissingPermission")
     @Synchronized
@@ -46,6 +48,11 @@ class AndroidMicrophoneCapture : MicrophoneCapture {
             .setBufferSizeInBytes(max(minimum * 2, frameSamples * 2 * 4))
             .build()
         check(audioRecord.state == AudioRecord.STATE_INITIALIZED) { "Microphone initialization failed" }
+		echoCanceler = if (AcousticEchoCanceler.isAvailable()) {
+			runCatching { AcousticEchoCanceler.create(audioRecord.audioSessionId)?.apply { enabled = true } }.getOrNull()
+		} else {
+			null
+		}
         audioRecord.startRecording()
         record = audioRecord
         running.set(true)
@@ -79,7 +86,9 @@ class AndroidMicrophoneCapture : MicrophoneCapture {
         } catch (_: IllegalStateException) {
             // The recorder can already be stopped during audio-route changes.
         }
-        current?.release()
+		echoCanceler?.release()
+		echoCanceler = null
+		current?.release()
         captureThread = null
     }
 

@@ -181,6 +181,11 @@ class VoiceConnection(
 		}
 	}
 
+	@Synchronized
+	fun resumeVoiceSession(voiceSessionId: String) {
+		if (voiceSessionId.isNotBlank()) this.voiceSessionId = voiceSessionId.trim()
+	}
+
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) {
         val resolved = try {
             VoiceProtocol.resourceUrl(server, url)

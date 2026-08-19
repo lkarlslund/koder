@@ -48,6 +48,7 @@ import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
+import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -80,6 +81,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var feedScroll: ScrollView? = null
     private var feedPlaceholder: View? = null
     private var typedMessage: EditText? = null
+	private var activePanel: View? = null
+	private var composerView: View? = null
+	private var pauseButton: Button? = null
+	private var transcriptButton: Button? = null
+	private var transcriptShown = false
+	private var renderedHistorySession = ""
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
         pendingStart = false
@@ -123,8 +130,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             status?.text = snapshot.detail
             transcript?.apply {
                 text = snapshot.partialTranscript
-                visibility = if (snapshot.partialTranscript.isBlank()) View.GONE else View.VISIBLE
+				visibility = if (transcriptShown && snapshot.partialTranscript.isNotBlank()) View.VISIBLE else View.GONE
             }
+			if (snapshot.voiceSessionId.isNotBlank() && renderedHistorySession != snapshot.voiceSessionId) {
+				renderHistory(snapshot.voiceSessionId, snapshot.history)
+			}
+			updateConversationMode(snapshot.stage)
             if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
                 lastAppUpdate = snapshot.appUpdate
             }
@@ -136,9 +147,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     override fun onAssistantMessage(message: VoiceMessage) {
         runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
-            message.parts.ifEmpty {
+			val parts = message.parts.ifEmpty {
                 listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
-            }.forEach(::addPart)
+			}
+			if (parts.any { it.mimeType !in DISPLAYABLE_TEXT_TYPES }) {
+				transcriptShown = true
+				updateConversationMode(null)
+			}
+			parts.forEach(::addPart)
         }
     }
 
@@ -626,6 +642,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         screen = Screen.CHAT
         clearCallViews()
         pendingSession = session
+		transcriptShown = false
+		renderedHistorySession = ""
         val root = column()
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -656,6 +674,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     marginStart = dp(10)
                 },
             )
+			pauseButton = Button(this@MainActivity).apply {
+				text = "Pause"
+				isAllCaps = false
+				contentDescription = "Pause voice conversation"
+				setOnClickListener {
+					if (text == "Resume") requestCallStart() else controller.end()
+				}
+			}.also { addView(it) }
         }
         root.addView(heading, matchWrap())
         status = helper("Preparing conversation…").apply {
@@ -676,6 +702,29 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             gravity = Gravity.CENTER
         }
         root.addView(transcript, spaced(bottom = 4))
+
+		val modeActions = LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER
+			transcriptButton = Button(this@MainActivity).apply {
+				text = "Show transcript"
+				isAllCaps = false
+				setOnClickListener {
+					transcriptShown = !transcriptShown
+					updateConversationMode(null)
+				}
+			}.also { addView(it) }
+		}
+		root.addView(modeActions, matchWrap())
+
+		activePanel = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			gravity = Gravity.CENTER
+			addView(logo(), centeredSquare(88, bottom = 18))
+			addView(title("Voice is active").apply { gravity = Gravity.CENTER }, matchWrap())
+			addView(helper("Just speak — you can interrupt Koder at any time.").apply { gravity = Gravity.CENTER }, spaced(top = 7))
+		}
+		root.addView(activePanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         feed = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -718,10 +767,40 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 }
             }
         })
+		composerView = composer
         root.addView(composer, matchWrap())
         showContent(root)
         requestCallStart()
     }
+
+	private fun updateConversationMode(stage: CallController.Stage?) {
+		val active = when (stage) {
+			null -> pauseButton?.text != "Resume"
+			CallController.Stage.DISCONNECTED, CallController.Stage.ERROR -> false
+			else -> true
+		}
+		pauseButton?.apply {
+			text = if (active) "Pause" else "Resume"
+			contentDescription = if (active) "Pause voice conversation" else "Resume voice conversation"
+		}
+		val showTranscript = !active || transcriptShown
+		activePanel?.visibility = if (active && !transcriptShown) View.VISIBLE else View.GONE
+		feedScroll?.visibility = if (showTranscript) View.VISIBLE else View.GONE
+		composerView?.visibility = if (showTranscript) View.VISIBLE else View.GONE
+		transcriptButton?.apply {
+			visibility = if (active) View.VISIBLE else View.GONE
+			text = if (transcriptShown) "Hide transcript" else "Show transcript"
+		}
+	}
+
+	private fun renderHistory(voiceSessionId: String, history: List<VoiceTranscriptEntry>) {
+		renderedHistorySession = voiceSessionId
+		if (history.isEmpty()) return
+		feed?.removeAllViews()
+		feedPlaceholder = null
+		feed?.gravity = Gravity.NO_GRAVITY
+		history.forEach { entry -> addBubble(if (entry.role == "user") "You" else "Koder", entry.text) }
+	}
 
     private fun leaveChat() {
         pendingStart = false
@@ -911,6 +990,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         feedScroll = null
         feedPlaceholder = null
         typedMessage = null
+		activePanel = null
+		composerView = null
+		pauseButton = null
+		transcriptButton = null
     }
 
     internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {

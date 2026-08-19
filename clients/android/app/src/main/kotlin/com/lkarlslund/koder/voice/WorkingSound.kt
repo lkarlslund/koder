@@ -46,9 +46,9 @@ class AndroidWorkingSound : WorkingSound {
 	}
 
 	private companion object {
-		const val VOLUME_PERCENT = 18
-		const val PULSE_MILLIS = 90
-		const val INITIAL_DELAY_MILLIS = 800L
-		const val REPEAT_MILLIS = 2_600L
+		const val VOLUME_PERCENT = 65
+		const val PULSE_MILLIS = 120
+		const val INITIAL_DELAY_MILLIS = 550L
+		const val REPEAT_MILLIS = 2_100L
 	}
 }

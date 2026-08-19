@@ -34,10 +34,11 @@ class VoiceProtocolTest {
     @Test
     fun decodesAndSelectsDurableVoiceChatsSeparatelyFromTargets() {
         val frame = VoiceProtocol.parse(
-            """{"type":"ready","protocol":"voice.v1","call_state":{"voice_session_id":"voice-2","active_session_id":"work-1","sessions":[{"id":"work-1","title":"Laptop"}],"voice_sessions":[{"id":"voice-1","title":"Personal"},{"id":"voice-2","title":"Work"}]}}""",
+			"""{"type":"ready","protocol":"voice.v1","call_state":{"voice_session_id":"voice-2","active_session_id":"work-1","sessions":[{"id":"work-1","title":"Laptop"}],"voice_sessions":[{"id":"voice-1","title":"Personal"},{"id":"voice-2","title":"Work"}],"history":[{"id":"message-1","role":"user","text":"What happened?","created_at":"2026-08-19T12:00:00Z"}]}}""",
         )
         assertEquals("voice-2", frame.callState?.voiceSessionId)
         assertEquals(listOf("voice-1", "voice-2"), frame.callState?.voiceSessions?.map { it.id })
+		assertEquals("What happened?", frame.callState?.history?.single()?.text)
         val selection = JSONObject(VoiceProtocol.selectVoiceSession("voice-1"))
         assertEquals("select_voice_session", selection.getString("type"))
         assertEquals("voice-1", selection.getString("voice_session_id"))

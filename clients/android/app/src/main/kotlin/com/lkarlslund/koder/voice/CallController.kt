@@ -25,6 +25,7 @@ class CallController(
         val voiceSessions: List<VoiceSession> = emptyList(),
         val activeSessionId: String = "",
         val voiceSessionId: String = "",
+		val history: List<VoiceTranscriptEntry> = emptyList(),
         val appUpdate: AppUpdate? = null,
     )
 
@@ -183,7 +184,9 @@ class CallController(
                 voiceSessions = state.voiceSessions,
                 activeSessionId = state.activeSessionId,
                 voiceSessionId = state.voiceSessionId,
+				history = state.history,
             )
+			connection.resumeVoiceSession(state.voiceSessionId)
         }
         frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {
@@ -206,7 +209,6 @@ class CallController(
             "transcript" -> if (frame.transcript.isNotBlank()) listener.onUserMessage(frame.transcript)
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
-                microphone.stop()
                 val format = frame.audioFormat ?: audioConfig?.output
                 if (format == null) {
                     update(Stage.ERROR, "Server omitted the speech audio format")
@@ -215,11 +217,14 @@ class CallController(
                     acceptingOutput = true
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
+					audioConfig?.input?.let { startMicrophone(it, showListeningState = false) }
                 }
             }
             "tts_end" -> {
-                acceptingOutput = false
-                playback.finish { onMain { maybeListen(force = true) } }
+				if (acceptingOutput) {
+					acceptingOutput = false
+					playback.finish { onMain { maybeListen(force = true) } }
+				}
             }
             "error" -> {
                 acceptingOutput = false
@@ -251,6 +256,10 @@ class CallController(
 
     private fun resumeListening() {
         val format = audioConfig?.input ?: return
+		startMicrophone(format, showListeningState = true)
+	}
+
+	private fun startMicrophone(format: VoiceAudioFormat, showListeningState: Boolean) {
         if (format.sampleRate != endpointSampleRate || format.channels != 1 || format.encoding != "pcm_s16le") {
             update(Stage.ERROR, "Server microphone format is not supported by on-device VAD")
             return
@@ -258,7 +267,7 @@ class CallController(
         endpoint.reset()
         utteranceId = ""
         inputSequence = 0
-        update(Stage.LISTENING, "Listening · $audioEndpoint", "")
+		if (showListeningState) update(Stage.LISTENING, "Listening · $audioEndpoint", "")
         try {
             microphone.start(format, endpointFrameSamples, object : MicrophoneCapture.Listener {
                 override fun onFrame(samples: ShortArray) = processMicrophoneFrame(format, samples)
@@ -276,6 +285,10 @@ class CallController(
             for (event in endpoint.accept(samples)) {
                 when (event) {
                     is UtteranceEvent.Started -> {
+						if (acceptingOutput) {
+							acceptingOutput = false
+							playback.stop()
+						}
                         utteranceId = connection.startAudio(format)
                         inputSequence = 0
                         event.frames.forEach(::sendPCM)

@@ -42,11 +42,19 @@ data class VoiceMessage(
     val delegation: VoiceDelegation?,
 )
 
+data class VoiceTranscriptEntry(
+	val id: String,
+	val role: String,
+	val text: String,
+	val createdAt: Instant? = null,
+)
+
 data class VoiceCallState(
     val voiceSessionId: String,
     val activeSessionId: String,
     val sessions: List<VoiceSession>,
     val voiceSessions: List<VoiceSession> = emptyList(),
+	val history: List<VoiceTranscriptEntry> = emptyList(),
 )
 
 data class VoiceAudioFormat(
@@ -340,6 +348,16 @@ object VoiceProtocol {
         activeSessionId = optString("active_session_id"),
 		sessions = optJSONArray("sessions").mapObjects { it.toVoiceSession() },
 		voiceSessions = optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() },
+		history = optJSONArray("history").mapObjects { item ->
+			VoiceTranscriptEntry(
+				id = item.getString("id"),
+				role = item.getString("role"),
+				text = item.getString("text"),
+				createdAt = item.optString("created_at").takeIf(String::isNotBlank)?.let {
+					runCatching { Instant.parse(it) }.getOrNull()
+				},
+			)
+		},
     )
 
 	private fun JSONObject.toVoiceSession(): VoiceSession = VoiceSession(
