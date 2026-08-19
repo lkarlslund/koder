@@ -30,12 +30,14 @@ class VoiceConnectionInstrumentedTest {
     fun websocketHandshakeAndUtteranceMatchGoProtocol() {
         val clientReady = CountDownLatch(1)
         val serverReceivedUtterance = CountDownLatch(1)
+		val serverReceivedHistory = CountDownLatch(1)
 		val serverReceivedVoiceCreation = CountDownLatch(1)
 		val serverReceivedAudio = CountDownLatch(1)
 		val clientReceivedAudio = CountDownLatch(1)
         var receivedFrame: VoiceServerFrame? = null
         var utteranceText = ""
 		var voiceTitle = ""
+		var historyCursor = ""
 
         server.enqueue(
             MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
@@ -56,6 +58,10 @@ class VoiceConnectionInstrumentedTest {
                         utteranceText = message.getString("text")
                         serverReceivedUtterance.countDown()
                     }
+					if (message.getString("type") == "history") {
+						historyCursor = message.getString("before_id")
+						serverReceivedHistory.countDown()
+					}
 					if (message.getString("type") == "create_voice_session") {
 						voiceTitle = message.getString("title")
 						serverReceivedVoiceCreation.countDown()
@@ -99,7 +105,9 @@ class VoiceConnectionInstrumentedTest {
             connection.connect(server.url("/").toString(), "test-token")
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
             connection.sendUtterance("check the calendar")
-            assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
+			assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
+			connection.requestHistory("message-5")
+			assertTrue("server did not receive history cursor", serverReceivedHistory.await(5, TimeUnit.SECONDS))
 			connection.createVoiceSession("Phone work")
 			assertTrue("server did not receive voice-chat creation", serverReceivedVoiceCreation.await(5, TimeUnit.SECONDS))
 			val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
@@ -115,6 +123,7 @@ class VoiceConnectionInstrumentedTest {
 		assertTrue(request?.target.orEmpty().contains("call_id="))
         assertEquals("ready", receivedFrame?.type)
         assertEquals("check the calendar", utteranceText)
+		assertEquals("message-5", historyCursor)
 		assertEquals("Phone work", voiceTitle)
     }
 }

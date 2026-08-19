@@ -245,21 +245,39 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
 // native client reconnecting to an existing voice conversation.
 func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, beforeID string, limit int) (voice.TranscriptPage, error) {
-	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	owner, session, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true, false)
 	if err != nil {
 		return voice.TranscriptPage{}, err
 	}
 	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
 		return voice.TranscriptPage{}, fmt.Errorf("session %s is not a voice chat", session.ID)
 	}
-	if err := runtime.EnsureTimeline(ctx); err != nil {
-		return voice.TranscriptPage{}, err
-	}
 	if limit <= 0 || limit > 20 {
 		limit = 5
 	}
-	entries := make([]voice.TranscriptEntry, 0, limit)
-	for _, item := range runtime.SnapshotTimeline() {
+	cursor := id.ID(strings.TrimSpace(beforeID))
+	entries := make([]voice.TranscriptEntry, 0, limit*2)
+	hasMore := false
+	for {
+		page, err := owner.TimelinePage(ctx, chatRecord.ID, cursor, 32, false)
+		if err != nil {
+			return voice.TranscriptPage{}, err
+		}
+		pageEntries := voiceTranscriptEntries(page.Items)
+		entries = append(pageEntries, entries...)
+		hasMore = page.HasMore
+		if countTranscriptTurns(entries) >= limit || !page.HasMore || len(page.Items) == 0 {
+			break
+		}
+		cursor = page.Before
+	}
+	start := transcriptPageStart(entries, limit)
+	return voice.TranscriptPage{Entries: entries[start:], HasMore: start > 0 || hasMore}, nil
+}
+
+func voiceTranscriptEntries(items []domain.TimelineItem) []voice.TranscriptEntry {
+	entries := make([]voice.TranscriptEntry, 0, len(items))
+	for _, item := range items {
 		var role, text string
 		switch content := item.Content.(type) {
 		case domain.UserMessage:
@@ -267,29 +285,24 @@ func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, be
 		case domain.AssistantMessage:
 			role, text = "assistant", content.Text
 		}
-		text = strings.TrimSpace(text)
-		if text == "" {
+		if text = strings.TrimSpace(text); text == "" {
 			continue
 		}
 		entries = append(entries, voice.TranscriptEntry{
 			ID: string(item.ID), Role: role, Text: text, CreatedAt: item.CreatedAt,
 		})
 	}
-	end := len(entries)
-	if beforeID = strings.TrimSpace(beforeID); beforeID != "" {
-		end = -1
-		for index, entry := range entries {
-			if entry.ID == beforeID {
-				end = index
-				break
-			}
-		}
-		if end < 0 {
-			return voice.TranscriptPage{}, fmt.Errorf("voice history cursor %q was not found", beforeID)
+	return entries
+}
+
+func countTranscriptTurns(entries []voice.TranscriptEntry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.Role == "user" {
+			count++
 		}
 	}
-	start := transcriptPageStart(entries[:end], limit)
-	return voice.TranscriptPage{Entries: entries[start:end], HasMore: start > 0}, nil
+	return count
 }
 
 func transcriptPageStart(entries []voice.TranscriptEntry, turns int) int {

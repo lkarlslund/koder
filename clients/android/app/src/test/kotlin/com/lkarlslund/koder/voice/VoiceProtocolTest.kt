@@ -9,6 +9,21 @@ import org.junit.Test
 
 class VoiceProtocolTest {
 	@Test
+	fun decodesHistoryPageAndEncodesCursorRequest() {
+		val payload = checkNotNull(javaClass.getResourceAsStream("/history.json"))
+			.bufferedReader().use { it.readText() }
+		val frame = VoiceProtocol.parse(payload)
+		assertEquals("history", frame.type)
+		assertEquals(listOf("message-1", "message-2"), frame.history.map { it.id })
+		assertTrue(frame.historyHasMore)
+
+		val request = JSONObject(VoiceProtocol.history("message-1"))
+		assertEquals("history", request.getString("type"))
+		assertEquals("message-1", request.getString("before_id"))
+		assertEquals(5, request.getInt("limit"))
+	}
+
+	@Test
 	fun deliberatePresentationTakesOverWithoutOpeningTranscript() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/presentation.json"))
 			.bufferedReader()

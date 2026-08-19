@@ -183,6 +183,13 @@ class VoiceConnection(
 		}
 	}
 
+	fun requestHistory(beforeId: String, limit: Int = 5) {
+		require(beforeId.isNotBlank()) { "History cursor is required" }
+		check(socket?.send(VoiceProtocol.history(beforeId, limit)) == true) {
+			"Voice connection is not open"
+		}
+	}
+
 	@Synchronized
 	fun resumeVoiceSession(voiceSessionId: String) {
 		if (voiceSessionId.isNotBlank()) this.voiceSessionId = voiceSessionId.trim()

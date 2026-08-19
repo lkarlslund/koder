@@ -300,7 +300,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "history":
 			page, err := call.History(ctx, frame.BeforeID, frame.Limit)
 			if err != nil {
-				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history", Error: err.Error()}); writeErr != nil {
 					return
 				}
 				continue

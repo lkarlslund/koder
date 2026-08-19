@@ -65,6 +65,7 @@ data class VoiceCallState(
     val sessions: List<VoiceSession>,
     val voiceSessions: List<VoiceSession> = emptyList(),
 	val history: List<VoiceTranscriptEntry> = emptyList(),
+	val historyHasMore: Boolean = false,
 )
 
 data class VoiceAudioFormat(
@@ -149,6 +150,8 @@ data class VoiceServerFrame(
 	val audioConfig: VoiceAudioConfig? = null,
 	val audioFormat: VoiceAudioFormat? = null,
 	val transcript: String = "",
+	val history: List<VoiceTranscriptEntry> = emptyList(),
+	val historyHasMore: Boolean = false,
     val message: VoiceMessage? = null,
     val appUpdate: AppUpdate? = null,
     val error: String = "",
@@ -205,6 +208,13 @@ object VoiceProtocol {
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)
         .toString()
+
+	fun history(beforeId: String, limit: Int = 5): String = JSONObject()
+		.put("type", "history")
+		.put("protocol", VOICE_PROTOCOL)
+		.put("before_id", beforeId)
+		.put("limit", limit)
+		.toString()
 
     fun utterance(id: String, text: String, sessionId: String = ""): String = JSONObject()
         .put("type", "utterance")
@@ -300,6 +310,8 @@ object VoiceProtocol {
 			audioConfig = root.optJSONObject("audio_config")?.toAudioConfig(),
 			audioFormat = root.optJSONObject("audio_format")?.toAudioFormat(),
 			transcript = root.optString("transcript"),
+			history = root.optJSONArray("history").mapObjects { it.toTranscriptEntry() },
+			historyHasMore = root.optBoolean("has_more"),
             message = root.optJSONObject("message")?.toVoiceMessage(),
             appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
             error = root.optString("error"),
@@ -359,17 +371,18 @@ object VoiceProtocol {
         activeSessionId = optString("active_session_id"),
 		sessions = optJSONArray("sessions").mapObjects { it.toVoiceSession() },
 		voiceSessions = optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() },
-		history = optJSONArray("history").mapObjects { item ->
-			VoiceTranscriptEntry(
-				id = item.getString("id"),
-				role = item.getString("role"),
-				text = item.getString("text"),
-				createdAt = item.optString("created_at").takeIf(String::isNotBlank)?.let {
-					runCatching { Instant.parse(it) }.getOrNull()
-				},
-			)
-		},
+		history = optJSONArray("history").mapObjects { it.toTranscriptEntry() },
+		historyHasMore = optBoolean("history_has_more"),
     )
+
+	private fun JSONObject.toTranscriptEntry() = VoiceTranscriptEntry(
+		id = getString("id"),
+		role = getString("role"),
+		text = getString("text"),
+		createdAt = optString("created_at").takeIf(String::isNotBlank)?.let {
+			runCatching { Instant.parse(it) }.getOrNull()
+		},
+	)
 
 	private fun JSONObject.toVoiceSession(): VoiceSession = VoiceSession(
 		id = getString("id"),

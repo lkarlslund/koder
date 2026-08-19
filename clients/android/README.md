@@ -130,5 +130,10 @@ closing it returns to the voice-active screen without exposing the transcript.
 Generic authenticated files are downloaded to a cache-only content URI before
 opening in another Android app.
 
+Opening the transcript starts with the newest five conversational turns. The
+view follows new messages only while the user is already near the bottom. When
+the user scrolls to the top, Android loads and prepends five older turns while
+preserving the current reading position.
+
 See `../../docs/voice-architecture.md` for the as-built design and
 `../../protocol/voice/v1/README.md` for the wire contract.

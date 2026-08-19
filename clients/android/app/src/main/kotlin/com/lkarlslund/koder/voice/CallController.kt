@@ -31,6 +31,8 @@ class CallController(
         val activeSessionId: String = "",
         val voiceSessionId: String = "",
 		val history: List<VoiceTranscriptEntry> = emptyList(),
+		val historyHasMore: Boolean = false,
+		val historyLoading: Boolean = false,
         val appUpdate: AppUpdate? = null,
     )
 
@@ -38,6 +40,7 @@ class CallController(
         fun onSnapshot(snapshot: Snapshot)
         fun onUserMessage(text: String)
         fun onAssistantMessage(message: VoiceMessage)
+		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
     }
 
     private val appContext = context.applicationContext
@@ -135,6 +138,20 @@ class CallController(
         }
     }
 
+	fun loadOlderHistory() {
+		if (!running || snapshot.historyLoading || !snapshot.historyHasMore) return
+		val beforeId = snapshot.history.firstOrNull()?.id.orEmpty()
+		if (beforeId.isBlank()) return
+		snapshot = snapshot.copy(historyLoading = true)
+		publish()
+		try {
+			connection.requestHistory(beforeId)
+		} catch (error: Exception) {
+			snapshot = snapshot.copy(historyLoading = false)
+			publish()
+		}
+	}
+
     fun selectVoiceSession(sessionId: String) {
         if (!running || sessionId.isBlank() || sessionId == snapshot.voiceSessionId) return
         cancelCapture()
@@ -197,12 +214,21 @@ class CallController(
 
     private fun handleFrame(frame: VoiceServerFrame) {
         frame.callState?.let { state ->
+			val sameVoiceSession = state.voiceSessionId == snapshot.voiceSessionId
+			val mergedHistory = if (sameVoiceSession) {
+				mergeTranscriptHistory(snapshot.history, state.history)
+			} else {
+				state.history
+			}
+			val retainedOlderPage = sameVoiceSession && snapshot.history.firstOrNull()?.id != state.history.firstOrNull()?.id
             snapshot = snapshot.copy(
                 sessions = state.sessions,
                 voiceSessions = state.voiceSessions,
                 activeSessionId = state.activeSessionId,
                 voiceSessionId = state.voiceSessionId,
-				history = state.history,
+				history = mergedHistory,
+				historyHasMore = if (retainedOlderPage) snapshot.historyHasMore else state.historyHasMore,
+				historyLoading = false,
             )
 			connection.resumeVoiceSession(state.voiceSessionId)
         }
@@ -225,6 +251,22 @@ class CallController(
                 "speaking" -> update(Stage.SPEAKING, "Koder is speaking…", "")
             }
             "transcript" -> if (frame.transcript.isNotBlank()) listener.onUserMessage(frame.transcript)
+			"history" -> {
+				if (frame.error.isNotBlank()) {
+					snapshot = snapshot.copy(historyLoading = false, historyHasMore = false)
+					publish()
+					return
+				}
+				val known = snapshot.history.asSequence().map(VoiceTranscriptEntry::id).toHashSet()
+				val older = frame.history.filterNot { it.id in known }
+				snapshot = snapshot.copy(
+					history = mergeTranscriptHistory(older, snapshot.history),
+					historyHasMore = frame.historyHasMore,
+					historyLoading = false,
+				)
+				listener.onHistoryPage(older)
+				publish()
+			}
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
                 val format = frame.audioFormat ?: audioConfig?.output
@@ -247,6 +289,7 @@ class CallController(
             "error" -> {
                 acceptingOutput = false
                 playback.stop()
+				snapshot = snapshot.copy(historyLoading = false)
                 update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
             }
         }

@@ -97,6 +97,13 @@ Voice chats and their transcripts are normal selectable Web UI sessions. Voice
 and quick sessions use one chat; Android intentionally does not reproduce the
 browser workspace or planning UI.
 
+Transcript history uses the same indexed timeline-page storage path as the Web
+UI. A ready snapshot carries only the newest five complete user/assistant
+turns. Android requests older five-turn pages when the user reaches the top,
+prepends them without moving the visible content, and stops when `has_more` is
+false. Koder never hydrates an entire long transcript merely to serve a native
+history page.
+
 ## Android boundaries
 
 The client is Kotlin with programmatic native Views. `CallController` composes

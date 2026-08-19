@@ -57,6 +57,8 @@ are PCM envelopes described below.
 - `audio_commit` with matching `utterance_id` and optional `session_id`: finish
   audio and start STT/routing.
 - `audio_cancel`: discard the current audio utterance.
+- `history` with `before_id` and `limit`: request older durable voice-chat
+  turns. Native clients use a limit of five.
 
 Only one audio utterance may be open. Selecting a work or voice session cancels
 any server-side partial audio.
@@ -76,6 +78,7 @@ Examples:
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
 {"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"languages":["da","en"]}
 {"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}
+{"type":"history","protocol":"voice.v1","before_id":"oldest-visible-message-id","limit":5}
 ```
 
 ## Server text frames
@@ -86,6 +89,7 @@ Examples:
   utterance.
 - `transcript`: final server STT text.
 - `message`: concise result, generic parts, and optional delegation provenance.
+- `history`: chronological older transcript entries plus `has_more`.
 - `tts_start`: output audio format follows in binary frames.
 - `tts_end`: all output audio has been sent.
 - `error`: user-presentable failure. The connection normally remains usable and
@@ -95,6 +99,10 @@ Examples:
 `call_state.sessions` lists ordinary and quick work targets.
 `call_state.voice_sessions` lists durable voice chats. Session summaries carry
 an RFC 3339 `updated_at` timestamp and are ordered most recently used first.
+`call_state.history` contains only the newest five complete conversational
+turns, and `history_has_more` indicates whether the client can request an older
+page. A history cursor is the first visible transcript entry ID; pages remain
+chronological and do not normally split a user's utterance from its answer.
 `working` is emitted only immediately before work is delegated into another
 chat. Its `working_on` field contains that ordinary session's bounded summary.
 Clients may play a local waiting cue until a later state arrives; `speaking` is

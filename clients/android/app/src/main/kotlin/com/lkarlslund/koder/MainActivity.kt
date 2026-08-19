@@ -59,6 +59,7 @@ import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.conversationSurface
+import com.lkarlslund.koder.voice.isNearConversationBottom
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -102,7 +103,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var pauseButton: Button? = null
 	private var transcriptButton: Button? = null
 	private var transcriptShown = false
+	private var transcriptOpened = false
+	private var followConversationBottom = true
 	private var renderedHistorySession = ""
+	private val renderedHistoryIDs = linkedSetOf<String>()
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -199,6 +203,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			updateConversationMode(null)
         }
     }
+
+	override fun onHistoryPage(entries: List<VoiceTranscriptEntry>) {
+		runOnUiThread { prependHistory(entries) }
+	}
 
     private fun showSetup(error: String = "") {
         screen = Screen.SETUP
@@ -807,8 +815,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         clearCallViews()
         pendingSession = session
 		transcriptShown = false
+		transcriptOpened = false
+		followConversationBottom = true
 		presentationShown = false
 		renderedHistorySession = ""
+		renderedHistoryIDs.clear()
         val root = column()
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -921,6 +932,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         feedScroll = ScrollView(this).apply {
             isFillViewport = true
             addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+			setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+				val child = getChildAt(0)
+				followConversationBottom = child == null || isNearConversationBottom(child.height, scrollY, height, dp(48))
+				if (scrollY < oldScrollY && scrollY <= dp(24) && visibility == View.VISIBLE) controller.loadOlderHistory()
+			}
         }
         root.addView(feedScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -975,6 +991,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationPanel?.visibility = if (surface == ConversationSurface.PRESENTATION) View.VISIBLE else View.GONE
 		feedScroll?.visibility = if (surface == ConversationSurface.TRANSCRIPT) View.VISIBLE else View.GONE
 		composerView?.visibility = if (surface == ConversationSurface.TRANSCRIPT) View.VISIBLE else View.GONE
+		if (surface == ConversationSurface.TRANSCRIPT && !transcriptOpened) {
+			transcriptOpened = true
+			followConversationBottom = true
+			scrollToBottom(force = true)
+		}
 		transcriptButton?.apply {
 			visibility = if (active) View.VISIBLE else View.GONE
 			text = if (transcriptShown) "Hide transcript" else "Show transcript"
@@ -993,7 +1014,26 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		feed?.removeAllViews()
 		feedPlaceholder = null
 		feed?.gravity = Gravity.NO_GRAVITY
-		history.forEach { entry -> addBubble(if (entry.role == "user") "You" else "Koder", entry.text) }
+		renderedHistoryIDs.clear()
+		history.forEach { entry ->
+			renderedHistoryIDs += entry.id
+			addBubble(if (entry.role == "user") "You" else "Koder", entry.text)
+		}
+	}
+
+	private fun prependHistory(entries: List<VoiceTranscriptEntry>) {
+		val feed = feed ?: return
+		val scroll = feedScroll ?: return
+		val older = entries.filter { it.id !in renderedHistoryIDs }
+		if (older.isEmpty()) return
+		removeFeedPlaceholder()
+		val previousHeight = feed.height
+		val previousY = scroll.scrollY
+		older.forEachIndexed { index, entry ->
+			renderedHistoryIDs += entry.id
+			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text), index, bubbleLayout(entry.role == "user"))
+		}
+		scroll.post { scroll.scrollTo(0, previousY + feed.height - previousHeight) }
 	}
 
     private fun leaveChat() {
@@ -1156,8 +1196,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val feed = feed ?: return@runOnUiThread
         if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
         removeFeedPlaceholder()
-        val fromUser = who == "You"
-        val bubble = LinearLayout(this).apply {
+		feed.addView(conversationBubble(who, text), bubbleLayout(who == "You"))
+		scrollToBottom()
+    }
+
+	private fun conversationBubble(who: String, text: String): View {
+		val fromUser = who == "You"
+		return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(11))
             background = GradientDrawable().apply {
@@ -1175,13 +1220,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }, matchWrap())
             addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
         }
-        feed.addView(bubble, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = if (fromUser) Gravity.END else Gravity.START
-            topMargin = dp(6)
-            bottomMargin = dp(6)
-        })
-        scrollToBottom()
-    }
+	}
+
+	private fun bubbleLayout(fromUser: Boolean) = LinearLayout.LayoutParams(
+		ViewGroup.LayoutParams.WRAP_CONTENT,
+		ViewGroup.LayoutParams.WRAP_CONTENT,
+	).apply {
+		gravity = if (fromUser) Gravity.END else Gravity.START
+		topMargin = dp(6)
+		bottomMargin = dp(6)
+	}
 
     private fun conversationPlaceholder() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -1223,7 +1271,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         elevation = dp(1).toFloat()
     }
 
-    private fun scrollToBottom() = feedScroll?.post { feedScroll?.fullScroll(View.FOCUS_DOWN) }
+	private fun scrollToBottom(force: Boolean = false) {
+		if (!force && !followConversationBottom) return
+		feedScroll?.post {
+			feedScroll?.fullScroll(View.FOCUS_DOWN)
+			followConversationBottom = true
+		}
+	}
 
     private fun clearCallViews() {
         updateButton = null
