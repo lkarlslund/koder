@@ -337,7 +337,7 @@ func Default() Config {
 			},
 		},
 		Voice: Voice{
-			STTLanguage:         "en",
+			STTLanguage:         "auto",
 			TTSVoice:            "alloy",
 			TTSLanguage:         "en",
 			InputSampleRate:     16000,

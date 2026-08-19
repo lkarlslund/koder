@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestControllerVoiceSpeechRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.FormValue("model") != "asr" || r.FormValue("language") != "en" || len(wav) != 44+len(pcm) || string(wav[:4]) != "RIFF" || !bytes.Equal(wav[44:], pcm) {
+			if r.FormValue("model") != "asr" || r.FormValue("language") != "" || len(wav) != 44+len(pcm) || string(wav[:4]) != "RIFF" || !bytes.Equal(wav[44:], pcm) {
 				t.Fatalf("unexpected transcription request: model=%q language=%q wav=%v", r.FormValue("model"), r.FormValue("language"), wav)
 			}
 			_, _ = io.WriteString(w, `{"text":"hello koder","language":"en"}`)
@@ -83,6 +84,30 @@ func TestControllerVoiceSpeechRoundTrip(t *testing.T) {
 	}
 	if format != (voice.AudioFormat{Encoding: voice.PCM16LE, SampleRate: 16000, Channels: 1}) {
 		t.Fatalf("input format = %#v", format)
+	}
+}
+
+func TestTranscriptionLanguageSupportsAutomaticDetection(t *testing.T) {
+	for _, test := range []struct{ configured, want string }{
+		{configured: "auto", want: ""},
+		{configured: " AUTO ", want: ""},
+		{configured: "da", want: "da"},
+	} {
+		if got := transcriptionLanguage(test.configured); got != test.want {
+			t.Fatalf("transcriptionLanguage(%q) = %q, want %q", test.configured, got, test.want)
+		}
+	}
+}
+
+func TestConciseSpokenResponseKeepsVisualDetailOutOfSpeech(t *testing.T) {
+	short := "I found it. The appointment is tomorrow at ten."
+	if got := conciseSpokenResponse(short); got != short {
+		t.Fatalf("short response = %q", got)
+	}
+	long := "This is the useful first sentence. " + strings.Repeat("Supporting detail takes many words and belongs in the visual transcript instead. ", 10)
+	got := conciseSpokenResponse(long)
+	if len(strings.Fields(got)) > 60 || !strings.HasSuffix(got, ".") {
+		t.Fatalf("concise response = %q (%d words)", got, len(strings.Fields(got)))
 	}
 }
 

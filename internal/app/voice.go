@@ -60,12 +60,20 @@ func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioForm
 	}
 	result, err := client.TranscribeSpeech(ctx, provider.TranscriptionRequest{
 		Model: modelID, Audio: wavFromPCM16(pcm, format.SampleRate, format.Channels),
-		Filename: "voice-utterance.wav", Language: cfg.Voice.STTLanguage,
+		Filename: "voice-utterance.wav", Language: transcriptionLanguage(cfg.Voice.STTLanguage),
 	})
 	if err != nil {
 		return "", err
 	}
 	return result.Text, nil
+}
+
+func transcriptionLanguage(configured string) string {
+	language := strings.TrimSpace(configured)
+	if strings.EqualFold(language, "auto") {
+		return ""
+	}
+	return language
 }
 
 // StreamVoiceSpeech streams raw PCM16 from the configured remote speech
@@ -222,6 +230,45 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 	}, nil
 }
 
+// VoiceSessionHistory returns a bounded, presentation-safe transcript for a
+// native client reconnecting to an existing voice conversation.
+func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID string, limit int) ([]voice.TranscriptEntry, error) {
+	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	if err != nil {
+		return nil, err
+	}
+	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return nil, fmt.Errorf("session %s is not a voice chat", session.ID)
+	}
+	if err := runtime.EnsureTimeline(ctx); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	entries := make([]voice.TranscriptEntry, 0, limit)
+	for _, item := range runtime.SnapshotTimeline() {
+		var role, text string
+		switch content := item.Content.(type) {
+		case domain.UserMessage:
+			role, text = "user", content.Text
+		case domain.AssistantMessage:
+			role, text = "assistant", content.Text
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		entries = append(entries, voice.TranscriptEntry{
+			ID: string(item.ID), Role: role, Text: text, CreatedAt: item.CreatedAt,
+		})
+	}
+	if len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries, nil
+}
+
 // RunVoiceTurn executes an utterance through the durable voice chat's normal
 // model loop, history, role prompt, and profile-scoped tools.
 func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, onWorking func(voice.Session) error) (voice.Message, error) {
@@ -283,7 +330,7 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 			if response := latestAssistantTextAfter(timeline, initialSeq); response != "" {
 				parts := []voice.Part{{MIMEType: "text/plain", Data: response}}
 				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
-				return voice.Message{SpokenText: strings.TrimSpace(response), Parts: parts}, nil
+				return voice.Message{SpokenText: conciseSpokenResponse(response), Parts: parts}, nil
 			}
 			if message := latestModelErrorAfter(timeline, initialSeq); message != "" {
 				return voice.Message{}, fmt.Errorf("voice chat stopped with an error: %s", message)
@@ -293,6 +340,25 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 			}
 		}
 	}
+}
+
+func conciseSpokenResponse(text string) string {
+	const maxWords = 60
+	text = strings.TrimSpace(text)
+	words := strings.Fields(text)
+	if len(words) <= maxWords {
+		return text
+	}
+	cut := strings.Join(words[:maxWords], " ")
+	for index := len(cut) - 1; index >= 0; index-- {
+		if cut[index] == '.' || cut[index] == '!' || cut[index] == '?' {
+			if index >= len(cut)/2 {
+				return strings.TrimSpace(cut[:index+1])
+			}
+			break
+		}
+	}
+	return strings.TrimRight(cut, ",;:-") + "…"
 }
 
 func (c *Controller) describeVoiceTarget(ctx context.Context, target voice.Session) voice.Session {

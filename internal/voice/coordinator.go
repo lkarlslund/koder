@@ -65,6 +65,20 @@ type VoiceSessionBackend interface {
 	RunVoiceTurn(context.Context, string, string, func(Session) error) (Message, error)
 }
 
+// VoiceHistoryBackend exposes the user-visible transcript of a durable voice
+// chat. It is optional so non-persistent coordinator backends stay small.
+type VoiceHistoryBackend interface {
+	VoiceSessionHistory(context.Context, string, int) ([]TranscriptEntry, error)
+}
+
+// TranscriptEntry is one user-visible turn from a durable voice chat.
+type TranscriptEntry struct {
+	ID        string    `json:"id"`
+	Role      string    `json:"role"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
 // ArtifactFile is an authenticated presentation resource resolved by Koder.
 type ArtifactFile struct {
 	Path     string
@@ -98,10 +112,11 @@ type Message struct {
 
 // CallState is the current server-owned routing state for one connection.
 type CallState struct {
-	VoiceSessionID  string    `json:"voice_session_id"`
-	ActiveSessionID string    `json:"active_session_id,omitempty"`
-	Sessions        []Session `json:"sessions"`
-	VoiceSessions   []Session `json:"voice_sessions"`
+	VoiceSessionID  string            `json:"voice_session_id"`
+	ActiveSessionID string            `json:"active_session_id,omitempty"`
+	Sessions        []Session         `json:"sessions"`
+	VoiceSessions   []Session         `json:"voice_sessions"`
+	History         []TranscriptEntry `json:"history,omitempty"`
 }
 
 // Call is an ephemeral coordinator bound to one voice connection.
@@ -145,9 +160,18 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	if c.activeSessionID != "" && !sessionExists(sessions, c.activeSessionID) {
 		c.activeSessionID = ""
 	}
+	var history []TranscriptEntry
+	if c.voiceSessionID != "" {
+		if backend, ok := c.backend.(VoiceHistoryBackend); ok {
+			history, err = backend.VoiceSessionHistory(ctx, c.voiceSessionID, 50)
+			if err != nil {
+				return CallState{}, err
+			}
+		}
+	}
 	return CallState{
 		VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID,
-		Sessions: sessions, VoiceSessions: voiceSessions,
+		Sessions: sessions, VoiceSessions: voiceSessions, History: history,
 	}, nil
 }
 

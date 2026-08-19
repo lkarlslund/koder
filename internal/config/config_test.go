@@ -422,7 +422,7 @@ func TestApplyDefaultsFillsVoiceAudioSettings(t *testing.T) {
 	if cfg.Voice.STTProviderID != "speech" || cfg.Voice.STTModelID != "asr" || cfg.Voice.TTSProviderID != "speech" || cfg.Voice.TTSModelID != "tts" {
 		t.Fatalf("expected voice model ids to be normalized, got %#v", cfg.Voice)
 	}
-	if cfg.Voice.STTLanguage != "en" || cfg.Voice.TTSLanguage != "en" || cfg.Voice.TTSVoice != "alloy" {
+	if cfg.Voice.STTLanguage != "auto" || cfg.Voice.TTSLanguage != "en" || cfg.Voice.TTSVoice != "alloy" {
 		t.Fatalf("expected voice text defaults, got %#v", cfg.Voice)
 	}
 	if cfg.Voice.InputSampleRate != 16000 || cfg.Voice.OutputSampleRate != 24000 || cfg.Voice.MaxUtteranceSeconds != 60 {
