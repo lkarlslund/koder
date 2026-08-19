@@ -20,7 +20,7 @@ class CallController(
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
 ) : AutoCloseable {
-    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, HELD, ERROR }
+	    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, MUTED, HELD, ERROR }
 
     data class Snapshot(
         val stage: Stage = Stage.DISCONNECTED,
@@ -33,7 +33,8 @@ class CallController(
 		val history: List<VoiceTranscriptEntry> = emptyList(),
 		val historyHasMore: Boolean = false,
 		val historyLoading: Boolean = false,
-        val appUpdate: AppUpdate? = null,
+	        val appUpdate: AppUpdate? = null,
+			val microphoneMuted: Boolean = false,
     )
 
     interface Listener {
@@ -102,8 +103,9 @@ class CallController(
     private var utteranceId = ""
     private var inputSequence = 0L
     private var outputSequence = 0L
-    @Volatile private var acceptingOutput = false
-	private var speechLanguages: Set<String> = emptySet()
+	    @Volatile private var acceptingOutput = false
+		private var speechLanguages: Set<String> = emptySet()
+		@Volatile private var microphoneMuted = false
 
     fun start(server: String, token: String, voiceSessionId: String = "", languages: Set<String> = emptySet()) {
         if (running) end()
@@ -113,7 +115,8 @@ class CallController(
         audioConfig = null
 		connectedServer = server
 		connectedToken = token
-		speechLanguages = languages.toSet()
+			speechLanguages = languages.toSet()
+			microphoneMuted = false
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
@@ -125,7 +128,7 @@ class CallController(
         }
     }
 
-    fun submit(text: String) {
+	    fun submit(text: String) {
         val normalized = text.trim()
         if (!running || normalized.isEmpty()) return
         microphone.stop()
@@ -135,7 +138,18 @@ class CallController(
             connection.sendUtterance(normalized)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Could not send request")
-        }
+	    }
+	}
+
+		fun setMicrophoneMuted(muted: Boolean) {
+			if (!running || muted == microphoneMuted) return
+			microphoneMuted = muted
+			if (muted) {
+				cancelCapture()
+				update(Stage.MUTED, "Microphone muted")
+			} else {
+				maybeListen(force = true)
+		}
     }
 
 	fun loadOlderHistory() {
@@ -309,8 +323,12 @@ class CallController(
         playback.write(frame.pcm)
     }
 
-    private fun maybeListen(force: Boolean = false) {
-        if (!running || !serverReady || !telecomReady || audioConfig == null) return
+	    private fun maybeListen(force: Boolean = false) {
+	        if (!running || !serverReady || !telecomReady || audioConfig == null) return
+			if (microphoneMuted) {
+				update(Stage.MUTED, "Microphone muted")
+				return
+			}
         if (!force && snapshot.stage in setOf(Stage.RECORDING, Stage.TRANSCRIBING, Stage.PROCESSING, Stage.WORKING, Stage.SPEAKING, Stage.HELD)) return
         resumeListening()
     }
@@ -386,7 +404,7 @@ class CallController(
         } else {
             workingSound.stop()
         }
-        snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial)
+	        snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial, microphoneMuted = microphoneMuted)
         publish()
     }
 

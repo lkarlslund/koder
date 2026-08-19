@@ -63,6 +63,7 @@ import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
+import com.lkarlslund.koder.voice.muteControlLabel
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var composerView: View? = null
 	private var pauseButton: Button? = null
 	private var transcriptButton: Button? = null
+	private var muteButton: Button? = null
 	private var transcriptShown = false
 	private var transcriptOpened = false
 	private var followConversationBottom = true
@@ -181,6 +183,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				renderHistory(snapshot.voiceSessionId, snapshot.history)
 			}
 			updateConversationMode(snapshot.stage)
+			muteButton?.apply {
+				text = muteControlLabel(snapshot.microphoneMuted)
+				contentDescription = if (snapshot.microphoneMuted) "Unmute microphone" else "Mute microphone"
+			}
             if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
                 lastAppUpdate = snapshot.appUpdate
             }
@@ -863,8 +869,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				setOnClickListener {
 					if (text == "Resume") requestCallStart() else controller.end()
 				}
-			}.also { addView(it) }
-        }
+				}.also { addView(it) }
+				muteButton = Button(this@MainActivity).apply {
+					text = muteControlLabel(false)
+					isAllCaps = false
+					contentDescription = "Mute microphone"
+					setOnClickListener { controller.setMicrophoneMuted(text == "Mute") }
+				}.also { addView(it) }
+			}
         root.addView(heading, matchWrap())
         status = helper("Preparing conversation…").apply {
             setTextColor(themeColor(android.R.attr.colorAccent))
@@ -1338,6 +1350,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		composerView = null
 		pauseButton = null
 		transcriptButton = null
+		muteButton = null
 		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
