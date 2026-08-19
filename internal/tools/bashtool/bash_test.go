@@ -57,7 +57,7 @@ func TestExecuteTimeoutKillsBackgroundChildHoldingOutputPipe(t *testing.T) {
 	start := time.Now()
 	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: tools.Request{
 		Args: map[string]string{
-			"command":    "sleep 5 &",
+			"command":    "sleep 5 & wait",
 			"timeout_ms": "100",
 		},
 	}})
