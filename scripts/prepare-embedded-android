@@ -133,7 +133,15 @@ if [[ ! -f "$APK_PATH" ]]; then
   echo "Android build did not produce $APK_PATH" >&2
   exit 1
 fi
-CERT_SHA256="$(apksigner verify --print-certs "$APK_PATH" | sed -n 's/^.*Signer: certificate SHA-256 digest: //p' | head -1)"
+APKSIGNER="$(command -v apksigner || true)"
+if [[ -z "$APKSIGNER" && -n "${ANDROID_HOME:-}" && -x "$ANDROID_HOME/build-tools/37.0.0/apksigner" ]]; then
+  APKSIGNER="$ANDROID_HOME/build-tools/37.0.0/apksigner"
+fi
+if [[ -z "$APKSIGNER" ]]; then
+  echo "apksigner was not found in PATH or Android Build Tools 37.0.0" >&2
+  exit 1
+fi
+CERT_SHA256="$("$APKSIGNER" verify --print-certs "$APK_PATH" | sed -n 's/^.*Signer: certificate SHA-256 digest: //p' | head -1)"
 if [[ -z "$CERT_SHA256" ]]; then
   echo "could not read signing certificate from $APK_PATH" >&2
   exit 1
