@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 text = snapshot.partialTranscript
 				visibility = if (transcriptShown && snapshot.partialTranscript.isNotBlank()) View.VISIBLE else View.GONE
             }
-			if (snapshot.voiceSessionId.isNotBlank() && renderedHistorySession != snapshot.voiceSessionId) {
+			if (snapshot.voiceSessionId.isNotBlank() && snapshot.history.isNotEmpty() && renderedHistorySession != snapshot.voiceSessionId) {
 				renderHistory(snapshot.voiceSessionId, snapshot.history)
 			}
 			updateConversationMode(snapshot.stage)
