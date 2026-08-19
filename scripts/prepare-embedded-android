@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANDROID_DIR="$ROOT_DIR/clients/android"
+CHANNEL="${1:-${KODER_ANDROID_CHANNEL:-local}}"
+CACHE_DIR="$ANDROID_DIR/.update-cache/$CHANNEL"
+SIGNING_DIR="$ANDROID_DIR/.signing"
+BUNDLE_DIR="$ROOT_DIR/internal/androidupdate/bundle"
+
+case "$CHANNEL" in
+  local|release) ;;
+  *) echo "unsupported Android update channel: $CHANNEL" >&2; exit 2 ;;
+esac
+
+mkdir -p "$CACHE_DIR" "$SIGNING_DIR" "$BUNDLE_DIR"
+chmod 700 "$SIGNING_DIR"
+
+random_secret() {
+  openssl rand -hex 24
+}
+
+ensure_local_key() {
+  local properties="$SIGNING_DIR/local-development.properties"
+  local keystore="$SIGNING_DIR/local-development.jks"
+  if [[ -f "$properties" && -f "$keystore" ]]; then
+    echo "$properties"
+    return
+  fi
+  if [[ -e "$properties" || -e "$keystore" ]]; then
+    echo "local Android signing key is incomplete; restore or remove both files in $SIGNING_DIR" >&2
+    exit 1
+  fi
+  local store_password key_password
+  store_password="$(random_secret)"
+  key_password="$store_password"
+  keytool -genkeypair -noprompt \
+    -keystore "$keystore" -storepass "$store_password" \
+    -alias koder-local-development -keypass "$key_password" \
+    -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 36500 \
+    -dname "CN=Koder Local Development,OU=Local Development,O=Koder,L=Copenhagen,C=DK"
+  chmod 600 "$keystore"
+  umask 077
+  {
+    echo "storeFile=.signing/local-development.jks"
+    echo "storePassword=$store_password"
+    echo "keyAlias=koder-local-development"
+    echo "keyPassword=$key_password"
+  } >"$properties"
+  echo "Created local Android signing key at $keystore; back it up to keep updating installed development builds." >&2
+  echo "$properties"
+}
+
+release_properties() {
+  local properties="${KODER_ANDROID_RELEASE_SIGNING_PROPERTIES:-$SIGNING_DIR/github-release.properties}"
+  if [[ ! -f "$properties" ]]; then
+    echo "release signing properties not found: $properties" >&2
+    exit 1
+  fi
+  echo "$properties"
+}
+
+source_fingerprint() {
+  {
+    find "$ANDROID_DIR/app/src" "$ANDROID_DIR/gradle" "$ROOT_DIR/protocol/voice/v1" \
+      -type f -print0
+    printf '%s\0' \
+      "$ANDROID_DIR/app/build.gradle.kts" \
+      "$ANDROID_DIR/build.gradle.kts" \
+      "$ANDROID_DIR/settings.gradle.kts" \
+      "$ANDROID_DIR/gradle.properties" \
+      "$ANDROID_DIR/gradlew" \
+      "$ANDROID_DIR/gradlew.bat" \
+      "$ROOT_DIR/scripts/prepare-embedded-android"
+  } | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+}
+
+SIGNING_PROPERTIES="$(if [[ "$CHANNEL" == "local" ]]; then ensure_local_key; else release_properties; fi)"
+SIGNING_KEY_PATH="$(sed -n 's/^storeFile=//p' "$SIGNING_PROPERTIES")"
+if [[ "$SIGNING_KEY_PATH" != /* ]]; then
+  SIGNING_KEY_PATH="$ANDROID_DIR/$SIGNING_KEY_PATH"
+fi
+if [[ ! -f "$SIGNING_KEY_PATH" ]]; then
+  echo "Android signing keystore not found: $SIGNING_KEY_PATH" >&2
+  exit 1
+fi
+
+FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL"; } | sha256sum | cut -d' ' -f1)"
+if [[ -f "$CACHE_DIR/fingerprint" && -f "$CACHE_DIR/koder.apk" && -f "$CACHE_DIR/manifest.json" ]] &&
+   [[ "$(<"$CACHE_DIR/fingerprint")" == "$FINGERPRINT" ]]; then
+  install -m 0644 "$CACHE_DIR/koder.apk" "$BUNDLE_DIR/koder.apk"
+  install -m 0644 "$CACHE_DIR/manifest.json" "$BUNDLE_DIR/manifest.json"
+  echo "$BUNDLE_DIR/koder.apk"
+  exit 0
+fi
+
+if [[ "$CHANNEL" == "local" ]]; then
+  previous=0
+  [[ -f "$CACHE_DIR/version-code" ]] && previous="$(<"$CACHE_DIR/version-code")"
+  current="$(( $(date -u +%s) / 60 ))"
+  (( current <= previous )) && current="$((previous + 1))"
+  VERSION_CODE="$current"
+  VERSION_NAME="0.1.0-local.$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
+  GRADLE_TASK=assembleDebug
+  APK_PATH="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+  SIGNING_PROPERTY=koderLocalSigningProperties
+  APPLICATION_ID=com.lkarlslund.koder.dev
+else
+  VERSION_CODE="${KODER_ANDROID_VERSION_CODE:?KODER_ANDROID_VERSION_CODE is required for release APKs}"
+  VERSION_NAME="${KODER_ANDROID_VERSION_NAME:?KODER_ANDROID_VERSION_NAME is required for release APKs}"
+  GRADLE_TASK=assembleRelease
+  APK_PATH="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
+  SIGNING_PROPERTY=koderReleaseSigningProperties
+  APPLICATION_ID=com.lkarlslund.koder
+fi
+
+SIGNING_RELATIVE="$(realpath --relative-to="$ANDROID_DIR" "$SIGNING_PROPERTIES")"
+(
+  cd "$ANDROID_DIR"
+  JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}" ./gradlew "$GRADLE_TASK" \
+    "-PkoderVersionCode=$VERSION_CODE" \
+    "-PkoderVersionName=$VERSION_NAME" \
+    "-P$SIGNING_PROPERTY=$SIGNING_RELATIVE"
+)
+
+if [[ ! -f "$APK_PATH" ]]; then
+  echo "Android build did not produce $APK_PATH" >&2
+  exit 1
+fi
+CERT_SHA256="$(apksigner verify --print-certs "$APK_PATH" | sed -n 's/^.*Signer: certificate SHA-256 digest: //p' | head -1)"
+if [[ -z "$CERT_SHA256" ]]; then
+  echo "could not read signing certificate from $APK_PATH" >&2
+  exit 1
+fi
+APK_SHA256="$(sha256sum "$APK_PATH" | cut -d' ' -f1)"
+APK_SIZE="$(stat -c %s "$APK_PATH")"
+
+install -m 0644 "$APK_PATH" "$CACHE_DIR/koder.apk"
+printf '%s\n' "$VERSION_CODE" >"$CACHE_DIR/version-code"
+printf '%s\n' "$FINGERPRINT" >"$CACHE_DIR/fingerprint"
+jq -n \
+  --arg channel "$CHANNEL" \
+  --arg application_id "$APPLICATION_ID" \
+  --arg version_name "$VERSION_NAME" \
+  --arg source_fingerprint "$FINGERPRINT" \
+  --arg signing_certificate_sha256 "$CERT_SHA256" \
+  --arg apk_sha256 "$APK_SHA256" \
+  --arg minimum_voice_protocol "voice.v1" \
+  --argjson version_code "$VERSION_CODE" \
+  --argjson apk_size "$APK_SIZE" \
+  '{channel:$channel,application_id:$application_id,version_code:$version_code,version_name:$version_name,source_fingerprint:$source_fingerprint,signing_certificate_sha256:$signing_certificate_sha256,apk_sha256:$apk_sha256,apk_size:$apk_size,minimum_voice_protocol:$minimum_voice_protocol}' \
+  >"$CACHE_DIR/manifest.json"
+install -m 0644 "$CACHE_DIR/koder.apk" "$BUNDLE_DIR/koder.apk"
+install -m 0644 "$CACHE_DIR/manifest.json" "$BUNDLE_DIR/manifest.json"
+echo "$BUNDLE_DIR/koder.apk"

@@ -2,6 +2,7 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.Properties
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -66,6 +67,18 @@ plugins {
 val sileroVadCommit = "806dcba3f0b5d95282d0889a074954a2f8c6397b"
 val sileroVadSHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
 val sileroVadAssets = layout.buildDirectory.dir("generated/sileroVadAssets")
+val koderVersionCode = providers.gradleProperty("koderVersionCode").getOrElse("1").toInt()
+val koderVersionName = providers.gradleProperty("koderVersionName").getOrElse("0.1.0-dev")
+
+fun signingProperties(path: String?): Properties? {
+    if (path.isNullOrBlank()) return null
+    val file = rootProject.file(path)
+    if (!file.isFile) return null
+    return Properties().apply { file.inputStream().use(::load) }
+}
+
+val localSigning = signingProperties(providers.gradleProperty("koderLocalSigningProperties").orNull)
+val releaseSigning = signingProperties(providers.gradleProperty("koderReleaseSigningProperties").orNull)
 
 val prepareSileroVadAssets by tasks.registering(DownloadVerifiedFile::class) {
     sourceUrl.set(
@@ -83,12 +96,17 @@ android {
     compileSdk = 36
     buildToolsVersion = "37.0.0"
 
+    buildFeatures {
+        resValues = true
+    }
+
     defaultConfig {
         applicationId = "com.lkarlslund.koder"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = koderVersionCode
+        versionName = koderVersionName
+        resValue("string", "app_name", "Koder")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -104,10 +122,35 @@ android {
         rootProject.layout.projectDirectory.dir("../../protocol/voice/v1/testdata").asFile.absolutePath,
     )
 
+    signingConfigs {
+        if (localSigning != null) {
+            create("localDevelopment") {
+                storeFile = rootProject.file(localSigning.getProperty("storeFile"))
+                storePassword = localSigning.getProperty("storePassword")
+                keyAlias = localSigning.getProperty("keyAlias")
+                keyPassword = localSigning.getProperty("keyPassword")
+            }
+        }
+        if (releaseSigning != null) {
+            create("officialRelease") {
+                storeFile = rootProject.file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            applicationIdSuffix = ".dev"
+            resValue("string", "app_name", "Koder Dev")
+            localSigning?.let { signingConfig = signingConfigs.getByName("localDevelopment") }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            releaseSigning?.let { signingConfig = signingConfigs.getByName("officialRelease") }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

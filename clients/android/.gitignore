@@ -4,4 +4,6 @@
 **/build/
 captures/
 local.properties
+.signing/
+.update-cache/
 *.iml
