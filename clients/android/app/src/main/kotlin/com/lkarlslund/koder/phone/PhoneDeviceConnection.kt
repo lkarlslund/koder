@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 class PhoneDeviceConnection(
     private val provider: PhoneToolProvider,
     private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build(),
+	private val identity: PhoneIdentity? = null,
 ) : AutoCloseable {
     private var socket: WebSocket? = null
     private var generation = 0L
@@ -24,7 +25,7 @@ class PhoneDeviceConnection(
         val scheme = if (base.scheme == "https") "https" else "http"
         val url = base.newBuilder().scheme(scheme).encodedPath("/voice/v1/device")
             .addQueryParameter("call_id", callId).build()
-        val request = Request.Builder().url(url)
+		val request = Request.Builder().also { builder -> identity?.applyTo(builder) }.url(url)
             .apply { if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}") }.build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {

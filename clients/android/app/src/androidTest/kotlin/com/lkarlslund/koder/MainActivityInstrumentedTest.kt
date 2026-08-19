@@ -1,7 +1,9 @@
 package com.lkarlslund.koder
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -79,6 +81,38 @@ class MainActivityInstrumentedTest {
             }
         }
     }
+
+	@Test
+	fun bindingLinkRegistersAndConnectsWithoutManualCredentialEntry() {
+		clearSettings()
+		val server = MockWebServer()
+		server.enqueue(MockResponse.Builder().code(201).body(
+			"""{"protocol":"voice.v1","binding":{"device":{"id":"device-1","name":"Test phone","registered_at":"2026-08-19T20:00:00Z"},"token":"kdv1_private"}}""",
+		).build())
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Bound conversation"}]}""",
+		).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			val bindingURI = Uri.parse("koder://bind?server=${Uri.encode(server.url("/").toString())}&code=kdb1_invitation")
+			val launch = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(bindingURI)
+			ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+				val labels = waitForText(scenario, "Bound conversation")
+				assertTrue(labels.contains("Conversations"))
+				val saved = SecureSettings(context).load()
+				assertEquals(server.url("/").toString(), saved.server)
+				assertEquals("kdv1_private", saved.token)
+			}
+			val bindRequest = server.takeRequest()
+			assertEquals("/voice/v1/bind", bindRequest.target)
+			assertTrue(bindRequest.headers["X-Koder-Device-ID"].orEmpty().isNotBlank())
+			val homeRequest = server.takeRequest()
+			assertEquals("/voice/v1/sessions", homeRequest.target)
+			assertEquals("Bearer kdv1_private", homeRequest.headers["Authorization"])
+		} finally {
+			server.close()
+		}
+	}
 
     @Test
     fun savedAccessTokenIsMaskedOnSetupScreen() {

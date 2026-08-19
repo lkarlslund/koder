@@ -1,5 +1,6 @@
 package com.lkarlslund.koder.voice
 
+import com.lkarlslund.koder.phone.PhoneIdentity
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -21,6 +22,7 @@ class VoiceConnection(
         .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build(),
+	private val identity: PhoneIdentity? = null,
 ) : AutoCloseable {
     interface Listener {
         fun onConnected()
@@ -69,7 +71,7 @@ class VoiceConnection(
 			.addQueryParameter("call_id", callId)
 			.apply { if (voiceSessionId.isNotBlank()) addQueryParameter("voice_session_id", voiceSessionId) }
 			.build()
-		val request = Request.Builder()
+		val request = Request.Builder().also { builder -> identity?.applyTo(builder) }
 			.url(url)
             .apply { if (token.isNotBlank()) header("Authorization", "Bearer $token") }
             .build()

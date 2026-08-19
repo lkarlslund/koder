@@ -7,6 +7,7 @@ import android.os.Looper
 import android.app.Activity
 import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
 import com.lkarlslund.koder.phone.PhoneDeviceConnection
+import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.phone.PhoneToolProvider
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,6 +20,7 @@ class CallController(
 	audioPlayback: StreamingAudioPlayback? = null,
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
+	private val phoneIdentity: PhoneIdentity? = null,
 ) : AutoCloseable {
 	    enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, MUTED, HELD, ERROR }
 
@@ -47,7 +49,7 @@ class CallController(
     }
 
     private val appContext = context.applicationContext
-	private val phoneDevice = PhoneDeviceConnection(phoneTools)
+	private val phoneDevice = PhoneDeviceConnection(phoneTools, identity = phoneIdentity)
 	private var connectedServer = ""
 	private var connectedToken = ""
     private val main = Handler(Looper.getMainLooper())
@@ -57,7 +59,7 @@ class CallController(
 	private val endpointSampleRate = detector.sampleRate
 	private val endpointFrameSamples = detector.frameSamples
     private val endpoint = VadEndpointPipeline(detector)
-    private val connection = VoiceConnection(object : VoiceConnection.Listener {
+	private val connection = VoiceConnection(object : VoiceConnection.Listener {
         override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading conversation…") }
 		override fun onCallIdentity(callId: String) {
 			phoneDevice.connect(connectedServer, connectedToken, callId)
@@ -68,7 +70,7 @@ class CallController(
             microphone.stop()
 	            if (running) update(Stage.CONNECTING, reconnectStatus(reason))
         }
-    })
+	}, identity = phoneIdentity)
     private val telecom = TelecomVoiceCall(context, object : TelecomVoiceCall.Listener {
         override fun onCallReady() = onMain { telecomReady = true; maybeListen() }
         override fun onCallHeld(held: Boolean) = onMain {

@@ -50,6 +50,8 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
+import com.lkarlslund.koder.phone.PhoneBindingClient
+import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
@@ -86,7 +88,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private lateinit var controller: CallController
     private lateinit var secureSettings: SecureSettings
     private lateinit var appUpdater: AndroidAppUpdater
-    private val sessionClient = VoiceSessionClient()
+	private lateinit var phoneIdentity: PhoneIdentity
+	private lateinit var bindingClient: PhoneBindingClient
+	private lateinit var sessionClient: VoiceSessionClient
 
     private var screen = Screen.LOADING
     private var settings = SecureSettings.Values("", "")
@@ -153,7 +157,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         secureSettings = SecureSettings(this)
-        controller = CallController(this, this)
+		phoneIdentity = PhoneIdentity.from(this)
+		bindingClient = PhoneBindingClient(phoneIdentity)
+		sessionClient = VoiceSessionClient(identity = phoneIdentity)
+        controller = CallController(this, this, phoneIdentity = phoneIdentity)
         appUpdater = AndroidAppUpdater(this, ::showUpdateStatus)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -170,16 +177,57 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
         })
         settings = secureSettings.load()
-        if (settings.server.isBlank()) showSetup() else loadHome()
+		if (!bindFromIntent(intent)) {
+			if (settings.server.isBlank()) showSetup() else loadHome()
+		}
     }
+
+	override fun onNewIntent(intent: Intent) {
+		super.onNewIntent(intent)
+		setIntent(intent)
+		bindFromIntent(intent)
+	}
 
     override fun onDestroy() {
         requestGeneration++
         sessionClient.close()
+		bindingClient.close()
         appUpdater.close()
         controller.close()
         super.onDestroy()
     }
+
+	private fun bindFromIntent(intent: Intent?): Boolean {
+		val uri = intent?.data ?: return false
+		if (uri.scheme != "koder" || uri.host != "bind") return false
+		showBindingProgress()
+		bindingClient.bind(uri) { result ->
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				result.fold(
+					onSuccess = { binding ->
+						secureSettings.save(binding.server, binding.token)
+						settings = secureSettings.load()
+						loadHome("Phone connected · loading conversations…")
+					},
+					onFailure = { failure -> showSetup("Couldn’t bind this phone: ${failure.message ?: "unknown error"}") },
+				)
+			}
+		}
+		return true
+	}
+
+	private fun showBindingProgress() {
+		screen = Screen.LOADING
+		clearCallViews()
+		showContent(column(Gravity.CENTER_HORIZONTAL).apply {
+			gravity = Gravity.CENTER
+			addView(logo(), centeredSquare(88, bottom = 22))
+			addView(ProgressBar(this@MainActivity))
+			addView(title("Connecting this phone").apply { gravity = Gravity.CENTER }, spaced(top = 18))
+			addView(body("Creating a private device registration in Koder…").apply { gravity = Gravity.CENTER }, spaced(top = 8))
+		})
+	}
 
 	    override fun onSnapshot(snapshot: CallController.Snapshot) {
         runOnUiThread {
@@ -244,7 +292,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val content = column()
         content.addView(logo(), centeredSquare(88, bottom = 18))
         content.addView(title("Welcome to Koder Voice"), matchWrap())
-        content.addView(body("Connect this phone to your Koder server. You can change these settings later."), spaced(bottom = 24))
+		content.addView(body("Open Koder on your computer, tap the phone icon, and scan its Bind phone QR code with this phone's camera. Koder Voice will open and connect automatically."), spaced(bottom = 12))
+		content.addView(helper("You can also enter an existing server credential manually below."), spaced(bottom = 24))
 
         content.addView(label("Server address"), matchWrap())
         val serverField = EditText(this).apply {
