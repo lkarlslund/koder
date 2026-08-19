@@ -59,6 +59,7 @@ import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.conversationSurface
+import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import java.io.File
 import java.time.Duration
@@ -1017,7 +1018,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		renderedHistoryIDs.clear()
 		history.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			addBubble(if (entry.role == "user") "You" else "Koder", entry.text)
+			addBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt)
 		}
 	}
 
@@ -1031,7 +1032,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val previousY = scroll.scrollY
 		older.forEachIndexed { index, entry ->
 			renderedHistoryIDs += entry.id
-			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text), index, bubbleLayout(entry.role == "user"))
+			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt), index, bubbleLayout(entry.role == "user"))
 		}
 		scroll.post { scroll.scrollTo(0, previousY + feed.height - previousHeight) }
 	}
@@ -1192,15 +1193,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
     }
 
-    private fun addBubble(who: String, text: String) = runOnUiThread {
+    private fun addBubble(who: String, text: String, createdAt: Instant? = Instant.now()) = runOnUiThread {
         val feed = feed ?: return@runOnUiThread
         if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
         removeFeedPlaceholder()
-		feed.addView(conversationBubble(who, text), bubbleLayout(who == "You"))
+		feed.addView(conversationBubble(who, text, createdAt), bubbleLayout(who == "You"))
 		scrollToBottom()
     }
 
-	private fun conversationBubble(who: String, text: String): View {
+	private fun conversationBubble(who: String, text: String, createdAt: Instant?): View {
 		val fromUser = who == "You"
 		return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1219,6 +1220,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWrap())
             addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
+			conversationTimeLabel(createdAt).takeIf(String::isNotBlank)?.let { time ->
+				addView(helper(time).apply {
+					gravity = Gravity.END
+					alpha = 0.72f
+					textSize = 11f
+				}, spaced(top = 5))
+			}
         }
 	}
 
