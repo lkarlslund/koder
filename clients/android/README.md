@@ -1,6 +1,6 @@
 # Koder Android voice client
 
-This directory is the native Kotlin, phone-style voice client. It is a separate
+This directory is the native Kotlin voice-conversation client. It is a separate
 Gradle build in the Koder repository and talks only to `voice.v1`.
 
 ## Prerequisites
@@ -31,8 +31,9 @@ export ANDROID_HOME=/opt/android-sdk
 
 The JVM suite covers protocol interoperability and deterministic VAD
 endpointing without live speech services. The managed-device suite boots the
-real Activity, runs real Silero inference, and tests authenticated mock
-WebSocket PCM in both directions.
+real Activity, checks setup and conversation-list states, runs real Silero
+inference, and tests authenticated mock HTTP/WebSocket interoperability and PCM
+in both directions.
 
 An opt-in test can authenticate to a live Koder without modifying a chat:
 
@@ -96,14 +97,18 @@ same token in the app. Do not use `localhost` on a physical phone. Cleartext
 HTTP is only appropriate on a trusted private network; use an HTTPS reverse
 proxy and enter its `https://` URL for `wss://` transport elsewhere.
 
-The token and address are encrypted using Android Keystore. On first call,
-grant microphone, notification, and nearby-device permissions. Android Core
-Telecom then owns earpiece, speaker, wired headset, hold, and Bluetooth routing.
+The welcome screen explains both fields; the access token is optional when the
+server has no voice token configured. The token is encrypted using Android
+Keystore. The app then connects without activating audio and presents existing
+voice conversations plus a New Conversation action. Selecting a conversation
+opens its dedicated voice/text screen. On the first conversation, grant
+microphone, notification, and nearby-device permissions. Android Core Telecom
+then owns earpiece, speaker, wired headset, hold, and Bluetooth routing as an
+internal audio implementation detail.
 
-The first selector chooses the durable voice chat whose transcript is being
-continued; its adjacent New button creates and selects another one. The second selector
-chooses an ordinary work session or returns to automatic semantic routing.
-Speech and typed input share the same server path.
+The persistent user concept is a conversation, not a phone call. Returning to
+the home screen pauses the live voice connection without ending or deleting its
+conversation. Speech and typed input share the same server path.
 
 Android runs on-device Silero VAD, streams microphone PCM to Koder, plays
 Koder's streamed PCM reply, and displays text, images, and generic MIME

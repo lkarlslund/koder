@@ -4,7 +4,7 @@
 Koder. Connect with WebSocket `GET /voice/v1`; use `wss` whenever the HTTP
 origin is HTTPS.
 
-## Authentication and call selection
+## Authentication and conversation selection
 
 When Koder has a voice token, every request requires:
 
@@ -13,8 +13,19 @@ Authorization: Bearer <token>
 ```
 
 Authentication happens before WebSocket upgrade. The same header is required
-for `/voice/v1/artifacts/...`. Failed authentication returns HTTP 401. A second
-simultaneous call returns HTTP 409.
+for `/voice/v1/sessions` and `/voice/v1/artifacts/...`. Failed authentication
+returns HTTP 401. A second simultaneous live voice connection returns HTTP 409.
+
+Before opening a live WebSocket, native clients use the authenticated
+conversation endpoint:
+
+- `GET /voice/v1/sessions` lists durable voice conversations and advertises an
+  optional signed Android update;
+- `POST /voice/v1/sessions` with `{"title":"Personal"}` creates a durable
+  conversation and returns it as `voice_session` alongside the refreshed list.
+
+These requests do not acquire the single-live-voice-connection lease, start
+audio routing, or request microphone permission.
 
 Optional query parameters:
 
