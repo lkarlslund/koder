@@ -148,20 +148,8 @@ jobs:
         if: steps.meta.outputs.changed == 'true'
         run: sdkmanager "platforms;android-36" "build-tools;37.0.0"
 
-      - name: Install test dependencies
-        if: steps.meta.outputs.changed == 'true'
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
-          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          bwrap --version
-
       - name: Run tests
         if: steps.meta.outputs.changed == 'true'
-        env:
-          KODER_BWRAP_DISABLE_NET_UNSHARE: "1"
         run: |
           set -euo pipefail
           go test ./cmd/... ./internal/...
