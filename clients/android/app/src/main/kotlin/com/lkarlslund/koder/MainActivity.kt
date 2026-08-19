@@ -30,6 +30,8 @@ import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
+import com.lkarlslund.koder.voice.AppUpdate
+import com.lkarlslund.koder.update.AndroidAppUpdater
 import java.io.File
 
 @SuppressLint("SetTextI18n")
@@ -39,6 +41,7 @@ class MainActivity : Activity(), CallController.Listener {
     private lateinit var server: EditText
     private lateinit var token: EditText
     private lateinit var callButton: Button
+    private lateinit var updateButton: Button
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var voiceSessionSpinner: Spinner
@@ -51,16 +54,20 @@ class MainActivity : Activity(), CallController.Listener {
     private var selectedVoiceSessionId = ""
     private var connected = false
     private var pendingStart = false
+    private var lastAppUpdate: AppUpdate? = null
+    private lateinit var appUpdater: AndroidAppUpdater
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         secureSettings = SecureSettings(this)
         controller = CallController(this, this)
+        appUpdater = AndroidAppUpdater(this, ::showUpdateStatus)
         buildUi()
         restoreSettings()
     }
 
     override fun onDestroy() {
+        appUpdater.close()
         controller.close()
         super.onDestroy()
     }
@@ -78,6 +85,10 @@ class MainActivity : Activity(), CallController.Listener {
 			newVoiceSessionButton.isEnabled = connected
             if (snapshot.voiceSessionId.isNotBlank()) selectedVoiceSessionId = snapshot.voiceSessionId
             updateVoiceSessions(snapshot.voiceSessions, snapshot.voiceSessionId)
+            if (snapshot.appUpdate != lastAppUpdate) {
+                lastAppUpdate = snapshot.appUpdate
+                appUpdater.consider(snapshot.appUpdate, server.text.toString(), token.text.toString())
+            }
         }
     }
 
@@ -127,6 +138,12 @@ class MainActivity : Activity(), CallController.Listener {
             setOnClickListener { if (connected) controller.end() else requestCallStart() }
         }
         root.addView(callButton, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 6))
+
+        updateButton = Button(this).apply {
+            visibility = View.GONE
+            setOnClickListener { appUpdater.install() }
+        }
+        root.addView(updateButton, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
 
         voiceSessionSpinner = Spinner(this)
         voiceSessionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -372,6 +389,27 @@ class MainActivity : Activity(), CallController.Listener {
 
     private fun saveSettings() {
 		secureSettings.save(server.text.toString(), token.text.toString())
+    }
+
+    private fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
+        when (next) {
+            AndroidAppUpdater.Status.Hidden -> updateButton.visibility = View.GONE
+            is AndroidAppUpdater.Status.Available -> {
+                updateButton.text = "Update Koder · ${next.versionName}"
+                updateButton.isEnabled = true
+                updateButton.visibility = View.VISIBLE
+            }
+            is AndroidAppUpdater.Status.Busy -> {
+                updateButton.text = next.message
+                updateButton.isEnabled = false
+                updateButton.visibility = View.VISIBLE
+            }
+            is AndroidAppUpdater.Status.Error -> {
+                updateButton.text = "${next.message} · Retry"
+                updateButton.isEnabled = true
+                updateButton.visibility = View.VISIBLE
+            }
+        }
     }
 
     private fun requiredPermissions(): List<String> = buildList {

@@ -25,6 +25,7 @@ class CallController(
         val voiceSessions: List<VoiceSession> = emptyList(),
         val activeSessionId: String = "",
         val voiceSessionId: String = "",
+        val appUpdate: AppUpdate? = null,
     )
 
     interface Listener {
@@ -187,6 +188,7 @@ class CallController(
         frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {
             "ready" -> {
+                snapshot = snapshot.copy(appUpdate = frame.appUpdate)
                 serverReady = true
                 maybeListen()
             }
