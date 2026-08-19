@@ -7,6 +7,13 @@ import org.junit.Test
 
 class ConversationHistoryTest {
 	@Test
+	fun latestLabelReportsUnreadMessages() {
+		assertEquals("Latest", latestConversationLabel(0))
+		assertEquals("Latest · 1 new", latestConversationLabel(1))
+		assertEquals("Latest · 4 new", latestConversationLabel(4))
+	}
+
+	@Test
 	fun tracksWhetherNewMessagesShouldFollowTheBottom() {
 		assertTrue(isNearConversationBottom(contentHeight = 1_000, scrollY = 500, viewportHeight = 480, threshold = 48))
 		assertFalse(isNearConversationBottom(contentHeight = 1_000, scrollY = 300, viewportHeight = 480, threshold = 48))

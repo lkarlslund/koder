@@ -62,6 +62,7 @@ import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
+import com.lkarlslund.koder.voice.latestConversationLabel
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -107,6 +108,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var transcriptShown = false
 	private var transcriptOpened = false
 	private var followConversationBottom = true
+	private var unreadConversationMessages = 0
+	private var latestButton: Button? = null
 	private var renderedHistorySession = ""
 	private val renderedHistoryIDs = linkedSetOf<String>()
 	private var placeholderTitle: TextView? = null
@@ -819,6 +822,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		transcriptShown = false
 		transcriptOpened = false
 		followConversationBottom = true
+		unreadConversationMessages = 0
 		presentationShown = false
 		renderedHistorySession = ""
 		renderedHistoryIDs.clear()
@@ -937,10 +941,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
 				val child = getChildAt(0)
 				followConversationBottom = child == null || isNearConversationBottom(child.height, scrollY, height, dp(48))
+				if (followConversationBottom) {
+					unreadConversationMessages = 0
+					latestButton?.visibility = View.GONE
+				}
 				if (scrollY < oldScrollY && scrollY <= dp(24) && visibility == View.VISIBLE) controller.loadOlderHistory()
 			}
         }
         root.addView(feedScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+		latestButton = Button(this).apply {
+			text = latestConversationLabel(0)
+			isAllCaps = false
+			visibility = View.GONE
+			contentDescription = "Jump to latest message"
+			setOnClickListener { scrollToBottom(force = true) }
+		}
+		root.addView(latestButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+			gravity = Gravity.CENTER_HORIZONTAL
+			bottomMargin = dp(4)
+		})
 
         val composer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1199,6 +1218,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
         removeFeedPlaceholder()
 		feed.addView(conversationBubble(who, text, createdAt), bubbleLayout(who == "You"))
+		if (!followConversationBottom) {
+			unreadConversationMessages++
+			latestButton?.apply {
+				this.text = latestConversationLabel(unreadConversationMessages)
+				visibility = View.VISIBLE
+			}
+		}
 		scrollToBottom()
     }
 
@@ -1312,6 +1338,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		composerView = null
 		pauseButton = null
 		transcriptButton = null
+		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
     }
