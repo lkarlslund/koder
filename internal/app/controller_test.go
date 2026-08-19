@@ -2455,7 +2455,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	var working voice.Session
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "Does the laptop fix still work?", func(session voice.Session) error {
+	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "Does the laptop fix still work?", voice.TurnOptions{ResponsePacing: voice.ResponsePacingDetailed}, func(session voice.Session) error {
 		working = session
 		return nil
 	})
@@ -2491,6 +2491,9 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	requestsMu.Unlock()
 	if !strings.Contains(joinedRequests, `"name":"session_delegate"`) || !strings.Contains(joinedRequests, "Use the exact session_id returned by session_list") {
 		t.Fatalf("voice tool instructions were not offered with the tool: %s", joinedRequests)
+	}
+	if !strings.Contains(joinedRequests, "Response pacing for this call is detailed") {
+		t.Fatalf("voice pacing instruction was not offered transiently: %s", joinedRequests)
 	}
 	if strings.Contains(chatrole.SpecFor(chatrole.Voice).SystemPrompt, "exact session_id") {
 		t.Fatalf("voice prompt contains tool mechanics: %s", chatrole.SpecFor(chatrole.Voice).SystemPrompt)
@@ -2586,7 +2589,7 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "What's happening where I am?", nil)
+	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "What's happening where I am?", voice.TurnOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

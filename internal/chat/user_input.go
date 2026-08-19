@@ -179,7 +179,7 @@ func (r *Chat) handleSubmitUserInput(answers []tools.UserInputAnswer, reply chan
 		for _, event := range events {
 			out <- event
 		}
-		r.continueTurnLoop(ctx, nil, out)
+		r.continueTurnLoop(ctx, nil, nil, out)
 	}()
 	r.forwardTurnEvents(turn, out)
 }

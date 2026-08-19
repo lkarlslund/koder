@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
+import com.lkarlslund.koder.voice.VoiceResponsePacing
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -20,6 +21,7 @@ class SecureSettings(context: Context) {
 		val vadSensitivityPercent: Int = 50,
 		val vadSilenceMilliseconds: Int = 600,
 		val builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
+		val responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -49,6 +51,7 @@ class SecureSettings(context: Context) {
 			preferences.getInt(VAD_SENSITIVITY, 50).coerceIn(35, 75),
 			preferences.getInt(VAD_SILENCE, 600).coerceIn(300, 1_200),
 			BuiltInAudioRoute.fromStorage(preferences.getString(AUDIO_ROUTE, null)),
+			VoiceResponsePacing.fromStorage(preferences.getString(RESPONSE_PACING, null)),
 		)
     }
 
@@ -83,6 +86,10 @@ class SecureSettings(context: Context) {
 
 	fun saveBuiltInAudioRoute(route: BuiltInAudioRoute) {
 		preferences.edit().putString(AUDIO_ROUTE, route.storageValue).apply()
+	}
+
+	fun saveResponsePacing(pacing: VoiceResponsePacing) {
+		preferences.edit().putString(RESPONSE_PACING, pacing.wireValue).apply()
 	}
 
     private fun decrypt(ciphertext: String, iv: String): String {
@@ -123,6 +130,7 @@ class SecureSettings(context: Context) {
 		const val VAD_SENSITIVITY = "vad_sensitivity"
 		const val VAD_SILENCE = "vad_silence"
 		const val AUDIO_ROUTE = "audio_route"
+		const val RESPONSE_PACING = "response_pacing"
         const val DEFAULT_SERVER = ""
     }
 }

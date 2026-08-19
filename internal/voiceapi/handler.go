@@ -77,6 +77,7 @@ type clientFrame struct {
 	Languages      []string           `json:"languages,omitempty"`
 	BeforeID       string             `json:"before_id,omitempty"`
 	Limit          int                `json:"limit,omitempty"`
+	ResponsePacing string             `json:"response_pacing,omitempty"`
 }
 
 type serverFrame struct {
@@ -269,6 +270,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	call := voice.NewCall(h.Backend, voiceSession.ID)
 	var audio *incomingAudio
+	responsePacing := voice.ResponsePacingNormal
 	var writeMu sync.Mutex
 	if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 		return
@@ -315,6 +317,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.TrimSpace(frame.Type) {
 		case "hello":
+			parsedPacing, parseErr := voice.ParseResponsePacing(frame.ResponsePacing)
+			if parseErr != nil {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: parseErr.Error()}); err != nil {
+					return
+				}
+				continue
+			}
+			responsePacing = parsedPacing
 			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
 				return
 			}
@@ -395,7 +405,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			completed := audio
 			audio = nil
-			if err := h.handleAudio(ctx, conn, &writeMu, call, completed, frame.SessionID); err != nil {
+			if err := h.handleAudio(ctx, conn, &writeMu, call, completed, responsePacing); err != nil {
 				return
 			}
 		case "utterance":
@@ -411,7 +421,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			message, err := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, frame.Text, func(session voice.Session) error {
+			message, err := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, frame.Text, voice.TurnOptions{ResponsePacing: responsePacing}, func(session voice.Session) error {
 				return writeWorking(ctx, conn, &writeMu, frame.UtteranceID, session)
 			})
 			cancel()
@@ -701,7 +711,7 @@ func (h *Handler) serveBindDevice(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(bindDeviceResponse{Protocol: protocolVersion, Binding: binding})
 }
 
-func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, _ string) error {
+func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, responsePacing voice.ResponsePacing) error {
 	if len(audio.pcm) == 0 {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: "audio utterance was empty"}); err != nil {
 			return err
@@ -730,7 +740,7 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 		cancel()
 		return writeResult(ctx, conn, writeMu, call, h.Backend, h.Updates, audio.utteranceID, transcript, voice.Message{}, stateErr)
 	}
-	message, callErr := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, transcript, func(session voice.Session) error {
+	message, callErr := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, transcript, voice.TurnOptions{ResponsePacing: responsePacing}, func(session voice.Session) error {
 		return writeWorking(ctx, conn, writeMu, audio.utteranceID, session)
 	})
 	cancel()

@@ -33,6 +33,8 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
@@ -68,6 +70,7 @@ import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
+import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.conversationAvailability
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
@@ -494,6 +497,24 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		content.addView(speechAutomaticRow(), spaced(bottom = 8))
 		SpeechLanguages.all.forEach { language -> content.addView(speechLanguageRow(language), spaced(bottom = 8)) }
 		content.addView(helper("Language choices apply the next time a conversation connects. Multiple choices are recognition hints because compatible speech services accept only one hard language setting."), spaced(top = 3, bottom = 24))
+
+		content.addView(title("Response pacing").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Choose how much Koder normally says aloud. This changes delivery for the call, not the conversation history."), spaced(top = 6, bottom = 10))
+		content.addView(RadioGroup(this).apply {
+			orientation = RadioGroup.VERTICAL
+			VoiceResponsePacing.entries.forEach { pacing ->
+				addView(RadioButton(this@MainActivity).apply {
+					id = View.generateViewId()
+					text = "${pacing.title}\n${pacing.description}"
+					contentDescription = "Use ${pacing.title.lowercase()} response pacing"
+					isChecked = settings.responsePacing == pacing
+					setOnClickListener {
+						settings = settings.copy(responsePacing = pacing)
+						secureSettings.saveResponsePacing(pacing)
+					}
+				}, matchWrap())
+			}
+		}, spaced(bottom = 24))
 
 		content.addView(title("Voice detection").apply { textSize = 24f }, matchWrap())
 		val sensitivityValue = helper("Sensitivity · ${settings.vadSensitivityPercent}%")
@@ -1337,6 +1358,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			settings.vadSensitivityPercent,
 			settings.vadSilenceMilliseconds,
 			settings.builtInAudioRoute,
+			settings.responsePacing,
 		)
     }
 

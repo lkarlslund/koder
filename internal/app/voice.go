@@ -353,10 +353,14 @@ func transcriptPageStart(entries []voice.TranscriptEntry, turns int) int {
 
 // RunVoiceTurn executes an utterance through the durable voice chat's normal
 // model loop, history, role prompt, and profile-scoped tools.
-func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, onWorking func(voice.Session) error) (voice.Message, error) {
+func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return voice.Message{}, fmt.Errorf("voice transcript is required")
+	}
+	pacing, err := voice.ParseResponsePacing(string(options.ResponsePacing))
+	if err != nil {
+		return voice.Message{}, err
 	}
 	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
 	if err != nil {
@@ -375,7 +379,15 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	initialSeq := latestTimelineSequence(initial.Timeline)
 	updates, unsubscribe := runtime.Subscribe()
 	defer unsubscribe()
-	runtime.Enqueue(chat.QueueItem{Kind: chat.QueueKindUser, Source: domain.UserMessageSourceVoice, Text: text})
+	runtime.Enqueue(chat.QueueItem{
+		Kind:   chat.QueueKindUser,
+		Source: domain.UserMessageSourceVoice,
+		Text:   text,
+		EphemeralInstructions: []provider.InstructionBlock{{
+			Kind: provider.InstructionKindRuntime,
+			Text: pacing.Instruction(),
+		}},
+	})
 	started := false
 	workingSent := false
 	for {
@@ -410,7 +422,7 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 			}
 			timeline := runtime.SnapshotTimeline()
 			if response := latestAssistantTextAfter(timeline, initialSeq); response != "" {
-				spoken := conciseSpokenResponse(response)
+				spoken := pacedSpokenResponse(response, pacing)
 				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
 				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
 				return voice.Message{SpokenText: spoken, Parts: parts}, nil
@@ -425,8 +437,8 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	}
 }
 
-func conciseSpokenResponse(text string) string {
-	const maxWords = 60
+func pacedSpokenResponse(text string, pacing voice.ResponsePacing) string {
+	maxWords := pacing.MaxSpokenWords()
 	text = conversationalVoiceText(text)
 	if text == "" {
 		return "I've put the details in the conversation."

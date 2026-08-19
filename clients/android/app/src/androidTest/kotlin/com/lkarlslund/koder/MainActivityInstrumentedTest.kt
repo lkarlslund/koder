@@ -186,8 +186,20 @@ class MainActivityInstrumentedTest {
 				assertTrue(settingsLabels.contains("Automatic (all languages)"))
 				assertTrue(settingsLabels.contains("Danish (da)"))
 				assertTrue(settingsLabels.contains("German (de)"))
+				assertTrue(settingsLabels.contains("Response pacing"))
+				assertTrue(settingsLabels.any { it.contains("Detailed") })
 				onView(withContentDescription("Recognize Danish")).perform(scrollTo(), click())
 				assertEquals(setOf("da"), SecureSettings(context).load().speechLanguages)
+				scenario.onActivity { activity ->
+					val root = activity.findViewById<View>(android.R.id.content)
+					val scroll = root.firstScrollView()
+					val target = root.findByDescription("Use detailed response pacing")
+					val bounds = android.graphics.Rect().also(target::getDrawingRect)
+					scroll.offsetDescendantRectToMyCoords(target, bounds)
+					scroll.scrollTo(0, bounds.top.coerceAtLeast(0))
+					target.performClick()
+				}
+				assertEquals(com.lkarlslund.koder.voice.VoiceResponsePacing.DETAILED, SecureSettings(context).load().responsePacing)
 				var scrollBefore = 0
 				var scrollAfter = 0
 				scenario.onActivity { activity ->

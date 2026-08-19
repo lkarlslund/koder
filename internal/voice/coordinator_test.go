@@ -2,9 +2,30 @@ package voice
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestResponsePacingValidationAndLimits(t *testing.T) {
+	for _, test := range []struct {
+		wire  string
+		want  ResponsePacing
+		limit int
+	}{
+		{"", ResponsePacingNormal, 65},
+		{"concise", ResponsePacingConcise, 30},
+		{"DETAILED", ResponsePacingDetailed, 150},
+	} {
+		got, err := ParseResponsePacing(test.wire)
+		if err != nil || got != test.want || got.MaxSpokenWords() != test.limit || !strings.Contains(got.Instruction(), "Response pacing") {
+			t.Fatalf("ParseResponsePacing(%q) = %q, %v", test.wire, got, err)
+		}
+	}
+	if _, err := ParseResponsePacing("essay"); err == nil {
+		t.Fatal("expected unsupported response pacing to fail")
+	}
+}
 
 type fakeBackend struct {
 	sessions []Session

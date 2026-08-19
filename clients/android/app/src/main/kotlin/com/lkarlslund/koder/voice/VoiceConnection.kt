@@ -37,6 +37,7 @@ class VoiceConnection(
     private var server = ""
 	private var voiceSessionId = ""
 	private var callId = ""
+	private var responsePacing = VoiceResponsePacing.NORMAL
 	private var desired = false
 	private var generation = 0L
 	private var reconnectAttempt = 0
@@ -46,11 +47,12 @@ class VoiceConnection(
 	}
 
 	@Synchronized
-	fun connect(server: String, bearerToken: String, voiceSessionId: String = "") {
+	fun connect(server: String, bearerToken: String, voiceSessionId: String = "", responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL) {
 		stopSocket("new call")
         token = bearerToken.trim()
         this.server = server.trim()
         this.voiceSessionId = voiceSessionId.trim()
+		this.responsePacing = responsePacing
 		callId = UUID.randomUUID().toString()
 		desired = true
 		reconnectAttempt = 0
@@ -84,7 +86,7 @@ class VoiceConnection(
 					}
 					reconnectAttempt = 0
 				}
-                webSocket.send(VoiceProtocol.hello())
+				webSocket.send(VoiceProtocol.hello(responsePacing))
                 listener.onCallIdentity(callId)
                 listener.onConnected()
             }

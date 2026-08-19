@@ -127,6 +127,7 @@ class CallController(
 		vadSensitivityPercent: Int = 50,
 		vadSilenceMilliseconds: Int = 600,
 		builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
+		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
 	) {
         if (running) end()
         running = true
@@ -152,7 +153,7 @@ class CallController(
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
         telecom.start()
         try {
-            connection.connect(server, token, voiceSessionId)
+			connection.connect(server, token, voiceSessionId, responsePacing)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Connection failed")
         }

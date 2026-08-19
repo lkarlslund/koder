@@ -28,6 +28,7 @@ func (r *Runtime) BuildConversationForTurn(_ context.Context, req chatpkg.TurnRe
 	if err != nil {
 		return nil, err
 	}
+	envelope.Instructions = append(envelope.Instructions, req.EphemeralInstructions...)
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 

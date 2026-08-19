@@ -22,6 +22,7 @@ type modelTurnLoop struct {
 	autoContinuedBadStop     bool
 	skipAutoCompactOnce      bool
 	consecutiveReasoningOnly int
+	ephemeralInstructions    []provider.InstructionBlock
 }
 
 func (l *modelTurnLoop) maxSteps() int {
@@ -62,6 +63,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	if err != nil {
 		return TurnStepResult{}, err
 	}
+	turnRequest.EphemeralInstructions = append([]provider.InstructionBlock(nil), l.ephemeralInstructions...)
 	session = turnRequest.Session
 	chat = turnRequest.Chat
 	messages, buildErr := l.model.BuildConversationForTurn(ctx, turnRequest)

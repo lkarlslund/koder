@@ -42,7 +42,9 @@ are PCM envelopes described below.
 
 ## Client text frames
 
-- `hello`: request a fresh `ready` snapshot.
+- `hello`: request a fresh `ready` snapshot and optionally set
+  `response_pacing` to `concise`, `normal`, or `detailed` for subsequent turns
+  on this connection. The pacing instruction is never added to chat history.
 - `ping`: request `pong`.
 - `select_voice_session` with `voice_session_id`: switch the durable voice-chat
   transcript owned by the current live call.
@@ -73,6 +75,7 @@ which has one `language` field rather than a native allow-list.
 Examples:
 
 ```json
+{"type":"hello","protocol":"voice.v1","response_pacing":"normal"}
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
 {"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}

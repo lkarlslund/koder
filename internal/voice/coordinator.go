@@ -70,7 +70,59 @@ type VoiceSessionBackend interface {
 	CreateVoiceSession(context.Context, string) (Session, error)
 	RenameVoiceSession(context.Context, string, string) (Session, error)
 	DeleteVoiceSession(context.Context, string) error
-	RunVoiceTurn(context.Context, string, string, func(Session) error) (Message, error)
+	RunVoiceTurn(context.Context, string, string, TurnOptions, func(Session) error) (Message, error)
+}
+
+// ResponsePacing controls spoken answer length without adding instructions to chat history.
+type ResponsePacing string
+
+const (
+	ResponsePacingConcise  ResponsePacing = "concise"
+	ResponsePacingNormal   ResponsePacing = "normal"
+	ResponsePacingDetailed ResponsePacing = "detailed"
+)
+
+// ParseResponsePacing validates a wire value, defaulting an omitted value to normal.
+func ParseResponsePacing(value string) (ResponsePacing, error) {
+	pacing := ResponsePacing(strings.ToLower(strings.TrimSpace(value)))
+	if pacing == "" {
+		return ResponsePacingNormal, nil
+	}
+	switch pacing {
+	case ResponsePacingConcise, ResponsePacingNormal, ResponsePacingDetailed:
+		return pacing, nil
+	default:
+		return "", fmt.Errorf("unsupported response pacing %q", value)
+	}
+}
+
+// TurnOptions contains per-connection behavior that must not pollute durable history.
+type TurnOptions struct {
+	ResponsePacing ResponsePacing
+}
+
+// Instruction returns a transient system instruction for the selected pacing.
+func (p ResponsePacing) Instruction() string {
+	switch p {
+	case ResponsePacingConcise:
+		return "Response pacing for this call is concise. Answer in one brief conversational sentence, normally no more than 25 spoken words."
+	case ResponsePacingDetailed:
+		return "Response pacing for this call is detailed. Give a conversational explanation of up to about five sentences and 140 spoken words when the extra detail is useful."
+	default:
+		return "Response pacing for this call is normal. Answer in one or two short conversational sentences, normally no more than 60 spoken words."
+	}
+}
+
+// MaxSpokenWords is the last-mile safety limit for this pacing.
+func (p ResponsePacing) MaxSpokenWords() int {
+	switch p {
+	case ResponsePacingConcise:
+		return 30
+	case ResponsePacingDetailed:
+		return 150
+	default:
+		return 65
+	}
 }
 
 // VoiceHistoryBackend exposes the user-visible transcript of a durable voice

@@ -37,6 +37,8 @@ type QueueItem struct {
 	Attachments []attachment.Draft
 	References  []reference.Draft
 	Note        string
+	// EphemeralInstructions affect this turn without becoming transcript history.
+	EphemeralInstructions []provider.InstructionBlock
 }
 
 type MetadataUpdate struct {
@@ -145,25 +147,26 @@ type Chat struct {
 	deps    Deps
 	onClose func(id.ID)
 
-	mu               sync.RWMutex
-	session          domain.Session
-	chat             domain.Chat
-	state            *ChatState
-	status           Status
-	statusText       string
-	active           bool
-	cancel           context.CancelFunc
-	toolCancels      map[string]context.CancelFunc
-	queue            []domain.QueuedInput
-	queueNotes       map[id.ID]string
-	activeUserSource string
-	cancelState      CancelState
-	running          map[string]struct{}
-	turnSeq          uint64
-	draining         bool
-	closed           bool
-	timelineLoaded   bool
-	timelineHasOlder bool
+	mu                sync.RWMutex
+	session           domain.Session
+	chat              domain.Chat
+	state             *ChatState
+	status            Status
+	statusText        string
+	active            bool
+	cancel            context.CancelFunc
+	toolCancels       map[string]context.CancelFunc
+	queue             []domain.QueuedInput
+	queueNotes        map[id.ID]string
+	queueInstructions map[id.ID][]provider.InstructionBlock
+	activeUserSource  string
+	cancelState       CancelState
+	running           map[string]struct{}
+	turnSeq           uint64
+	draining          bool
+	closed            bool
+	timelineLoaded    bool
+	timelineHasOlder  bool
 
 	inbox   chan any
 	done    chan struct{}
@@ -253,9 +256,10 @@ type TurnStepResult struct {
 }
 
 type TurnRequest struct {
-	Session  domain.Session
-	Chat     domain.Chat
-	Timeline []domain.TimelineItem
+	Session               domain.Session
+	Chat                  domain.Chat
+	Timeline              []domain.TimelineItem
+	EphemeralInstructions []provider.InstructionBlock
 }
 
 type ToolTurnService interface {
@@ -422,21 +426,22 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		statusText = "Waiting for input"
 	}
 	c := &Chat{
-		deps:             deps,
-		onClose:          onClose,
-		session:          session,
-		chat:             chatRecord,
-		state:            NewTimelineState(chatRecord, timeline, approvals),
-		status:           status,
-		statusText:       statusText,
-		queue:            cloneQueuedInputs(chatRecord.QueuedInputs),
-		queueNotes:       map[id.ID]string{},
-		toolCancels:      map[string]context.CancelFunc{},
-		timelineLoaded:   timelineLoaded,
-		timelineHasOlder: timelineHasOlder,
-		inbox:            make(chan any, 64),
-		done:             make(chan struct{}),
-		subs:             map[int]chan Update{},
+		deps:              deps,
+		onClose:           onClose,
+		session:           session,
+		chat:              chatRecord,
+		state:             NewTimelineState(chatRecord, timeline, approvals),
+		status:            status,
+		statusText:        statusText,
+		queue:             cloneQueuedInputs(chatRecord.QueuedInputs),
+		queueNotes:        map[id.ID]string{},
+		queueInstructions: map[id.ID][]provider.InstructionBlock{},
+		toolCancels:       map[string]context.CancelFunc{},
+		timelineLoaded:    timelineLoaded,
+		timelineHasOlder:  timelineHasOlder,
+		inbox:             make(chan any, 64),
+		done:              make(chan struct{}),
+		subs:              map[int]chan Update{},
 	}
 	go c.loop()
 	resuming := false
@@ -2264,9 +2269,14 @@ func (r *Chat) loop() {
 
 func (r *Chat) handleEnqueue(item QueueItem) {
 	queued := queuedInputFromItem(item)
-	if note := strings.TrimSpace(item.Note); note != "" {
+	if note := strings.TrimSpace(item.Note); note != "" || len(item.EphemeralInstructions) > 0 {
 		r.mu.Lock()
-		r.queueNotes[queued.ID] = note
+		if note != "" {
+			r.queueNotes[queued.ID] = note
+		}
+		if len(item.EphemeralInstructions) > 0 {
+			r.queueInstructions[queued.ID] = append([]provider.InstructionBlock(nil), item.EphemeralInstructions...)
+		}
 		r.mu.Unlock()
 	}
 	r.handleAppendQueuedInput(queued)
@@ -2689,7 +2699,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 			return
 		}
 		if shouldContinue {
-			r.continueTurnLoop(ctx, nil, out)
+			r.continueTurnLoop(ctx, nil, nil, out)
 		}
 	})
 	r.forwardTurnEvents(turn, out)
@@ -2823,7 +2833,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 			return
 		}
 		if shouldContinue {
-			r.continueTurnLoop(ctx, nil, out)
+			r.continueTurnLoop(ctx, nil, nil, out)
 		}
 	})
 	r.forwardTurnEvents(turn, out)
@@ -3317,10 +3327,12 @@ func (r *Chat) maybeDispatchNext() {
 func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput) {
 	r.mu.Lock()
 	note := r.queueNotes[item.ID]
+	ephemeralInstructions := r.queueInstructions[item.ID]
 	delete(r.queueNotes, item.ID)
+	delete(r.queueInstructions, item.ID)
 	r.mu.Unlock()
 	if r.deps.Model != nil {
-		r.runTurnLoop(ctx, turn, item, note)
+		r.runTurnLoop(ctx, turn, item, note, ephemeralInstructions)
 		return
 	}
 	err := fmt.Errorf("model service is not configured")
@@ -3335,7 +3347,7 @@ func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedInput, note string) {
+func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedInput, note string, ephemeralInstructions []provider.InstructionBlock) {
 	out := make(chan domain.Event, 32)
 	r.startWorker(func() {
 		defer close(out)
@@ -3358,17 +3370,17 @@ func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedI
 			r.handleTurnError(ctx, out, err)
 			return
 		}
-		r.continueTurnLoop(ctx, turnInstructions, out)
+		r.continueTurnLoop(ctx, turnInstructions, ephemeralInstructions, out)
 	})
 	r.forwardTurnEvents(turn, out)
 }
 
-func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions []provider.InstructionBlock, out chan<- domain.Event) {
+func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions, ephemeralInstructions []provider.InstructionBlock, out chan<- domain.Event) {
 	if r.deps.Model == nil {
 		r.handleTurnError(ctx, out, fmt.Errorf("model service is not configured"))
 		return
 	}
-	loop := modelTurnLoop{model: r.deps.Model, session: r.Snapshot().Session}
+	loop := modelTurnLoop{model: r.deps.Model, session: r.Snapshot().Session, ephemeralInstructions: ephemeralInstructions}
 	for step := 0; step < loop.maxSteps(); step++ {
 		if step > 0 {
 			item, applied, err := r.ApplyNextSteer(ctx)

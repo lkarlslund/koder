@@ -1,16 +1,45 @@
 package modelruntime
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 )
+
+func TestBuildConversationAddsEphemeralInstructionsOnlyToRequest(t *testing.T) {
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-1", SessionID: session.ID, WorkflowRole: chatrole.Voice}
+	timeline := []domain.TimelineItem{{
+		ID: "user-1", ChatID: chat.ID, Content: domain.UserMessage{Text: "What happened?"},
+	}}
+	messages, err := runtime.BuildConversationForTurn(context.Background(), chatpkg.TurnRequest{
+		Session:  session,
+		Chat:     chat,
+		Timeline: timeline,
+		EphemeralInstructions: []provider.InstructionBlock{{
+			Kind: provider.InstructionKindRuntime,
+			Text: "Speak in one brief sentence.",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) < 2 || messages[0].Role != provider.RoleSystem || !strings.Contains(messages[0].Content, "Speak in one brief sentence.") {
+		t.Fatalf("ephemeral instruction missing from system request: %#v", messages)
+	}
+	if messages[len(messages)-1].Role != provider.RoleUser || messages[len(messages)-1].Content != "What happened?" {
+		t.Fatalf("durable timeline changed: %#v", messages)
+	}
+}
 
 func TestBuildPromptEnvelopeCompactionSummaryPreservesRetainedToolTail(t *testing.T) {
 	t.Parallel()

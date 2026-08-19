@@ -9,6 +9,13 @@ import org.junit.Test
 
 class VoiceProtocolTest {
 	@Test
+	fun helloCarriesResponsePacingWithoutAddingAChatMessage() {
+		val hello = JSONObject(VoiceProtocol.hello(VoiceResponsePacing.CONCISE))
+		assertEquals("hello", hello.getString("type"))
+		assertEquals("concise", hello.getString("response_pacing"))
+		assertFalse(hello.has("text"))
+	}
+	@Test
 	fun decodesHistoryPageAndEncodesCursorRequest() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/history.json"))
 			.bufferedReader().use { it.readText() }

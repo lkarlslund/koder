@@ -38,6 +38,7 @@ class VoiceConnectionInstrumentedTest {
         var utteranceText = ""
 		var voiceTitle = ""
 		var historyCursor = ""
+		var responsePacing = ""
 
         server.enqueue(
             MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
@@ -54,6 +55,7 @@ class VoiceConnectionInstrumentedTest {
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     val message = JSONObject(text)
+					if (message.getString("type") == "hello") responsePacing = message.getString("response_pacing")
                     if (message.getString("type") == "utterance") {
                         utteranceText = message.getString("text")
                         serverReceivedUtterance.countDown()
@@ -102,7 +104,7 @@ class VoiceConnectionInstrumentedTest {
 			}
             override fun onDisconnected(reason: String) = Unit
         }).use { connection ->
-            connection.connect(server.url("/").toString(), "test-token")
+            connection.connect(server.url("/").toString(), "test-token", responsePacing = VoiceResponsePacing.DETAILED)
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
             connection.sendUtterance("check the calendar")
 			assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
@@ -125,5 +127,6 @@ class VoiceConnectionInstrumentedTest {
         assertEquals("check the calendar", utteranceText)
 		assertEquals("message-5", historyCursor)
 		assertEquals("Phone work", voiceTitle)
+		assertEquals("detailed", responsePacing)
     }
 }

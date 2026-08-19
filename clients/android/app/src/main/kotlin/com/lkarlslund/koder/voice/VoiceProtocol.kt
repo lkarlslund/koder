@@ -204,9 +204,10 @@ object VoiceProtocol {
         )
     }
 
-    fun hello(): String = JSONObject()
+    fun hello(responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL): String = JSONObject()
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)
+		.put("response_pacing", responsePacing.wireValue)
         .toString()
 
 	fun history(beforeId: String, limit: Int = 5): String = JSONObject()

@@ -43,6 +43,7 @@ type fakeBackend struct {
 	artifact   voice.ArtifactFile
 	voiceChats []voice.Session
 	history    []voice.TranscriptEntry
+	pacing     voice.ResponsePacing
 }
 
 func (f *fakeBackend) VoiceSessionHistory(_ context.Context, _ string, beforeID string, limit int) (voice.TranscriptPage, error) {
@@ -131,7 +132,8 @@ func (f *fakeBackend) EnsureVoiceSession(_ context.Context, requestedID string) 
 	return voice.Session{ID: requestedID, Title: "Voice Chat"}, nil
 }
 
-func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, onWorking func(voice.Session) error) (voice.Message, error) {
+func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	f.pacing = options.ResponsePacing
 	target := voice.Session{ID: "session-1", Title: "Laptop repair"}
 	if onWorking != nil {
 		if err := onWorking(target); err != nil {
@@ -280,6 +282,10 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	readType(t, ctx, conn, "ready")
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "hello", Protocol: protocolVersion, ResponsePacing: "detailed"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "ready")
 	if err := writeClientFrame(ctx, conn, clientFrame{Type: "utterance", Protocol: protocolVersion, UtteranceID: "utt-1", Text: "check it", SessionID: "session-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +298,7 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 		t.Fatalf("working state = %#v", working)
 	}
 	message := readType(t, ctx, conn, "message")
-	if message.Message == nil || message.Message.SpokenText != "Done: check it." || !backend.delegated {
+	if message.Message == nil || message.Message.SpokenText != "Done: check it." || !backend.delegated || backend.pacing != voice.ResponsePacingDetailed {
 		t.Fatalf("message=%#v delegated=%v", message, backend.delegated)
 	}
 	readType(t, ctx, conn, "state")

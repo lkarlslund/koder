@@ -137,19 +137,31 @@ func TestTranscriptionHintsUseHardSingleAndPromptedMultipleLanguages(t *testing.
 
 func TestConciseSpokenResponseKeepsVisualDetailOutOfSpeech(t *testing.T) {
 	short := "I found it. The appointment is tomorrow at ten."
-	if got := conciseSpokenResponse(short); got != short {
+	if got := pacedSpokenResponse(short, voice.ResponsePacingNormal); got != short {
 		t.Fatalf("short response = %q", got)
 	}
 	long := "This is the useful first sentence. " + strings.Repeat("Supporting detail takes many words and belongs in the visual transcript instead. ", 10)
-	got := conciseSpokenResponse(long)
-	if len(strings.Fields(got)) > 60 || !strings.HasSuffix(got, ".") {
+	got := pacedSpokenResponse(long, voice.ResponsePacingNormal)
+	if len(strings.Fields(got)) > voice.ResponsePacingNormal.MaxSpokenWords() || !strings.HasSuffix(got, ".") {
 		t.Fatalf("concise response = %q (%d words)", got, len(strings.Fields(got)))
+	}
+}
+
+func TestSpokenResponseLimitFollowsPacing(t *testing.T) {
+	long := strings.Repeat("useful detail ", 100)
+	concise := pacedSpokenResponse(long, voice.ResponsePacingConcise)
+	detailed := pacedSpokenResponse(long, voice.ResponsePacingDetailed)
+	if len(strings.Fields(concise)) > voice.ResponsePacingConcise.MaxSpokenWords() {
+		t.Fatalf("concise response has %d words", len(strings.Fields(concise)))
+	}
+	if len(strings.Fields(detailed)) <= len(strings.Fields(concise)) || len(strings.Fields(detailed)) > voice.ResponsePacingDetailed.MaxSpokenWords() {
+		t.Fatalf("detailed response has %d words; concise has %d", len(strings.Fields(detailed)), len(strings.Fields(concise)))
 	}
 }
 
 func TestConciseSpokenResponseRemovesDocumentFormatting(t *testing.T) {
 	formatted := "## Result\n\n- **First** item\n- [Second](https://example.com) item\n\n| Time | Person |\n|---|---|\n| 10:00 | Steen |\n\n```go\nfmt.Println(\"not spoken\")\n```"
-	got := conciseSpokenResponse(formatted)
+	got := pacedSpokenResponse(formatted, voice.ResponsePacingNormal)
 	if got != "Result. First item. Second item. Time, Person. 10:00, Steen." {
 		t.Fatalf("spoken response = %q", got)
 	}

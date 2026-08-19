@@ -13,6 +13,7 @@ const (
 	InstructionKindSkills              InstructionKind = "skills"
 	InstructionKindSessionNote         InstructionKind = "session_note"
 	InstructionKindContinuation        InstructionKind = "continuation"
+	InstructionKindRuntime             InstructionKind = "runtime"
 )
 
 type InstructionBlock struct {

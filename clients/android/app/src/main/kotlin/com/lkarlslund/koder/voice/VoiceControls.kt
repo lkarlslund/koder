@@ -2,6 +2,16 @@ package com.lkarlslund.koder.voice
 
 fun muteControlLabel(muted: Boolean): String = if (muted) "Unmute" else "Mute"
 
+enum class VoiceResponsePacing(val wireValue: String, val title: String, val description: String) {
+	CONCISE("concise", "Concise", "One brief sentence when possible"),
+	NORMAL("normal", "Normal", "One or two short sentences"),
+	DETAILED("detailed", "Detailed", "A fuller spoken explanation when useful");
+
+	companion object {
+		fun fromStorage(value: String?): VoiceResponsePacing = entries.firstOrNull { it.wireValue == value } ?: NORMAL
+	}
+}
+
 enum class ConversationAvailability { CONNECTING, RETRYING, ONLINE, PAUSED, OFFLINE }
 
 fun conversationAvailability(stage: CallController.Stage?, detail: String = ""): ConversationAvailability = when {
