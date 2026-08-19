@@ -21,6 +21,7 @@ import android.text.format.DateUtils
 import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -1214,6 +1215,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 cornerRadius = dp(16).toFloat()
             }
             elevation = dp(1).toFloat()
+			isLongClickable = true
+			contentDescription = "$who message. Long press to copy"
+			setOnLongClickListener {
+				(getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("$who message", text))
+				performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+				Toast.makeText(this@MainActivity, "Message copied", Toast.LENGTH_SHORT).show()
+				true
+			}
             addView(helper(who).apply {
                 setTextColor(themeColor(android.R.attr.colorAccent))
                 alpha = 1f
