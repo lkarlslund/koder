@@ -14,6 +14,19 @@ enum class BuiltInAudioRoute(val storageValue: String) {
 
 enum class VoiceAudioEndpointType { BLUETOOTH, WIRED_HEADSET, EARPIECE, SPEAKER, OTHER }
 
+fun audioRouteChipText(endpointName: String): String {
+	val normalized = endpointName.trim()
+	val label = when {
+		normalized.isBlank() -> "Audio"
+		normalized.startsWith("Bluetooth:", ignoreCase = true) -> normalized.substringAfter(':').trim().ifBlank { "Bluetooth" }
+		normalized.startsWith("Headset:", ignoreCase = true) -> normalized.substringAfter(':').trim().ifBlank { "Headset" }
+		normalized.equals("Phone earpiece", ignoreCase = true) -> "Earpiece"
+		normalized.equals("phone audio", ignoreCase = true) -> "Phone audio"
+		else -> normalized
+	}
+	return "$label  ▾"
+}
+
 data class VoiceAudioEndpoint(
 	val id: String,
 	val name: String,

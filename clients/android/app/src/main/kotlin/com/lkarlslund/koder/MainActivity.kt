@@ -74,6 +74,7 @@ import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
+import com.lkarlslund.koder.voice.audioRouteChipText
 import com.lkarlslund.koder.voice.conversationAvailability
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
@@ -128,7 +129,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var pauseButton: ImageButton? = null
 	private var transcriptButton: ImageButton? = null
 	private var muteButton: ImageButton? = null
-	private var audioButton: ImageButton? = null
+	private var audioButton: TextView? = null
 	private var searchButton: ImageButton? = null
 	private var savedButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
@@ -265,8 +266,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			audioButton?.apply {
 				isEnabled = snapshot.audioEndpoints.isNotEmpty()
-				contentDescription = "Audio route${snapshot.audioEndpointName.takeIf(String::isNotBlank)?.let { ": $it" }.orEmpty()}"
-				setActionAppearance(this, ACTION_GREEN, false)
+				text = audioRouteChipText(snapshot.audioEndpointName)
+				contentDescription = "Audio route: ${snapshot.audioEndpointName.ifBlank { "loading" }}. Tap to switch"
+				setAudioRouteAppearance(this)
 				ViewCompat.setTooltipText(this, contentDescription)
 			}
             if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
@@ -1097,10 +1099,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					updateConversationMode(null)
 				}
 			}.also { addView(it, actionLayout()) }
-			audioButton = iconActionButton(R.drawable.ic_voice_audio, "Audio route", ACTION_GREEN).apply {
+			audioButton = audioRouteButton().apply {
 				isEnabled = false
 				setOnClickListener(::showAudioRouteMenu)
-			}.also { addView(it, actionLayout(start = 8)) }
+			}.also { addView(it, routeActionLayout(start = 8)) }
 			searchButton = iconActionButton(R.drawable.ic_voice_search, "Search transcript", ACTION_BLUE).apply {
 				setOnClickListener { showTranscriptSearchDialog() }
 			}.also { addView(it, actionLayout(start = 8)) }
@@ -1814,7 +1816,37 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		button.alpha = if (button.isEnabled) 1f else 0.45f
 	}
 
+	private fun audioRouteButton(): TextView = TextView(this).apply {
+		text = audioRouteChipText("")
+		setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_voice_audio, 0, 0, 0)
+		compoundDrawablePadding = dp(6)
+		gravity = Gravity.CENTER
+		maxLines = 1
+		ellipsize = TextUtils.TruncateAt.END
+		textSize = 13f
+		setTypeface(typeface, Typeface.BOLD)
+		isFocusable = true
+		setPadding(dp(11), 0, dp(11), 0)
+		elevation = dp(2).toFloat()
+		setAudioRouteAppearance(this)
+	}
+
+	private fun setAudioRouteAppearance(button: TextView) {
+		button.setTextColor(ACTION_GREEN)
+		button.compoundDrawableTintList = ColorStateList.valueOf(ACTION_GREEN)
+		button.background = GradientDrawable().apply {
+			cornerRadius = dp(24).toFloat()
+			setColor(withAlpha(ACTION_GREEN, 28))
+			setStroke(dp(1), withAlpha(ACTION_GREEN, 100))
+		}
+		button.alpha = if (button.isEnabled) 1f else 0.45f
+	}
+
 	private fun actionLayout(start: Int = 0) = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+		marginStart = dp(start)
+	}
+
+	private fun routeActionLayout(start: Int = 0) = LinearLayout.LayoutParams(dp(120), dp(48)).apply {
 		marginStart = dp(start)
 	}
 

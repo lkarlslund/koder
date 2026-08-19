@@ -353,6 +353,9 @@ class MainActivityInstrumentedTest {
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
 				waitForText(scenario, "Searchable")
 				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
+				waitForText(scenario, "Speaker  ▾")
+				onView(withText("Speaker  ▾")).perform(click())
+				onView(withText("✓  Speaker")).perform(click())
 				onView(withContentDescription("Search transcript")).perform(click())
 				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
 				onView(withText("Search")).perform(click())
