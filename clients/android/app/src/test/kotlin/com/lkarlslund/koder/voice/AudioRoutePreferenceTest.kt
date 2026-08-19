@@ -42,4 +42,27 @@ class AudioRoutePreferenceTest {
 			automaticAudioEndpointType(BuiltInAudioRoute.SPEAKER, setOf(VoiceAudioEndpointType.EARPIECE, VoiceAudioEndpointType.SPEAKER)),
 		)
 	}
+
+	@Test
+	fun routeChangesFallBackAndAdoptExternalAudio() {
+		val earpiece = endpoint("ear", VoiceAudioEndpointType.EARPIECE)
+		val speaker = endpoint("speaker", VoiceAudioEndpointType.SPEAKER)
+		val wired = endpoint("wired", VoiceAudioEndpointType.WIRED_HEADSET)
+		val bluetooth = endpoint("buds", VoiceAudioEndpointType.BLUETOOTH)
+
+		assertEquals("speaker", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(earpiece, speaker), null)?.id)
+		assertEquals("wired", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(earpiece, speaker, wired), null)?.id)
+		assertEquals("buds", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(earpiece, speaker, wired, bluetooth), null)?.id)
+		assertEquals("wired", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(earpiece, speaker, wired), "buds")?.id)
+		assertEquals("speaker", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(earpiece, speaker), "buds")?.id)
+	}
+
+	@Test
+	fun availableManualRouteSurvivesOtherEndpointChanges() {
+		val speaker = endpoint("speaker", VoiceAudioEndpointType.SPEAKER)
+		val bluetooth = endpoint("buds", VoiceAudioEndpointType.BLUETOOTH)
+		assertEquals("speaker", preferredAudioEndpoint(BuiltInAudioRoute.SPEAKER, listOf(speaker, bluetooth), "speaker")?.id)
+	}
+
+	private fun endpoint(id: String, type: VoiceAudioEndpointType) = VoiceAudioEndpoint(id, id, type, false)
 }

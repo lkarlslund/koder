@@ -144,20 +144,41 @@ class TelecomVoiceCall(context: Context, private val listener: Listener) : AutoC
 
 	private fun applyPreferredRoute() {
 		val callControl = control ?: return
-		val target = manualEndpointId?.let { id -> availableEndpoints.firstOrNull { it.identifier.toString() == id } }
-			?: automaticEndpoint()
-			?: return
+		val target = preferredEndpoint() ?: return
 		if (target.identifier == currentEndpoint?.identifier) return
 		routeJob?.cancel()
-		routeJob = scope.launch { callControl.requestEndpointChange(target) }
+		routeJob = scope.launch {
+			try {
+				callControl.requestEndpointChange(target)
+			} catch (error: CancellationException) {
+				throw error
+			} catch (_: Exception) {
+				// An endpoint can vanish between the availability event and this
+				// request. Clear a stale manual choice and retry the best route
+					// from the latest endpoint snapshot once.
+				if (manualEndpointId == target.identifier.toString()) manualEndpointId = null
+				val fallback = preferredEndpoint()
+				if (fallback != null && fallback.identifier != target.identifier && fallback.identifier != currentEndpoint?.identifier) {
+					runCatching { callControl.requestEndpointChange(fallback) }
+				}
+			}
+		}
 	}
 
-	private fun automaticEndpoint(): CallEndpointCompat? {
-		val targetType = automaticAudioEndpointType(
+	private fun preferredEndpoint(): CallEndpointCompat? {
+		val selected = preferredAudioEndpoint(
 			builtInRoute,
-			availableEndpoints.mapTo(linkedSetOf()) { it.endpointType() },
+			availableEndpoints.map { endpoint ->
+				VoiceAudioEndpoint(
+					endpoint.identifier.toString(),
+					endpoint.description(),
+					endpoint.endpointType(),
+					endpoint.identifier == currentEndpoint?.identifier,
+				)
+			},
+			manualEndpointId,
 		) ?: return null
-		return availableEndpoints.firstOrNull { it.endpointType() == targetType }
+		return availableEndpoints.firstOrNull { it.identifier.toString() == selected.id }
 	}
 
 	private fun publishEndpoints() {

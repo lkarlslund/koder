@@ -14,6 +14,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -355,7 +356,8 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
 				waitForText(scenario, "Speaker  ▾")
 				onView(withText("Speaker  ▾")).perform(click())
-				onView(withText("✓  Speaker")).perform(click())
+				onView(withText("✓  Speaker")).check(matches(isDisplayed()))
+				pressBack()
 				onView(withContentDescription("Search transcript")).perform(click())
 				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
 				onView(withText("Search")).perform(click())

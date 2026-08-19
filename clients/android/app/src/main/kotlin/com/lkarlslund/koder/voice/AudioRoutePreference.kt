@@ -62,3 +62,13 @@ fun automaticAudioEndpointType(
 		null -> null
 	}
 }
+
+fun preferredAudioEndpoint(
+	builtInRoute: BuiltInAudioRoute,
+	available: List<VoiceAudioEndpoint>,
+	manualEndpointId: String?,
+): VoiceAudioEndpoint? {
+	manualEndpointId?.let { id -> available.firstOrNull { it.id == id } }?.let { return it }
+	val targetType = automaticAudioEndpointType(builtInRoute, available.mapTo(linkedSetOf()) { it.type }) ?: return null
+	return available.firstOrNull { it.type == targetType }
+}
