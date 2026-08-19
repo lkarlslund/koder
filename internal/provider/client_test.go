@@ -1706,8 +1706,8 @@ func TestTranscribeSpeech(t *testing.T) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatal(err)
 		}
-		if r.FormValue("model") != "koder-stt" || r.FormValue("language") != "en" {
-			t.Fatalf("unexpected stt fields: model=%q language=%q", r.FormValue("model"), r.FormValue("language"))
+		if r.FormValue("model") != "koder-stt" || r.FormValue("language") != "en" || r.FormValue("prompt") != "Expected English" {
+			t.Fatalf("unexpected stt fields: model=%q language=%q prompt=%q", r.FormValue("model"), r.FormValue("language"), r.FormValue("prompt"))
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
@@ -1733,7 +1733,7 @@ func TestTranscribeSpeech(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := client.TranscribeSpeech(context.Background(), TranscriptionRequest{
-		Model: "koder-stt", Audio: audio, Filename: "voice.wav", Language: "en",
+		Model: "koder-stt", Audio: audio, Filename: "voice.wav", Language: "en", Prompt: "Expected English",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -49,10 +49,16 @@ type AudioConfig struct {
 	MaxUtteranceSeconds int         `json:"max_utterance_seconds"`
 }
 
+// TranscriptionHints are client-specific recognition preferences. An empty
+// language list leaves language detection under server configuration.
+type TranscriptionHints struct {
+	Languages []string
+}
+
 // SpeechBackend connects the voice transport to remote STT and TTS services.
 type SpeechBackend interface {
 	VoiceAudioConfig() AudioConfig
-	TranscribeVoice(context.Context, AudioFormat, []byte) (string, error)
+	TranscribeVoice(context.Context, AudioFormat, []byte, TranscriptionHints) (string, error)
 	StreamVoiceSpeech(context.Context, string, func([]byte) error) error
 }
 

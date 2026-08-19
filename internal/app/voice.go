@@ -34,7 +34,7 @@ func (c *Controller) VoiceAudioConfig() voice.AudioConfig {
 
 // TranscribeVoice sends one VAD-finalized PCM utterance to the configured
 // OpenAI-compatible speech recognition service.
-func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
+func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioFormat, pcm []byte, hints voice.TranscriptionHints) (string, error) {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
@@ -59,14 +59,25 @@ func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioForm
 	if err != nil {
 		return "", err
 	}
+	language, prompt := transcriptionHints(cfg.Voice.STTLanguage, hints.Languages)
 	result, err := client.TranscribeSpeech(ctx, provider.TranscriptionRequest{
 		Model: modelID, Audio: wavFromPCM16(pcm, format.SampleRate, format.Channels),
-		Filename: "voice-utterance.wav", Language: transcriptionLanguage(cfg.Voice.STTLanguage),
+		Filename: "voice-utterance.wav", Language: language, Prompt: prompt,
 	})
 	if err != nil {
 		return "", err
 	}
 	return result.Text, nil
+}
+
+func transcriptionHints(configured string, requested []string) (language, prompt string) {
+	if len(requested) == 1 {
+		return requested[0], ""
+	}
+	if len(requested) > 1 {
+		return "", "Expected spoken languages: " + strings.Join(requested, ", ") + ". Transcribe the speech in the language spoken."
+	}
+	return transcriptionLanguage(configured), ""
 }
 
 func transcriptionLanguage(configured string) string {

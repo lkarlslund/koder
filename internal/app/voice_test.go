@@ -65,7 +65,7 @@ func TestControllerVoiceSpeechRoundTrip(t *testing.T) {
 	cfg.Voice.TTSVoice = "F1"
 	controller := New(cfg, nil)
 	format := controller.VoiceAudioConfig().Input
-	transcript, err := controller.TranscribeVoice(context.Background(), format, pcm)
+	transcript, err := controller.TranscribeVoice(context.Background(), format, pcm, voice.TranscriptionHints{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +96,27 @@ func TestTranscriptionLanguageSupportsAutomaticDetection(t *testing.T) {
 		if got := transcriptionLanguage(test.configured); got != test.want {
 			t.Fatalf("transcriptionLanguage(%q) = %q, want %q", test.configured, got, test.want)
 		}
+	}
+}
+
+func TestTranscriptionHintsUseHardSingleAndPromptedMultipleLanguages(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		configured string
+		requested  []string
+		language   string
+		prompt     string
+	}{
+		{name: "server default", configured: "da", language: "da"},
+		{name: "single selection", configured: "auto", requested: []string{"en"}, language: "en"},
+		{name: "multiple selection", configured: "de", requested: []string{"da", "en"}, prompt: "Expected spoken languages: da, en. Transcribe the speech in the language spoken."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			language, prompt := transcriptionHints(test.configured, test.requested)
+			if language != test.language || prompt != test.prompt {
+				t.Fatalf("transcriptionHints() = %q, %q; want %q, %q", language, prompt, test.language, test.prompt)
+			}
+		})
 	}
 }
 

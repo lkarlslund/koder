@@ -80,6 +80,7 @@ type TranscriptionRequest struct {
 	Audio    []byte
 	Filename string
 	Language string
+	Prompt   string
 }
 
 type TranscriptionResponse struct {
@@ -1063,6 +1064,11 @@ func (c *Client) TranscribeSpeech(ctx context.Context, input TranscriptionReques
 	if language := strings.TrimSpace(input.Language); language != "" {
 		if err := writer.WriteField("language", language); err != nil {
 			return TranscriptionResponse{}, fmt.Errorf("write stt language: %w", err)
+		}
+	}
+	if prompt := strings.TrimSpace(input.Prompt); prompt != "" {
+		if err := writer.WriteField("prompt", prompt); err != nil {
+			return TranscriptionResponse{}, fmt.Errorf("write stt prompt: %w", err)
 		}
 	}
 	if err := writer.Close(); err != nil {

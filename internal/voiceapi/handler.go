@@ -71,6 +71,7 @@ type clientFrame struct {
 	VoiceSessionID string             `json:"voice_session_id,omitempty"`
 	Title          string             `json:"title,omitempty"`
 	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
+	Languages      []string           `json:"languages,omitempty"`
 }
 
 type serverFrame struct {
@@ -130,6 +131,28 @@ type incomingAudio struct {
 	format       voice.AudioFormat
 	nextSequence uint32
 	pcm          []byte
+	languages    []string
+}
+
+func normalizeLanguages(values []string) ([]string, error) {
+	if len(values) > 8 {
+		return nil, fmt.Errorf("audio_start accepts at most 8 language hints")
+	}
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		language := strings.ToLower(strings.TrimSpace(value))
+		if len(language) != 2 || language[0] < 'a' || language[0] > 'z' || language[1] < 'a' || language[1] > 'z' {
+			return nil, fmt.Errorf("invalid ISO 639-1 language hint %q", value)
+		}
+		if _, ok := seen[language]; ok {
+			continue
+		}
+		seen[language] = struct{}{}
+		normalized = append(normalized, language)
+	}
+	slices.Sort(normalized)
+	return normalized, nil
 }
 
 // ServeHTTP accepts one authenticated voice call.
@@ -307,7 +330,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			audio = &incomingAudio{utteranceID: utteranceID, format: *frame.AudioFormat}
+			languages, err := normalizeLanguages(frame.Languages)
+			if err != nil {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: err.Error()}); err != nil {
+					return
+				}
+				continue
+			}
+			audio = &incomingAudio{utteranceID: utteranceID, format: *frame.AudioFormat, languages: languages}
 			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "state", UtteranceID: utteranceID, State: "recording"}); err != nil {
 				return
 			}
@@ -549,7 +579,7 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: audio.utteranceID, State: "transcribing"}); err != nil {
 		return err
 	}
-	transcript, err := h.Backend.TranscribeVoice(ctx, audio.format, audio.pcm)
+	transcript, err := h.Backend.TranscribeVoice(ctx, audio.format, audio.pcm, voice.TranscriptionHints{Languages: audio.languages})
 	if err != nil {
 		if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: err.Error()}); writeErr != nil {
 			return writeErr

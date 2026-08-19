@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ func (f fakeUpdateSource) OpenAPK() (fs.File, error) { return os.Open(f.path) }
 type fakeBackend struct {
 	delegated  bool
 	transcript string
+	languages  []string
 	spoken     string
 	artifact   voice.ArtifactFile
 	voiceChats []voice.Session
@@ -114,11 +116,12 @@ func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, o
 	return voice.Message{SpokenText: spoken, Parts: []voice.Part{{MIMEType: "text/plain", Data: spoken}}, Delegation: &result}, nil
 }
 
-func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
+func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte, hints voice.TranscriptionHints) (string, error) {
 	if format != f.VoiceAudioConfig().Input || len(pcm) == 0 {
 		return "", context.Canceled
 	}
 	f.transcript = "check the laptop"
+	f.languages = append([]string(nil), hints.Languages...)
 	return f.transcript, nil
 }
 
@@ -185,6 +188,18 @@ func TestSharedProtocolFixturesDecode(t *testing.T) {
 	}
 	if request.Protocol != protocolVersion || request.Type != "device_tool_request" || request.Action != phonedevice.SearchContacts || request.Arguments["query"] != "Steen" {
 		t.Fatalf("phone request fixture = %#v", request)
+	}
+}
+
+func TestNormalizeLanguages(t *testing.T) {
+	got, err := normalizeLanguages([]string{" EN ", "da", "en"})
+	if err != nil || !slices.Equal(got, []string{"da", "en"}) {
+		t.Fatalf("normalizeLanguages() = %v, %v", got, err)
+	}
+	for _, invalid := range [][]string{{"german"}, {"de-DE"}, {"1x"}, make([]string, 9)} {
+		if _, err := normalizeLanguages(invalid); err == nil {
+			t.Fatalf("normalizeLanguages(%v) succeeded", invalid)
+		}
 	}
 }
 
@@ -435,7 +450,7 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 		t.Fatal("ready did not advertise audio config")
 	}
 	format := ready.AudioConfig.Input
-	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_start", UtteranceID: "audio-1", AudioFormat: &format}); err != nil {
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_start", UtteranceID: "audio-1", AudioFormat: &format, Languages: []string{"en", "da"}}); err != nil {
 		t.Fatal(err)
 	}
 	readType(t, ctx, conn, "state")
@@ -453,6 +468,9 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	transcript := readType(t, ctx, conn, "transcript")
 	if transcript.Transcript != "check the laptop" {
 		t.Fatalf("transcript = %#v", transcript)
+	}
+	if !slices.Equal(backend.languages, []string{"da", "en"}) {
+		t.Fatalf("transcription languages = %v", backend.languages)
 	}
 	readType(t, ctx, conn, "state") // processing
 	working := readType(t, ctx, conn, "state")
