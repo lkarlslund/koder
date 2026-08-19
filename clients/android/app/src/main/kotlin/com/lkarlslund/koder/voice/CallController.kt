@@ -33,8 +33,10 @@ class CallController(
 		val history: List<VoiceTranscriptEntry> = emptyList(),
 		val historyHasMore: Boolean = false,
 		val historyLoading: Boolean = false,
-	        val appUpdate: AppUpdate? = null,
-			val microphoneMuted: Boolean = false,
+        val appUpdate: AppUpdate? = null,
+		val microphoneMuted: Boolean = false,
+		val audioEndpointName: String = "",
+		val audioEndpoints: List<VoiceAudioEndpoint> = emptyList(),
     )
 
     interface Listener {
@@ -85,6 +87,12 @@ class CallController(
             if (snapshot.stage == Stage.LISTENING) update(Stage.LISTENING, "Listening · $name")
         }
 
+		override fun onAudioEndpoints(currentName: String, endpoints: List<VoiceAudioEndpoint>) = onMain {
+			audioEndpoint = currentName.ifBlank { audioEndpoint }
+			snapshot = snapshot.copy(audioEndpointName = currentName, audioEndpoints = endpoints)
+			publish()
+		}
+
         override fun onCallEnded() = onMain { if (running) end() }
         override fun onTelecomUnavailable(message: String) = onMain {
             audioEndpoint = "phone audio"
@@ -114,6 +122,7 @@ class CallController(
 		languages: Set<String> = emptySet(),
 		vadSensitivityPercent: Int = 50,
 		vadSilenceMilliseconds: Int = 600,
+		builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
 	) {
         if (running) end()
         running = true
@@ -132,6 +141,7 @@ class CallController(
 			endThreshold = (startThreshold - 0.15f).coerceAtLeast(0.1f),
 			endSilenceMilliseconds = vadSilenceMilliseconds.coerceIn(300, 1_200),
 		))
+		telecom.setBuiltInAudioRoute(builtInAudioRoute)
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
@@ -156,7 +166,7 @@ class CallController(
 	    }
 	}
 
-		fun setMicrophoneMuted(muted: Boolean) {
+	fun setMicrophoneMuted(muted: Boolean) {
 			if (!running || muted == microphoneMuted) return
 			microphoneMuted = muted
 			if (muted) {
@@ -179,6 +189,11 @@ class CallController(
 			snapshot = snapshot.copy(historyLoading = false)
 			publish()
 		}
+	}
+
+	fun selectAudioEndpoint(endpointId: String) {
+		if (!running || endpointId.isBlank()) return
+		telecom.selectAudioEndpoint(endpointId)
 	}
 
     fun selectVoiceSession(sessionId: String) {

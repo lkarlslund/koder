@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -18,6 +19,7 @@ class SecureSettings(context: Context) {
 		val speechLanguages: Set<String> = emptySet(),
 		val vadSensitivityPercent: Int = 50,
 		val vadSilenceMilliseconds: Int = 600,
+		val builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -46,6 +48,7 @@ class SecureSettings(context: Context) {
 			languages,
 			preferences.getInt(VAD_SENSITIVITY, 50).coerceIn(35, 75),
 			preferences.getInt(VAD_SILENCE, 600).coerceIn(300, 1_200),
+			BuiltInAudioRoute.fromStorage(preferences.getString(AUDIO_ROUTE, null)),
 		)
     }
 
@@ -76,6 +79,10 @@ class SecureSettings(context: Context) {
 
 	fun saveVadSilence(milliseconds: Int) {
 		preferences.edit().putInt(VAD_SILENCE, milliseconds.coerceIn(300, 1_200)).apply()
+	}
+
+	fun saveBuiltInAudioRoute(route: BuiltInAudioRoute) {
+		preferences.edit().putString(AUDIO_ROUTE, route.storageValue).apply()
 	}
 
     private fun decrypt(ciphertext: String, iv: String): String {
@@ -115,6 +122,7 @@ class SecureSettings(context: Context) {
 		const val SPEECH_LANGUAGES = "speech_languages"
 		const val VAD_SENSITIVITY = "vad_sensitivity"
 		const val VAD_SILENCE = "vad_silence"
+		const val AUDIO_ROUTE = "audio_route"
         const val DEFAULT_SERVER = ""
     }
 }

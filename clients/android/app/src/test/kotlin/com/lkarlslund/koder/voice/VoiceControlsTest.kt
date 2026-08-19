@@ -22,6 +22,7 @@ class VoiceControlsTest {
 		assertEquals("Authorization failed · check Settings", reconnectStatus("Expected HTTP 101 (HTTP 401)"))
 		assertEquals("Voice endpoint unavailable · reconnecting", reconnectStatus("Expected HTTP 101 (HTTP 404)"))
 		assertEquals("Conversation is busy · reconnecting", reconnectStatus("Expected HTTP 101 (HTTP 409)"))
+		assertEquals("Voice connection unavailable · reconnecting", reconnectStatus("Expected HTTP 101 response but was '500'"))
 		assertEquals("Reconnecting · network changed", reconnectStatus("network changed"))
 	}
 }

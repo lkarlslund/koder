@@ -20,6 +20,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lkarlslund.koder.update.AndroidAppUpdater
+import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
@@ -40,6 +41,15 @@ class MainActivityInstrumentedTest {
     fun clearSettings() {
         context.getSharedPreferences("koder_voice", Context.MODE_PRIVATE).edit().clear().commit()
     }
+
+    @Test
+	fun builtInAudioRouteDefaultsToSpeakerAndRemembersEarpiece() {
+		clearSettings()
+		val secureSettings = SecureSettings(context)
+		assertEquals(BuiltInAudioRoute.SPEAKER, secureSettings.load().builtInAudioRoute)
+		secureSettings.saveBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)
+		assertEquals(BuiltInAudioRoute.EARPIECE, secureSettings.load().builtInAudioRoute)
+	}
 
     @Test
 	fun setupDoesNotKeepTheScreenAwake() {

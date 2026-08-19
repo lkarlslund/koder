@@ -29,6 +29,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
@@ -40,6 +41,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.ViewCompat
@@ -50,6 +52,7 @@ import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
+import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.ConversationSurface
 import com.lkarlslund.koder.voice.ServerInfo
 import com.lkarlslund.koder.voice.SpeechLanguage
@@ -61,11 +64,11 @@ import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
+import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
-import com.lkarlslund.koder.voice.muteControlLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import java.io.File
 import java.time.Duration
@@ -107,9 +110,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var presentationShown = false
 	private var speechAutomaticCheck: CheckBox? = null
 	private var composerView: View? = null
-	private var pauseButton: Button? = null
-	private var transcriptButton: Button? = null
-	private var muteButton: Button? = null
+	private var pauseButton: ImageButton? = null
+	private var transcriptButton: ImageButton? = null
+	private var muteButton: ImageButton? = null
+	private var audioButton: ImageButton? = null
+	private var latestCallSnapshot = CallController.Snapshot()
 	private var transcriptShown = false
 	private var transcriptOpened = false
 	private var followConversationBottom = true
@@ -174,9 +179,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         super.onDestroy()
     }
 
-    override fun onSnapshot(snapshot: CallController.Snapshot) {
+	    override fun onSnapshot(snapshot: CallController.Snapshot) {
         runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
+			latestCallSnapshot = snapshot
             status?.text = snapshot.detail
             transcript?.apply {
                 text = snapshot.partialTranscript
@@ -187,8 +193,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			updateConversationMode(snapshot.stage)
 			muteButton?.apply {
-				text = muteControlLabel(snapshot.microphoneMuted)
 				contentDescription = if (snapshot.microphoneMuted) "Unmute microphone" else "Mute microphone"
+				setImageResource(if (snapshot.microphoneMuted) R.drawable.ic_voice_mic_off else R.drawable.ic_voice_mic)
+				setActionAppearance(this, if (snapshot.microphoneMuted) ACTION_RED else ACTION_BLUE, snapshot.microphoneMuted)
+				ViewCompat.setTooltipText(this, contentDescription)
+			}
+			audioButton?.apply {
+				isEnabled = snapshot.audioEndpoints.isNotEmpty()
+				contentDescription = "Audio route${snapshot.audioEndpointName.takeIf(String::isNotBlank)?.let { ": $it" }.orEmpty()}"
+				setActionAppearance(this, ACTION_GREEN, false)
+				ViewCompat.setTooltipText(this, contentDescription)
 			}
             if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
                 lastAppUpdate = snapshot.appUpdate
@@ -925,21 +939,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(this@MainActivity).apply {
-                text = "‹"
-                textSize = 38f
-                gravity = Gravity.CENTER
-                minWidth = dp(48)
-                minHeight = dp(48)
-                contentDescription = "Back to conversations"
-                isClickable = true
-                isFocusable = true
-                val selectable = TypedValue()
-                if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
-                    setBackgroundResource(selectable.resourceId)
-                }
-                setOnClickListener { leaveChat() }
-            })
+	            addView(iconActionButton(R.drawable.ic_voice_back, "Back to conversations", ACTION_NEUTRAL).apply {
+					setOnClickListener { leaveChat() }
+				}, actionLayout())
             addView(
                 title(session.title.ifBlank { "Conversation" }).apply {
                     textSize = 23f
@@ -951,20 +953,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     marginStart = dp(10)
                 },
             )
-			pauseButton = Button(this@MainActivity).apply {
-				text = "Pause"
-				isAllCaps = false
+			pauseButton = iconActionButton(R.drawable.ic_voice_pause, "Pause voice conversation", ACTION_ORANGE).apply {
+				tag = "Pause"
 				contentDescription = "Pause voice conversation"
 				setOnClickListener {
-					if (text == "Pause") controller.end() else requestCallStart()
+					if (tag == "Pause") controller.end() else requestCallStart()
 				}
-				}.also { addView(it) }
-				muteButton = Button(this@MainActivity).apply {
-					text = muteControlLabel(false)
-					isAllCaps = false
+			}.also { addView(it, actionLayout(start = 6)) }
+			muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
 					contentDescription = "Mute microphone"
-					setOnClickListener { controller.setMicrophoneMuted(text == "Mute") }
-				}.also { addView(it) }
+					setOnClickListener { controller.setMicrophoneMuted(!latestCallSnapshot.microphoneMuted) }
+				}.also { addView(it, actionLayout(start = 6)) }
 			}
         root.addView(heading, matchWrap())
         status = helper("Preparing conversation…").apply {
@@ -989,14 +988,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val modeActions = LinearLayout(this).apply {
 			orientation = LinearLayout.HORIZONTAL
 			gravity = Gravity.CENTER
-			transcriptButton = Button(this@MainActivity).apply {
-				text = "Show transcript"
-				isAllCaps = false
+			transcriptButton = iconActionButton(R.drawable.ic_voice_transcript, "Show transcript", ACTION_BLUE).apply {
 				setOnClickListener {
 					transcriptShown = !transcriptShown
 					updateConversationMode(null)
 				}
-			}.also { addView(it) }
+			}.also { addView(it, actionLayout()) }
+			audioButton = iconActionButton(R.drawable.ic_voice_audio, "Audio route", ACTION_GREEN).apply {
+				isEnabled = false
+				setOnClickListener(::showAudioRouteMenu)
+			}.also { addView(it, actionLayout(start = 8)) }
 		}
 		root.addView(modeActions, matchWrap())
 
@@ -1100,7 +1101,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun updateConversationMode(stage: CallController.Stage?) {
 		val active = when (stage) {
-			null -> pauseButton?.text == "Pause"
+			null -> pauseButton?.tag == "Pause"
 			CallController.Stage.DISCONNECTED, CallController.Stage.ERROR -> false
 			else -> true
 		}
@@ -1110,12 +1111,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 		}
 		pauseButton?.apply {
-			text = primaryVoiceControlLabel(stage, active)
-			contentDescription = when (text) {
+			val label = primaryVoiceControlLabel(stage, active)
+			tag = label
+			setImageResource(when (label) {
+				"Pause" -> R.drawable.ic_voice_pause
+				"Retry" -> R.drawable.ic_voice_retry
+				else -> R.drawable.ic_voice_play
+			})
+			contentDescription = when (label) {
 				"Pause" -> "Pause voice conversation"
 				"Retry" -> "Retry voice connection"
 				else -> "Resume voice conversation"
 			}
+			setActionAppearance(this, if (label == "Retry") ACTION_RED else ACTION_ORANGE, label != "Pause")
+			ViewCompat.setTooltipText(this, contentDescription)
 		}
 		val surface = conversationSurface(active, transcriptShown, presentationShown)
 		activePanel?.visibility = if (surface == ConversationSurface.ACTIVE) View.VISIBLE else View.GONE
@@ -1129,14 +1138,46 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		transcriptButton?.apply {
 			visibility = if (active) View.VISIBLE else View.GONE
-			text = if (transcriptShown) "Hide transcript" else "Show transcript"
+			contentDescription = if (transcriptShown) "Hide transcript" else "Show transcript"
+			setActionAppearance(this, ACTION_BLUE, transcriptShown)
+			ViewCompat.setTooltipText(this, contentDescription)
 		}
+		audioButton?.visibility = if (active) View.VISIBLE else View.GONE
 		placeholderTitle?.text = if (active) "No transcript yet" else "Conversation paused"
 		placeholderDetail?.text = if (active) {
 			"Your conversation will appear here as you speak."
 		} else {
 			"Resume when you want to keep talking."
 		}
+	}
+
+	private fun showAudioRouteMenu(anchor: View) {
+		val endpoints = latestCallSnapshot.audioEndpoints
+		if (endpoints.isEmpty()) {
+			Toast.makeText(this, "Audio routes are still loading", Toast.LENGTH_SHORT).show()
+			return
+		}
+		PopupMenu(this, anchor).apply {
+			endpoints.forEachIndexed { index, endpoint ->
+				menu.add(0, index, index, (if (endpoint.current) "✓  " else "") + endpoint.name)
+			}
+			setOnMenuItemClickListener { item ->
+				val endpoint = endpoints.getOrNull(item.itemId) ?: return@setOnMenuItemClickListener false
+				when (endpoint.type) {
+					VoiceAudioEndpointType.EARPIECE -> rememberBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)
+					VoiceAudioEndpointType.SPEAKER -> rememberBuiltInAudioRoute(BuiltInAudioRoute.SPEAKER)
+					else -> Unit
+				}
+				controller.selectAudioEndpoint(endpoint.id)
+				true
+			}
+			show()
+		}
+	}
+
+	private fun rememberBuiltInAudioRoute(route: BuiltInAudioRoute) {
+		settings = settings.copy(builtInAudioRoute = route)
+		secureSettings.saveBuiltInAudioRoute(route)
 	}
 
 	private fun renderHistory(voiceSessionId: String, history: List<VoiceTranscriptEntry>) {
@@ -1192,6 +1233,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			settings.speechLanguages,
 			settings.vadSensitivityPercent,
 			settings.vadSilenceMilliseconds,
+			settings.builtInAudioRoute,
 		)
     }
 
@@ -1432,6 +1474,31 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         elevation = dp(1).toFloat()
     }
 
+	private fun iconActionButton(@DrawableRes icon: Int, description: String, color: Int): ImageButton = ImageButton(this).apply {
+		setImageResource(icon)
+		contentDescription = description
+		isFocusable = true
+		scaleType = ImageView.ScaleType.CENTER
+		setPadding(dp(12), dp(12), dp(12), dp(12))
+		elevation = dp(2).toFloat()
+		setActionAppearance(this, color, false)
+		ViewCompat.setTooltipText(this, description)
+	}
+
+	private fun setActionAppearance(button: ImageButton, color: Int, selected: Boolean) {
+		button.imageTintList = ColorStateList.valueOf(color)
+		button.background = GradientDrawable().apply {
+			shape = GradientDrawable.OVAL
+			setColor(withAlpha(color, if (selected) 62 else 28))
+			if (selected) setStroke(dp(2), withAlpha(color, 180))
+		}
+		button.alpha = if (button.isEnabled) 1f else 0.45f
+	}
+
+	private fun actionLayout(start: Int = 0) = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+		marginStart = dp(start)
+	}
+
 	private fun scrollToBottom(force: Boolean = false) {
 		if (!force && !followConversationBottom) return
 		feedScroll?.post {
@@ -1457,6 +1524,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		pauseButton = null
 		transcriptButton = null
 		muteButton = null
+		audioButton = null
+		latestCallSnapshot = CallController.Snapshot()
 		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
@@ -1580,6 +1649,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     companion object {
+		private const val ACTION_BLUE = 0xff3867d6.toInt()
+		private const val ACTION_GREEN = 0xff16856b.toInt()
+		private const val ACTION_ORANGE = 0xffd97706.toInt()
+		private const val ACTION_RED = 0xffc2414b.toInt()
+		private const val ACTION_NEUTRAL = 0xff596273.toInt()
         private val DISPLAYABLE_TEXT_TYPES = setOf("text/plain", "text/markdown")
         private val SERVER_TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
             .withZone(ZoneOffset.UTC)

@@ -15,5 +15,6 @@ fun reconnectStatus(reason: String): String = when {
 	reason.contains("HTTP 404", ignoreCase = true) -> "Voice endpoint unavailable · reconnecting"
 	reason.contains("HTTP 409", ignoreCase = true) || reason.contains("busy", ignoreCase = true) ->
 		"Conversation is busy · reconnecting"
+	reason.contains("Expected HTTP 101", ignoreCase = true) -> "Voice connection unavailable · reconnecting"
 	else -> "Reconnecting · " + reason.substringBefore(" (HTTP").take(72).ifBlank { "connection lost" }
 }

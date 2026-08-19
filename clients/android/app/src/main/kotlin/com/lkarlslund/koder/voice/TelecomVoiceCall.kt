@@ -17,107 +17,178 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/** Lets Android own call audio routing, including Bluetooth, wired headsets, and the earpiece. */
+/** Lets Android own call audio routing while applying Koder's preferred endpoint. */
 class TelecomVoiceCall(context: Context, private val listener: Listener) : AutoCloseable {
-    interface Listener {
-        fun onCallReady()
-        fun onCallHeld(held: Boolean)
-        fun onAudioEndpoint(name: String)
-        fun onCallEnded()
-        fun onTelecomUnavailable(message: String)
-    }
+	interface Listener {
+		fun onCallReady()
+		fun onCallHeld(held: Boolean)
+		fun onAudioEndpoint(name: String)
+		fun onAudioEndpoints(currentName: String, endpoints: List<VoiceAudioEndpoint>) = Unit
+		fun onCallEnded()
+		fun onTelecomUnavailable(message: String)
+	}
 
-    private val callsManager = CallsManager(context.applicationContext)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var callJob: Job? = null
-    private var control: CallControlScope? = null
-    private var ending = false
+	private val callsManager = CallsManager(context.applicationContext)
+	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+	private var callJob: Job? = null
+	private var routeJob: Job? = null
+	private var control: CallControlScope? = null
+	private var ending = false
+	private var builtInRoute = BuiltInAudioRoute.SPEAKER
+	private var availableEndpoints = emptyList<CallEndpointCompat>()
+	private var currentEndpoint: CallEndpointCompat? = null
+	private var manualEndpointId: String? = null
 
-    fun start() {
-        if (callJob != null) return
-        ending = false
-        try {
-            callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
-        } catch (error: Exception) {
-            listener.onTelecomUnavailable(error.message ?: "Android audio routing is unavailable")
-            listener.onCallReady()
-            return
-        }
+	fun setBuiltInAudioRoute(route: BuiltInAudioRoute) {
+		builtInRoute = route
+		manualEndpointId = null
+		applyPreferredRoute()
+	}
 
-        callJob = scope.launch {
-            try {
-                callsManager.addCall(
-                    callAttributes = CallAttributesCompat(
-                        displayName = "Koder",
-                        address = Uri.parse("sip:koder-voice"),
-                        direction = CallAttributesCompat.DIRECTION_OUTGOING,
-                        callType = CallAttributesCompat.CALL_TYPE_AUDIO_CALL,
-                        callCapabilities = CallAttributesCompat.SUPPORTS_SET_INACTIVE,
-                    ),
-                    onAnswer = { listener.onCallHeld(false) },
-                    onDisconnect = {
-                        ending = true
-                        listener.onCallEnded()
-                    },
-                    onSetActive = { listener.onCallHeld(false) },
-                    onSetInactive = { listener.onCallHeld(true) },
-                ) {
-                    control = this
-                    launch {
-                        currentCallEndpoint.collectLatest { endpoint ->
-                            listener.onAudioEndpoint(endpoint.description())
-                        }
-                    }
-                    launch {
-                        setActive()
-                        listener.onCallReady()
-                    }
-                    launch { awaitCancellation() }
-                }
-            } catch (_: CancellationException) {
-                // Normal local hang-up.
-            } catch (error: Exception) {
-                if (!ending) {
-                    listener.onTelecomUnavailable(error.message ?: "Android audio routing failed")
-                    listener.onCallReady()
-                }
-            } finally {
-                control = null
-                callJob = null
-            }
-        }
-    }
+	fun selectAudioEndpoint(endpointId: String) {
+		manualEndpointId = endpointId.takeIf { id -> availableEndpoints.any { it.identifier.toString() == id } }
+		applyPreferredRoute()
+	}
 
-    fun disconnect() {
-        if (ending) return
-        ending = true
-        val activeControl = control
-        if (activeControl == null) {
-            callJob?.cancel()
-            callJob = null
-            listener.onCallEnded()
-            return
-        }
-        scope.launch {
-            activeControl.disconnect(DisconnectCause(DisconnectCause.LOCAL))
-            callJob?.cancel()
-            listener.onCallEnded()
-        }
-    }
+	fun start() {
+		if (callJob != null) return
+		ending = false
+		manualEndpointId = null
+		try {
+			callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
+		} catch (error: Exception) {
+			listener.onTelecomUnavailable(error.message ?: "Android audio routing is unavailable")
+			listener.onCallReady()
+			return
+		}
 
-    override fun close() {
-        ending = true
-        callJob?.cancel()
-        callJob = null
-        scope.cancel()
-    }
+		callJob = scope.launch {
+			try {
+				callsManager.addCall(
+					callAttributes = CallAttributesCompat(
+						displayName = "Koder",
+						address = Uri.parse("sip:koder-voice"),
+						direction = CallAttributesCompat.DIRECTION_OUTGOING,
+						callType = CallAttributesCompat.CALL_TYPE_AUDIO_CALL,
+						callCapabilities = CallAttributesCompat.SUPPORTS_SET_INACTIVE,
+					),
+					onAnswer = { listener.onCallHeld(false) },
+					onDisconnect = { ending = true; listener.onCallEnded() },
+					onSetActive = { listener.onCallHeld(false) },
+					onSetInactive = { listener.onCallHeld(true) },
+				) {
+					control = this
+					launch {
+						currentCallEndpoint.collectLatest { endpoint ->
+							currentEndpoint = endpoint
+							listener.onAudioEndpoint(endpoint.description())
+							publishEndpoints()
+						}
+					}
+					launch {
+						availableEndpoints.collectLatest { endpoints ->
+							this@TelecomVoiceCall.availableEndpoints = endpoints
+							if (manualEndpointId != null && endpoints.none { it.identifier.toString() == manualEndpointId }) {
+								manualEndpointId = null
+							}
+							publishEndpoints()
+							applyPreferredRoute()
+						}
+					}
+					launch { setActive(); listener.onCallReady() }
+					launch { awaitCancellation() }
+				}
+			} catch (_: CancellationException) {
+				// Normal local hang-up.
+			} catch (error: Exception) {
+				if (!ending) {
+					listener.onTelecomUnavailable(error.message ?: "Android audio routing failed")
+					listener.onCallReady()
+				}
+			} finally {
+				routeJob?.cancel()
+				routeJob = null
+				availableEndpoints = emptyList()
+				currentEndpoint = null
+				manualEndpointId = null
+				control = null
+				callJob = null
+			}
+		}
+	}
 
-    private fun CallEndpointCompat.description(): String = when (type) {
-        CallEndpointCompat.TYPE_BLUETOOTH -> "Bluetooth: $name"
-        CallEndpointCompat.TYPE_WIRED_HEADSET -> "Headset: $name"
-        CallEndpointCompat.TYPE_SPEAKER -> "Speaker"
-        CallEndpointCompat.TYPE_EARPIECE -> "Phone earpiece"
-        CallEndpointCompat.TYPE_STREAMING -> "Stream: $name"
-        else -> name.toString()
-    }
+	fun disconnect() {
+		if (ending) return
+		ending = true
+		val activeControl = control
+		if (activeControl == null) {
+			callJob?.cancel()
+			callJob = null
+			listener.onCallEnded()
+			return
+		}
+		scope.launch {
+			activeControl.disconnect(DisconnectCause(DisconnectCause.LOCAL))
+			callJob?.cancel()
+			listener.onCallEnded()
+		}
+	}
+
+	override fun close() {
+		ending = true
+		callJob?.cancel()
+		callJob = null
+		routeJob?.cancel()
+		scope.cancel()
+	}
+
+	private fun applyPreferredRoute() {
+		val callControl = control ?: return
+		val target = manualEndpointId?.let { id -> availableEndpoints.firstOrNull { it.identifier.toString() == id } }
+			?: automaticEndpoint()
+			?: return
+		if (target.identifier == currentEndpoint?.identifier) return
+		routeJob?.cancel()
+		routeJob = scope.launch { callControl.requestEndpointChange(target) }
+	}
+
+	private fun automaticEndpoint(): CallEndpointCompat? {
+		val targetType = automaticAudioEndpointType(
+			builtInRoute,
+			availableEndpoints.mapTo(linkedSetOf()) { it.endpointType() },
+		) ?: return null
+		return availableEndpoints.firstOrNull { it.endpointType() == targetType }
+	}
+
+	private fun publishEndpoints() {
+		val current = currentEndpoint
+		listener.onAudioEndpoints(
+			current?.description().orEmpty(),
+			availableEndpoints.map { endpoint ->
+				VoiceAudioEndpoint(
+					endpoint.identifier.toString(),
+					endpoint.description(),
+					endpoint.endpointType(),
+					endpoint.identifier == current?.identifier,
+				)
+			},
+		)
+	}
+
+	private fun CallEndpointCompat.endpointType(): VoiceAudioEndpointType = when (type) {
+		CallEndpointCompat.TYPE_BLUETOOTH -> VoiceAudioEndpointType.BLUETOOTH
+		CallEndpointCompat.TYPE_WIRED_HEADSET -> VoiceAudioEndpointType.WIRED_HEADSET
+		CallEndpointCompat.TYPE_EARPIECE -> VoiceAudioEndpointType.EARPIECE
+		CallEndpointCompat.TYPE_SPEAKER -> VoiceAudioEndpointType.SPEAKER
+		else -> VoiceAudioEndpointType.OTHER
+	}
+
+	private fun CallEndpointCompat.description(): String = when (type) {
+		CallEndpointCompat.TYPE_BLUETOOTH -> "Bluetooth: $name"
+		CallEndpointCompat.TYPE_WIRED_HEADSET -> "Headset: $name"
+		CallEndpointCompat.TYPE_SPEAKER -> "Speaker"
+		CallEndpointCompat.TYPE_EARPIECE -> "Phone earpiece"
+		CallEndpointCompat.TYPE_STREAMING -> "Stream: $name"
+		else -> name.toString()
+	}
 }
