@@ -3,6 +3,7 @@ package phonedevice
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -57,4 +58,67 @@ func TestHubOwnershipAndReplacementRelease(t *testing.T) {
 	if capabilities := hub.Capabilities(); len(capabilities) != 0 {
 		t.Fatalf("released capabilities = %#v", capabilities)
 	}
+}
+
+func TestHubVoiceTurnRequiresExplicitMapIntent(t *testing.T) {
+	hub := &Hub{}
+	var executed []Action
+	releasePhone, err := hub.Attach("call-1", []string{"get_location", "open_map"}, func(_ context.Context, _ string, action Action, _ map[string]string) (Result, error) {
+		executed = append(executed, action)
+		return Result{Text: "done"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releasePhone()
+
+	releaseTurn := hub.BeginVoiceTurn("What's happening where I am?")
+	if actions := capabilityActions(hub.Capabilities()); !slices.Equal(actions, []Action{GetLocation}) {
+		t.Fatalf("implicit-location capabilities = %v, want only get_location", actions)
+	}
+	if _, err := hub.Execute(context.Background(), OpenMap, nil); err == nil {
+		t.Fatal("open_map executed without explicit map intent")
+	}
+	releaseTurn()
+
+	releaseTurn = hub.BeginVoiceTurn("Show me the route on a map")
+	defer releaseTurn()
+	if actions := capabilityActions(hub.Capabilities()); !slices.Equal(actions, []Action{GetLocation, OpenMap}) {
+		t.Fatalf("explicit-map capabilities = %v", actions)
+	}
+	if _, err := hub.Execute(context.Background(), OpenMap, map[string]string{"query": "Aarhus"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(executed, []Action{OpenMap}) {
+		t.Fatalf("executed actions = %v", executed)
+	}
+}
+
+func TestExplicitlyRequestsMap(t *testing.T) {
+	tests := map[string]bool{
+		"What's happening where I am?":      false,
+		"Where am I right now?":             false,
+		"Show me this area":                 false,
+		"Open it on a map":                  true,
+		"Give me directions home":           true,
+		"Navigate to Steen":                 true,
+		"Vis mig ruten på kortet":           true,
+		"Hvad sker der i nærheden af mig?":  false,
+		"Giv mig en kørselsvejledning hjem": true,
+	}
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			if got := explicitlyRequestsMap(input); got != want {
+				t.Fatalf("explicitlyRequestsMap(%q) = %v, want %v", input, got, want)
+			}
+		})
+	}
+}
+
+func capabilityActions(capabilities []CatalogEntry) []Action {
+	actions := make([]Action, len(capabilities))
+	for index, capability := range capabilities {
+		actions[index] = capability.Action
+	}
+	return actions
 }

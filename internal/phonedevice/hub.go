@@ -107,9 +107,66 @@ type connection struct {
 // Hub owns at most one Android tool provider, matching the one-active-call
 // invariant. Its zero value is usable.
 type Hub struct {
-	mu         sync.RWMutex
-	active     *connection
-	generation uint64
+	mu             sync.RWMutex
+	active         *connection
+	generation     uint64
+	turn           *voiceTurnPolicy
+	turnGeneration uint64
+}
+
+type voiceTurnPolicy struct {
+	generation   uint64
+	allowOpenMap bool
+}
+
+// BeginVoiceTurn limits intent-sensitive phone actions to those explicitly
+// requested in the current utterance. The returned release must be called when
+// the turn finishes. The one-active-voice-conversation invariant means this
+// policy is process-wide in the same way as the attached phone provider.
+func (h *Hub) BeginVoiceTurn(userText string) func() {
+	if h == nil {
+		return func() {}
+	}
+	h.mu.Lock()
+	h.turnGeneration++
+	generation := h.turnGeneration
+	h.turn = &voiceTurnPolicy{
+		generation:   generation,
+		allowOpenMap: explicitlyRequestsMap(userText),
+	}
+	h.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if h.turn != nil && h.turn.generation == generation {
+				h.turn = nil
+			}
+		})
+	}
+}
+
+func explicitlyRequestsMap(text string) bool {
+	text = strings.ToLower(text)
+	replacer := strings.NewReplacer(
+		".", " ", ",", " ", "?", " ", "!", " ", ":", " ", ";", " ",
+		"/", " ", "-", " ", "_", " ", "'", " ", "\"", " ",
+	)
+	words := strings.Fields(replacer.Replace(text))
+	explicit := map[string]bool{
+		"map": true, "maps": true, "route": true, "routes": true,
+		"navigate": true, "navigation": true, "directions": true,
+		"kort": true, "kortet": true, "rute": true, "ruten": true,
+		"naviger": true, "navigationen": true, "vejvisning": true,
+		"kørselsvejledning": true,
+	}
+	for _, word := range words {
+		if explicit[word] {
+			return true
+		}
+	}
+	return false
 }
 
 // Attach installs or replaces the provider for callID.
@@ -173,6 +230,9 @@ func (h *Hub) Capabilities() []CatalogEntry {
 	}
 	out := make([]CatalogEntry, 0, len(h.active.actions))
 	for _, entry := range catalog {
+		if entry.Action == OpenMap && h.turn != nil && !h.turn.allowOpenMap {
+			continue
+		}
 		if h.active.actions[entry.Action] {
 			out = append(out, entry)
 		}
@@ -190,6 +250,10 @@ func (h *Hub) Execute(ctx context.Context, action Action, args map[string]string
 	if active == nil || !active.actions[action] {
 		h.mu.RUnlock()
 		return Result{}, fmt.Errorf("phone action %q is not enabled or the phone is disconnected", action)
+	}
+	if action == OpenMap && h.turn != nil && !h.turn.allowOpenMap {
+		h.mu.RUnlock()
+		return Result{}, errors.New("phone action open_map requires an explicit user request to view a map or navigate")
 	}
 	execute := active.execute
 	callID := active.callID

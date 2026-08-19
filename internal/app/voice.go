@@ -413,6 +413,8 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	if initial.Active || (initial.Status != "" && initial.Status != chat.StatusIdle && initial.Status != chat.StatusErrored) {
 		return voice.Message{}, fmt.Errorf("voice chat is already busy")
 	}
+	releasePhonePolicy := c.phone.BeginVoiceTurn(text)
+	defer releasePhonePolicy()
 	initialSeq := latestTimelineSequence(initial.Timeline)
 	updates, unsubscribe := runtime.Subscribe()
 	defer unsubscribe()

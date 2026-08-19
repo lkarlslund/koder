@@ -2616,13 +2616,15 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 	joinedRequests := strings.Join(requests, "\n")
 	requestsMu.Unlock()
 	for _, expected := range []string{
-		"only when the user explicitly asks to see a map",
 		"delegate it with the resolved place name",
 		"Find notable public events happening in Aarhus today",
 	} {
 		if !strings.Contains(joinedRequests, expected) {
 			t.Fatalf("voice routing did not contain %q: %s", expected, joinedRequests)
 		}
+	}
+	if strings.Contains(joinedRequests, `"open_map"`) {
+		t.Fatalf("implicit local-information turn offered open_map to the voice model: %s", joinedRequests)
 	}
 }
 
