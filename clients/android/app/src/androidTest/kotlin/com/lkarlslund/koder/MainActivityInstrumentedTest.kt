@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -39,6 +40,19 @@ class MainActivityInstrumentedTest {
     fun clearSettings() {
         context.getSharedPreferences("koder_voice", Context.MODE_PRIVATE).edit().clear().commit()
     }
+
+    @Test
+	fun setupDoesNotKeepTheScreenAwake() {
+		clearSettings()
+		ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+			scenario.onActivity { activity ->
+				assertEquals(
+					0,
+					activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+				)
+			}
+		}
+	}
 
     @Test
     fun firstRunExplainsBothConnectionFields() {

@@ -24,6 +24,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -1015,6 +1016,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			CallController.Stage.DISCONNECTED, CallController.Stage.ERROR -> false
 			else -> true
 		}
+		if (active) {
+			window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+		} else {
+			window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+		}
 		pauseButton?.apply {
 			text = if (active) "Pause" else "Resume"
 			contentDescription = if (active) "Pause voice conversation" else "Resume voice conversation"
@@ -1073,6 +1079,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         pendingStart = false
         pendingSession = null
         controller.end()
+		window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         loadHome("Refreshing conversations…")
     }
 
