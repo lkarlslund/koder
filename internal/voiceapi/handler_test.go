@@ -36,6 +36,11 @@ type fakeBackend struct {
 	spoken     string
 	artifact   voice.ArtifactFile
 	voiceChats []voice.Session
+	history    []voice.TranscriptEntry
+}
+
+func (f *fakeBackend) VoiceSessionHistory(context.Context, string, int) ([]voice.TranscriptEntry, error) {
+	return append([]voice.TranscriptEntry(nil), f.history...), nil
 }
 
 func (f *fakeBackend) VoiceSessionArtifact(_, _ string) (voice.ArtifactFile, error) {
@@ -465,6 +470,48 @@ func TestHandlerRejectsConcurrentCalls(t *testing.T) {
 	}
 	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
 		t.Fatalf("concurrent dial response=%v err=%v", response, err)
+	}
+}
+
+func TestHandlerReconnectsSameCallAndRestoresHistory(t *testing.T) {
+	backend := &fakeBackend{history: []voice.TranscriptEntry{{
+		ID: "message-1", Role: "user", Text: "What happened?", CreatedAt: time.Now().UTC(),
+	}}}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := context.Background()
+	url := "ws" + server.URL[len("http"):] + "/voice/v1?call_id=phone-1&voice_session_id=voice-1"
+	first, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, first, "ready")
+
+	second, response, err := websocket.Dial(ctx, url, nil)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("same-owner reconnect: %v", err)
+	}
+	defer func() { _ = second.Close(websocket.StatusNormalClosure, "") }()
+	ready := readType(t, ctx, second, "ready")
+	if ready.CallState == nil || len(ready.CallState.History) != 1 || ready.CallState.History[0].Text != "What happened?" {
+		t.Fatalf("restored history = %#v", ready.CallState)
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, _, err := first.Read(readCtx); err == nil {
+		t.Fatal("replaced connection remained open")
+	}
+	_, response, err = websocket.Dial(ctx, strings.Replace(url, "phone-1", "phone-2", 1), nil)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
+		t.Fatalf("different-owner dial response=%v err=%v", response, err)
 	}
 }
 
