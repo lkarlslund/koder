@@ -9,6 +9,13 @@ import org.junit.Test
 
 class VoiceProtocolTest {
 	@Test
+	fun pingUsesTheVersionedVoiceProtocol() {
+		val ping = JSONObject(VoiceProtocol.ping())
+		assertEquals("ping", ping.getString("type"))
+		assertEquals(VOICE_PROTOCOL, ping.getString("protocol"))
+	}
+
+	@Test
 	fun helloCarriesResponsePacingWithoutAddingAChatMessage() {
 		val hello = JSONObject(VoiceProtocol.hello(VoiceResponsePacing.CONCISE))
 		assertEquals("hello", hello.getString("type"))

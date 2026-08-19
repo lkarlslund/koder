@@ -14,6 +14,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings as AndroidSettings
 import android.text.TextUtils
 import android.text.InputType
@@ -55,6 +57,7 @@ import com.lkarlslund.koder.phone.PhoneCapability
 import com.lkarlslund.koder.phone.PhoneBindingClient
 import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.voice.AppUpdate
+import com.lkarlslund.koder.voice.AudioDiagnostics
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.ConversationAvailability
@@ -71,6 +74,7 @@ import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
+import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -486,11 +490,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun showHomeMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             menu.add("Server info")
+			menu.add("Audio diagnostics")
             menu.add("Settings")
             menu.add("About")
             setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Server info" -> loadServerInfo()
+					"Audio diagnostics" -> showAudioDiagnostics()
                     "Settings" -> showSettings()
                     "About" -> showAbout()
                 }
@@ -499,6 +505,74 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             show()
         }
     }
+
+	private fun showAudioDiagnostics() {
+		val content = column().apply { setPadding(dp(8), dp(4), dp(8), dp(4)) }
+		val scroll = ScrollView(this).apply { addView(content, matchWrap()) }
+		val dialog = AlertDialog.Builder(this)
+			.setTitle("Audio diagnostics")
+			.setView(scroll)
+			.setNegativeButton("Close", null)
+			.create()
+		val refreshHandler = Handler(Looper.getMainLooper())
+		val refresh = object : Runnable {
+			override fun run() {
+				if (!dialog.isShowing) return
+				controller.refreshAudioDiagnostics()
+				renderAudioDiagnostics(content, controller.audioDiagnostics())
+				refreshHandler.postDelayed(this, 1_000)
+			}
+		}
+		dialog.setOnDismissListener { refreshHandler.removeCallbacks(refresh) }
+		dialog.setOnShowListener { refresh.run() }
+		dialog.show()
+	}
+
+	private fun renderAudioDiagnostics(content: LinearLayout, diagnostics: AudioDiagnostics) {
+		content.removeAllViews()
+		content.addView(TextView(this).apply {
+			text = if (diagnostics.active) "●  Live conversation audio" else "○  No active conversation"
+			textSize = 18f
+			setTypeface(typeface, Typeface.BOLD)
+			setTextColor(themeColor(android.R.attr.colorAccent))
+			background = GradientDrawable().apply {
+				setColor(withAlpha(themeColor(android.R.attr.colorAccent), 28))
+				cornerRadius = dp(14).toFloat()
+			}
+			setPadding(dp(14), dp(10), dp(14), dp(10))
+			contentDescription = if (diagnostics.active) "Audio diagnostics live" else "Audio diagnostics inactive"
+		}, spaced(bottom = 16))
+
+		content.addDiagnosticsSection("Connection", listOf(
+			"State" to latestCallSnapshot.stage.name.lowercase().replaceFirstChar(Char::uppercase),
+			"Round trip" to (diagnostics.roundTripMillis?.let { "$it ms" } ?: "Measuring…"),
+			"Reconnects" to diagnostics.reconnects.toString(),
+		))
+		content.addDiagnosticsSection("Microphone / VAD", listOf(
+			"Level" to String.format(Locale.US, "%s  %.1f dBFS", audioLevelBar(diagnostics.microphoneLevelDbfs), diagnostics.microphoneLevelDbfs),
+			"VAD" to "${diagnostics.vadState} · ${diagnostics.vadProbabilityPercent}%",
+			"Route" to diagnostics.inputRoute,
+			"Format" to formatAudio(diagnostics.inputFormat),
+			"Frames" to String.format(Locale.US, "%,d captured", diagnostics.capturedFrames),
+		))
+		content.addDiagnosticsSection("Speech output", listOf(
+			"Route" to diagnostics.outputRoute,
+			"Format" to formatAudio(diagnostics.outputFormat),
+			"Jitter" to String.format(Locale.US, "%.2f ms", diagnostics.outputJitterMillis),
+			"Frames" to String.format(Locale.US, "%,d received", diagnostics.receivedFrames),
+			"Dropped" to diagnostics.droppedOutputFrames.toString(),
+			"Duplicates" to diagnostics.duplicateOutputFrames.toString(),
+		), bottom = 0)
+	}
+
+	private fun formatAudio(format: VoiceAudioFormat?): String = format?.let {
+		"${it.sampleRate} Hz · ${if (it.channels == 1) "mono" else "${it.channels} ch"} · ${it.encoding}"
+	} ?: "Unavailable"
+
+	private fun audioLevelBar(dbfs: Double): String {
+		val lit = (((dbfs.coerceIn(-60.0, 0.0) + 60.0) / 60.0) * 12).toInt()
+		return "▮".repeat(lit) + "▯".repeat(12 - lit)
+	}
 
     private fun showSettings() {
         screen = Screen.SETTINGS
@@ -1322,15 +1396,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun showAudioRouteMenu(anchor: View) {
 		val endpoints = latestCallSnapshot.audioEndpoints
-		if (endpoints.isEmpty()) {
-			Toast.makeText(this, "Audio routes are still loading", Toast.LENGTH_SHORT).show()
-			return
-		}
+		val diagnosticsId = endpoints.size
 		PopupMenu(this, anchor).apply {
 			endpoints.forEachIndexed { index, endpoint ->
 				menu.add(0, index, index, (if (endpoint.current) "✓  " else "") + endpoint.name)
 			}
+			menu.add(1, diagnosticsId, diagnosticsId, "Audio diagnostics…")
 			setOnMenuItemClickListener { item ->
+				if (item.groupId == 1) {
+					showAudioDiagnostics()
+					return@setOnMenuItemClickListener true
+				}
 				val endpoint = endpoints.getOrNull(item.itemId) ?: return@setOnMenuItemClickListener false
 				when (endpoint.type) {
 					VoiceAudioEndpointType.EARPIECE -> rememberBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)

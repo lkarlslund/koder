@@ -51,6 +51,7 @@ class VoiceConnection(
 		fun onCallIdentity(callId: String) = Unit
         fun onFrame(frame: VoiceServerFrame)
 		fun onAudioFrame(frame: VoiceAudioFrame) = Unit
+		fun onRoundTripMillis(milliseconds: Long) = Unit
         fun onDisconnected(reason: String)
     }
 
@@ -67,6 +68,7 @@ class VoiceConnection(
 	private var replayedSocketAttempt = -1L
 	private var pendingTurn: PendingTurn? = null
 	private var activeOutputUtteranceId = ""
+	private var pendingPingAtNanos: Long? = null
 	private var reconnect: ScheduledFuture<*>? = null
 	private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
 		Thread(runnable, "koder-voice-reconnect").apply { isDaemon = true }
@@ -129,13 +131,18 @@ class VoiceConnection(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
+				try {
 					val frame = VoiceProtocol.parse(text)
-					synchronized(this@VoiceConnection) {
+					val roundTrip = synchronized(this@VoiceConnection) {
 						observe(frame)
 						if (frame.type == "ready") replayPending(webSocket, expectedSocketAttempt)
+						if (frame.type == "pong") pendingPingAtNanos?.let { started ->
+							pendingPingAtNanos = null
+							((System.nanoTime() - started).coerceAtLeast(0) / 1_000_000)
+						} else null
 					}
 					listener.onFrame(frame)
+					roundTrip?.let(listener::onRoundTripMillis)
                 } catch (error: Exception) {
                     listener.onDisconnected("Invalid server response: ${error.message}")
                 }
@@ -171,12 +178,21 @@ class VoiceConnection(
 	private fun handleDisconnect(webSocket: WebSocket, expectedGeneration: Long, reason: String) {
 		if (socket !== webSocket || generation != expectedGeneration) return
 		socket = null
+		pendingPingAtNanos = null
 		listener.onDisconnected(reason)
 		if (!desired) return
 		val delay = (500L shl reconnectAttempt.coerceAtMost(4)).coerceAtMost(8_000L)
 		reconnectAttempt++
 		reconnect?.cancel(false)
 		reconnect = scheduler.schedule({ openSocket(expectedGeneration) }, delay, TimeUnit.MILLISECONDS)
+	}
+
+	@Synchronized
+	fun sendPing() {
+		if (pendingPingAtNanos != null) return
+		val current = socket ?: return
+		pendingPingAtNanos = System.nanoTime()
+		if (!current.send(VoiceProtocol.ping())) pendingPingAtNanos = null
 	}
 
     fun sendUtterance(text: String, sessionId: String = ""): String {
@@ -349,6 +365,7 @@ class VoiceConnection(
 		reconnect = null
 		pendingTurn = null
 		activeOutputUtteranceId = ""
+		pendingPingAtNanos = null
 		stopSocket("call ended")
 	}
 

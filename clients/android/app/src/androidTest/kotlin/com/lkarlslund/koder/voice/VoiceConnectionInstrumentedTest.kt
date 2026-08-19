@@ -38,12 +38,14 @@ class VoiceConnectionInstrumentedTest {
 		val serverReceivedVoiceCreation = CountDownLatch(1)
 		val serverReceivedAudio = CountDownLatch(1)
 		val clientReceivedAudio = CountDownLatch(1)
+		val clientReceivedPong = CountDownLatch(1)
 		var readyFrame: VoiceServerFrame? = null
         var utteranceText = ""
 		var voiceTitle = ""
 		var historyCursor = ""
 		var searchQuery = ""
 		var responsePacing = ""
+		var roundTripMillis = -1L
 
         server.enqueue(
             MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
@@ -58,8 +60,11 @@ class VoiceConnectionInstrumentedTest {
                     )
                 }
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
+				override fun onMessage(webSocket: WebSocket, text: String) {
                     val message = JSONObject(text)
+					if (message.getString("type") == "ping") {
+						webSocket.send("""{"type":"pong","protocol":"voice.v1","server_time":"2026-08-20T00:00:00Z"}""")
+					}
 					if (message.getString("type") == "hello") responsePacing = message.getString("response_pacing")
                     if (message.getString("type") == "utterance") {
                         utteranceText = message.getString("text")
@@ -113,10 +118,16 @@ class VoiceConnectionInstrumentedTest {
 					clientReceivedAudio.countDown()
 				}
 			}
+			override fun onRoundTripMillis(milliseconds: Long) {
+				roundTripMillis = milliseconds
+				clientReceivedPong.countDown()
+			}
             override fun onDisconnected(reason: String) = Unit
         }).use { connection ->
             connection.connect(server.url("/").toString(), "test-token", responsePacing = VoiceResponsePacing.DETAILED)
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
+			connection.sendPing()
+			assertTrue("client did not measure protocol round trip", clientReceivedPong.await(5, TimeUnit.SECONDS))
             connection.sendUtterance("check the calendar")
 			assertTrue("server did not receive utterance", serverReceivedUtterance.await(5, TimeUnit.SECONDS))
 			connection.requestHistory("message-5")
@@ -143,6 +154,7 @@ class VoiceConnectionInstrumentedTest {
 		assertEquals("boots", searchQuery)
 		assertEquals("Phone work", voiceTitle)
 		assertEquals("detailed", responsePacing)
+		assertTrue(roundTripMillis >= 0)
     }
 
 	@Test

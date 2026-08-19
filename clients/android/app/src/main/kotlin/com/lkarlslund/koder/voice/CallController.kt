@@ -61,7 +61,8 @@ class CallController(
 	}
 	private val endpointSampleRate = detector.sampleRate
 	private val endpointFrameSamples = detector.frameSamples
-    private val endpoint = VadEndpointPipeline(detector)
+	private val endpoint = VadEndpointPipeline(detector)
+	private val diagnostics = AudioDiagnosticsTracker()
 	private val connection = VoiceConnection(object : VoiceConnection.Listener {
         override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading conversation…") }
 		override fun onCallIdentity(callId: String) {
@@ -69,10 +70,12 @@ class CallController(
 		}
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
+		override fun onRoundTripMillis(milliseconds: Long) = diagnostics.recordRoundTrip(milliseconds)
         override fun onDisconnected(reason: String) = onMain {
             microphone.stop()
 			acceptingOutput = false
 			playback.stop()
+			diagnostics.recordReconnect()
 	            if (running) {
 					if (pausedByUser || telecomHeld) update(Stage.HELD, "Conversation paused")
 					else update(Stage.CONNECTING, reconnectStatus(reason))
@@ -143,6 +146,7 @@ class CallController(
 	) {
         if (running) end()
         running = true
+		diagnostics.reset()
         serverReady = false
         telecomReady = false
         audioConfig = null
@@ -221,6 +225,10 @@ class CallController(
 			listener.onHistorySearch(emptyList(), error.message ?: "Could not search transcript")
 		}
 	}
+
+	fun audioDiagnostics(): AudioDiagnostics = diagnostics.snapshot(running, audioEndpoint, audioConfig)
+
+	fun refreshAudioDiagnostics() = connection.sendPing()
 
 	fun selectAudioEndpoint(endpointId: String) {
 		if (!running || endpointId.isBlank()) return
@@ -392,6 +400,7 @@ class CallController(
 			"history_search" -> listener.onHistorySearch(frame.searchResults, frame.error.takeIf(String::isNotBlank))
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
+				diagnostics.startOutput(frame.utteranceId)
 				if (pausedByUser || telecomHeld) {
 					acceptingOutput = false
 					update(Stage.HELD, "Conversation paused", "")
@@ -432,6 +441,7 @@ class CallController(
     @Synchronized
     private fun handleOutputAudio(frame: VoiceAudioFrame) {
         if (!running || !acceptingOutput) return
+		audioConfig?.output?.let { diagnostics.recordOutput(frame, it) }
         if (frame.kind != VoiceAudioFrameKind.OUTPUT_PCM || frame.sequence != outputSequence) {
             acceptingOutput = false
             playback.stop()
@@ -484,7 +494,9 @@ class CallController(
     private fun processMicrophoneFrame(format: VoiceAudioFormat, samples: ShortArray) {
         if (!running) return
         try {
-            for (event in endpoint.accept(samples)) {
+			val evaluated = endpoint.evaluate(samples)
+			diagnostics.recordInput(samples, evaluated.vad, utteranceId.isNotBlank())
+			for (event in evaluated.events) {
                 when (event) {
                     is UtteranceEvent.Started -> {
 						val wasInterruption = acceptingOutput

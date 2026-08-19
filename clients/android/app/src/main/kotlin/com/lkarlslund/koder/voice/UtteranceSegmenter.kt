@@ -135,6 +135,8 @@ class VadEndpointPipeline(
         ),
     ),
 ) : AutoCloseable {
+	data class Evaluation(val vad: VadResult, val events: List<UtteranceEvent>)
+
 	private var segmenter = segmenter
 
 	fun configure(config: EndpointConfig) {
@@ -143,8 +145,12 @@ class VadEndpointPipeline(
 		segmenter = UtteranceSegmenter(config)
 	}
 
-    fun accept(samples: ShortArray): List<UtteranceEvent> =
-        segmenter.accept(samples, detector.evaluate(samples))
+	fun evaluate(samples: ShortArray): Evaluation {
+		val vad = detector.evaluate(samples)
+		return Evaluation(vad, segmenter.accept(samples, vad))
+	}
+
+    fun accept(samples: ShortArray): List<UtteranceEvent> = evaluate(samples).events
 
     fun commit(): List<UtteranceEvent> = segmenter.commit()
 

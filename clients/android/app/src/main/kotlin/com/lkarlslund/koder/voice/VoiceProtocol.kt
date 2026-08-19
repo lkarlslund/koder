@@ -217,6 +217,11 @@ object VoiceProtocol {
 		.put("response_pacing", responsePacing.wireValue)
         .toString()
 
+	fun ping(): String = JSONObject()
+		.put("type", "ping")
+		.put("protocol", VOICE_PROTOCOL)
+		.toString()
+
 	fun history(beforeId: String, limit: Int = 5): String = JSONObject()
 		.put("type", "history")
 		.put("protocol", VOICE_PROTOCOL)
