@@ -39,6 +39,31 @@ func TestPhoneDefinitionIsDynamicAndVoiceOnly(t *testing.T) {
 	}
 }
 
+func TestPhoneDefinitionKeepsLocalContextReadOnly(t *testing.T) {
+	control := catalogControl{entries: []phonedevice.CatalogEntry{
+		catalogEntry(t, phonedevice.GetLocation),
+		catalogEntry(t, phonedevice.OpenMap),
+	}}
+	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{
+		ChatRole: chatrole.Voice,
+		Services: RuntimeService(control),
+	})
+	if !enabled {
+		t.Fatal("phone definition is disabled")
+	}
+	description := definition.Function.Description
+	for _, required := range []string{
+		"first read get_location",
+		"delegate it with the resolved place name",
+		"only when the user explicitly asks",
+		"never use this merely to determine or describe where the user is",
+	} {
+		if !strings.Contains(description, required) {
+			t.Fatalf("phone definition does not contain %q: %s", required, description)
+		}
+	}
+}
+
 func TestPhoneToolCallsInjectedControl(t *testing.T) {
 	control := &fakeControl{}
 	result, err := tools.Call(context.Background(), tools.Options{
@@ -48,4 +73,24 @@ func TestPhoneToolCallsInjectedControl(t *testing.T) {
 	if err != nil || result.Output != "Steen: +45 1234" || control.action != phonedevice.SearchContacts || control.args["query"] != "Steen" {
 		t.Fatalf("result=%#v action=%q args=%v err=%v", result, control.action, control.args, err)
 	}
+}
+
+type catalogControl struct {
+	entries []phonedevice.CatalogEntry
+}
+
+func (c catalogControl) Capabilities() []phonedevice.CatalogEntry { return c.entries }
+func (catalogControl) Execute(context.Context, phonedevice.Action, map[string]string) (phonedevice.Result, error) {
+	return phonedevice.Result{}, nil
+}
+
+func catalogEntry(t *testing.T, action phonedevice.Action) phonedevice.CatalogEntry {
+	t.Helper()
+	for _, entry := range phonedevice.Catalog() {
+		if entry.Action == action {
+			return entry
+		}
+	}
+	t.Fatalf("catalog action %q was not found", action)
+	return phonedevice.CatalogEntry{}
 }

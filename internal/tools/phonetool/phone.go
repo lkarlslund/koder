@@ -101,7 +101,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	if err != nil {
 		return tools.ToolSpec{}, false
 	}
-	spec.Usage = "Use only for an action on the currently connected phone. Enabled actions:\n- " + strings.Join(lines, "\n- ")
+	spec.Usage = "Use only for an action on the currently connected phone. For current local information, first read get_location; if outside research is needed, delegate it with the resolved place name. Do not open another phone app unless the user asked to see or act on something there. Enabled actions:\n- " + strings.Join(lines, "\n- ")
 	spec.Parameters = string(schema)
 	return spec, true
 }

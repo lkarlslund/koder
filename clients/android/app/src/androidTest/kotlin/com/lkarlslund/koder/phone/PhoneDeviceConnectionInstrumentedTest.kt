@@ -1,5 +1,7 @@
 package com.lkarlslund.koder.phone
 
+import android.location.Address
+import android.location.Location
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -12,11 +14,41 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.net.InetAddress
+import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PhoneDeviceConnectionInstrumentedTest {
+	@Test
+	fun locationResultIncludesHumanPlaceNameForLocalContextQuestions() {
+		val capturedAt = System.currentTimeMillis() - 2_000
+		val location = Location("test").apply {
+			latitude = 56.1629
+			longitude = 10.2039
+			accuracy = 12.4f
+			time = capturedAt
+		}
+		val address = Address(Locale.ENGLISH).apply {
+			locality = "Aarhus"
+			adminArea = "Central Denmark Region"
+			countryName = "Denmark"
+			setAddressLine(0, "Aarhus, Denmark")
+		}
+
+		val result = phoneLocationResult(location, address)
+		val data = result.data as JSONObject
+
+		assertTrue(result.text.startsWith("Current location resolved to Aarhus, Central Denmark Region, Denmark"))
+		assertEquals("Aarhus, Central Denmark Region, Denmark", data.getString("place_name"))
+		assertEquals("Aarhus", data.getString("locality"))
+		assertEquals("Central Denmark Region", data.getString("admin_area"))
+		assertEquals("Denmark", data.getString("country"))
+		assertEquals("Aarhus, Denmark", data.getString("formatted_address"))
+		assertEquals(56.1629, data.getDouble("latitude"), 0.0001)
+		assertEquals(10.2039, data.getDouble("longitude"), 0.0001)
+	}
+
     @Test
     fun advertisesEnabledCapabilitiesAndReturnsToolResult() {
         val server = MockWebServer()

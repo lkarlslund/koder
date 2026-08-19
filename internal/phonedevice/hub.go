@@ -49,7 +49,7 @@ type CatalogEntry struct {
 
 var catalog = []CatalogEntry{
 	{DeviceStatus, "Read battery, charging, storage, network, locale, and time-zone status", "none", false},
-	{GetLocation, "Read the phone's most recent location with age and accuracy", "none", false},
+	{GetLocation, "Read and resolve the phone's current location for questions about where the user is or what is happening nearby; this does not display a map", "none", false},
 	{SearchContacts, "Search device contacts and return matching names, phone numbers, and email addresses", "query; optional limit", false},
 	{UpcomingCalendar, "Search calendar events in a time range", "optional query, start_time, end_time, limit", false},
 	{SearchSMS, "Search SMS messages stored on the phone", "optional query, phone_number, since_time, limit", false},
@@ -59,7 +59,7 @@ var catalog = []CatalogEntry{
 	{ComposeEmail, "Open a prefilled email draft for the user to review and send", "optional to, subject, body", true},
 	{CreateContact, "Open a prefilled new-contact screen for the user to save", "name; optional phone_number, email", true},
 	{CreateCalendarEvent, "Create a calendar event after confirmation on the phone", "title, start_time; optional end_time, location, description", true},
-	{OpenMap, "Open a place, address, or coordinates in the phone's map app", "query or latitude and longitude", true},
+	{OpenMap, "Display a place or route in the phone's map app only when the user explicitly asks to see a map, open a place, or navigate; never use this merely to determine or describe where the user is", "query or latitude and longitude", true},
 	{SetAlarm, "Open a prefilled alarm on the phone", "hour, minute; optional label", true},
 	{SetTimer, "Open a prefilled timer on the phone", "duration_seconds; optional label", true},
 	{ReadClipboard, "Read the current clipboard while Koder Voice is in the foreground", "none", false},

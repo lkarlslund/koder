@@ -12,6 +12,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.location.Address
+import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
 import android.media.AudioManager
@@ -144,11 +146,16 @@ class AndroidPhoneToolProvider(
         val best = manager.getProviders(true).mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
             .maxWithOrNull(compareBy<Location> { it.time }.thenByDescending { -it.accuracy })
             ?: error("No recent phone location is available")
-        val data = JSONObject().put("latitude", best.latitude).put("longitude", best.longitude)
-            .put("accuracy_meters", best.accuracy).put("captured_at", Instant.ofEpochMilli(best.time).toString())
-            .put("age_seconds", ((System.currentTimeMillis() - best.time).coerceAtLeast(0) / 1000))
-        return PhoneToolResult("Current location is available with ${best.accuracy.toInt()} meter accuracy", data)
+		return phoneLocationResult(best, reverseGeocode(best))
     }
+
+	@Suppress("DEPRECATION")
+	private fun reverseGeocode(location: Location): Address? {
+		if (!Geocoder.isPresent()) return null
+		return runCatching {
+			Geocoder(activity, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
+		}.getOrNull()
+	}
 
     private fun contacts(args: Map<String, String>): PhoneToolResult {
         val query = args["query"].orEmpty().lowercase(Locale.getDefault())
@@ -395,4 +402,24 @@ class AndroidPhoneToolProvider(
             "set_alarm", "set_timer", "write_clipboard", "open_url", "media_control", "open_app", "share_text",
         )
     }
+}
+
+internal fun phoneLocationResult(location: Location, address: Address?): PhoneToolResult {
+	val locality = address?.locality.orEmpty().ifBlank { address?.subAdminArea.orEmpty() }
+	val region = address?.adminArea.orEmpty()
+	val country = address?.countryName.orEmpty()
+	val placeName = listOf(locality, region, country).filter(String::isNotBlank).distinct().joinToString(", ")
+	val data = JSONObject()
+		.put("latitude", location.latitude)
+		.put("longitude", location.longitude)
+		.put("accuracy_meters", location.accuracy)
+		.put("captured_at", Instant.ofEpochMilli(location.time).toString())
+		.put("age_seconds", ((System.currentTimeMillis() - location.time).coerceAtLeast(0) / 1000))
+	if (placeName.isNotBlank()) data.put("place_name", placeName)
+	if (locality.isNotBlank()) data.put("locality", locality)
+	if (region.isNotBlank()) data.put("admin_area", region)
+	if (country.isNotBlank()) data.put("country", country)
+	address?.getAddressLine(0)?.takeIf(String::isNotBlank)?.let { data.put("formatted_address", it) }
+	val summary = if (placeName.isBlank()) "Current location coordinates are available" else "Current location resolved to $placeName"
+	return PhoneToolResult("$summary with ${location.accuracy.toInt()} meter accuracy", data)
 }

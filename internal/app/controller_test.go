@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modeltest"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -2492,6 +2494,122 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	}
 	if strings.Contains(chatrole.SpecFor(chatrole.Voice).SystemPrompt, "exact session_id") {
 		t.Fatalf("voice prompt contains tool mechanics: %s", chatrole.SpecFor(chatrole.Voice).SystemPrompt)
+	}
+}
+
+func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
+	var voiceStep atomic.Int32
+	var requestsMu sync.Mutex
+	var requests []string
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		requestBody := string(body)
+		requestsMu.Lock()
+		requests = append(requests, requestBody)
+		requestsMu.Unlock()
+		if !strings.Contains(requestBody, "You are a voice assistant") {
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"Aarhus has DHL Stafetten today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+			return
+		}
+
+		switch voiceStep.Add(1) {
+		case 1:
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"location-1","type":"function","function":{"name":"phone","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"action":"get_location"}`)
+		case 2:
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"start-1","type":"function","function":{"name":"session_start","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"title":"Aarhus events today","temporary":true}`)
+		case 3:
+			var request struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil {
+				t.Errorf("decode model request: %v", err)
+				return
+			}
+			var target voice.Session
+			for index := len(request.Messages) - 1; index >= 0; index-- {
+				if request.Messages[index].Role == "tool" && json.Unmarshal([]byte(request.Messages[index].Content), &target) == nil && target.ID != "" {
+					break
+				}
+			}
+			if target.ID == "" {
+				t.Error("session_start result was not returned to the voice model")
+				return
+			}
+			arguments := fmt.Sprintf(`{"session_id":%q,"message":"Find notable public events happening in Aarhus today and summarize the most relevant one."}`, target.ID)
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"delegate-1","type":"function","function":{"name":"session_delegate","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
+		case 4:
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"You're in Aarhus, and DHL Stafetten is happening today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+		default:
+			t.Errorf("unexpected voice model step %d", voiceStep.Load())
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: 5 * time.Second},
+		}
+	})
+	var actionsMu sync.Mutex
+	var actions []phonedevice.Action
+	release, err := ctrl.PhoneDeviceHub().Attach("local-context-test", []string{"get_location", "open_map"}, func(_ context.Context, _ string, action phonedevice.Action, _ map[string]string) (phonedevice.Result, error) {
+		actionsMu.Lock()
+		actions = append(actions, action)
+		actionsMu.Unlock()
+		if action != phonedevice.GetLocation {
+			return phonedevice.Result{}, fmt.Errorf("unexpected phone action %q", action)
+		}
+		return phonedevice.Result{
+			Text: "Current location resolved to Aarhus, Central Denmark Region, Denmark with 12 meter accuracy",
+			Data: map[string]any{"place_name": "Aarhus, Central Denmark Region, Denmark", "latitude": 56.1629, "longitude": 10.2039},
+		}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	voiceSession, _, err := ctrl.CreateVoiceChat(context.Background(), "Phone assistant")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "What's happening where I am?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SpokenText != "You're in Aarhus, and DHL Stafetten is happening today." {
+		t.Fatalf("voice response = %#v", message)
+	}
+	actionsMu.Lock()
+	gotActions := slices.Clone(actions)
+	actionsMu.Unlock()
+	if !slices.Equal(gotActions, []phonedevice.Action{phonedevice.GetLocation}) {
+		t.Fatalf("phone actions = %v, want only get_location", gotActions)
+	}
+	requestsMu.Lock()
+	joinedRequests := strings.Join(requests, "\n")
+	requestsMu.Unlock()
+	for _, expected := range []string{
+		"only when the user explicitly asks to see a map",
+		"delegate it with the resolved place name",
+		"Find notable public events happening in Aarhus today",
+	} {
+		if !strings.Contains(joinedRequests, expected) {
+			t.Fatalf("voice routing did not contain %q: %s", expected, joinedRequests)
+		}
 	}
 }
 
