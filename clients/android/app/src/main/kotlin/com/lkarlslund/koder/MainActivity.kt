@@ -49,6 +49,10 @@ import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
 import java.io.File
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
@@ -356,20 +360,22 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 "Server" to settings.server,
                 "Protocol" to VOICE_PROTOCOL,
                 "Authentication" to if (info.tokenRequired) "Bearer token required" else "No token required",
-                "Server time" to info.serverTime.toString(),
+                "Server time" to formatTimestamp(info.serverTime),
             ))
             addDiagnosticsSection("Koder", listOf(
                 "Version" to info.version,
                 "Commit" to info.commit.take(12) + if (info.dirty == "true") " · dirty" else "",
-                "Built" to info.buildTime,
+                "Built" to formatTimestamp(info.buildTime),
                 "Uptime" to formatUptime(info.uptimeSeconds),
-                "Started" to info.startedAt.toString(),
+                "Started" to formatTimestamp(info.startedAt),
             ))
             addDiagnosticsSection("Sessions", listOf(
                 "Regular" to info.sessionCount.toString(),
                 "Voice" to info.voiceSessionCount.toString(),
                 "Live voice" to if (info.voiceConnectionActive) {
-                    "Active${info.voiceConnectionSince?.let { " since $it" }.orEmpty()}"
+                    "Active${info.voiceConnectionSince?.let { since ->
+                        " · ${formatUptime(Duration.between(since, info.serverTime).seconds)}"
+                    }.orEmpty()}"
                 } else {
                     "Idle"
                 },
@@ -457,6 +463,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val clock = DateUtils.formatElapsedTime(safeSeconds % 86_400)
         return if (days > 0) "${days}d $clock" else clock
     }
+
+    private fun formatTimestamp(value: Instant): String = SERVER_TIMESTAMP.format(value)
+
+    private fun formatTimestamp(value: String): String = runCatching { formatTimestamp(Instant.parse(value)) }
+        .getOrDefault(value)
 
     private fun formatBytes(bytes: Long): String = when {
         bytes >= 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f GiB", bytes / (1024.0 * 1024.0 * 1024.0))
@@ -1021,5 +1032,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     companion object {
         private val DISPLAYABLE_TEXT_TYPES = setOf("text/plain", "text/markdown")
+        private val SERVER_TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
+            .withZone(ZoneOffset.UTC)
     }
 }
