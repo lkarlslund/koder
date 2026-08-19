@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SIGNING_DIR="$ROOT_DIR/clients/android/.signing"
+KEYSTORE="$SIGNING_DIR/github-release.jks"
+PROPERTIES="$SIGNING_DIR/github-release.properties"
+ALIAS=koder-github-release
+UPLOAD="${1:-}"
+
+if [[ -n "$UPLOAD" && "$UPLOAD" != "--github" ]]; then
+  echo "usage: scripts/configure-android-release-signing [--github]" >&2
+  exit 2
+fi
+
+mkdir -p "$SIGNING_DIR"
+chmod 700 "$SIGNING_DIR"
+if [[ ! -f "$KEYSTORE" || ! -f "$PROPERTIES" ]]; then
+  if [[ -e "$KEYSTORE" || -e "$PROPERTIES" ]]; then
+    echo "release Android signing key is incomplete; restore or remove both files in $SIGNING_DIR" >&2
+    exit 1
+  fi
+  STORE_PASSWORD="$(openssl rand -hex 24)"
+  keytool -genkeypair -noprompt \
+    -keystore "$KEYSTORE" -storepass "$STORE_PASSWORD" \
+    -alias "$ALIAS" -keypass "$STORE_PASSWORD" \
+    -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 36500 \
+    -dname "CN=Koder GitHub Release,OU=GitHub Releases,O=Koder,L=Copenhagen,C=DK"
+  umask 077
+  {
+    echo "storeFile=.signing/github-release.jks"
+    echo "storePassword=$STORE_PASSWORD"
+    echo "keyAlias=$ALIAS"
+    echo "keyPassword=$STORE_PASSWORD"
+  } >"$PROPERTIES"
+  chmod 600 "$KEYSTORE" "$PROPERTIES"
+  echo "Created $KEYSTORE. Back up this file and its properties; losing them prevents official app updates." >&2
+fi
+
+if [[ "$UPLOAD" == "--github" ]]; then
+  STORE_PASSWORD="$(sed -n 's/^storePassword=//p' "$PROPERTIES")"
+  KEY_ALIAS="$(sed -n 's/^keyAlias=//p' "$PROPERTIES")"
+  KEY_PASSWORD="$(sed -n 's/^keyPassword=//p' "$PROPERTIES")"
+  [[ -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]] || {
+    echo "release signing properties are incomplete" >&2
+    exit 1
+  }
+  base64 -w0 "$KEYSTORE" | gh secret set ANDROID_RELEASE_KEYSTORE_BASE64
+  printf '%s' "$STORE_PASSWORD" | gh secret set ANDROID_RELEASE_STORE_PASSWORD
+  printf '%s' "$KEY_ALIAS" | gh secret set ANDROID_RELEASE_KEY_ALIAS
+  printf '%s' "$KEY_PASSWORD" | gh secret set ANDROID_RELEASE_KEY_PASSWORD
+  echo "Updated Android release signing secrets for $(gh repo view --json nameWithOwner --jq .nameWithOwner)." >&2
+fi
+
+echo "$PROPERTIES"

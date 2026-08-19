@@ -102,6 +102,23 @@ Silero consumes 512 samples at 16 kHz and retains its recurrent state and
 the build and accepted only if its SHA-256 matches. Speech recognition and
 synthesis do not run on Android.
 
+## App updates
+
+Local-development and official clients are separate Android applications:
+`com.lkarlslund.koder.dev` and `com.lkarlslund.koder`. Each has its own stable,
+private signing key. A Koder build embeds exactly one matching signed APK and a
+small manifest; Android source/signing fingerprints make local builds reuse the
+cached APK unless an input changed.
+
+The optional update manifest travels in the authenticated `ready` frame and
+the APK is streamed from `/voice/v1/android/koder.apk` using the same bearer
+token. Android only offers a higher version for its own application ID and
+signing certificate. It then verifies the downloaded size and SHA-256 plus the
+package ID, version code, and APK signer before opening the system installer.
+Android retains the final install-consent and unknown-source controls. GitHub
+release builds create the official APK once and embed identical bytes in both
+Linux architectures, keeping Koder a single-file download.
+
 The app is turn-based: it records until local VAD commits, stops capture while
 Koder works and speaks, then resumes listening. The first release deliberately
 does not implement simultaneous full-duplex barge-in, incoming calls,

@@ -85,7 +85,13 @@ if [[ ! -f "$SIGNING_KEY_PATH" ]]; then
   exit 1
 fi
 
-FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL"; } | sha256sum | cut -d' ' -f1)"
+RELEASE_IDENTITY=""
+if [[ "$CHANNEL" == "release" ]]; then
+  : "${KODER_ANDROID_VERSION_CODE:?KODER_ANDROID_VERSION_CODE is required for release APKs}"
+  : "${KODER_ANDROID_VERSION_NAME:?KODER_ANDROID_VERSION_NAME is required for release APKs}"
+  RELEASE_IDENTITY="$KODER_ANDROID_VERSION_CODE $KODER_ANDROID_VERSION_NAME"
+fi
+FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL" "$RELEASE_IDENTITY"; } | sha256sum | cut -d' ' -f1)"
 if [[ -f "$CACHE_DIR/fingerprint" && -f "$CACHE_DIR/koder.apk" && -f "$CACHE_DIR/manifest.json" ]] &&
    [[ "$(<"$CACHE_DIR/fingerprint")" == "$FINGERPRINT" ]]; then
   install -m 0644 "$CACHE_DIR/koder.apk" "$BUNDLE_DIR/koder.apk"
@@ -106,8 +112,8 @@ if [[ "$CHANNEL" == "local" ]]; then
   SIGNING_PROPERTY=koderLocalSigningProperties
   APPLICATION_ID=com.lkarlslund.koder.dev
 else
-  VERSION_CODE="${KODER_ANDROID_VERSION_CODE:?KODER_ANDROID_VERSION_CODE is required for release APKs}"
-  VERSION_NAME="${KODER_ANDROID_VERSION_NAME:?KODER_ANDROID_VERSION_NAME is required for release APKs}"
+  VERSION_CODE="$KODER_ANDROID_VERSION_CODE"
+  VERSION_NAME="$KODER_ANDROID_VERSION_NAME"
   GRADLE_TASK=assembleRelease
   APK_PATH="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
   SIGNING_PROPERTY=koderReleaseSigningProperties

@@ -55,9 +55,30 @@ The live test is skipped unless `voiceLiveServer` is supplied.
 ## Install on a phone
 
 ```sh
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+../../scripts/prepare-embedded-android local
+adb install -r ../../internal/androidupdate/bundle/koder.apk
 ```
+
+This uses the ignored, stable local-development signing key and the
+`com.lkarlslund.koder.dev` app ID. Back up `.signing/local-development.jks`
+and its properties file: a lost signing key cannot update an installed app.
+After this one-time sideload, newer Koder binaries advertise their embedded APK
+in the app. Tap the update offer; the app verifies its ID, version, signer,
+size, and SHA-256 before Android asks for install confirmation. Android may ask
+once for permission to install apps from Koder.
+
+Official GitHub builds use `com.lkarlslund.koder`, so both channels can coexist.
+They cannot update each other. Maintainers create the separate ignored release
+key and provision GitHub Actions with:
+
+```sh
+../../scripts/configure-android-release-signing --github
+```
+
+Back up `.signing/github-release.jks` and its properties separately. The
+rolling-release workflow builds the official APK once, embeds the same signed
+bytes and metadata into both Linux binaries, and does not publish a standalone
+APK.
 
 Start Koder on the trusted LAN with its speech provider configured:
 

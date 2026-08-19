@@ -133,6 +133,21 @@ jobs:
             fi
           } > release-notes.md
 
+      - name: Set up Java
+        if: steps.meta.outputs.changed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        if: steps.meta.outputs.changed == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        if: steps.meta.outputs.changed == 'true'
+        run: sdkmanager "platforms;android-36" "build-tools;37.0.0"
+
       - name: Install test dependencies
         if: steps.meta.outputs.changed == 'true'
         run: |
@@ -150,6 +165,39 @@ jobs:
         run: |
           set -euo pipefail
           go test ./cmd/... ./internal/...
+          clients/android/gradlew -p clients/android testDebugUnitTest lintDebug
+
+      - name: Build signed official Android client
+        if: steps.meta.outputs.changed == 'true'
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : "${ANDROID_RELEASE_KEYSTORE_BASE64:?missing ANDROID_RELEASE_KEYSTORE_BASE64 secret}"
+          : "${ANDROID_RELEASE_STORE_PASSWORD:?missing ANDROID_RELEASE_STORE_PASSWORD secret}"
+          : "${ANDROID_RELEASE_KEY_ALIAS:?missing ANDROID_RELEASE_KEY_ALIAS secret}"
+          : "${ANDROID_RELEASE_KEY_PASSWORD:?missing ANDROID_RELEASE_KEY_PASSWORD secret}"
+          signing_dir="$RUNNER_TEMP/koder-android-signing"
+          mkdir -p "$signing_dir"
+          chmod 700 "$signing_dir"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode >"$signing_dir/release.jks"
+          chmod 600 "$signing_dir/release.jks"
+          {
+            echo "storeFile=$signing_dir/release.jks"
+            echo "storePassword=$ANDROID_RELEASE_STORE_PASSWORD"
+            echo "keyAlias=$ANDROID_RELEASE_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_RELEASE_KEY_PASSWORD"
+          } >"$signing_dir/release.properties"
+          chmod 600 "$signing_dir/release.properties"
+          version_code=$((10#${RELEASE_TAG#r}))
+          KODER_ANDROID_RELEASE_SIGNING_PROPERTIES="$signing_dir/release.properties" \
+            KODER_ANDROID_VERSION_CODE="$version_code" \
+            KODER_ANDROID_VERSION_NAME="$RELEASE_TAG" \
+            scripts/prepare-embedded-android release >/dev/null
 
       - name: Build Linux x64 artifact
         if: steps.meta.outputs.changed == 'true'
@@ -162,6 +210,7 @@ jobs:
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: "0"
+          KODER_EMBED_ANDROID: "0"
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -179,6 +228,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: "0"
+          KODER_EMBED_ANDROID: "0"
         run: |
           set -euo pipefail
           mkdir -p dist
