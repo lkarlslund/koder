@@ -87,6 +87,7 @@ const (
 	ToolKindSessionList         ToolKind = "session_list"
 	ToolKindSessionDelegate     ToolKind = "session_delegate"
 	ToolKindSessionStart        ToolKind = "session_start"
+	ToolKindPhone               ToolKind = "phone"
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
@@ -176,6 +177,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindSessionList,
 	ToolKindSessionDelegate,
 	ToolKindSessionStart,
+	ToolKindPhone,
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,

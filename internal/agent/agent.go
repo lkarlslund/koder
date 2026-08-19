@@ -30,6 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/offeredfile"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -69,6 +70,14 @@ type Engine struct {
 func (e *Engine) SetVoiceSessionControl(control sessiontool.Control) {
 	if e != nil && e.toolsRuntime != nil {
 		e.toolsRuntime.SetVoiceSessionControl(control)
+	}
+}
+
+// SetPhoneDeviceControl connects permission-gated Android capabilities to
+// voice chats without exposing them to other chat roles.
+func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
+	if e != nil && e.toolsRuntime != nil {
+		e.toolsRuntime.SetPhoneDeviceControl(control)
 	}
 }
 

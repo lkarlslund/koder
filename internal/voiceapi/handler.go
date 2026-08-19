@@ -22,6 +22,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -49,11 +50,16 @@ type Handler struct {
 	Token   string
 	Lease   *voice.CallLease
 	Updates androidUpdateSource
+	Devices *phonedevice.Hub
 }
 
 // NewHandler creates a process-scoped voice protocol handler.
 func NewHandler(backend backend, token string) *Handler {
-	return &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded()}
+	handler := &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded()}
+	if source, ok := backend.(interface{ PhoneDeviceHub() *phonedevice.Hub }); ok {
+		handler.Devices = source.PhoneDeviceHub()
+	}
+	return handler
 }
 
 type clientFrame struct {
@@ -145,6 +151,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveServerInfo(w, r)
 		return
 	}
+	if r.URL.Path == "/voice/v1/device" {
+		h.servePhoneDevice(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -185,6 +195,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	if h.Devices != nil {
+		defer h.Devices.DetachCall(callID)
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}})
 	if err != nil {
 		return

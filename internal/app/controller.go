@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/offeredfile"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -402,10 +403,12 @@ type Controller struct {
 	nextSub int
 	nextSeq uint64
 	subs    map[int]chan Event
+	phone   *phonedevice.Hub
 }
 
 // New constructs a browser app controller.
 func New(cfg config.Config, engine *agent.Engine) *Controller {
+	phone := &phonedevice.Hub{}
 	controller := &Controller{
 		cfg:                         cfg,
 		agent:                       engine,
@@ -413,11 +416,22 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		subs:                        map[int]chan Event{},
 		workspaceSnapshot:           workspacepkg.Snapshot,
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
+		phone:                       phone,
 	}
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)
+		engine.SetPhoneDeviceControl(phone)
 	}
 	return controller
+}
+
+// PhoneDeviceHub returns the process-owned provider used by the authenticated
+// Android sidecar and voice-only phone tool.
+func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
+	if c == nil {
+		return nil
+	}
+	return c.phone
 }
 
 // Start initializes global browser state. Sessions are activated by explicit

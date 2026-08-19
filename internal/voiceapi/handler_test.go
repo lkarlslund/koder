@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -473,6 +474,66 @@ func TestHandlerRejectsConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestPhoneDeviceSidecarRequiresAndServesActiveCall(t *testing.T) {
+	hub := &phonedevice.Hub{}
+	handler := NewHandler(&fakeBackend{}, "")
+	handler.Devices = hub
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx := context.Background()
+	baseURL := "ws" + server.URL[len("http"):]
+
+	_, response, err := websocket.Dial(ctx, baseURL+"/voice/v1/device?call_id=phone-1", nil)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
+		t.Fatalf("inactive sidecar response=%v err=%v", response, err)
+	}
+
+	voiceConn, _, err := websocket.Dial(ctx, baseURL+"/voice/v1?call_id=phone-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = voiceConn.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, voiceConn, "ready")
+	deviceConn, _, err := websocket.Dial(ctx, baseURL+"/voice/v1/device?call_id=phone-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deviceConn.Close(websocket.StatusNormalClosure, "") }()
+	writeJSON(t, ctx, deviceConn, deviceFrame{Type: "device_hello", Protocol: protocolVersion, Capabilities: []string{"search_contacts", "invented_action"}})
+	var ready deviceFrame
+	readJSON(t, ctx, deviceConn, &ready)
+	if ready.Type != "device_ready" || len(ready.Capabilities) != 1 || ready.Capabilities[0] != "search_contacts" {
+		t.Fatalf("device ready = %#v", ready)
+	}
+
+	type outcome struct {
+		result phonedevice.Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := hub.Execute(ctx, phonedevice.SearchContacts, map[string]string{"query": "Steen"})
+		done <- outcome{result: result, err: err}
+	}()
+	var request deviceFrame
+	readJSON(t, ctx, deviceConn, &request)
+	if request.Type != "device_tool_request" || request.Action != phonedevice.SearchContacts || request.Arguments["query"] != "Steen" {
+		t.Fatalf("device request = %#v", request)
+	}
+	writeJSON(t, ctx, deviceConn, deviceFrame{Type: "device_tool_result", Protocol: protocolVersion, RequestID: request.RequestID, Result: &phonedevice.Result{Text: "Found Steen"}})
+	select {
+	case got := <-done:
+		if got.err != nil || got.result.Text != "Found Steen" {
+			t.Fatalf("device result=%#v err=%v", got.result, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("phone action did not complete")
+	}
+}
+
 func TestHandlerReconnectsSameCallAndRestoresHistory(t *testing.T) {
 	backend := &fakeBackend{history: []voice.TranscriptEntry{{
 		ID: "message-1", Role: "user", Text: "What happened?", CreatedAt: time.Now().UTC(),
@@ -609,6 +670,31 @@ func writeClientFrame(ctx context.Context, conn *websocket.Conn, frame clientFra
 		return err
 	}
 	return conn.Write(ctx, websocket.MessageText, payload)
+}
+
+func writeJSON(t *testing.T, ctx context.Context, conn *websocket.Conn, value any) {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readJSON(t *testing.T, ctx context.Context, conn *websocket.Conn, value any) {
+	t.Helper()
+	messageType, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageText {
+		t.Fatalf("message type = %v, want text", messageType)
+	}
+	if err := json.Unmarshal(payload, value); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func readType(t *testing.T, ctx context.Context, conn *websocket.Conn, want string) serverFrame {

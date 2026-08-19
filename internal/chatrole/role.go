@@ -89,7 +89,7 @@ You are the user's persistent coordination chat and retain the conversation acro
 - When work will take time, first say a brief natural acknowledgement such as "Let me check." Then do the work and give only its concise outcome.
 - After tool work, preserve important uncertainty and any action the user must take, but leave supporting detail in the visual response instead of speaking it all.
 - Do not mention tools, routing, delegation, prompts, Markdown, or internal implementation details.`),
-			AllowTools: toolSet("chat_status", "session_list", "session_delegate", "session_start"),
+			AllowTools: toolSet("chat_status", "session_list", "session_delegate", "session_start", "phone"),
 		},
 		Compaction: {
 			Registered:  true,

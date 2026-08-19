@@ -18,12 +18,14 @@ import (
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
+	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
 
@@ -38,6 +40,7 @@ type Runtime struct {
 	offeredFiles     *offeredfile.Manager
 	managedSkillsDir string
 	voiceSessions    sessiontool.Control
+	phoneDevice      phonedevice.Control
 }
 
 type Config struct {
@@ -51,6 +54,7 @@ type Config struct {
 	OfferedFiles     *offeredfile.Manager
 	ManagedSkillsDir string
 	VoiceSessions    sessiontool.Control
+	PhoneDevice      phonedevice.Control
 }
 
 func New(cfg Config) *Runtime {
@@ -69,6 +73,13 @@ func New(cfg Config) *Runtime {
 		offeredFiles:     cfg.OfferedFiles,
 		managedSkillsDir: strings.TrimSpace(cfg.ManagedSkillsDir),
 		voiceSessions:    cfg.VoiceSessions,
+		phoneDevice:      cfg.PhoneDevice,
+	}
+}
+
+func (r *Runtime) SetPhoneDeviceControl(control phonedevice.Control) {
+	if r != nil {
+		r.phoneDevice = control
 	}
 }
 
@@ -145,6 +156,12 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
 	}
 	for key, service := range sessiontool.RuntimeService(r.voiceSessions) {
+		if runtime.Services == nil {
+			runtime.Services = map[string]any{}
+		}
+		runtime.Services[key] = service
+	}
+	for key, service := range phonetool.RuntimeService(r.phoneDevice) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

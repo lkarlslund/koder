@@ -86,3 +86,9 @@ func (l *CallLease) Snapshot() (ActiveCall, bool) {
 	defer l.mu.Unlock()
 	return l.active, l.active.CallID != ""
 }
+
+// Owns reports whether callID currently holds the process-wide lease.
+func (l *CallLease) Owns(callID string) bool {
+	active, ok := l.Snapshot()
+	return ok && active.CallID == strings.TrimSpace(callID)
+}
