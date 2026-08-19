@@ -406,7 +406,7 @@ type Controller struct {
 
 // New constructs a browser app controller.
 func New(cfg config.Config, engine *agent.Engine) *Controller {
-	return &Controller{
+	controller := &Controller{
 		cfg:                         cfg,
 		agent:                       engine,
 		theme:                       normalizeTheme(cfg.UI.Theme),
@@ -414,6 +414,10 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		workspaceSnapshot:           workspacepkg.Snapshot,
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 	}
+	if engine != nil {
+		engine.SetVoiceSessionControl(controller)
+	}
+	return controller
 }
 
 // Start initializes global browser state. Sessions are activated by explicit

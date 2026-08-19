@@ -248,7 +248,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-			message, err := call.HandleTextWithWorking(delegationCtx, frame.Text, frame.SessionID, func(session voice.Session) error {
+			state, stateErr := call.State(delegationCtx)
+			if stateErr != nil {
+				cancel()
+				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, frame.UtteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
+					return
+				}
+				continue
+			}
+			message, err := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, frame.Text, func(session voice.Session) error {
 				return writeWorking(ctx, conn, &writeMu, frame.UtteranceID, session)
 			})
 			cancel()
@@ -301,7 +309,7 @@ func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, file.Path)
 }
 
-func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, sessionID string) error {
+func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, _ string) error {
 	if len(audio.pcm) == 0 {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: audio.utteranceID, Error: "audio utterance was empty"}); err != nil {
 			return err
@@ -325,7 +333,12 @@ func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu
 		return err
 	}
 	delegationCtx, cancel := context.WithTimeout(ctx, delegationTimeout)
-	message, callErr := call.HandleTextWithWorking(delegationCtx, transcript, sessionID, func(session voice.Session) error {
+	state, stateErr := call.State(delegationCtx)
+	if stateErr != nil {
+		cancel()
+		return writeResult(ctx, conn, writeMu, call, h.Backend, audio.utteranceID, transcript, voice.Message{}, stateErr)
+	}
+	message, callErr := h.Backend.RunVoiceTurn(delegationCtx, state.VoiceSessionID, transcript, func(session voice.Session) error {
 		return writeWorking(ctx, conn, writeMu, audio.utteranceID, session)
 	})
 	cancel()
@@ -355,24 +368,12 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 	return nil
 }
 
-func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, utteranceID, transcript string, message voice.Message, callErr error) error {
+func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, utteranceID, _ string, message voice.Message, callErr error) error {
 	if callErr != nil {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error()}); err != nil {
 			return err
 		}
 		return writeReady(ctx, conn, writeMu, call, backend)
-	}
-	state, err := call.State(ctx)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(transcript) != "" {
-		if err := backend.RecordVoiceExchange(ctx, state.VoiceSessionID, transcript, message); err != nil {
-			if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "record voice exchange: " + err.Error()}); writeErr != nil {
-				return writeErr
-			}
-			return writeReady(ctx, conn, writeMu, call, backend)
-		}
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "message", UtteranceID: utteranceID, Message: &message}); err != nil {
 		return err

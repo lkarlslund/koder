@@ -16,13 +16,11 @@ import (
 )
 
 type fakeBackend struct {
-	delegated              bool
-	transcript             string
-	spoken                 string
-	recordedVoiceSessionID string
-	recordedTranscript     string
-	artifact               voice.ArtifactFile
-	voiceChats             []voice.Session
+	delegated  bool
+	transcript string
+	spoken     string
+	artifact   voice.ArtifactFile
+	voiceChats []voice.Session
 }
 
 func (f *fakeBackend) VoiceSessionArtifact(_, _ string) (voice.ArtifactFile, error) {
@@ -77,10 +75,22 @@ func (f *fakeBackend) EnsureVoiceSession(_ context.Context, requestedID string) 
 	return voice.Session{ID: requestedID, Title: "Voice Chat"}, nil
 }
 
-func (f *fakeBackend) RecordVoiceExchange(_ context.Context, voiceSessionID, transcript string, _ voice.Message) error {
-	f.recordedVoiceSessionID = voiceSessionID
-	f.recordedTranscript = transcript
-	return nil
+func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, onWorking func(voice.Session) error) (voice.Message, error) {
+	target := voice.Session{ID: "session-1", Title: "Laptop repair"}
+	if onWorking != nil {
+		if err := onWorking(target); err != nil {
+			return voice.Message{}, err
+		}
+	}
+	result, err := f.DelegateVoice(ctx, target.ID, text)
+	if err != nil {
+		return voice.Message{}, err
+	}
+	spoken := result.Text
+	if !strings.HasSuffix(spoken, ".") {
+		spoken += "."
+	}
+	return voice.Message{SpokenText: spoken, Parts: []voice.Part{{MIMEType: "text/plain", Data: spoken}}, Delegation: &result}, nil
 }
 
 func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte) (string, error) {
@@ -183,9 +193,6 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	}
 	readType(t, ctx, conn, "tts_end")
 	readType(t, ctx, conn, "ready")
-	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check it" {
-		t.Fatalf("recorded voice exchange = session %q transcript %q", backend.recordedVoiceSessionID, backend.recordedTranscript)
-	}
 }
 
 func TestHandlerSwitchesDurableVoiceChat(t *testing.T) {
@@ -299,9 +306,6 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	readType(t, ctx, conn, "ready")
 	if backend.spoken != "Done: check the laptop." {
 		t.Fatalf("synthesized text = %q", backend.spoken)
-	}
-	if backend.recordedVoiceSessionID != "voice-1" || backend.recordedTranscript != "check the laptop" {
-		t.Fatalf("recorded voice exchange = session %q transcript %q", backend.recordedVoiceSessionID, backend.recordedTranscript)
 	}
 }
 

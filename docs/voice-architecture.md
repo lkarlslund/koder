@@ -4,7 +4,7 @@ Status: implemented first release
 
 Koder's Android client is a native phone-style voice surface over the existing
 session system. Android owns call audio and endpointing. Koder owns speech
-services, durable voice-chat history, semantic routing, delegated work, and
+services, durable voice-chat history, coordinated work, and
 generic presentations.
 
 The app lives in this repository under `clients/android`, but remains a separate
@@ -37,7 +37,8 @@ Android Core-Telecom call
   -> Silero VAD and endpoint state machine
   -> authenticated voice.v1 WebSocket
   -> remote OpenAI-compatible STT
-  -> constrained voice routing profile
+  -> normal persistent chat with the Voice profile
+  -> voice-scoped session tools when other work is needed
   -> existing, quick, or persistent Koder session
   -> ordinary target chat and its normal tools
   -> concise result plus generic MIME parts
@@ -45,32 +46,29 @@ Android Core-Telecom call
   -> AudioTrack and Android companion feed
 ```
 
-Obvious list and named-session requests take deterministic fast paths. Other
-utterances are routed by the configured default chat model using bounded
-session summaries and a strict decision vocabulary:
+Every final transcript is a normal user turn in the selected durable voice
+chat. The Voice role supplies short, conversational behavior and the normal
+chat loop supplies history, model execution, tool calls, and the final answer.
+There is no separate stateless router or summarizer model call.
 
-- continue an exact existing session;
-- create a disposable quick chat for one-off work;
-- create a persistent session for an explicitly durable or ongoing objective;
-- ask one short clarification.
-
-Koder validates model-selected IDs and actions before acting. An explicit
-session selected in Android always wins. The selected target remains active for
-conversation continuity, while the routing profile can recognize a change of
-objective. Quick chats remain visible and can be closed or promoted in the Web
-UI; they are not silently deleted while their results or artifacts may still be
-useful.
+Session mechanics live in the voice-only tool definitions, not in the role
+prompt. `session_list` returns bounded work-session summaries,
+`session_delegate` asks an existing session to inspect its history or do work,
+and `session_start` creates a temporary or persistent target. Tool arguments
+and lifecycle guidance therefore stay synchronized with the capabilities the
+model is actually offered. Quick chats remain visible and can be closed or
+promoted in the Web UI.
 
 Delegation waits for the target chat's sealed response. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
-The voice profile summarizes a completed answer into one to three plain spoken
-sentences; the full delegated answer remains available as a visual text part.
-If summarization is unavailable, a bounded Markdown-stripping fallback is used.
+The Voice role returns one to three short spoken sentences after tool work.
+Tool results and offered artifacts remain in the durable voice timeline and
+can also be surfaced as generic visual parts.
 
 ## Server boundaries
 
-- `internal/voice` owns call state, routing decisions, delegation contracts,
+- `internal/voice` owns call state, delegation contracts,
   audio framing, and the process-wide call lease.
 - `internal/voiceapi` owns HTTP/WebSocket authentication and `voice.v1` wire
   DTOs.

@@ -41,15 +41,12 @@ class MainActivity : Activity(), CallController.Listener {
     private lateinit var callButton: Button
     private lateinit var status: TextView
     private lateinit var transcript: TextView
-    private lateinit var sessionSpinner: Spinner
     private lateinit var voiceSessionSpinner: Spinner
 	private lateinit var newVoiceSessionButton: Button
     private lateinit var feed: LinearLayout
     private lateinit var feedScroll: ScrollView
     private lateinit var typedMessage: EditText
-    private var sessions: List<VoiceSession> = emptyList()
     private var voiceSessions: List<VoiceSession> = emptyList()
-    private var spinnerUpdating = false
     private var voiceSpinnerUpdating = false
     private var selectedVoiceSessionId = ""
     private var connected = false
@@ -79,7 +76,6 @@ class MainActivity : Activity(), CallController.Listener {
             server.isEnabled = !connected
             token.isEnabled = !connected
 			newVoiceSessionButton.isEnabled = connected
-            updateSessions(snapshot.sessions, snapshot.activeSessionId)
             if (snapshot.voiceSessionId.isNotBlank()) selectedVoiceSessionId = snapshot.voiceSessionId
             updateVoiceSessions(snapshot.voiceSessions, snapshot.voiceSessionId)
         }
@@ -160,15 +156,6 @@ class MainActivity : Activity(), CallController.Listener {
         }
         root.addView(status, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 8))
 
-        sessionSpinner = Spinner(this)
-        sessionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!spinnerUpdating && connected) controller.selectSession(sessions.getOrNull(position - 1)?.id.orEmpty())
-            }
-        }
-        root.addView(sessionSpinner, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
-
         transcript = TextView(this).apply {
             setTextColor(0xFF555555.toInt())
             textSize = 15f
@@ -199,7 +186,6 @@ class MainActivity : Activity(), CallController.Listener {
         composer.addView(send, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(composer, matchWrap())
         setContentView(root)
-        updateSessions(emptyList(), "")
         updateVoiceSessions(emptyList(), "")
     }
 
@@ -246,16 +232,6 @@ class MainActivity : Activity(), CallController.Listener {
 			}
 			.show()
 	}
-
-    private fun updateSessions(next: List<VoiceSession>, activeId: String) {
-        if (next == sessions && sessionSpinner.selectedItemPosition == next.indexOfFirst { it.id == activeId } + 1) return
-        sessions = next
-        val labels = listOf("Automatic chat selection") + next.map { it.title.ifBlank { "Untitled chat" } }
-        spinnerUpdating = true
-        sessionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-        sessionSpinner.setSelection((next.indexOfFirst { it.id == activeId } + 1).coerceAtLeast(0))
-        spinnerUpdating = false
-    }
 
     private fun updateVoiceSessions(next: List<VoiceSession>, activeId: String) {
         if (next == voiceSessions && voiceSessionSpinner.selectedItemPosition == next.indexOfFirst { it.id == activeId }) return

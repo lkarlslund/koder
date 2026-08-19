@@ -20,7 +20,7 @@ func TestDefaultRegistryRoleSpecs(t *testing.T) {
 		{name: "execution", role: Execution, displayName: "Execute", prompt: "execution worker"},
 		{name: "standalone", role: Standalone, displayName: "Standalone", prompt: "standalone chat"},
 		{name: "compaction", role: Compaction, displayName: "Compact", prompt: "summarizes conversation history"},
-		{name: "voice", role: Voice, displayName: "Voice", prompt: "voice coordination chat"},
+		{name: "voice", role: Voice, displayName: "Voice", prompt: "voice assistant"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -58,6 +58,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"compaction rejects read", Compaction, testTool("file_read"), false},
 		{"compaction rejects chat send", Compaction, testTool("chat_send"), false},
 		{"voice allows chat status", Voice, testTool("chat_status"), true},
+		{"voice allows session delegation", Voice, testTool("session_delegate"), true},
 		{"voice rejects file read", Voice, testTool("file_read"), false},
 		{"unknown rejects read", Role("unknown"), testTool("file_read"), false},
 	}

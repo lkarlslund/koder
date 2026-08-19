@@ -2,15 +2,12 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -143,105 +140,10 @@ func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error
 	return out, nil
 }
 
-// ResolveVoiceRoute runs the constrained voice coordination profile against
-// bounded session summaries. The coordinator validates its structured output
-// before it can select or create anything.
-func (c *Controller) ResolveVoiceRoute(ctx context.Context, request voice.RouteRequest) (voice.RouteDecision, error) {
-	c.mu.RLock()
-	cfg := c.cfg
-	c.mu.RUnlock()
-	client, modelID, err := voiceProfileClient(cfg)
-	if err != nil {
-		return voice.RouteDecision{}, err
-	}
-	type routeSession struct {
-		ID          string `json:"id"`
-		Title       string `json:"title"`
-		LastMessage string `json:"last_message,omitempty"`
-	}
-	sessions := make([]routeSession, 0, min(len(request.Sessions), 20))
-	for _, session := range request.Sessions[:min(len(request.Sessions), 20)] {
-		sessions = append(sessions, routeSession{
-			ID: session.ID, Title: truncateVoiceRouteText(session.Title, 100),
-			LastMessage: truncateVoiceRouteText(session.LastMessage, 240),
-		})
-	}
-	payload, err := json.Marshal(map[string]any{
-		"utterance": request.Text, "active_session_id": request.ActiveSessionID, "sessions": sessions,
-	})
-	if err != nil {
-		return voice.RouteDecision{}, err
-	}
-	response, err := client.CompleteChat(ctx, provider.ChatRequest{
-		Model: modelID,
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: voiceRouterPrompt},
-			{Role: provider.RoleUser, Content: string(payload)},
-		},
-		Stream: false,
-	})
-	if err != nil {
-		return voice.RouteDecision{}, fmt.Errorf("resolve voice route: %w", err)
-	}
-	decision, err := decodeVoiceRoute(response.Text)
-	if err != nil {
-		return voice.RouteDecision{}, fmt.Errorf("decode voice route: %w", err)
-	}
-	return decision, nil
-}
-
-// SummarizeVoiceResult turns a potentially long, Markdown-oriented delegated
-// answer into short plain speech. The original result remains a visual part.
-func (c *Controller) SummarizeVoiceResult(
-	ctx context.Context,
-	request string,
-	result voice.DelegationResult,
-) (string, error) {
-	c.mu.RLock()
-	cfg := c.cfg
-	c.mu.RUnlock()
-	client, modelID, err := voiceProfileClient(cfg)
-	if err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(map[string]string{
-		"user_request":     truncateVoiceRouteText(request, 1000),
-		"delegated_result": truncateVoiceRouteText(result.Text, 8000),
-	})
-	if err != nil {
-		return "", err
-	}
-	response, err := client.CompleteChat(ctx, provider.ChatRequest{
-		Model: modelID,
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: voiceSummaryPrompt},
-			{Role: provider.RoleUser, Content: string(payload)},
-		},
-		Stream: false,
-	})
-	if err != nil {
-		return "", fmt.Errorf("summarize voice result: %w", err)
-	}
-	return truncateVoiceRouteText(response.Text, 480), nil
-}
-
-func voiceProfileClient(cfg config.Config) (*provider.Client, string, error) {
-	providerID, modelID := cfg.ResolveModel(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
-	providerCfg, ok := cfg.Provider(providerID)
-	if !ok || providerCfg.Disabled || strings.TrimSpace(modelID) == "" {
-		return nil, "", fmt.Errorf("default model for voice coordination is not configured")
-	}
-	client, err := provider.New(providerID, providerCfg, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	return client, modelID, nil
-}
-
 // CreateVoiceTarget creates either a disposable one-chat managed workspace or
 // a normal persistent session in the current workspace.
 func (c *Controller) CreateVoiceTarget(ctx context.Context, title string, persistent bool) (voice.Session, error) {
-	title = truncateVoiceRouteText(strings.TrimSpace(title), 80)
+	title = truncateVoiceText(strings.TrimSpace(title), 80)
 	if title == "" {
 		title = "Voice task"
 	}
@@ -264,54 +166,7 @@ func (c *Controller) CreateVoiceTarget(ctx context.Context, title string, persis
 	}, nil
 }
 
-const voiceRouterPrompt = `You route a phone-style Koder voice request.
-Return exactly one JSON object and no markdown:
-{"action":"existing|new_temporary|new_persistent|clarify","session_id":"","title":"","question":"","delegate":true}
-
-Rules:
-- existing: use only an exact supplied session id. Prefer the active session when this clearly continues it.
-- new_temporary: use for a self-contained one-off task when no supplied session is relevant.
-- new_persistent: use only when the user explicitly asks to create/keep a durable session or the work is clearly an ongoing project.
-- clarify: only when the choice materially changes the result; ask one short voice-friendly question.
-- delegate is false only when the utterance merely selects or creates a session and contains no work request.
-- Give a short descriptive title for a new target. Do not answer or perform the user's task.`
-
-const voiceSummaryPrompt = `Turn the delegated result into a phone-call response.
-Return only plain spoken text: no Markdown, lists, labels, preamble, or JSON.
-Use one to three short sentences and at most 60 words.
-Answer as a natural continuation of the conversation, using complete, punctuated sentences.
-Start directly in context, such as "I checked...", "We found...", or "We discovered...".
-Preserve the key result, uncertainty, and any next action.
-Do not invent facts and do not mention delegation or these instructions.`
-
-func decodeVoiceRoute(text string) (voice.RouteDecision, error) {
-	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
-	if start < 0 || end < start {
-		return voice.RouteDecision{}, fmt.Errorf("model did not return a JSON object")
-	}
-	var wire struct {
-		Action    voice.RouteAction `json:"action"`
-		SessionID string            `json:"session_id"`
-		Title     string            `json:"title"`
-		Question  string            `json:"question"`
-		Delegate  bool              `json:"delegate"`
-	}
-	if err := json.Unmarshal([]byte(text[start:end+1]), &wire); err != nil {
-		return voice.RouteDecision{}, err
-	}
-	switch wire.Action {
-	case voice.RouteExisting, voice.RouteNewTemporary, voice.RouteNewPersistent, voice.RouteClarify:
-	default:
-		return voice.RouteDecision{}, fmt.Errorf("unsupported action %q", wire.Action)
-	}
-	return voice.RouteDecision{
-		Action: wire.Action, SessionID: strings.TrimSpace(wire.SessionID),
-		Title: truncateVoiceRouteText(wire.Title, 80), Question: truncateVoiceRouteText(wire.Question, 240),
-		Delegate: wire.Delegate,
-	}, nil
-}
-
-func truncateVoiceRouteText(text string, limit int) string {
+func truncateVoiceText(text string, limit int) string {
 	text = strings.TrimSpace(text)
 	runes := []rune(text)
 	if len(runes) <= limit {
@@ -367,35 +222,110 @@ func (c *Controller) CreateVoiceSession(ctx context.Context, title string) (voic
 	}, nil
 }
 
-// RecordVoiceExchange appends the human transcript and concise spoken result
-// to the durable voice chat without invoking its model.
-func (c *Controller) RecordVoiceExchange(ctx context.Context, voiceSessionID, transcript string, message voice.Message) error {
-	transcript = strings.TrimSpace(transcript)
-	if transcript == "" {
-		return fmt.Errorf("voice transcript is required")
+// RunVoiceTurn executes an utterance through the durable voice chat's normal
+// model loop, history, role prompt, and profile-scoped tools.
+func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, onWorking func(voice.Session) error) (voice.Message, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return voice.Message{}, fmt.Errorf("voice transcript is required")
 	}
-	_, session, _, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
 	if err != nil {
-		return err
+		return voice.Message{}, err
 	}
-	if session.Kind != domain.SessionKindVoice {
-		return fmt.Errorf("session %s is not a voice session", session.ID)
+	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return voice.Message{}, fmt.Errorf("session %s is not a voice chat", session.ID)
 	}
 	if err := runtime.EnsureTimeline(ctx); err != nil {
-		return err
+		return voice.Message{}, err
 	}
-	if _, err := runtime.AppendUserMessage(ctx, domain.UserMessage{Text: transcript, Source: "voice"}); err != nil {
-		return err
+	initial := runtime.Snapshot()
+	if initial.Active || (initial.Status != "" && initial.Status != chat.StatusIdle && initial.Status != chat.StatusErrored) {
+		return voice.Message{}, fmt.Errorf("voice chat is already busy")
 	}
-	item, err := runtime.AppendTimelineContent(ctx, domain.AssistantMessage{Text: strings.TrimSpace(message.SpokenText)})
+	initialSeq := latestTimelineSequence(initial.Timeline)
+	updates, unsubscribe := runtime.Subscribe()
+	defer unsubscribe()
+	runtime.Enqueue(chat.QueueItem{Kind: chat.QueueKindUser, Source: domain.UserMessageSourceVoice, Text: text})
+	started := false
+	workingSent := false
+	for {
+		select {
+		case <-ctx.Done():
+			return voice.Message{}, fmt.Errorf("wait for voice chat: %w", ctx.Err())
+		case update, ok := <-updates:
+			if !ok {
+				return voice.Message{}, fmt.Errorf("voice chat closed before replying")
+			}
+			snapshot := update.Snapshot
+			if voiceTurnStarted(snapshot.Status, snapshot.Active) {
+				started = true
+			}
+			if !workingSent && snapshot.Status == chat.StatusRunningTools && onWorking != nil {
+				if target, found := voiceWorkingTarget(runtime.SnapshotTimeline(), initialSeq); found {
+					target = c.describeVoiceTarget(ctx, target)
+					if err := onWorking(target); err != nil {
+						return voice.Message{}, err
+					}
+					workingSent = true
+				}
+			}
+			if snapshot.Status == chat.StatusWaitingApproval {
+				return voice.Message{}, fmt.Errorf("voice chat needs approval in Koder")
+			}
+			if snapshot.Status == chat.StatusWaitingInput {
+				return voice.Message{}, fmt.Errorf("voice chat needs text input in Koder")
+			}
+			if snapshot.Active || snapshot.Status == chat.StatusWaitingLLM || snapshot.Status == chat.StatusRunningTools {
+				continue
+			}
+			timeline := runtime.SnapshotTimeline()
+			if response := latestAssistantTextAfter(timeline, initialSeq); response != "" {
+				parts := []voice.Part{{MIMEType: "text/plain", Data: response}}
+				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
+				return voice.Message{SpokenText: strings.TrimSpace(response), Parts: parts}, nil
+			}
+			if message := latestModelErrorAfter(timeline, initialSeq); message != "" {
+				return voice.Message{}, fmt.Errorf("voice chat stopped with an error: %s", message)
+			}
+			if snapshot.Status == chat.StatusErrored && started {
+				return voice.Message{}, fmt.Errorf("voice chat stopped with an error")
+			}
+		}
+	}
+}
+
+func (c *Controller) describeVoiceTarget(ctx context.Context, target voice.Session) voice.Session {
+	sessions, err := c.ListVoiceSessions(ctx)
 	if err != nil {
-		return err
+		return target
 	}
-	item.Seal(time.Now().UTC())
-	if _, err := runtime.UpsertTimelineItem(ctx, item); err != nil {
-		return err
+	for _, session := range sessions {
+		if session.ID == target.ID {
+			return session
+		}
 	}
-	return nil
+	return target
+}
+
+func voiceWorkingTarget(timeline []domain.TimelineItem, after int64) (voice.Session, bool) {
+	for index := len(timeline) - 1; index >= 0; index-- {
+		item := timeline[index]
+		if item.Seq <= after {
+			break
+		}
+		message, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range message.Tools {
+			if call.Tool != domain.ToolKindSessionDelegate || (call.Status != domain.ToolStatusPending && call.Status != domain.ToolStatusRunning) {
+				continue
+			}
+			return voice.Session{ID: strings.TrimSpace(call.Args["session_id"]), Title: "Work session"}, true
+		}
+	}
+	return voice.Session{}, false
 }
 
 // DelegateVoice sends work to the existing default chat of an ordinary session

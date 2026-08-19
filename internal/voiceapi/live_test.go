@@ -105,7 +105,6 @@ func TestLiveSynthesizedVoiceRoundTrip(t *testing.T) {
 	}
 
 	var transcript, spoken string
-	var delegated bool
 	var working bool
 	var outputPCM []byte
 	for {
@@ -138,7 +137,6 @@ func TestLiveSynthesizedVoiceRoundTrip(t *testing.T) {
 		case "message":
 			if frame.Message != nil {
 				spoken = frame.Message.SpokenText
-				delegated = frame.Message.Delegation != nil
 			}
 		case "error":
 			t.Fatalf("live voice error: %s", frame.Error)
@@ -151,11 +149,8 @@ complete:
 	if strings.TrimSpace(transcript) == "" || strings.TrimSpace(spoken) == "" {
 		t.Fatalf("incomplete voice result: transcript=%q spoken=%q", transcript, spoken)
 	}
-	if os.Getenv("KODER_VOICE_LIVE_REQUIRE_DELEGATION") == "1" && !delegated {
-		t.Fatalf("voice result did not delegate: transcript=%q spoken=%q", transcript, spoken)
-	}
-	if delegated && !working {
-		t.Fatal("delegated voice result did not announce a working target")
+	if os.Getenv("KODER_VOICE_LIVE_REQUIRE_DELEGATION") == "1" && !working {
+		t.Fatalf("voice turn did not delegate or announce a working target: transcript=%q spoken=%q", transcript, spoken)
 	}
 	if len(outputPCM) < ready.AudioConfig.Output.SampleRate/2 {
 		t.Fatalf("streamed TTS is too short: %d bytes", len(outputPCM))

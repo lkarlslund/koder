@@ -41,6 +41,7 @@ import (
 	"github.com/lkarlslund/koder/internal/toolruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
 
 type Engine struct {
@@ -61,6 +62,14 @@ type Engine struct {
 	envPrompts    map[id.ID]string
 	registry      *sessionpkg.Registry
 	retryPause    func(context.Context, time.Duration, func(time.Duration)) error
+}
+
+// SetVoiceSessionControl connects the native voice profile to process-wide
+// work-session coordination after the application controller is constructed.
+func (e *Engine) SetVoiceSessionControl(control sessiontool.Control) {
+	if e != nil && e.toolsRuntime != nil {
+		e.toolsRuntime.SetVoiceSessionControl(control)
+	}
 }
 
 const (

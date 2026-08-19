@@ -84,6 +84,9 @@ const (
 	ToolKindChatRename          ToolKind = "chat_rename"
 	ToolKindChatCleanup         ToolKind = "chat_cleanup"
 	ToolKindChatStatus          ToolKind = "chat_status"
+	ToolKindSessionList         ToolKind = "session_list"
+	ToolKindSessionDelegate     ToolKind = "session_delegate"
+	ToolKindSessionStart        ToolKind = "session_start"
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
@@ -170,6 +173,9 @@ var builtinToolKinds = []ToolKind{
 	ToolKindChatRename,
 	ToolKindChatCleanup,
 	ToolKindChatStatus,
+	ToolKindSessionList,
+	ToolKindSessionDelegate,
+	ToolKindSessionStart,
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,
@@ -493,6 +499,7 @@ const (
 	UserMessageSourceAutoResume      = "auto_resume"
 	UserMessageSourceSubchat         = "subchat"
 	UserMessageSourceTurnInstruction = "turn_instruction"
+	UserMessageSourceVoice           = "voice"
 )
 
 type QueuedInput struct {
@@ -510,6 +517,9 @@ type QueuedInput struct {
 
 // UserMessageSourceForQueuedInput returns the transcript source label for a queued input.
 func UserMessageSourceForQueuedInput(item QueuedInput) string {
+	if strings.TrimSpace(item.Source) == UserMessageSourceVoice {
+		return UserMessageSourceVoice
+	}
 	switch item.Origin {
 	case QueuedInputOriginUser:
 		return UserMessageSourceUser

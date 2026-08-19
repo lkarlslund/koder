@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,8 +19,8 @@ class MainActivityInstrumentedTest {
                 val labels = activity.findViewById<View>(android.R.id.content).allText()
                 assertTrue(labels.contains("Koder voice"))
                 assertTrue(labels.contains("Start call"))
-                assertTrue(labels.contains("Automatic chat selection"))
-				assertTrue(labels.contains("New"))
+                assertFalse(labels.contains("Automatic chat selection"))
+                assertTrue(labels.contains("New"))
                 assertTrue(labels.contains("Type to test without speech"))
                 assertTrue(labels.contains("Send"))
             }

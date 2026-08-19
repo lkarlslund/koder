@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2395,24 +2396,102 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	if ensured.ID != string(voiceSession.ID) {
 		t.Fatalf("ensured voice session = %#v", ensured)
 	}
-	if err := ctrl.RecordVoiceExchange(ctx, string(voiceSession.ID), "check the laptop", voice.Message{SpokenText: "It is fixed."}); err != nil {
+}
+
+func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
+	var targetID string
+	var requestsMu sync.Mutex
+	var requests []string
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		requestBody := string(body)
+		requestsMu.Lock()
+		requests = append(requests, requestBody)
+		requestsMu.Unlock()
+		switch {
+		case strings.Contains(requestBody, "You are a voice assistant") && strings.Contains(requestBody, `"role":"tool"`):
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"We found that the laptop now boots normally."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+		case strings.Contains(requestBody, "You are a voice assistant"):
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"delegate-1","type":"function","function":{"name":"session_delegate","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"session_id":"`+targetID+`","message":"Check whether the laptop fix still works"}`)
+		default:
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The laptop now boots normally after the firmware fix."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: 5 * time.Second},
+		}
+	})
+	state, err := ctrl.Sessions(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if len(state.Sessions) == 0 {
+		t.Fatal("expected ordinary target session")
+	}
+	target := state.Sessions[0]
+	target.Title = "Laptop repair"
+	if err := ctrl.RenameSession(context.Background(), target.ID, target.Title); err != nil {
+		t.Fatal(err)
+	}
+	targetID = string(target.ID)
+	voiceSession, _, err := ctrl.CreateVoiceChat(context.Background(), "Phone assistant")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var working voice.Session
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "Does the laptop fix still work?", func(session voice.Session) error {
+		working = session
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SpokenText != "We found that the laptop now boots normally." {
+		t.Fatalf("voice response = %#v", message)
+	}
+	if working.ID != targetID || working.Title != "Laptop repair" {
+		t.Fatalf("working target = %#v", working)
+	}
+
 	_, _, _, runtime, err := ctrl.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: voiceSession.ID}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.EnsureTimeline(ctx); err != nil {
-		t.Fatal(err)
-	}
 	timeline := runtime.SnapshotTimeline()
-	if len(timeline) != 2 {
-		t.Fatalf("voice transcript length = %d; timeline=%#v", len(timeline), timeline)
+	userTurns := 0
+	for _, item := range timeline {
+		if user, ok := item.Content.(domain.UserMessage); ok {
+			userTurns++
+			if user.Text != "Does the laptop fix still work?" || user.Source != "voice" {
+				t.Fatalf("voice user turn = %#v", user)
+			}
+		}
 	}
-	user, userOK := timeline[0].Content.(domain.UserMessage)
-	assistant, assistantOK := timeline[1].Content.(domain.AssistantMessage)
-	if !userOK || user.Text != "check the laptop" || user.Source != "voice" || !assistantOK || assistant.Text != "It is fixed." || !timeline[1].Sealed() {
-		t.Fatalf("unexpected durable voice transcript: %#v", timeline)
+	if userTurns != 1 {
+		t.Fatalf("voice transcript has %d user turns: %#v", userTurns, timeline)
+	}
+	requestsMu.Lock()
+	joinedRequests := strings.Join(requests, "\n")
+	requestsMu.Unlock()
+	if !strings.Contains(joinedRequests, `"name":"session_delegate"`) || !strings.Contains(joinedRequests, "Use the exact session_id returned by session_list") {
+		t.Fatalf("voice tool instructions were not offered with the tool: %s", joinedRequests)
+	}
+	if strings.Contains(chatrole.SpecFor(chatrole.Voice).SystemPrompt, "exact session_id") {
+		t.Fatalf("voice prompt contains tool mechanics: %s", chatrole.SpecFor(chatrole.Voice).SystemPrompt)
 	}
 }
 
@@ -2431,94 +2510,6 @@ func TestEnsureVoiceSessionCreatesFirstDurableChat(t *testing.T) {
 	}
 	if again.ID != created.ID {
 		t.Fatalf("expected newest voice session reuse, got %#v after %#v", again, created)
-	}
-}
-
-func TestDecodeVoiceRouteAcceptsFencedModelOutput(t *testing.T) {
-	decision, err := decodeVoiceRoute("```json\n{\"action\":\"existing\",\"session_id\":\"session-1\",\"delegate\":true}\n```")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.Action != voice.RouteExisting || decision.SessionID != "session-1" || !decision.Delegate {
-		t.Fatalf("decision = %#v", decision)
-	}
-}
-
-func TestDecodeVoiceRouteRejectsUnconstrainedAction(t *testing.T) {
-	if _, err := decodeVoiceRoute(`{"action":"delete_everything","delegate":true}`); err == nil {
-		t.Fatal("expected unsupported action error")
-	}
-}
-
-func TestResolveVoiceRouteUsesDefaultModelAndBoundedSummaries(t *testing.T) {
-	var requestBody string
-	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			t.Fatalf("unexpected route model path %q", r.URL.Path)
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		requestBody = string(body)
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"action\":\"existing\",\"session_id\":\"mail\",\"delegate\":true}"},"finish_reason":"stop"}]}`)
-	}))
-	defer modelServer.Close()
-	cfg := config.Default()
-	cfg.Defaults.ProviderID = "router"
-	cfg.Defaults.ModelID = "route-model"
-	cfg.Providers = map[string]config.Provider{
-		"router": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
-	}
-	ctrl := &Controller{cfg: cfg}
-	sessions := make([]voice.Session, 25)
-	for index := range sessions {
-		sessions[index] = voice.Session{ID: fmt.Sprintf("session-%d", index), Title: strings.Repeat("x", 140)}
-	}
-	sessions[0] = voice.Session{ID: "mail", Title: "Inbox"}
-	decision, err := ctrl.ResolveVoiceRoute(context.Background(), voice.RouteRequest{
-		Text: "Check whether Steen replied", ActiveSessionID: "mail", Sessions: sessions,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.Action != voice.RouteExisting || decision.SessionID != "mail" || !decision.Delegate {
-		t.Fatalf("decision = %#v", decision)
-	}
-	if !strings.Contains(requestBody, `"model":"route-model"`) || strings.Contains(requestBody, "session-24") {
-		t.Fatalf("unexpected bounded route request: %s", requestBody)
-	}
-}
-
-func TestSummarizeVoiceResultUsesPlainSpeechProfile(t *testing.T) {
-	var requestBody string
-	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		requestBody = string(body)
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The firmware gate is in UEFI, and the practical unlock sets CMOS bit 2."},"finish_reason":"stop"}]}`)
-	}))
-	defer modelServer.Close()
-	cfg := config.Default()
-	cfg.Defaults.ProviderID = "router"
-	cfg.Defaults.ModelID = "voice-model"
-	cfg.Providers = map[string]config.Provider{
-		"router": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
-	}
-	ctrl := &Controller{cfg: cfg}
-	summary, err := ctrl.SummarizeVoiceResult(context.Background(), "What did we find?", voice.DelegationResult{
-		Text: strings.Repeat("# Detailed result\n", 600),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary != "The firmware gate is in UEFI, and the practical unlock sets CMOS bit 2." {
-		t.Fatalf("summary = %q", summary)
-	}
-	if !strings.Contains(requestBody, "Turn the delegated result into a phone-call response") || len(requestBody) > 12_000 {
-		t.Fatalf("unexpected bounded summary request (%d bytes): %s", len(requestBody), requestBody)
 	}
 }
 

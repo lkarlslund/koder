@@ -112,19 +112,9 @@ class CallController(
         listener.onUserMessage(normalized)
         update(Stage.PROCESSING, "Understanding…", "")
         try {
-            connection.sendUtterance(normalized, snapshot.activeSessionId)
+            connection.sendUtterance(normalized)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Could not send request")
-        }
-    }
-
-    fun selectSession(sessionId: String) {
-        if (!running) return
-        cancelCapture()
-        try {
-            connection.selectSession(sessionId)
-        } catch (error: Exception) {
-            update(Stage.ERROR, error.message ?: "Could not select chat")
         }
     }
 
@@ -294,7 +284,7 @@ class CallController(
                         val completedId = utteranceId
                         utteranceId = ""
                         microphone.stop()
-                        connection.commitAudio(completedId, snapshot.activeSessionId)
+                        connection.commitAudio(completedId)
                         onMain { update(Stage.TRANSCRIBING, "Recognizing speech…", "") }
                     }
                 }

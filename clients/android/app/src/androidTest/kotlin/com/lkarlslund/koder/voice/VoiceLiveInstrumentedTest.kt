@@ -2,7 +2,6 @@ package com.lkarlslund.koder.voice
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assume.assumeTrue
@@ -15,7 +14,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class VoiceLiveInstrumentedTest {
     @Test
-    fun delegatesToOneExistingChat() {
+    fun voiceChatCanCoordinateWithExistingWork() {
         val arguments = InstrumentationRegistry.getArguments()
         val server = arguments.getString("voiceLiveServer").orEmpty()
         assumeTrue("set voiceLiveServer to enable the live test", server.isNotBlank())
@@ -26,6 +25,7 @@ class VoiceLiveInstrumentedTest {
         var sessions = emptyList<VoiceSession>()
         var voiceSessions = emptyList<VoiceSession>()
         var response: VoiceServerFrame? = null
+        var workingOn: VoiceSession? = null
         var disconnectReason = ""
         var terminalError = ""
         val connection = VoiceConnection(object : VoiceConnection.Listener {
@@ -43,6 +43,9 @@ class VoiceLiveInstrumentedTest {
                         response = frame
                         replied.countDown()
                     }
+                }
+                if (frame.type == "state" && frame.state == "working") {
+                    workingOn = frame.workingOn
                 }
                 if (frame.type == "error") {
                     terminalError = frame.error
@@ -72,12 +75,7 @@ class VoiceLiveInstrumentedTest {
 
             val prompt = arguments.getString("voiceLiveUtterance").orEmpty()
             if (prompt.isBlank()) return
-            val requestedId = arguments.getString("voiceLiveSessionId").orEmpty()
-            val requestedTitle = arguments.getString("voiceLiveSessionTitle").orEmpty()
-            val target = sessions.firstOrNull { it.id == requestedId }
-                ?: sessions.firstOrNull { requestedTitle.isNotBlank() && it.title.contains(requestedTitle, ignoreCase = true) }
-                ?: sessions.first()
-            connection.sendUtterance(prompt, target.id)
+            connection.sendUtterance(prompt)
             assertTrueWithReason("delegated chat did not reply", replied.await(5, TimeUnit.MINUTES), disconnectReason)
 
             val message = response?.message
@@ -86,9 +84,11 @@ class VoiceLiveInstrumentedTest {
                     if (terminalError.isBlank()) "" else ": $terminalError",
                 message,
             )
-            assertEquals(target.id, message?.delegation?.sessionId)
             assertFalse("live response did not contain speech", message?.spokenText.isNullOrBlank())
-            println("Koder live voice response from ${target.title}: ${message?.spokenText}")
+            if (arguments.getString("voiceLiveRequireDelegation") == "true") {
+                assertNotNull("voice chat did not announce delegated work", workingOn)
+            }
+            println("Koder live voice response${workingOn?.let { " after working in ${it.title}" }.orEmpty()}: ${message?.spokenText}")
         } finally {
             connection.close()
         }

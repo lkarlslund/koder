@@ -24,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
+	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
 
 type Runtime struct {
@@ -36,6 +37,7 @@ type Runtime struct {
 	attachments      *attachment.Manager
 	offeredFiles     *offeredfile.Manager
 	managedSkillsDir string
+	voiceSessions    sessiontool.Control
 }
 
 type Config struct {
@@ -48,6 +50,7 @@ type Config struct {
 	Attachments      *attachment.Manager
 	OfferedFiles     *offeredfile.Manager
 	ManagedSkillsDir string
+	VoiceSessions    sessiontool.Control
 }
 
 func New(cfg Config) *Runtime {
@@ -65,6 +68,13 @@ func New(cfg Config) *Runtime {
 		attachments:      cfg.Attachments,
 		offeredFiles:     cfg.OfferedFiles,
 		managedSkillsDir: strings.TrimSpace(cfg.ManagedSkillsDir),
+		voiceSessions:    cfg.VoiceSessions,
+	}
+}
+
+func (r *Runtime) SetVoiceSessionControl(control sessiontool.Control) {
+	if r != nil {
+		r.voiceSessions = control
 	}
 }
 
@@ -133,6 +143,12 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
 		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
+	}
+	for key, service := range sessiontool.RuntimeService(r.voiceSessions) {
+		if runtime.Services == nil {
+			runtime.Services = map[string]any{}
+		}
+		runtime.Services[key] = service
 	}
 	return runtime
 }
