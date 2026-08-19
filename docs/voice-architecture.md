@@ -38,6 +38,7 @@ Android Core-Telecom call
   -> authenticated voice.v1 WebSocket
   -> remote OpenAI-compatible STT
   -> normal persistent chat with the Voice profile
+  -> optional permission-gated tool call to the connected Android phone
   -> voice-scoped session tools when other work is needed
   -> existing, quick, or persistent Koder session
   -> ordinary target chat and its normal tools
@@ -79,6 +80,10 @@ can also be surfaced as generic visual parts.
 - `internal/chatstatus` and the `chat_status` tool provide model-authored,
   descriptive chat status without replacing runtime states such as reasoning,
   streaming, waiting, error, or idle.
+- `internal/phonedevice` owns the one-active-call phone capability catalog and
+  RPC hub. `internal/tools/phonetool` exposes one dynamic voice-only `phone`
+  tool whose action enum contains only capabilities currently advertised by
+  Android.
 
 Voice chats and their transcripts are normal selectable Web UI sessions. Voice
 and quick sessions use one chat; Android intentionally does not reproduce the
@@ -96,6 +101,9 @@ separate interfaces for:
 - `StreamingAudioPlayback` / `AudioTrack`;
 - `TelecomVoiceCall` for audio focus, hold, headset controls, speaker,
   earpiece, wired routes, and Bluetooth.
+- `PhoneDeviceConnection` for the authenticated phone-tool sidecar and
+  `AndroidPhoneToolProvider` for permission checks, local queries, intents,
+  direct actions, and phone-side confirmation.
 
 Silero consumes 512 samples at 16 kHz and retains its recurrent state and
 64-sample context. The model is downloaded from a pinned upstream commit during
@@ -119,10 +127,35 @@ Android retains the final install-consent and unknown-source controls. GitHub
 release builds create the official APK once and embed identical bytes in both
 Linux architectures, keeping Koder a single-file download.
 
-The app is turn-based: it records until local VAD commits, stops capture while
-Koder works and speaks, then resumes listening. The first release deliberately
-does not implement simultaneous full-duplex barge-in, incoming calls,
-always-listening wake-up, or offline inference.
+Local VAD remains active during streamed playback. Speech onset stops playback
+and starts a new utterance, allowing the user to interrupt Koder. The first
+release deliberately does not implement incoming calls, an always-listening
+wake word, or offline speech inference.
+
+## Phone-contributed tools
+
+Phone tools exist only while their Android app is connected to the active voice
+call. The user enables groups in Settings; all groups start disabled. Android
+re-checks runtime or special-access permission when connecting, then advertises
+only usable action IDs. Revoking a permission removes those actions on the next
+conversation. Koder owns the trusted catalog and never accepts tool names,
+schemas, or prompt text from Android.
+
+The initial catalog covers device/network/battery/storage status, location,
+contacts, calendar, SMS, current notification and email previews, calls,
+email/contact/calendar drafts, maps, alarms and timers, clipboard, HTTPS links,
+media control, installed app discovery/launching, and Android sharing. There is
+no generic Android API for browsing arbitrary email inboxes, so inbox access
+continues to come from ordinary Koder integrations; notification access can
+surface mail previews already shown by Android.
+
+Read operations run off the UI thread and return generic bounded JSON. Calls,
+SMS sending, drafts, writes, navigation, media/app control, and sharing require
+a visible confirmation dialog on the phone. System draft and chooser screens
+retain their own final review as well. SMS and call-log permissions have store
+distribution restrictions; Koder's local sideload channel can offer SMS access,
+while a future store build may need to omit it unless it qualifies as a default
+handler.
 
 Server address and bearer token are encrypted at rest with an Android Keystore
 key. Reconnect uses a stable call ID for the logical call and exponential

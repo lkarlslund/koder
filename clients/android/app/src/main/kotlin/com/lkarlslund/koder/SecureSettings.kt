@@ -11,7 +11,11 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class SecureSettings(context: Context) {
-    data class Values(val server: String, val token: String)
+    data class Values(
+        val server: String,
+        val token: String,
+        val enabledPhoneCapabilities: Set<String> = emptySet(),
+    )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
@@ -29,7 +33,7 @@ class SecureSettings(context: Context) {
             preferences.edit().remove(TOKEN).remove(TOKEN_IV).apply()
             ""
         }
-        return Values(server, token)
+        return Values(server, token, preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet())
     }
 
     fun save(server: String, token: String) {
@@ -43,6 +47,10 @@ class SecureSettings(context: Context) {
         edit.putString(TOKEN, cipher.doFinal(token.toByteArray(Charsets.UTF_8)).base64())
             .putString(TOKEN_IV, cipher.iv.base64())
             .apply()
+    }
+
+    fun savePhoneCapabilities(enabled: Set<String>) {
+        preferences.edit().putStringSet(PHONE_CAPABILITIES, enabled.toSet()).apply()
     }
 
     private fun decrypt(ciphertext: String, iv: String): String {
@@ -78,6 +86,7 @@ class SecureSettings(context: Context) {
         const val SERVER = "server"
         const val TOKEN = "token_encrypted"
         const val TOKEN_IV = "token_iv"
+        const val PHONE_CAPABILITIES = "phone_capabilities"
         const val DEFAULT_SERVER = ""
     }
 }

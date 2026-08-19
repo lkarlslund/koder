@@ -24,6 +24,7 @@ class VoiceConnection(
 ) : AutoCloseable {
     interface Listener {
         fun onConnected()
+		fun onCallIdentity(callId: String) = Unit
         fun onFrame(frame: VoiceServerFrame)
 		fun onAudioFrame(frame: VoiceAudioFrame) = Unit
         fun onDisconnected(reason: String)
@@ -82,6 +83,7 @@ class VoiceConnection(
 					reconnectAttempt = 0
 				}
                 webSocket.send(VoiceProtocol.hello())
+                listener.onCallIdentity(callId)
                 listener.onConnected()
             }
 

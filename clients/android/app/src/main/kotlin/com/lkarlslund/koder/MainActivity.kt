@@ -14,6 +14,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings as AndroidSettings
 import android.text.TextUtils
 import android.text.InputType
 import android.text.format.DateUtils
@@ -29,16 +30,20 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
+import com.lkarlslund.koder.phone.PhoneCapabilities
+import com.lkarlslund.koder.phone.PhoneCapability
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.ServerInfo
@@ -59,7 +64,7 @@ import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
-    private enum class Screen { SETUP, LOADING, HOME, CHAT }
+    private enum class Screen { SETUP, SETTINGS, LOADING, HOME, CHAT }
 
     private lateinit var controller: CallController
     private lateinit var secureSettings: SecureSettings
@@ -71,6 +76,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var requestGeneration = 0L
     private var pendingSession: VoiceSession? = null
     private var pendingStart = false
+    private var pendingPhoneCapability: PhoneCapability? = null
     private var lastAppUpdate: AppUpdate? = null
 
     private var updateButton: Button? = null
@@ -98,6 +104,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             status?.text = "Microphone permission is required for voice conversations"
         }
     }
+    private val phonePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val capability = pendingPhoneCapability ?: return@registerForActivityResult
+        pendingPhoneCapability = null
+        val granted = phoneCapabilityAvailable(capability)
+        if (granted) enablePhoneCapability(capability.id) else {
+            Toast.makeText(this, "${capability.title} permission was not granted", Toast.LENGTH_LONG).show()
+            showSettings()
+        }
+    }
+    private val notificationAccessLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val capability = pendingPhoneCapability ?: return@registerForActivityResult
+        pendingPhoneCapability = null
+        if (notificationAccessGranted()) enablePhoneCapability(capability.id) else showSettings()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,6 +128,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             override fun handleOnBackPressed() {
                 if (screen == Screen.CHAT) {
                     leaveChat()
+                } else if (screen == Screen.SETTINGS) {
+                    loadHome()
+                } else if (screen == Screen.SETUP && settings.server.isNotBlank()) {
+                    showSettings()
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -202,7 +226,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     serverField.error = "Server address is required"
                     return@setOnClickListener
                 }
-                settings = SecureSettings.Values(serverAddress, tokenField.text.toString())
+                settings = SecureSettings.Values(serverAddress, tokenField.text.toString(), settings.enabledPhoneCapabilities)
                 secureSettings.save(settings.server, settings.token)
                 loadHome()
             }
@@ -327,7 +351,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
                     "Server info" -> loadServerInfo()
-                    "Settings" -> showSetup()
+                    "Settings" -> showSettings()
                     "About" -> showAbout()
                 }
                 true
@@ -335,6 +359,91 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             show()
         }
     }
+
+    private fun showSettings() {
+        screen = Screen.SETTINGS
+        settings = secureSettings.load()
+        clearCallViews()
+        val content = column()
+        content.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "‹"; textSize = 38f; gravity = Gravity.CENTER; minWidth = dp(48); minHeight = dp(48)
+                contentDescription = "Back to conversations"; isClickable = true; setOnClickListener { loadHome() }
+            })
+            addView(title("Settings"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }, matchWrap())
+
+        content.addView(label("Koder server"), spaced(top = 20, bottom = 5))
+        content.addView(body(settings.server).apply { typeface = Typeface.MONOSPACE }, matchWrap())
+        content.addView(Button(this).apply {
+            text = "Edit connection"; isAllCaps = false; setOnClickListener { showSetup() }
+        }, spaced(top = 8, bottom = 24))
+
+        content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
+        content.addView(body("Choose what the active Koder voice conversation may ask this phone to do. Disabled groups disappear from Koder's available tools. Actions that change something or contact a person are confirmed here first."), spaced(top = 6, bottom = 14))
+        PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
+        content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
+        showScrollable(content)
+    }
+
+    private fun phoneCapabilityRow(capability: PhoneCapability) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(16), dp(13), dp(12), dp(13))
+        background = cardBackground()
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(body(capability.title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+            addView(helper(capability.description), spaced(top = 3))
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        addView(Switch(this@MainActivity).apply {
+            contentDescription = "Allow ${capability.title}"
+            isChecked = capability.id in settings.enabledPhoneCapabilities && phoneCapabilityAvailable(capability)
+            setOnCheckedChangeListener { _, checked ->
+                if (checked) requestPhoneCapability(capability) else disablePhoneCapability(capability.id)
+            }
+        })
+    }
+
+    private fun requestPhoneCapability(capability: PhoneCapability) {
+        pendingPhoneCapability = capability
+        when {
+            capability.notificationAccess && !notificationAccessGranted() -> {
+                notificationAccessLauncher.launch(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            capability.permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED } ->
+                phonePermissionLauncher.launch(capability.permissions)
+            else -> {
+                pendingPhoneCapability = null
+                enablePhoneCapability(capability.id)
+            }
+        }
+    }
+
+    private fun enablePhoneCapability(id: String) {
+        val enabled = settings.enabledPhoneCapabilities + id
+        secureSettings.savePhoneCapabilities(enabled)
+        settings = settings.copy(enabledPhoneCapabilities = enabled)
+        showSettings()
+    }
+
+    private fun disablePhoneCapability(id: String) {
+        val enabled = settings.enabledPhoneCapabilities - id
+        secureSettings.savePhoneCapabilities(enabled)
+        settings = settings.copy(enabledPhoneCapabilities = enabled)
+    }
+
+    private fun phoneCapabilityAvailable(capability: PhoneCapability) =
+        (!capability.notificationAccess || notificationAccessGranted()) &&
+            if (capability.id == "location") {
+                capability.permissions.any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+            } else {
+                capability.permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+            }
+
+    private fun notificationAccessGranted() = packageName in NotificationManagerCompat.getEnabledListenerPackages(this)
 
     private fun loadServerInfo() {
         val loading = AlertDialog.Builder(this)

@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.app.Activity
+import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
+import com.lkarlslund.koder.phone.PhoneDeviceConnection
+import com.lkarlslund.koder.phone.PhoneToolProvider
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -14,6 +18,7 @@ class CallController(
 	detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
 	audioPlayback: StreamingAudioPlayback? = null,
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
+	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
 ) : AutoCloseable {
     enum class Stage { DISCONNECTED, CONNECTING, LISTENING, RECORDING, TRANSCRIBING, PROCESSING, WORKING, SPEAKING, HELD, ERROR }
 
@@ -36,6 +41,9 @@ class CallController(
     }
 
     private val appContext = context.applicationContext
+	private val phoneDevice = PhoneDeviceConnection(phoneTools)
+	private var connectedServer = ""
+	private var connectedToken = ""
     private val main = Handler(Looper.getMainLooper())
 	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback { message ->
 		onMain { update(Stage.ERROR, message) }
@@ -45,6 +53,9 @@ class CallController(
     private val endpoint = VadEndpointPipeline(detector)
     private val connection = VoiceConnection(object : VoiceConnection.Listener {
         override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading conversation…") }
+		override fun onCallIdentity(callId: String) {
+			phoneDevice.connect(connectedServer, connectedToken, callId)
+		}
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
@@ -96,6 +107,8 @@ class CallController(
         serverReady = false
         telecomReady = false
         audioConfig = null
+		connectedServer = server
+		connectedToken = token
         snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
@@ -161,6 +174,7 @@ class CallController(
 		workingSound.stop()
         endpoint.reset()
         connection.close()
+		phoneDevice.close()
         telecom.disconnect()
         appContext.stopService(Intent(appContext, VoiceCallService::class.java))
         snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused")
@@ -175,6 +189,8 @@ class CallController(
 		workingSound.close()
         endpoint.close()
         connection.close()
+		phoneDevice.close()
+		phoneTools.close()
     }
 
     private fun handleFrame(frame: VoiceServerFrame) {

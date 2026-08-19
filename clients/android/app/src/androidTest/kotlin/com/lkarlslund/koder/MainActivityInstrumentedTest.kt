@@ -115,6 +115,14 @@ class MainActivityInstrumentedTest {
                 onView(withText("linux/amd64")).check(matches(isDisplayed()))
                 onView(withText("7")).check(matches(isDisplayed()))
                 onView(withText("Close")).perform(click())
+                onView(withContentDescription("More options")).perform(click())
+                onView(withText("Settings")).perform(click())
+                val settingsLabels = waitForText(scenario, "Phone tools")
+                assertTrue(settingsLabels.contains("Device information"))
+                assertTrue(settingsLabels.contains("Contacts"))
+                assertTrue(settingsLabels.contains("Notifications & email previews"))
+                onView(withContentDescription("Allow Device information")).perform(click())
+                assertTrue("device" in SecureSettings(context).load().enabledPhoneCapabilities)
             }
         } finally {
             server.close()

@@ -1,0 +1,71 @@
+package com.lkarlslund.koder.phone
+
+import android.Manifest
+
+data class PhoneCapability(
+    val id: String,
+    val title: String,
+    val description: String,
+    val actions: Set<String>,
+    val permissions: Array<String> = emptyArray(),
+    val notificationAccess: Boolean = false,
+)
+
+object PhoneCapabilities {
+    val all = listOf(
+        PhoneCapability(
+            "device", "Device information",
+            "Battery, charging, storage, network, locale, installed apps, and app launching.",
+            setOf("device_status", "list_apps", "open_app"),
+        ),
+        PhoneCapability(
+            "location", "Location & maps",
+            "Current location and opening addresses or places in your map app.",
+            setOf("get_location", "open_map"),
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+        ),
+        PhoneCapability(
+            "contacts", "Contacts",
+            "Search names, phone numbers, and email addresses; prepare new contacts.",
+            setOf("search_contacts", "create_contact"),
+            arrayOf(Manifest.permission.READ_CONTACTS),
+        ),
+        PhoneCapability(
+            "calendar", "Calendar",
+            "Read upcoming appointments and prepare calendar entries for review.",
+            setOf("upcoming_calendar", "create_calendar_event"),
+            arrayOf(Manifest.permission.READ_CALENDAR),
+        ),
+        PhoneCapability(
+            "calls", "Phone calls",
+            "Place a real call after you confirm it on this phone.",
+            setOf("place_call"),
+            arrayOf(Manifest.permission.CALL_PHONE),
+        ),
+        PhoneCapability(
+            "messages", "SMS messages",
+            "Search stored text messages or send one after phone confirmation.",
+            setOf("search_sms", "send_sms"),
+            arrayOf(Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS),
+        ),
+        PhoneCapability(
+            "notifications", "Notifications & email previews",
+            "Search notifications currently visible to Android, including mail and chat previews.",
+            setOf("recent_notifications"),
+            notificationAccess = true,
+        ),
+        PhoneCapability(
+            "clipboard", "Clipboard",
+            "Read or, after confirmation, replace the clipboard while Koder is open.",
+            setOf("read_clipboard", "write_clipboard"),
+        ),
+        PhoneCapability(
+            "assistant_actions", "Personal assistant actions",
+            "Draft email, set alarms and timers, open safe links, control media, and share text.",
+            setOf("compose_email", "set_alarm", "set_timer", "open_url", "media_control", "share_text"),
+        ),
+    )
+
+    val byID = all.associateBy(PhoneCapability::id)
+    val knownActions = all.flatMap { it.actions }.toSet()
+}

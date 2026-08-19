@@ -164,6 +164,17 @@ func TestSharedProtocolFixturesDecode(t *testing.T) {
 	if working.Protocol != protocolVersion || working.State != "working" || working.WorkingOn == nil || working.WorkingOn.ID != "session-fixture-1" {
 		t.Fatalf("working fixture = %#v", working)
 	}
+	requestData, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", "device_tool_request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request deviceFrame
+	if err := json.Unmarshal(requestData, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Protocol != protocolVersion || request.Type != "device_tool_request" || request.Action != phonedevice.SearchContacts || request.Arguments["query"] != "Steen" {
+		t.Fatalf("phone request fixture = %#v", request)
+	}
 }
 
 func (f *fakeBackend) DelegateVoice(_ context.Context, sessionID, text string) (voice.DelegationResult, error) {

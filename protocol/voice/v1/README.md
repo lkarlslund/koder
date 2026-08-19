@@ -131,6 +131,35 @@ the installed app and whose version code is newer. They must verify the byte
 size, APK SHA-256, package metadata, and APK signer before invoking Android's
 package installer.
 
+## Connected-phone tool provider
+
+While the main call owns its `call_id`, Android may open a second authenticated
+WebSocket at `GET /voice/v1/device?call_id=<same-id>`. This sidecar exists so a
+voice-chat tool call can wait for Android while the main socket continues to
+stream voice state and audio. It never acquires a second call lease.
+
+Android first sends `device_hello` with only the action IDs the user enabled
+and for which Android permission is currently available:
+
+```json
+{"type":"device_hello","protocol":"voice.v1","capabilities":["device_status","search_contacts"]}
+```
+
+Koder filters unknown IDs and replies with `device_ready`. During a voice-chat
+turn it can send a request; Android returns either a bounded result or error:
+
+```json
+{"type":"device_tool_request","protocol":"voice.v1","request_id":"uuid","action":"search_contacts","arguments":{"query":"Steen"}}
+{"type":"device_tool_result","protocol":"voice.v1","request_id":"uuid","result":{"text":"Found one contact","data":{"contacts":[]}}}
+```
+
+The server owns action descriptions and argument schemas; client-provided text
+never becomes a tool definition. A disconnected or disabled phone action is
+not offered to the model. Android confirms consequential actions on the phone
+before returning success. The server accepts one provider belonging to the
+active call, bounds frames to 128 KiB, results to 64 KiB, and waits at most two
+minutes for local permission or confirmation.
+
 ## Binary PCM envelope
 
 All integers are big-endian except PCM samples, which are signed 16-bit
@@ -187,4 +216,5 @@ resend committed work. Final exchanges already accepted by Koder are in the
 durable voice-chat transcript.
 
 Unknown JSON fields are ignored. Unknown frame types receive `error`. Shared
-fixtures in `testdata` are decoded by both Go and Kotlin tests.
+fixtures in `testdata` are decoded by both Go and Kotlin tests, including the
+phone-tool request/result contract.

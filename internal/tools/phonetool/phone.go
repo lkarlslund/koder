@@ -93,6 +93,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			"url":              map[string]any{"type": "string"},
 			"app":              map[string]any{"type": "string"},
 			"package_name":     map[string]any{"type": "string"},
+			"media_action":     map[string]any{"type": "string", "enum": []string{"play", "pause", "toggle", "next", "previous"}},
 		},
 		"required":             []string{"action"},
 		"additionalProperties": false,

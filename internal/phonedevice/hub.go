@@ -65,7 +65,7 @@ var catalog = []CatalogEntry{
 	{ReadClipboard, "Read the current clipboard while Koder Voice is in the foreground", "none", false},
 	{WriteClipboard, "Replace the phone clipboard after confirmation", "text", true},
 	{OpenURL, "Open an HTTPS URL on the phone", "url", true},
-	{MediaControl, "Control the active media session", "action: play, pause, toggle, next, or previous", true},
+	{MediaControl, "Control the active media session", "media_action: play, pause, toggle, next, or previous", true},
 	{ListApps, "Search launchable apps installed on the phone", "optional query, limit", false},
 	{OpenApp, "Open an installed app", "package_name", true},
 	{ShareText, "Open Android's share sheet with text", "text; optional title", true},
