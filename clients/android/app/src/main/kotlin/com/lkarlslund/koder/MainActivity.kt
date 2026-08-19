@@ -65,6 +65,7 @@ import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.muteControlLabel
+import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -868,7 +869,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				isAllCaps = false
 				contentDescription = "Pause voice conversation"
 				setOnClickListener {
-					if (text == "Resume") requestCallStart() else controller.end()
+					if (text == "Pause") controller.end() else requestCallStart()
 				}
 				}.also { addView(it) }
 				muteButton = Button(this@MainActivity).apply {
@@ -1012,7 +1013,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun updateConversationMode(stage: CallController.Stage?) {
 		val active = when (stage) {
-			null -> pauseButton?.text != "Resume"
+			null -> pauseButton?.text == "Pause"
 			CallController.Stage.DISCONNECTED, CallController.Stage.ERROR -> false
 			else -> true
 		}
@@ -1022,8 +1023,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 		}
 		pauseButton?.apply {
-			text = if (active) "Pause" else "Resume"
-			contentDescription = if (active) "Pause voice conversation" else "Resume voice conversation"
+			text = primaryVoiceControlLabel(stage, active)
+			contentDescription = when (text) {
+				"Pause" -> "Pause voice conversation"
+				"Retry" -> "Retry voice connection"
+				else -> "Resume voice conversation"
+			}
 		}
 		val surface = conversationSurface(active, transcriptShown, presentationShown)
 		activePanel?.visibility = if (surface == ConversationSurface.ACTIVE) View.VISIBLE else View.GONE
