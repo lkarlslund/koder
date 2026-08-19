@@ -87,6 +87,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var transcriptButton: Button? = null
 	private var transcriptShown = false
 	private var renderedHistorySession = ""
+	private var placeholderTitle: TextView? = null
+	private var placeholderDetail: TextView? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
         pendingStart = false
@@ -791,6 +793,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			visibility = if (active) View.VISIBLE else View.GONE
 			text = if (transcriptShown) "Hide transcript" else "Show transcript"
 		}
+		placeholderTitle?.text = if (active) "No transcript yet" else "Conversation paused"
+		placeholderDetail?.text = if (active) {
+			"Your conversation will appear here as you speak."
+		} else {
+			"Resume when you want to keep talking."
+		}
 	}
 
 	private fun renderHistory(voiceSessionId: String, history: List<VoiceTranscriptEntry>) {
@@ -953,14 +961,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
             contentDescription = "Voice conversation is ready"
         }, centeredSquare(76, bottom = 18))
-        addView(title("Just speak").apply {
+		placeholderTitle = title("No transcript yet").apply {
             textSize = 25f
             gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
-        }, matchWrap())
-        addView(helper("Koder is listening. You can also type a message below.").apply {
+		}.also { addView(it, matchWrap()) }
+		placeholderDetail = helper("Your conversation will appear here as you speak.").apply {
             gravity = Gravity.CENTER
-        }, spaced(top = 7))
+		}.also { addView(it, spaced(top = 7)) }
     }
 
     private fun removeFeedPlaceholder() {
@@ -994,6 +1002,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		composerView = null
 		pauseButton = null
 		transcriptButton = null
+		placeholderTitle = null
+		placeholderDetail = null
     }
 
     internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
