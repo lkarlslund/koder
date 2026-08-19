@@ -25,6 +25,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.net.InetAddress
 import java.security.MessageDigest
 
 @RunWith(AndroidJUnit4::class)
@@ -74,7 +75,7 @@ class MainActivityInstrumentedTest {
                 .body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"Calendar updated"}]}""")
                 .build(),
         )
-        server.start()
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
         try {
             SecureSettings(context).save(server.url("/").toString(), "")
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -116,7 +117,7 @@ class MainActivityInstrumentedTest {
                 """{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Older","updated_at":"2026-08-18T12:00:00Z"},{"id":"voice-2","title":"Newest","updated_at":"2026-08-19T12:00:00Z"}],$update}""",
             ).build(),
         )
-        server.start()
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
         try {
             SecureSettings(context).save(server.url("/").toString(), "")
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->

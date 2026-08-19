@@ -13,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.net.InetAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -80,7 +81,7 @@ class VoiceConnectionInstrumentedTest {
                 }
             }).build(),
         )
-        server.start()
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
 
         VoiceConnection(object : VoiceConnection.Listener {
             override fun onConnected() = Unit

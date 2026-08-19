@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var transcript: TextView? = null
     private var feed: LinearLayout? = null
     private var feedScroll: ScrollView? = null
+    private var feedPlaceholder: View? = null
     private var typedMessage: EditText? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
@@ -272,6 +273,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         root.addView(refresh, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(Button(this).apply {
             text = "+  New conversation"
+            isAllCaps = false
             contentDescription = "Create a new voice conversation"
             backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
             setTextColor(themeColor(android.R.attr.colorBackground))
@@ -452,14 +454,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(Button(this@MainActivity).apply {
-                text = "Back"
+            addView(TextView(this@MainActivity).apply {
+                text = "‹"
+                textSize = 38f
+                gravity = Gravity.CENTER
+                minWidth = dp(48)
+                minHeight = dp(48)
                 contentDescription = "Back to conversations"
+                isClickable = true
+                isFocusable = true
+                val selectable = TypedValue()
+                if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+                    setBackgroundResource(selectable.resourceId)
+                }
                 setOnClickListener { leaveChat() }
             })
             addView(
                 title(session.title.ifBlank { "Conversation" }).apply {
-                    textSize = 22f
+                    textSize = 23f
+                    setTypeface(typeface, Typeface.BOLD)
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
                 },
@@ -469,23 +482,58 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             )
         }
         root.addView(heading, matchWrap())
-        status = body("Preparing conversation…").apply { gravity = Gravity.CENTER_HORIZONTAL }
-        root.addView(status, spaced(top = 8))
-        transcript = helper("").apply { visibility = View.GONE }
-        root.addView(transcript, spaced(top = 4))
+        status = helper("Preparing conversation…").apply {
+            setTextColor(themeColor(android.R.attr.colorAccent))
+            background = GradientDrawable().apply {
+                setColor(withAlpha(themeColor(android.R.attr.colorAccent), 30))
+                cornerRadius = dp(18).toFloat()
+            }
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+        }
+        root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(10)
+            bottomMargin = dp(8)
+        })
+        transcript = helper("").apply {
+            visibility = View.GONE
+            gravity = Gravity.CENTER
+        }
+        root.addView(transcript, spaced(bottom = 4))
 
-        feed = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        feedScroll = ScrollView(this).apply { addView(feed, matchWrap()) }
+        feed = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            feedPlaceholder = conversationPlaceholder().also { addView(it, matchWrap()) }
+        }
+        feedScroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         root.addView(feedScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val composer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val composer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(5), dp(5), dp(5))
+            background = cardBackground()
+            elevation = dp(2).toFloat()
+        }
         typedMessage = EditText(this).apply {
             hint = "Message Koder"
             maxLines = 3
+            minHeight = dp(48)
+            background = null
+            setPadding(dp(10), 0, dp(8), 0)
         }
         composer.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         composer.addView(Button(this).apply {
-            text = "Send"
+            text = "➤"
+            contentDescription = "Send message"
+            minWidth = dp(56)
+            isAllCaps = false
+            backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
+            setTextColor(themeColor(android.R.attr.colorBackground))
             setOnClickListener {
                 val message = typedMessage?.text?.toString().orEmpty()
                 if (message.isNotBlank()) {
@@ -529,6 +577,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun addImage(part: VoicePart) {
         val feed = feed ?: return
+        removeFeedPlaceholder()
         val card = card()
         val title = helper(part.name.ifBlank { part.alt.ifBlank { part.mimeType } })
         val image = ImageView(this).apply {
@@ -556,6 +605,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun addGenericPart(part: VoicePart) {
         val feed = feed ?: return
+        removeFeedPlaceholder()
         val text = buildString {
             append(part.name.ifBlank { "Koder attachment" })
             append("\n")
@@ -606,12 +656,62 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun addBubble(who: String, text: String) = runOnUiThread {
         val feed = feed ?: return@runOnUiThread
         if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
-        val card = card().apply {
-            addView(label(who), matchWrap())
-            addView(body(text), spaced(top = 3))
+        removeFeedPlaceholder()
+        val fromUser = who == "You"
+        val bubble = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(11))
+            background = GradientDrawable().apply {
+                setColor(
+                    if (fromUser) withAlpha(themeColor(android.R.attr.colorAccent), 46)
+                    else themeColor(android.R.attr.colorBackgroundFloating),
+                )
+                cornerRadius = dp(16).toFloat()
+            }
+            elevation = dp(1).toFloat()
+            addView(helper(who).apply {
+                setTextColor(themeColor(android.R.attr.colorAccent))
+                alpha = 1f
+                setTypeface(typeface, Typeface.BOLD)
+            }, matchWrap())
+            addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
         }
-        feed.addView(card, spaced(top = 5, bottom = 5))
+        feed.addView(bubble, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = if (fromUser) Gravity.END else Gravity.START
+            topMargin = dp(6)
+            bottomMargin = dp(6)
+        })
         scrollToBottom()
+    }
+
+    private fun conversationPlaceholder() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(dp(24), dp(28), dp(24), dp(28))
+        addView(ImageView(this@MainActivity).apply {
+            setImageResource(android.R.drawable.ic_btn_speak_now)
+            imageTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(withAlpha(themeColor(android.R.attr.colorAccent), 32))
+            }
+            contentDescription = "Voice conversation is ready"
+        }, centeredSquare(76, bottom = 18))
+        addView(title("Just speak").apply {
+            textSize = 25f
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+        }, matchWrap())
+        addView(helper("Koder is listening. You can also type a message below.").apply {
+            gravity = Gravity.CENTER
+        }, spaced(top = 7))
+    }
+
+    private fun removeFeedPlaceholder() {
+        feedPlaceholder?.let { feed?.removeView(it) }
+        feedPlaceholder = null
+        feed?.gravity = Gravity.NO_GRAVITY
     }
 
     private fun card() = LinearLayout(this).apply {
@@ -632,6 +732,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         transcript = null
         feed = null
         feedScroll = null
+        feedPlaceholder = null
         typedMessage = null
     }
 

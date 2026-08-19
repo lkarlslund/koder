@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.net.InetAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -17,7 +18,7 @@ class VoiceSessionClientInstrumentedTest {
         val server = MockWebServer()
         server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""").build())
         server.enqueue(MockResponse.Builder().code(201).body("""{"protocol":"voice.v1","voice_session":{"id":"voice-2","title":"Work"},"voice_sessions":[]}""").build())
-        server.start()
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
         try {
             VoiceSessionClient().use { client ->
                 val listed = CountDownLatch(1)
