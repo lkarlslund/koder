@@ -91,6 +91,10 @@ if [[ "$CHANNEL" == "release" ]]; then
   : "${KODER_ANDROID_VERSION_CODE:?KODER_ANDROID_VERSION_CODE is required for release APKs}"
   : "${KODER_ANDROID_VERSION_NAME:?KODER_ANDROID_VERSION_NAME is required for release APKs}"
   RELEASE_IDENTITY="$KODER_ANDROID_VERSION_CODE $KODER_ANDROID_VERSION_NAME"
+else
+  # The local version name contains this revision, so it must participate in
+  # cache invalidation even when the source tree itself has not changed.
+  RELEASE_IDENTITY="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 fi
 FINGERPRINT="$({ source_fingerprint; sha256sum "$SIGNING_KEY_PATH"; printf '%s\n' "$CHANNEL" "$RELEASE_IDENTITY" "$TARGET_ABIS"; } | sha256sum | cut -d' ' -f1)"
 if [[ -f "$CACHE_DIR/fingerprint" && -f "$CACHE_DIR/koder.apk" && -f "$CACHE_DIR/manifest.json" ]] &&
