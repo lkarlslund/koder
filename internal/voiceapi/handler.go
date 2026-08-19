@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
+	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/version"
@@ -51,6 +53,7 @@ type Handler struct {
 	Lease   *voice.CallLease
 	Updates androidUpdateSource
 	Devices *phonedevice.Hub
+	Auth    *deviceauth.Registry
 }
 
 // NewHandler creates a process-scoped voice protocol handler.
@@ -130,6 +133,16 @@ type createSessionRequest struct {
 	Title string `json:"title"`
 }
 
+type bindDeviceRequest struct {
+	Code   string                `json:"code"`
+	Device deviceauth.DeviceInfo `json:"device"`
+}
+
+type bindDeviceResponse struct {
+	Protocol string             `json:"protocol"`
+	Binding  deviceauth.Binding `json:"binding"`
+}
+
 type incomingAudio struct {
 	utteranceID  string
 	format       voice.AudioFormat
@@ -165,7 +178,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "voice backend unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if !authorized(r, h.Token) {
+	if r.URL.Path == "/voice/v1/bind" {
+		h.serveBindDevice(w, r)
+		return
+	}
+	if r.URL.Path == "/voice/v1/android/koder.apk" && h.Auth != nil && h.Auth.InvitationValid(r.URL.Query().Get("bind_code")) {
+		h.serveAndroidAPK(w, r)
+		return
+	}
+	if !authorized(r, h.Token, h.Auth) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="koder-voice"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -445,7 +466,7 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 		GCCycles:          memory.NumGC,
 		SessionCount:      len(sessions),
 		VoiceSessionCount: len(voiceSessions),
-		TokenRequired:     strings.TrimSpace(h.Token) != "",
+		TokenRequired:     strings.TrimSpace(h.Token) != "" || h.Auth != nil,
 	}
 	if active, ok := h.Lease.Snapshot(); ok {
 		response.VoiceConnectionActive = true
@@ -631,7 +652,7 @@ func (h *Handler) serveAndroidAPK(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "embedded Android update is unavailable", http.StatusInternalServerError)
 		return
 	}
-	defer apk.Close()
+	defer func() { _ = apk.Close() }()
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", `attachment; filename="koder.apk"`)
 	w.Header().Set("Content-Length", fmt.Sprint(meta.APKSize))
@@ -641,6 +662,43 @@ func (h *Handler) serveAndroidAPK(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, apk); err != nil {
 		return
 	}
+}
+
+func (h *Handler) serveBindDevice(w http.ResponseWriter, r *http.Request) {
+	if h.Auth == nil {
+		http.Error(w, "device binding is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request bindDeviceRequest
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid device binding request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid device binding request: expected one JSON object", http.StatusBadRequest)
+		return
+	}
+	binding, err := h.Auth.Bind(request.Code, request.Device)
+	if err != nil {
+		if errors.Is(err, deviceauth.ErrInvitationInvalid) {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "bind device: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(bindDeviceResponse{Protocol: protocolVersion, Binding: binding})
 }
 
 func (h *Handler) handleAudio(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audio *incomingAudio, _ string) error {
@@ -801,9 +859,9 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, 
 	return conn.Write(ctx, websocket.MessageText, payload)
 }
 
-func authorized(r *http.Request, configuredToken string) bool {
+func authorized(r *http.Request, configuredToken string, registry *deviceauth.Registry) bool {
 	configuredToken = strings.TrimSpace(configuredToken)
-	if configuredToken == "" {
+	if configuredToken == "" && registry == nil {
 		return true
 	}
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
@@ -811,8 +869,23 @@ func authorized(r *http.Request, configuredToken string) bool {
 		return false
 	}
 	provided := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
-	if len(provided) != len(configuredToken) {
-		return false
+	if registry != nil {
+		return registry.Authorize(provided, deviceInfoFromHeaders(r.Header))
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(configuredToken)) == 1
+	if configuredToken != "" && len(provided) == len(configuredToken) && subtle.ConstantTimeCompare([]byte(provided), []byte(configuredToken)) == 1 {
+		return true
+	}
+	return false
+}
+
+func deviceInfoFromHeaders(header http.Header) deviceauth.DeviceInfo {
+	return deviceauth.DeviceInfo{
+		InstallationID: header.Get("X-Koder-Device-ID"),
+		Name:           header.Get("X-Koder-Device-Name"),
+		Manufacturer:   header.Get("X-Koder-Device-Manufacturer"),
+		Model:          header.Get("X-Koder-Device-Model"),
+		AndroidVersion: header.Get("X-Koder-Android-Version"),
+		AppVersion:     header.Get("X-Koder-App-Version"),
+		AppID:          header.Get("X-Koder-App-ID"),
+	}
 }

@@ -434,6 +434,14 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 	return c.phone
 }
 
+// StateDir returns the process state directory for server-owned durable data.
+func (c *Controller) StateDir() string {
+	if c == nil {
+		return ""
+	}
+	return c.cfg.StateDir()
+}
+
 // Start initializes global browser state. Sessions are activated by explicit
 // client selection or creation, not by process startup.
 func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot string) error {

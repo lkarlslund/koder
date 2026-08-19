@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
+	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -384,7 +386,7 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var listed sessionsResponse
 	if err := json.NewDecoder(response.Body).Decode(&listed); err != nil {
 		t.Fatal(err)
@@ -406,7 +408,7 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var created sessionsResponse
 	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
 		t.Fatal(err)
@@ -432,7 +434,7 @@ func TestHandlerRenamesVoiceSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var body sessionsResponse
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
@@ -455,7 +457,7 @@ func TestHandlerDeletesVoiceSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var body sessionsResponse
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
@@ -512,7 +514,7 @@ func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var info serverInfoResponse
 	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
 		t.Fatal(err)
@@ -803,13 +805,131 @@ func TestHandlerAdvertisesAndServesAuthenticatedAndroidUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if response.StatusCode != http.StatusOK || string(body) != string(apk) || response.Header.Get("ETag") != `"`+meta.APKSHA256+`"` {
 		t.Fatalf("APK response status=%d headers=%v body=%q", response.StatusCode, response.Header, body)
+	}
+}
+
+func TestHandlerBindsPerDeviceTokenAndRevokesIt(t *testing.T) {
+	registry, err := deviceauth.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := registry.CreateInvitation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apk := []byte("signed-apk")
+	path := filepath.Join(t.TempDir(), "koder.apk")
+	if err := os.WriteFile(path, apk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(&fakeBackend{}, "")
+	handler.Auth = registry
+	handler.Updates = fakeUpdateSource{meta: androidupdate.Manifest{
+		Channel: "local", ApplicationID: "com.lkarlslund.koder.dev", VersionCode: 42,
+		VersionName: "0.1.0-local.test", APKSHA256: strings.Repeat("a", 64), APKSize: int64(len(apk)),
+	}, path: path}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/voice/v1/android/koder.apk?bind_code=" + url.QueryEscape(invitation.Code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloaded, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(downloaded) != string(apk) {
+		t.Fatalf("invited APK download status=%d body=%q err=%v", response.StatusCode, downloaded, err)
+	}
+
+	payload := fmt.Sprintf(`{"code":%q,"device":{"installation_id":"phone-1","name":"Lak's Pixel","manufacturer":"Google","model":"Pixel 9","android_version":"16","app_version":"0.1.0","app_id":"com.lkarlslund.koder.dev"}}`, invitation.Code)
+	response, err = http.Post(server.URL+"/voice/v1/bind", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var bound bindDeviceResponse
+	if err := json.NewDecoder(response.Body).Decode(&bound); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusCreated || bound.Protocol != protocolVersion || bound.Binding.Token == "" || bound.Binding.Device.Name != "Lak's Pixel" {
+		t.Fatalf("bind response status=%d body=%#v", response.StatusCode, bound)
+	}
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/voice/v1/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+bound.Binding.Token)
+	request.Header.Set("X-Koder-App-Version", "0.1.1")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("device token status = %d", response.StatusCode)
+	}
+	devices := registry.List()
+	if len(devices) != 1 || devices[0].AppVersion != "0.1.1" {
+		t.Fatalf("registered devices = %#v", devices)
+	}
+	if _, err := registry.Revoke(bound.Binding.Device.ID); err != nil {
+		t.Fatal(err)
+	}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/voice/v1/sessions", nil)
+	request.Header.Set("Authorization", "Bearer "+bound.Binding.Token)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked device token status = %d", response.StatusCode)
+	}
+}
+
+func TestMigratedDeviceRevocationOverridesConfiguredLegacyToken(t *testing.T) {
+	registry, err := deviceauth.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, _, err := registry.ImportLegacy("shared-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(&fakeBackend{}, "shared-secret")
+	handler.Auth = registry
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	request := func() int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/voice/v1/sessions", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer shared-secret")
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		return response.StatusCode
+	}
+	if got := request(); got != http.StatusOK {
+		t.Fatalf("migrated token status = %d", got)
+	}
+	if _, err := registry.Revoke(device.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := request(); got != http.StatusUnauthorized {
+		t.Fatalf("revoked migrated token status = %d", got)
 	}
 }
 
