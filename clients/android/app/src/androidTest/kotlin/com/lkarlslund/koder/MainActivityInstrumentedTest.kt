@@ -3,6 +3,7 @@ package com.lkarlslund.koder
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -11,6 +12,7 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +38,19 @@ class MainActivityInstrumentedTest {
                 assertTrue(labels.any { it.contains("stored encrypted") })
                 assertTrue(labels.contains("Connect"))
                 assertFalse(labels.contains("Send"))
+            }
+        }
+    }
+
+    @Test
+    fun savedAccessTokenIsMaskedOnSetupScreen() {
+        SecureSettings(context).save("", "visible-secret")
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val tokenField = activity.findViewById<View>(android.R.id.content)
+                    .findByDescription("Access token") as EditText
+                assertTrue(tokenField.inputType and android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD != 0)
+                assertNotEquals("visible-secret", tokenField.transformationMethod.getTransformation(tokenField.text, tokenField).toString())
             }
         }
     }
@@ -86,5 +101,15 @@ class MainActivityInstrumentedTest {
         if (this@allText is ViewGroup) {
             repeat(this@allText.childCount) { index -> addAll(this@allText.getChildAt(index).allText()) }
         }
+    }
+
+    private fun View.findByDescription(description: String): View {
+        if (contentDescription?.toString() == description) return this
+        if (this is ViewGroup) {
+            repeat(childCount) { index ->
+                runCatching { return getChildAt(index).findByDescription(description) }
+            }
+        }
+        error("No view with content description $description")
     }
 }

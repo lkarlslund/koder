@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.TextUtils
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -147,8 +148,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val tokenField = EditText(this).apply {
             hint = "Optional"
             contentDescription = "Access token"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine()
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = PasswordTransformationMethod.getInstance()
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
             setText(settings.token)
         }
         content.addView(tokenField, matchWrap())
