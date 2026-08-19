@@ -2,71 +2,97 @@ package com.lkarlslund.koder
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import com.lkarlslund.koder.update.AndroidAppUpdater
+import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.CallController
+import com.lkarlslund.koder.voice.VoiceHome
 import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
-import com.lkarlslund.koder.voice.AppUpdate
-import com.lkarlslund.koder.update.AndroidAppUpdater
+import com.lkarlslund.koder.voice.VoiceSessionClient
 import java.io.File
 
 @SuppressLint("SetTextI18n")
-class MainActivity : Activity(), CallController.Listener {
+class MainActivity : ComponentActivity(), CallController.Listener {
+    private enum class Screen { SETUP, LOADING, HOME, CHAT }
+
     private lateinit var controller: CallController
-	private lateinit var secureSettings: SecureSettings
-    private lateinit var server: EditText
-    private lateinit var token: EditText
-    private lateinit var callButton: Button
-    private lateinit var updateButton: Button
-    private lateinit var status: TextView
-    private lateinit var transcript: TextView
-    private lateinit var voiceSessionSpinner: Spinner
-	private lateinit var newVoiceSessionButton: Button
-    private lateinit var feed: LinearLayout
-    private lateinit var feedScroll: ScrollView
-    private lateinit var typedMessage: EditText
-    private var voiceSessions: List<VoiceSession> = emptyList()
-    private var voiceSpinnerUpdating = false
-    private var selectedVoiceSessionId = ""
-    private var connected = false
+    private lateinit var secureSettings: SecureSettings
+    private lateinit var appUpdater: AndroidAppUpdater
+    private val sessionClient = VoiceSessionClient()
+
+    private var screen = Screen.LOADING
+    private var settings = SecureSettings.Values("", "")
+    private var requestGeneration = 0L
+    private var pendingSession: VoiceSession? = null
     private var pendingStart = false
     private var lastAppUpdate: AppUpdate? = null
-    private lateinit var appUpdater: AndroidAppUpdater
+
+    private var updateButton: Button? = null
+    private var status: TextView? = null
+    private var transcript: TextView? = null
+    private var feed: LinearLayout? = null
+    private var feedScroll: ScrollView? = null
+    private var typedMessage: EditText? = null
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (!pendingStart) return@registerForActivityResult
+        pendingStart = false
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startCall()
+        } else {
+            status?.text = "Microphone permission is required for voice conversations"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         secureSettings = SecureSettings(this)
         controller = CallController(this, this)
         appUpdater = AndroidAppUpdater(this, ::showUpdateStatus)
-        buildUi()
-        restoreSettings()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (screen == Screen.CHAT) {
+                    leaveChat()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+        settings = secureSettings.load()
+        if (settings.server.isBlank()) showSetup() else loadHome()
     }
 
     override fun onDestroy() {
+        requestGeneration++
+        sessionClient.close()
         appUpdater.close()
         controller.close()
         super.onDestroy()
@@ -74,111 +100,225 @@ class MainActivity : Activity(), CallController.Listener {
 
     override fun onSnapshot(snapshot: CallController.Snapshot) {
         runOnUiThread {
-            connected = snapshot.stage != CallController.Stage.DISCONNECTED &&
-                snapshot.stage != CallController.Stage.ERROR
-            status.text = snapshot.detail
-            transcript.text = snapshot.partialTranscript
-            transcript.visibility = if (snapshot.partialTranscript.isBlank()) View.GONE else View.VISIBLE
-            callButton.text = if (connected) "Hang up" else "Start call"
-            server.isEnabled = !connected
-            token.isEnabled = !connected
-			newVoiceSessionButton.isEnabled = connected
-            if (snapshot.voiceSessionId.isNotBlank()) selectedVoiceSessionId = snapshot.voiceSessionId
-            updateVoiceSessions(snapshot.voiceSessions, snapshot.voiceSessionId)
-            if (snapshot.appUpdate != lastAppUpdate) {
+            if (screen != Screen.CHAT) return@runOnUiThread
+            status?.text = snapshot.detail
+            transcript?.apply {
+                text = snapshot.partialTranscript
+                visibility = if (snapshot.partialTranscript.isBlank()) View.GONE else View.VISIBLE
+            }
+            if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
                 lastAppUpdate = snapshot.appUpdate
-                appUpdater.consider(snapshot.appUpdate, server.text.toString(), token.text.toString())
             }
         }
     }
 
-    override fun onUserMessage(text: String) = addBubble("You", text, 0xFFE3F2FD.toInt())
+    override fun onUserMessage(text: String) = addBubble("You", text)
 
     override fun onAssistantMessage(message: VoiceMessage) {
         runOnUiThread {
-            val visibleParts = message.parts.ifEmpty {
-				listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
-            }
-            visibleParts.forEach { addPart(it) }
+            if (screen != Screen.CHAT) return@runOnUiThread
+            message.parts.ifEmpty {
+                listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
+            }.forEach(::addPart)
         }
     }
 
-    private fun buildUi() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            setBackgroundColor(0xFFF7F7F8.toInt())
-        }
-        root.addView(TextView(this).apply {
-            text = "Koder voice"
-            textSize = 24f
-            setTextColor(Color.BLACK)
-        })
-        root.addView(TextView(this).apply {
-            text = "A call into your existing Koder chats"
-            textSize = 14f
-            setTextColor(0xFF555555.toInt())
-        }, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, bottom = 12))
+    private fun showSetup(error: String = "") {
+        screen = Screen.SETUP
+        clearCallViews()
+        val content = column()
+        content.addView(logo(), centeredSquare(88, bottom = 18))
+        content.addView(title("Welcome to Koder Voice"), matchWrap())
+        content.addView(body("Connect this phone to your Koder server. You can change these settings later."), spaced(bottom = 24))
 
-        server = EditText(this).apply {
-            hint = "Koder server"
+        content.addView(label("Server address"), matchWrap())
+        val serverField = EditText(this).apply {
+            hint = "http://192.168.1.20:7979"
+            contentDescription = "Server address"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine()
+            setText(settings.server)
         }
-        token = EditText(this).apply {
-            hint = "Voice token (optional locally)"
+        content.addView(serverField, matchWrap())
+        content.addView(helper("Use the address you open Koder with. Include the port if it is not 80 or 443."), spaced(bottom = 18))
+
+        content.addView(label("Access token"), matchWrap())
+        val tokenField = EditText(this).apply {
+            hint = "Optional"
+            contentDescription = "Access token"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine()
+            setText(settings.token)
         }
-        root.addView(server, matchWrap())
-        root.addView(token, matchWrap())
+        content.addView(tokenField, matchWrap())
+        content.addView(helper("Leave this empty when your Koder server has no voice token. The token is stored encrypted on this phone."), spaced(bottom = 20))
+        if (error.isNotBlank()) content.addView(errorText(error), spaced(bottom = 12))
 
-        callButton = Button(this).apply {
-            text = "Start call"
-            setOnClickListener { if (connected) controller.end() else requestCallStart() }
+        content.addView(Button(this).apply {
+            text = "Connect"
+            contentDescription = "Connect to Koder"
+            setOnClickListener {
+                val serverAddress = serverField.text.toString().trim()
+                if (serverAddress.isBlank()) {
+                    serverField.error = "Server address is required"
+                    return@setOnClickListener
+                }
+                settings = SecureSettings.Values(serverAddress, tokenField.text.toString())
+                secureSettings.save(settings.server, settings.token)
+                loadHome()
+            }
+        }, matchWrap())
+        showScrollable(content)
+    }
+
+    private fun loadHome(message: String = "Connecting to Koder…") {
+        screen = Screen.LOADING
+        clearCallViews()
+        val generation = ++requestGeneration
+        val content = column(Gravity.CENTER_HORIZONTAL).apply {
+            gravity = Gravity.CENTER
+            addView(logo(), centeredSquare(88, bottom = 22))
+            addView(ProgressBar(this@MainActivity))
+            addView(title("Koder Voice").apply { gravity = Gravity.CENTER }, spaced(top = 18))
+            addView(body(message).apply { gravity = Gravity.CENTER }, spaced(top = 8))
         }
-        root.addView(callButton, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 6))
+        showContent(content)
+        sessionClient.list(settings.server, settings.token) { result ->
+            runOnUiThread {
+                if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                result.fold(::showHome, ::showConnectionError)
+            }
+        }
+    }
+
+    private fun showConnectionError(failure: Throwable) {
+        screen = Screen.LOADING
+        val content = column()
+        content.addView(title("Couldn’t connect to Koder"), matchWrap())
+        content.addView(body(failure.message ?: "The server could not be reached."), spaced(top = 8, bottom = 20))
+        content.addView(Button(this).apply {
+            text = "Try again"
+            setOnClickListener { loadHome() }
+        }, matchWrap())
+        content.addView(Button(this).apply {
+            text = "Edit connection settings"
+            setOnClickListener { showSetup() }
+        }, spaced(top = 8))
+        showContent(content)
+    }
+
+    private fun showHome(home: VoiceHome) {
+        screen = Screen.HOME
+        clearCallViews()
+        val root = column()
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(title("Conversations"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Button(this@MainActivity).apply {
+                text = "Settings"
+                contentDescription = "Connection settings"
+                setOnClickListener { showSetup() }
+            })
+        }
+        root.addView(heading, matchWrap())
+        root.addView(body("Continue a conversation or start a new one."), spaced(bottom = 14))
 
         updateButton = Button(this).apply {
             visibility = View.GONE
             setOnClickListener { appUpdater.install() }
         }
-        root.addView(updateButton, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
+        root.addView(updateButton, matchWrap())
 
-        voiceSessionSpinner = Spinner(this)
-        voiceSessionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!voiceSpinnerUpdating && connected) {
-                    voiceSessions.getOrNull(position)?.let { controller.selectVoiceSession(it.id) }
-                }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        if (home.voiceSessions.isEmpty()) {
+            list.addView(helper("No voice conversations yet."), spaced(top = 20, bottom = 20))
+        } else {
+            home.voiceSessions.forEach { session -> list.addView(sessionButton(session), spaced(bottom = 8)) }
+        }
+        root.addView(ScrollView(this).apply { addView(list, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(Button(this).apply {
+            text = "New conversation"
+            contentDescription = "Create a new voice conversation"
+            setOnClickListener { showCreateVoiceSessionDialog() }
+        }, spaced(top = 12))
+        showContent(root)
+
+        lastAppUpdate = home.appUpdate
+        appUpdater.consider(home.appUpdate, settings.server, settings.token)
+    }
+
+    private fun sessionButton(session: VoiceSession) = Button(this).apply {
+        text = buildString {
+            append(session.title.ifBlank { "Untitled conversation" })
+            if (session.lastMessage.isNotBlank()) append("\n${session.lastMessage}")
+        }
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        isAllCaps = false
+        minHeight = dp(64)
+        contentDescription = "Open voice conversation ${session.title.ifBlank { "Untitled" }}"
+        setOnClickListener { openChat(session) }
+    }
+
+    private fun showCreateVoiceSessionDialog() {
+        val titleField = EditText(this).apply {
+            hint = "For example: Personal"
+            contentDescription = "Conversation name"
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle("New conversation")
+            .setMessage("Give this ongoing voice conversation a name so you can find it again.")
+            .setView(titleField)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create") { _, _ -> createSession(titleField.text.toString()) }
+            .show()
+    }
+
+    private fun createSession(title: String) {
+        screen = Screen.LOADING
+        val generation = ++requestGeneration
+        val content = column(Gravity.CENTER_HORIZONTAL).apply {
+            gravity = Gravity.CENTER
+            addView(ProgressBar(this@MainActivity))
+            addView(body("Creating conversation…"), spaced(top = 18))
+        }
+        showContent(content)
+        sessionClient.create(settings.server, settings.token, title.trim().ifBlank { "Voice Chat" }) { result ->
+            runOnUiThread {
+                if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                result.fold(
+                    onSuccess = { home ->
+                        home.createdVoiceSession?.let(::openChat) ?: showHome(home)
+                    },
+                    onFailure = ::showConnectionError,
+                )
             }
         }
-		newVoiceSessionButton = Button(this).apply {
-			text = "New"
-			isEnabled = false
-			contentDescription = "Create voice chat"
-			setOnClickListener { showCreateVoiceSessionDialog() }
-		}
-		val voiceSessionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-		voiceSessionRow.addView(voiceSessionSpinner, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-		voiceSessionRow.addView(newVoiceSessionButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-		root.addView(voiceSessionRow, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
+    }
 
-        status = TextView(this).apply {
-            text = "Ready"
-            textSize = 16f
-            setTextColor(0xFF1B5E20.toInt())
-            gravity = Gravity.CENTER_HORIZONTAL
+    private fun openChat(session: VoiceSession) {
+        screen = Screen.CHAT
+        clearCallViews()
+        pendingSession = session
+        val root = column()
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Button(this@MainActivity).apply {
+                text = "Back"
+                contentDescription = "Back to conversations"
+                setOnClickListener { leaveChat() }
+            })
+            addView(title(session.title.ifBlank { "Conversation" }), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(10)
+            })
         }
-        root.addView(status, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 8))
-
-        transcript = TextView(this).apply {
-            setTextColor(0xFF555555.toInt())
-            textSize = 15f
-            visibility = View.GONE
-        }
-        root.addView(transcript, margins(height = ViewGroup.LayoutParams.WRAP_CONTENT, top = 4))
+        root.addView(heading, matchWrap())
+        status = body("Preparing conversation…").apply { gravity = Gravity.CENTER_HORIZONTAL }
+        root.addView(status, spaced(top = 8))
+        transcript = helper("").apply { visibility = View.GONE }
+        root.addView(transcript, spaced(top = 4))
 
         feed = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         feedScroll = ScrollView(this).apply { addView(feed, matchWrap()) }
@@ -186,95 +326,57 @@ class MainActivity : Activity(), CallController.Listener {
 
         val composer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         typedMessage = EditText(this).apply {
-            hint = "Type to test without speech"
+            hint = "Message Koder"
             maxLines = 3
         }
-        val send = Button(this).apply {
+        composer.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        composer.addView(Button(this).apply {
             text = "Send"
             setOnClickListener {
-                val text = typedMessage.text.toString()
-                if (text.isNotBlank()) {
-                    controller.submit(text)
-                    typedMessage.text.clear()
+                val message = typedMessage?.text?.toString().orEmpty()
+                if (message.isNotBlank()) {
+                    controller.submit(message)
+                    typedMessage?.text?.clear()
                 }
             }
-        }
-        composer.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        composer.addView(send, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        })
         root.addView(composer, matchWrap())
-        setContentView(root)
-        updateVoiceSessions(emptyList(), "")
+        showContent(root)
+        requestCallStart()
+    }
+
+    private fun leaveChat() {
+        pendingStart = false
+        pendingSession = null
+        controller.end()
+        loadHome("Refreshing conversations…")
     }
 
     private fun requestCallStart() {
-        saveSettings()
         val missing = requiredPermissions().filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) startCall() else {
             pendingStart = true
-            requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST)
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, results)
-        if (requestCode != PERMISSION_REQUEST || !pendingStart) return
-        pendingStart = false
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startCall()
-        } else {
-            Toast.makeText(this, "Microphone permission is required for voice calls", Toast.LENGTH_LONG).show()
+            permissionLauncher.launch(missing.toTypedArray())
         }
     }
 
     private fun startCall() {
-        val address = server.text.toString().trim()
-        if (address.isEmpty()) {
-            server.error = "Server address is required"
-            return
-        }
-        controller.start(address, token.text.toString(), selectedVoiceSessionId)
-    }
-
-	private fun showCreateVoiceSessionDialog() {
-		val title = EditText(this).apply {
-			hint = "Voice chat name"
-			setSingleLine()
-		}
-		AlertDialog.Builder(this)
-			.setTitle("New voice chat")
-			.setView(title)
-			.setNegativeButton("Cancel", null)
-			.setPositiveButton("Create") { _, _ ->
-				controller.createVoiceSession(title.text.toString().trim().ifBlank { "Voice Chat" })
-			}
-			.show()
-	}
-
-    private fun updateVoiceSessions(next: List<VoiceSession>, activeId: String) {
-        if (next == voiceSessions && voiceSessionSpinner.selectedItemPosition == next.indexOfFirst { it.id == activeId }) return
-        voiceSessions = next
-        val labels = next.map { "Voice chat · ${it.title.ifBlank { "Untitled" }}" }.ifEmpty { listOf("Voice chat · loading") }
-        voiceSpinnerUpdating = true
-        voiceSessionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-        voiceSessionSpinner.setSelection(next.indexOfFirst { it.id == activeId }.coerceAtLeast(0))
-        voiceSpinnerUpdating = false
+        val session = pendingSession ?: return
+        controller.start(settings.server, settings.token, session.id)
     }
 
     private fun addPart(part: VoicePart) {
         when {
-            part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() ->
-                addBubble("Koder", part.text, Color.WHITE)
+            part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addBubble("Koder", part.text)
             part.mimeType.startsWith("image/") -> addImage(part)
             else -> addGenericPart(part)
         }
     }
 
     private fun addImage(part: VoicePart) {
+        val feed = feed ?: return
         val card = card()
-        val title = TextView(this).apply {
-            text = part.name.ifBlank { part.alt.ifBlank { part.mimeType } }
-            setTextColor(Color.DKGRAY)
-        }
+        val title = helper(part.name.ifBlank { part.alt.ifBlank { part.mimeType } })
         val image = ImageView(this).apply {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -283,7 +385,7 @@ class MainActivity : Activity(), CallController.Listener {
         }
         card.addView(title, matchWrap())
         card.addView(image, matchWrap())
-        feed.addView(card, cardMargins())
+        feed.addView(card, spaced(top = 5, bottom = 5))
         if (part.url.isBlank()) {
             title.text = "${title.text} · no image URL"
         } else {
@@ -299,7 +401,8 @@ class MainActivity : Activity(), CallController.Listener {
     }
 
     private fun addGenericPart(part: VoicePart) {
-        val label = buildString {
+        val feed = feed ?: return
+        val text = buildString {
             append(part.name.ifBlank { "Koder attachment" })
             append("\n")
             append(part.alt.ifBlank { part.mimeType })
@@ -307,41 +410,29 @@ class MainActivity : Activity(), CallController.Listener {
             if (part.url.isNotBlank()) append("\nOpen ${part.url}")
         }
         val card = card().apply {
-            addView(TextView(this@MainActivity).apply {
-                text = label
-                setTextColor(0xFF0D47A1.toInt())
-            }, matchWrap())
+            addView(body(text), matchWrap())
             if (part.url.isNotBlank()) setOnClickListener { downloadAndOpen(part) }
         }
-        feed.addView(card, cardMargins())
+        feed.addView(card, spaced(top = 5, bottom = 5))
         scrollToBottom()
     }
 
     private fun downloadAndOpen(part: VoicePart) {
         controller.loadBytes(part.url) { bytes, error ->
             if (bytes == null) {
-                runOnUiThread {
-                    Toast.makeText(this, error ?: "Could not download attachment", Toast.LENGTH_LONG).show()
-                }
+                runOnUiThread { Toast.makeText(this, error ?: "Could not download attachment", Toast.LENGTH_LONG).show() }
                 return@loadBytes
             }
             try {
                 val directory = File(cacheDir, "voice-presentations").apply { mkdirs() }
                 val requestedName = part.name.ifBlank { "koder-${part.id.ifBlank { part.url.hashCode().toString() }}" }
-                val safeName = requestedName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
-                    .ifBlank { "koder-attachment" }
+                val safeName = requestedName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96).ifBlank { "koder-attachment" }
                 val file = File(directory, safeName)
                 file.outputStream().use { it.write(bytes) }
                 val uri = FileProvider.getUriForFile(this, "$packageName.presentations", file)
                 runOnUiThread { openPresentation(uri, part.mimeType) }
             } catch (failure: Exception) {
-                runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        failure.message ?: "Could not open attachment",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
+                runOnUiThread { Toast.makeText(this, failure.message ?: "Could not open attachment", Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -358,58 +449,117 @@ class MainActivity : Activity(), CallController.Listener {
         }
     }
 
-    private fun addBubble(who: String, text: String, color: Int) = runOnUiThread {
-        if (text.isBlank()) return@runOnUiThread
+    private fun addBubble(who: String, text: String) = runOnUiThread {
+        val feed = feed ?: return@runOnUiThread
+        if (screen != Screen.CHAT || text.isBlank()) return@runOnUiThread
         val card = card().apply {
-            setBackgroundColor(color)
-            addView(TextView(this@MainActivity).apply {
-                this.text = "$who\n$text"
-                setTextColor(Color.BLACK)
-                textSize = 16f
-            }, matchWrap())
+            addView(label(who), matchWrap())
+            addView(body(text), spaced(top = 3))
         }
-        feed.addView(card, cardMargins())
+        feed.addView(card, spaced(top = 5, bottom = 5))
         scrollToBottom()
     }
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(12), dp(10), dp(12), dp(10))
-        setBackgroundColor(Color.WHITE)
+        background = GradientDrawable().apply {
+            setColor(themeColor(android.R.attr.colorBackgroundFloating))
+            cornerRadius = dp(10).toFloat()
+        }
         elevation = dp(1).toFloat()
     }
 
-    private fun scrollToBottom() = feedScroll.post { feedScroll.fullScroll(View.FOCUS_DOWN) }
+    private fun scrollToBottom() = feedScroll?.post { feedScroll?.fullScroll(View.FOCUS_DOWN) }
 
-    private fun restoreSettings() {
-		val values = secureSettings.load()
-		server.setText(values.server)
-		token.setText(values.token)
-    }
-
-    private fun saveSettings() {
-		secureSettings.save(server.text.toString(), token.text.toString())
+    private fun clearCallViews() {
+        updateButton = null
+        status = null
+        transcript = null
+        feed = null
+        feedScroll = null
+        typedMessage = null
     }
 
     private fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
+        val button = updateButton ?: return@runOnUiThread
         when (next) {
-            AndroidAppUpdater.Status.Hidden -> updateButton.visibility = View.GONE
+            AndroidAppUpdater.Status.Hidden -> button.visibility = View.GONE
             is AndroidAppUpdater.Status.Available -> {
-                updateButton.text = "Update Koder · ${next.versionName}"
-                updateButton.isEnabled = true
-                updateButton.visibility = View.VISIBLE
+                button.text = "Update Koder · ${next.versionName}"
+                button.isEnabled = true
+                button.visibility = View.VISIBLE
             }
             is AndroidAppUpdater.Status.Busy -> {
-                updateButton.text = next.message
-                updateButton.isEnabled = false
-                updateButton.visibility = View.VISIBLE
+                button.text = next.message
+                button.isEnabled = false
+                button.visibility = View.VISIBLE
             }
             is AndroidAppUpdater.Status.Error -> {
-                updateButton.text = "${next.message} · Retry"
-                updateButton.isEnabled = true
-                updateButton.visibility = View.VISIBLE
+                button.text = "${next.message} · Retry"
+                button.isEnabled = true
+                button.visibility = View.VISIBLE
             }
         }
+    }
+
+    private fun showScrollable(content: View) = showContent(ScrollView(this).apply { addView(content, matchWrap()) })
+
+    private fun showContent(content: View) {
+        val baseHorizontal = dp(20)
+        val baseVertical = dp(16)
+        content.setBackgroundColor(themeColor(android.R.attr.colorBackground))
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(baseHorizontal + bars.left, baseVertical + bars.top, baseHorizontal + bars.right, baseVertical + bars.bottom)
+            insets
+        }
+        setContentView(content)
+        ViewCompat.requestApplyInsets(content)
+    }
+
+    private fun column(horizontalGravity: Int = Gravity.NO_GRAVITY) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = horizontalGravity
+    }
+
+    private fun title(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 26f
+    }
+
+    private fun label(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 16f
+    }
+
+    private fun body(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 16f
+    }
+
+    private fun helper(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 14f
+        alpha = 0.72f
+    }
+
+    private fun errorText(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 15f
+        setTextColor(themeColor(android.R.attr.colorError))
+    }
+
+    private fun logo() = ImageView(this).apply {
+        setImageResource(R.drawable.ic_koder)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        contentDescription = "Koder logo"
+    }
+
+    private fun themeColor(attribute: Int): Int {
+        val value = TypedValue()
+        check(theme.resolveAttribute(attribute, value, true)) { "Theme does not define color attribute $attribute" }
+        return if (value.resourceId != 0) getColor(value.resourceId) else value.data
     }
 
     private fun requiredPermissions(): List<String> = buildList {
@@ -420,15 +570,17 @@ class MainActivity : Activity(), CallController.Listener {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun matchWrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-    private fun margins(height: Int, top: Int = 0, bottom: Int = 0) =
+    private fun spaced(height: Int = ViewGroup.LayoutParams.WRAP_CONTENT, top: Int = 0, bottom: Int = 0) =
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height).apply {
             topMargin = dp(top)
             bottomMargin = dp(bottom)
         }
-    private fun cardMargins() = margins(ViewGroup.LayoutParams.WRAP_CONTENT, top = 5, bottom = 5)
+    private fun centeredSquare(size: Int, bottom: Int = 0) = LinearLayout.LayoutParams(dp(size), dp(size)).apply {
+        gravity = Gravity.CENTER_HORIZONTAL
+        bottomMargin = dp(bottom)
+    }
 
     companion object {
-        private const val PERMISSION_REQUEST = 80
         private val DISPLAYABLE_TEXT_TYPES = setOf("text/plain", "text/markdown")
     }
 }

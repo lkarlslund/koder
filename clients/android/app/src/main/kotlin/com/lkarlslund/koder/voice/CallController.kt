@@ -43,7 +43,7 @@ class CallController(
 	private val endpointFrameSamples = detector.frameSamples
     private val endpoint = VadEndpointPipeline(detector)
     private val connection = VoiceConnection(object : VoiceConnection.Listener {
-        override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading voice chat…") }
+        override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading conversation…") }
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
         override fun onDisconnected(reason: String) = onMain {
@@ -57,7 +57,7 @@ class CallController(
             if (held) {
                 microphone.stop()
                 playback.stop()
-                update(Stage.HELD, "Call on hold")
+                update(Stage.HELD, "Conversation on hold")
             } else {
                 telecomReady = true
                 maybeListen()
@@ -71,9 +71,9 @@ class CallController(
 
         override fun onCallEnded() = onMain { if (running) end() }
         override fun onTelecomUnavailable(message: String) = onMain {
-            audioEndpoint = "default audio"
+            audioEndpoint = "phone audio"
             telecomReady = true
-            update(Stage.CONNECTING, "$message; using default audio")
+            update(Stage.CONNECTING, "$message; using phone audio")
             maybeListen()
         }
     })
@@ -82,7 +82,7 @@ class CallController(
     @Volatile private var running = false
     private var serverReady = false
     private var telecomReady = false
-    private var audioEndpoint = "call audio"
+    private var audioEndpoint = "phone audio"
     private var audioConfig: VoiceAudioConfig? = null
     private var utteranceId = ""
     private var inputSequence = 0L
@@ -124,9 +124,9 @@ class CallController(
         cancelCapture()
         try {
             connection.selectVoiceSession(sessionId)
-            update(Stage.PROCESSING, "Switching voice chat…", "")
+            update(Stage.PROCESSING, "Switching conversation…", "")
         } catch (error: Exception) {
-            update(Stage.ERROR, error.message ?: "Could not switch voice chat")
+            update(Stage.ERROR, error.message ?: "Could not switch conversation")
         }
     }
 
@@ -135,9 +135,9 @@ class CallController(
 		cancelCapture()
 		try {
 			connection.createVoiceSession(title)
-			update(Stage.PROCESSING, "Creating voice chat…", "")
+			update(Stage.PROCESSING, "Creating conversation…", "")
 		} catch (error: Exception) {
-			update(Stage.ERROR, error.message ?: "Could not create voice chat")
+			update(Stage.ERROR, error.message ?: "Could not create conversation")
 		}
 	}
 
@@ -162,7 +162,7 @@ class CallController(
         connection.close()
         telecom.disconnect()
         appContext.stopService(Intent(appContext, VoiceCallService::class.java))
-        snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Call ended")
+        snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused")
         publish()
     }
 

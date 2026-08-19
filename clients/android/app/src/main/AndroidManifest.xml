@@ -18,7 +18,7 @@
         android:icon="@drawable/ic_koder"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:theme="@style/KoderTheme"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"

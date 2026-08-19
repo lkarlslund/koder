@@ -78,6 +78,6 @@ class SecureSettings(context: Context) {
         const val SERVER = "server"
         const val TOKEN = "token_encrypted"
         const val TOKEN_IV = "token_iv"
-        const val DEFAULT_SERVER = "http://10.0.2.2:7979"
+        const val DEFAULT_SERVER = ""
     }
 }

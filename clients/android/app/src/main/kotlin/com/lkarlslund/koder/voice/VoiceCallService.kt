@@ -16,7 +16,7 @@ class VoiceCallService : Service() {
         super.onCreate()
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Koder voice call", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, "Koder voice conversation", NotificationManager.IMPORTANCE_LOW),
         )
         val intent = PendingIntent.getActivity(
             this,
@@ -25,7 +25,7 @@ class VoiceCallService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Koder voice call")
+            .setContentTitle("Koder voice conversation")
             .setContentText("Listening for your next request")
             .setSmallIcon(com.lkarlslund.koder.R.drawable.ic_koder)
             .setOngoing(true)

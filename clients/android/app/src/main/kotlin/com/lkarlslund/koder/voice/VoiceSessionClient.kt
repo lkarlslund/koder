@@ -1,0 +1,68 @@
+package com.lkarlslund.koder.voice
+
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+
+class VoiceSessionClient(
+    private val client: OkHttpClient = OkHttpClient(),
+) : AutoCloseable {
+    fun list(server: String, token: String, callback: (Result<VoiceHome>) -> Unit) {
+        request(server, token, null, callback)
+    }
+
+    fun create(server: String, token: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+        request(server, token, VoiceProtocol.createSessionRequest(title), callback)
+    }
+
+    private fun request(
+        server: String,
+        token: String,
+        body: String?,
+        callback: (Result<VoiceHome>) -> Unit,
+    ) {
+        val request = try {
+            Request.Builder()
+                .url(VoiceProtocol.resourceUrl(server, "/voice/v1/sessions"))
+                .apply {
+                    if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}")
+                    if (body != null) post(body.toRequestBody(JSON))
+                }
+                .build()
+        } catch (error: Exception) {
+            callback(Result.failure(error))
+            return
+        }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback(Result.failure(e))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val payload = it.body.string()
+                    if (!it.isSuccessful) {
+                        val detail = payload.trim().ifBlank { "HTTP ${it.code}" }
+                        callback(Result.failure(IOException("Koder returned $detail")))
+                        return
+                    }
+                    callback(runCatching { VoiceProtocol.parseHome(payload) })
+                }
+            }
+        })
+    }
+
+    override fun close() {
+        client.dispatcher.cancelAll()
+        client.connectionPool.evictAll()
+    }
+
+    private companion object {
+        val JSON = "application/json; charset=utf-8".toMediaType()
+    }
+}

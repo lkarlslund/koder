@@ -70,6 +70,12 @@ data class AppUpdate(
     val downloadUri: String,
 )
 
+data class VoiceHome(
+    val voiceSessions: List<VoiceSession>,
+    val createdVoiceSession: VoiceSession? = null,
+    val appUpdate: AppUpdate? = null,
+)
+
 enum class VoiceAudioFrameKind(val wireValue: Int) {
     INPUT_PCM(1),
     OUTPUT_PCM(2),
@@ -104,6 +110,21 @@ data class VoiceServerFrame(
 )
 
 object VoiceProtocol {
+	fun createSessionRequest(title: String): String = JSONObject()
+		.put("title", title.trim())
+		.toString()
+
+	fun parseHome(payload: String): VoiceHome {
+		val root = JSONObject(payload)
+		val protocol = root.optString("protocol")
+		require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
+		return VoiceHome(
+			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() },
+			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
+			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
+		)
+	}
+
     fun hello(): String = JSONObject()
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)

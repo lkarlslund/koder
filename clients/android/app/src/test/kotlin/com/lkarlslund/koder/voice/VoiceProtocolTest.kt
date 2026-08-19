@@ -56,6 +56,19 @@ class VoiceProtocolTest {
         assertEquals("/voice/v1/android/koder.apk", frame.appUpdate?.downloadUri)
     }
 
+    @Test
+    fun decodesVoiceHomeAndCreatesSessionRequest() {
+        val home = VoiceProtocol.parseHome(
+            """{"protocol":"voice.v1","voice_session":{"id":"voice-2","title":"New work"},"voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"See you tomorrow"},{"id":"voice-2","title":"New work"}]}""",
+        )
+        assertEquals(listOf("voice-1", "voice-2"), home.voiceSessions.map { it.id })
+        assertEquals("See you tomorrow", home.voiceSessions.first().lastMessage)
+        assertEquals("voice-2", home.createdVoiceSession?.id)
+
+        val request = JSONObject(VoiceProtocol.createSessionRequest("  Phone work  "))
+        assertEquals("Phone work", request.getString("title"))
+    }
+
 	@Test
 	fun decodesWorkingTargetForLocalWaitingCue() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/working.json"))
@@ -100,6 +113,10 @@ class VoiceProtocolTest {
         assertEquals("ws://10.0.2.2:7979/voice/v1", VoiceProtocol.websocketUrl("10.0.2.2:7979"))
         assertEquals("wss://koder.example/voice/v1", VoiceProtocol.websocketUrl("https://koder.example"))
         assertEquals("ws://localhost:7979/voice/v1", VoiceProtocol.websocketUrl("ws://localhost:7979/voice/v1"))
+        assertEquals(
+            "http://10.0.2.2:7979/voice/v1/sessions",
+            VoiceProtocol.resourceUrl("10.0.2.2:7979", "/voice/v1/sessions"),
+        )
     }
 
     @Test

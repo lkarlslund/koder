@@ -39,7 +39,7 @@ class TelecomVoiceCall(context: Context, private val listener: Listener) : AutoC
         try {
             callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
         } catch (error: Exception) {
-            listener.onTelecomUnavailable(error.message ?: "Android call routing is unavailable")
+            listener.onTelecomUnavailable(error.message ?: "Android audio routing is unavailable")
             listener.onCallReady()
             return
         }
@@ -78,7 +78,7 @@ class TelecomVoiceCall(context: Context, private val listener: Listener) : AutoC
                 // Normal local hang-up.
             } catch (error: Exception) {
                 if (!ending) {
-                    listener.onTelecomUnavailable(error.message ?: "Android call routing failed")
+                    listener.onTelecomUnavailable(error.message ?: "Android audio routing failed")
                     listener.onCallReady()
                 }
             } finally {
