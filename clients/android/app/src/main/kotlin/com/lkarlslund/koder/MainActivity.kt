@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var presentationFeed: LinearLayout? = null
 	private var presentationShown = false
 	private var speechAutomaticCheck: CheckBox? = null
+	private val phoneCapabilitySwitches = mutableMapOf<String, Switch>()
 	private var composerView: View? = null
 	private var pauseButton: ImageButton? = null
 	private var transcriptButton: ImageButton? = null
@@ -139,13 +140,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val granted = phoneCapabilityAvailable(capability)
         if (granted) enablePhoneCapability(capability.id) else {
             Toast.makeText(this, "${capability.title} permission was not granted", Toast.LENGTH_LONG).show()
-            showSettings()
+			phoneCapabilitySwitches[capability.id]?.isChecked = false
         }
     }
     private val notificationAccessLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val capability = pendingPhoneCapability ?: return@registerForActivityResult
         pendingPhoneCapability = null
-        if (notificationAccessGranted()) enablePhoneCapability(capability.id) else showSettings()
+	        if (notificationAccessGranted()) enablePhoneCapability(capability.id)
+		else phoneCapabilitySwitches[capability.id]?.isChecked = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -527,6 +529,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             addView(helper(capability.description), spaced(top = 3))
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
         addView(Switch(this@MainActivity).apply {
+			phoneCapabilitySwitches[capability.id] = this
             contentDescription = "Allow ${capability.title}"
             isChecked = capability.id in settings.enabledPhoneCapabilities && phoneCapabilityAvailable(capability)
             setOnCheckedChangeListener { _, checked ->
@@ -554,7 +557,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val enabled = settings.enabledPhoneCapabilities + id
         secureSettings.savePhoneCapabilities(enabled)
         settings = settings.copy(enabledPhoneCapabilities = enabled)
-        showSettings()
+		phoneCapabilitySwitches[id]?.isChecked = true
     }
 
     private fun disablePhoneCapability(id: String) {
@@ -1520,6 +1523,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationPanel = null
 		presentationFeed = null
 		speechAutomaticCheck = null
+		phoneCapabilitySwitches.clear()
 		composerView = null
 		pauseButton = null
 		transcriptButton = null

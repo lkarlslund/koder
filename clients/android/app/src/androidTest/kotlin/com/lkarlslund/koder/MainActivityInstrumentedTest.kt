@@ -150,6 +150,22 @@ class MainActivityInstrumentedTest {
 				assertTrue(settingsLabels.contains("German (de)"))
 				onView(withContentDescription("Recognize Danish")).perform(scrollTo(), click())
 				assertEquals(setOf("da"), SecureSettings(context).load().speechLanguages)
+				var scrollBefore = 0
+				var scrollAfter = 0
+				scenario.onActivity { activity ->
+					val root = activity.findViewById<View>(android.R.id.content)
+					val scroll = root.firstScrollView()
+					val target = root.findByDescription("Allow Device information")
+					val bounds = android.graphics.Rect().also(target::getDrawingRect)
+					scroll.offsetDescendantRectToMyCoords(target, bounds)
+					scroll.scrollTo(0, bounds.top.coerceAtLeast(0))
+					scrollBefore = scroll.scrollY
+					target.performClick()
+					scrollAfter = scroll.scrollY
+				}
+				assertTrue(scrollBefore > 0)
+				assertTrue("tool toggle reset scroll from $scrollBefore to $scrollAfter", kotlin.math.abs(scrollAfter - scrollBefore) <= 2)
+				assertTrue("device" in SecureSettings(context).load().enabledPhoneCapabilities)
                 assertTrue(settingsLabels.contains("Contacts"))
                 assertTrue(settingsLabels.contains("Notifications & email previews"))
             }
@@ -237,4 +253,12 @@ class MainActivityInstrumentedTest {
         }
         error("No view with content description $description")
     }
+
+	private fun View.firstScrollView(): android.widget.ScrollView {
+		if (this is android.widget.ScrollView) return this
+		if (this is ViewGroup) {
+			repeat(childCount) { index -> runCatching { return getChildAt(index).firstScrollView() } }
+		}
+		error("No ScrollView found")
+	}
 }
