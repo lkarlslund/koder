@@ -22,7 +22,12 @@ object UpdatePolicy {
         else -> null
     }
 
-    fun writeVerified(input: InputStream, destination: File, update: AppUpdate) {
+    fun writeVerified(
+        input: InputStream,
+        destination: File,
+        update: AppUpdate,
+        onProgress: (downloadedBytes: Long) -> Unit = {},
+    ) {
         val digest = MessageDigest.getInstance("SHA-256")
         var total = 0L
         destination.outputStream().buffered().use { output ->
@@ -34,6 +39,7 @@ object UpdatePolicy {
                 require(total <= update.apkSize) { "Update is larger than advertised" }
                 digest.update(buffer, 0, count)
                 output.write(buffer, 0, count)
+                onProgress(total)
             }
         }
         require(total == update.apkSize) { "Update size is $total bytes; expected ${update.apkSize}" }

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
@@ -16,6 +17,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.lkarlslund.koder.update.AndroidAppUpdater
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
@@ -87,6 +89,17 @@ class MainActivityInstrumentedTest {
                 assertTrue(labels.contains("⋮"))
                 assertFalse(labels.contains("Send"))
                 assertFalse(labels.any { it.contains("Message Koder") })
+                scenario.onActivity { activity ->
+                    activity.showUpdateStatus(AndroidAppUpdater.Status.Downloading("next-dev", 42, 100))
+                    val progress = activity.findViewById<View>(android.R.id.content)
+                        .findByDescription("Update download progress") as ProgressBar
+                    assertEquals(View.VISIBLE, progress.visibility)
+                    assertEquals(42, progress.progress)
+                    assertTrue(
+                        activity.findViewById<View>(android.R.id.content).allText()
+                            .any { it.equals("Downloading next-dev · 42%", ignoreCase = true) },
+                    )
+                }
                 onView(withContentDescription("More options")).perform(click())
                 onView(withText("Settings")).check(matches(isDisplayed()))
                 onView(withText("About")).check(matches(isDisplayed()))

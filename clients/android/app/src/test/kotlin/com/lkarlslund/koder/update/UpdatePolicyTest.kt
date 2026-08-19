@@ -31,8 +31,10 @@ class UpdatePolicyTest {
     @Test
     fun streamsAndVerifiesExactBytes() {
         val destination = kotlin.io.path.createTempFile().toFile().apply { deleteOnExit() }
-        UpdatePolicy.writeVerified(ByteArrayInputStream(bytes), destination, update())
+        val progress = mutableListOf<Long>()
+        UpdatePolicy.writeVerified(ByteArrayInputStream(bytes), destination, update(), progress::add)
         assertTrue(destination.readBytes().contentEquals(bytes))
+        assertEquals(listOf(bytes.size.toLong()), progress)
     }
 
     @Test(expected = IllegalArgumentException::class)

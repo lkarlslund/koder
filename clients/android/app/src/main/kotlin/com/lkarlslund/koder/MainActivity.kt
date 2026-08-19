@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var lastAppUpdate: AppUpdate? = null
 
     private var updateButton: Button? = null
+    private var updateProgress: ProgressBar? = null
     private var status: TextView? = null
     private var transcript: TextView? = null
     private var feed: LinearLayout? = null
@@ -256,6 +257,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             setOnClickListener { appUpdater.install() }
         }
         root.addView(updateButton, matchWrap())
+        updateProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+            contentDescription = "Update download progress"
+        }
+        root.addView(updateProgress, spaced(top = 6, bottom = 10))
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (home.voiceSessions.isEmpty()) {
@@ -728,6 +735,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun clearCallViews() {
         updateButton = null
+        updateProgress = null
         status = null
         transcript = null
         feed = null
@@ -736,24 +744,42 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         typedMessage = null
     }
 
-    private fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
+    internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
         val button = updateButton ?: return@runOnUiThread
+        val progress = updateProgress
         when (next) {
-            AndroidAppUpdater.Status.Hidden -> button.visibility = View.GONE
+            AndroidAppUpdater.Status.Hidden -> {
+                button.visibility = View.GONE
+                progress?.visibility = View.GONE
+            }
             is AndroidAppUpdater.Status.Available -> {
                 button.text = "Update Koder · ${next.versionName}"
                 button.isEnabled = true
                 button.visibility = View.VISIBLE
+                progress?.visibility = View.GONE
+            }
+            is AndroidAppUpdater.Status.Downloading -> {
+                val percent = ((next.downloadedBytes * 100) / next.totalBytes).toInt().coerceIn(0, 100)
+                button.text = "Downloading ${next.versionName} · $percent%"
+                button.isEnabled = false
+                button.visibility = View.VISIBLE
+                progress?.apply {
+                    isIndeterminate = false
+                    this.progress = percent
+                    visibility = View.VISIBLE
+                }
             }
             is AndroidAppUpdater.Status.Busy -> {
                 button.text = next.message
                 button.isEnabled = false
                 button.visibility = View.VISIBLE
+                progress?.visibility = View.GONE
             }
             is AndroidAppUpdater.Status.Error -> {
                 button.text = "${next.message} · Retry"
                 button.isEnabled = true
                 button.visibility = View.VISIBLE
+                progress?.visibility = View.GONE
             }
         }
     }

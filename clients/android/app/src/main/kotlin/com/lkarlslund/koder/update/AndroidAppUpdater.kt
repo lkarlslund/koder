@@ -31,6 +31,7 @@ class AndroidAppUpdater(
     sealed interface Status {
         data object Hidden : Status
         data class Available(val versionName: String) : Status
+        data class Downloading(val versionName: String, val downloadedBytes: Long, val totalBytes: Long) : Status
         data class Busy(val message: String) : Status
         data class Error(val message: String) : Status
     }
@@ -69,7 +70,7 @@ class AndroidAppUpdater(
             listener(Status.Error("Update download is not on the Koder server"))
             return
         }
-        listener(Status.Busy("Downloading ${selected.update.versionName}…"))
+        listener(Status.Downloading(selected.update.versionName, 0, selected.update.apkSize))
         val request = Request.Builder().url(resolved)
             .apply { if (selected.token.isNotBlank()) header("Authorization", "Bearer ${selected.token}") }
             .build()
@@ -93,9 +94,27 @@ class AndroidAppUpdater(
                             val temporary = File(directory, "koder-${selected.update.versionCode}.apk.part")
                             val complete = File(directory, "koder-${selected.update.versionCode}.apk")
                             try {
+                                var lastPercent = -1
                                 it.body.byteStream().use { input ->
-                                    UpdatePolicy.writeVerified(input, temporary, selected.update)
+                                    UpdatePolicy.writeVerified(input, temporary, selected.update) { downloaded ->
+                                        val percent = ((downloaded * 100) / selected.update.apkSize)
+                                            .toInt()
+                                            .coerceIn(0, 100)
+                                        if (percent != lastPercent) {
+                                            lastPercent = percent
+                                            activity.runOnUiThread {
+                                                listener(
+                                                    Status.Downloading(
+                                                        selected.update.versionName,
+                                                        downloaded,
+                                                        selected.update.apkSize,
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
+                                activity.runOnUiThread { listener(Status.Busy("Verifying update…")) }
                                 verifyArchive(temporary, selected.update)
                                 if (complete.exists()) require(complete.delete()) { "Could not replace cached update" }
                                 require(temporary.renameTo(complete)) { "Could not finalize downloaded update" }
