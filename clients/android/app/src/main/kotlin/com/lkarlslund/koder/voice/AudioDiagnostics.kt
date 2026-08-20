@@ -28,6 +28,30 @@ internal fun pcmLevel(bytes: ByteArray): Float {
 	return sqrt(sum / count.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
 }
 
+internal fun pcmWaveform(samples: ShortArray, bins: Int = 65): FloatArray {
+	require(bins > 0)
+	if (samples.isEmpty()) return FloatArray(bins)
+	return FloatArray(bins) { bin ->
+		val start = bin * samples.size / bins
+		val end = ((bin + 1) * samples.size / bins).coerceAtLeast(start + 1).coerceAtMost(samples.size)
+		var peak: Short = 0
+		for (index in start until end) {
+			if (abs(samples[index].toInt()) > abs(peak.toInt())) peak = samples[index]
+		}
+		(peak.toFloat() / 9_000f).coerceIn(-1f, 1f)
+	}
+}
+
+internal fun pcmWaveform(bytes: ByteArray, bins: Int = 65): FloatArray {
+	val sampleCount = bytes.size / 2
+	if (sampleCount == 0) return FloatArray(bins)
+	val samples = ShortArray(sampleCount) { index ->
+		val offset = index * 2
+		((bytes[offset].toInt() and 0xff) or (bytes[offset + 1].toInt() shl 8)).toShort()
+	}
+	return pcmWaveform(samples, bins)
+}
+
 data class AudioDiagnostics(
 	val active: Boolean = false,
 	val microphoneLevelDbfs: Double = -96.0,

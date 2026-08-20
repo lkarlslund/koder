@@ -16,11 +16,12 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.random.Random
 
-enum class VoiceOrbMode { IDLE, LISTENING, USER_SPEAKING, PROCESSING, WORKING, AI_SPEAKING }
+enum class VoiceOrbMode { IDLE, CONNECTING, LISTENING, USER_SPEAKING, PROCESSING, WORKING, AI_SPEAKING }
 
 fun voiceOrbMode(stage: CallController.Stage?): VoiceOrbMode = when (stage) {
 	CallController.Stage.RECORDING -> VoiceOrbMode.USER_SPEAKING
-	CallController.Stage.TRANSCRIBING, CallController.Stage.PROCESSING, CallController.Stage.CONNECTING -> VoiceOrbMode.PROCESSING
+	CallController.Stage.CONNECTING -> VoiceOrbMode.CONNECTING
+	CallController.Stage.TRANSCRIBING, CallController.Stage.PROCESSING -> VoiceOrbMode.PROCESSING
 	CallController.Stage.WORKING -> VoiceOrbMode.WORKING
 	CallController.Stage.SPEAKING -> VoiceOrbMode.AI_SPEAKING
 	CallController.Stage.LISTENING, CallController.Stage.MUTED -> VoiceOrbMode.LISTENING
@@ -29,6 +30,7 @@ fun voiceOrbMode(stage: CallController.Stage?): VoiceOrbMode = when (stage) {
 
 fun voiceOrbDescription(mode: VoiceOrbMode): String = when (mode) {
 	VoiceOrbMode.IDLE -> "Voice conversation inactive"
+	VoiceOrbMode.CONNECTING -> "Koder is connecting"
 	VoiceOrbMode.LISTENING -> "Koder is listening"
 	VoiceOrbMode.USER_SPEAKING -> "You are speaking"
 	VoiceOrbMode.PROCESSING -> "Koder is thinking"
@@ -59,6 +61,7 @@ class VoiceStateOrbView @JvmOverloads constructor(
 	private var lastFrameAt = startedAt
 	private var starTravel = 0f
 	private var level = 0.12f
+	private var audioWaveform = FloatArray(65)
 
 	init {
 		setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -80,18 +83,29 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		level = (level * 0.72f + value.coerceIn(0f, 1f) * 0.28f).coerceAtLeast(0.04f)
 	}
 
+	fun setAudioWaveform(values: FloatArray) {
+		if (values.isEmpty()) return
+		if (audioWaveform.size != values.size) audioWaveform = FloatArray(values.size)
+		values.forEachIndexed { index, value ->
+			audioWaveform[index] = audioWaveform[index] * 0.25f + value.coerceIn(-1f, 1f) * 0.75f
+		}
+		invalidate()
+	}
+
 	override fun onDraw(canvas: Canvas) {
 		super.onDraw(canvas)
 		val size = minOf(width, height).toFloat()
 		val radius = size * 0.46f
 		val cx = width / 2f
 		val cy = height / 2f
+		val rimWidth = max(2f, size * 0.012f)
+		val contentRadius = radius - rimWidth * 1.5f
 		bounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
 		paint.style = Paint.Style.FILL
 		paint.color = Color.rgb(3, 10, 26)
 		canvas.drawCircle(cx, cy, radius, paint)
 		canvas.save()
-		canvas.clipPath(Path().apply { addCircle(cx, cy, radius, Path.Direction.CW) })
+		canvas.clipPath(Path().apply { addCircle(cx, cy, contentRadius, Path.Direction.CW) })
 		val animationsEnabled = ValueAnimator.areAnimatorsEnabled()
 		val now = System.nanoTime()
 		val seconds = if (animationsEnabled) (now - startedAt) / 1_000_000_000f else 0f
@@ -100,16 +114,16 @@ class VoiceStateOrbView @JvmOverloads constructor(
 			starTravel += elapsed * voiceStarTravelRate(mode)
 		}
 		lastFrameAt = now
-		drawStars(canvas, cx, cy, radius, starTravel)
+		drawStars(canvas, cx, cy, contentRadius, starTravel)
 		when (mode) {
-			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, radius, seconds, Color.rgb(44, 232, 255))
-			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, radius, seconds, Color.rgb(188, 104, 255))
+			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(44, 232, 255))
+			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(188, 104, 255))
 			VoiceOrbMode.WORKING -> drawSpinner(canvas, cx, cy, radius, seconds)
 			else -> Unit
 		}
 		canvas.restore()
 		paint.style = Paint.Style.STROKE
-		paint.strokeWidth = max(2f, size * 0.012f)
+		paint.strokeWidth = rimWidth
 		paint.color = when (mode) {
 			VoiceOrbMode.USER_SPEAKING -> Color.rgb(44, 232, 255)
 			VoiceOrbMode.AI_SPEAKING -> Color.rgb(188, 104, 255)
@@ -140,15 +154,15 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		}
 	}
 
-	private fun drawWave(canvas: Canvas, cx: Float, cy: Float, radius: Float, seconds: Float, color: Int) {
+	private fun drawWave(canvas: Canvas, cx: Float, cy: Float, radius: Float, color: Int) {
 		wave.reset()
-		val amplitude = radius * (0.10f + level * 0.42f)
+		val amplitude = radius * (0.28f + level * 0.32f)
 		val left = cx - radius * 0.78f
 		val width = radius * 1.56f
-		repeat(65) { index ->
-			val fraction = index / 64f
+		audioWaveform.forEachIndexed { index, sample ->
+			val fraction = index / (audioWaveform.size - 1).coerceAtLeast(1).toFloat()
 			val envelope = sin(fraction * PI).toFloat()
-			val y = cy + sin(fraction * 8f * PI.toFloat() - seconds * 9f) * amplitude * envelope * (0.7f + 0.3f * sin(fraction * 23f + seconds))
+			val y = cy + sample * amplitude * envelope
 			val x = left + width * fraction
 			if (index == 0) wave.moveTo(x, y) else wave.lineTo(x, y)
 		}
@@ -182,6 +196,6 @@ internal fun voiceStarMotion(mode: VoiceOrbMode, initialRadius: Float, speed: Fl
 }
 
 internal fun voiceStarTravelRate(mode: VoiceOrbMode): Float =
-	if (mode == VoiceOrbMode.PROCESSING) 0.58f else 0.032f
+	if (mode == VoiceOrbMode.PROCESSING) 0.58f else 0.075f
 
 internal fun voiceOrbSizeDp(fontScale: Float): Int = if (fontScale >= 1.3f) 232 else 300

@@ -22,6 +22,7 @@ class VoiceStateOrbTest {
 	@Test
 	fun stagesMapToDistinctOrbBehaviors() {
 		assertEquals(VoiceOrbMode.LISTENING, voiceOrbMode(CallController.Stage.LISTENING))
+		assertEquals(VoiceOrbMode.CONNECTING, voiceOrbMode(CallController.Stage.CONNECTING))
 		assertEquals(VoiceOrbMode.USER_SPEAKING, voiceOrbMode(CallController.Stage.RECORDING))
 		assertEquals(VoiceOrbMode.PROCESSING, voiceOrbMode(CallController.Stage.TRANSCRIBING))
 		assertEquals(VoiceOrbMode.PROCESSING, voiceOrbMode(CallController.Stage.PROCESSING))
@@ -36,7 +37,7 @@ class VoiceStateOrbTest {
 		val processingLater = voiceStarMotion(VoiceOrbMode.PROCESSING, initialRadius = 0.2f, speed = 1f, travel = voiceStarTravelRate(VoiceOrbMode.PROCESSING))
 		assertTrue(listeningLater.radius > listeningStart.radius)
 		assertEquals(0f, listeningLater.trailFraction)
-		assertTrue(voiceStarTravelRate(VoiceOrbMode.PROCESSING) > voiceStarTravelRate(VoiceOrbMode.LISTENING) * 10f)
+		assertTrue(voiceStarTravelRate(VoiceOrbMode.PROCESSING) > voiceStarTravelRate(VoiceOrbMode.LISTENING) * 5f)
 		assertTrue(processingLater.radius > listeningLater.radius)
 		assertTrue(processingLater.trailFraction > 0f)
 	}
@@ -54,5 +55,14 @@ class VoiceStateOrbTest {
 		val quiet = byteArrayOf(0x10, 0x00, 0x10, 0x00)
 		val loud = byteArrayOf(0x00, 0x40, 0x00, 0x40)
 		assertTrue(pcmLevel(loud) > pcmLevel(quiet))
+	}
+
+	@Test
+	fun waveformUsesActualSignedInputAndOutputSamples() {
+		val input = pcmWaveform(shortArrayOf(9_000, -9_000, 4_500, -4_500), bins = 4)
+		assertEquals(listOf(1f, -1f, 0.5f, -0.5f), input.toList())
+		val output = pcmWaveform(byteArrayOf(0x28, 0x23, 0xD8.toByte(), 0xDC.toByte()), bins = 2)
+		assertEquals(1f, output[0], 0.001f)
+		assertEquals(-1f, output[1], 0.001f)
 	}
 }

@@ -477,6 +477,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
+	override fun onAudioWaveform(samples: FloatArray, user: Boolean) {
+		runOnUiThread {
+			if (screen != Screen.CHAT) return@runOnUiThread
+			val expected = if (user) CallController.Stage.RECORDING else CallController.Stage.SPEAKING
+			if (latestCallSnapshot.stage == expected) voiceOrb?.setAudioWaveform(samples)
+		}
+	}
+
 	override fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) {
 		runOnUiThread {
 			if (screen != Screen.CHAT) return@runOnUiThread

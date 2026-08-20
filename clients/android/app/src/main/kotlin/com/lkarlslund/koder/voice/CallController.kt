@@ -54,6 +54,7 @@ class CallController(
 		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
 		fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) = Unit
 		fun onAudioLevel(level: Float, user: Boolean) = Unit
+		fun onAudioWaveform(samples: FloatArray, user: Boolean) = Unit
     }
 
     private val appContext = context.applicationContext
@@ -474,6 +475,7 @@ class CallController(
             return
         }
 		listener.onAudioLevel(pcmLevel(frame.pcm), false)
+		listener.onAudioWaveform(pcmWaveform(frame.pcm), false)
         outputSequence++
         playback.write(frame.pcm)
     }
@@ -523,6 +525,7 @@ class CallController(
 			val evaluated = endpoint.evaluate(samples)
 			diagnostics.recordInput(samples, evaluated.vad, utteranceId.isNotBlank())
 			listener.onAudioLevel(pcmLevel(samples), true)
+			listener.onAudioWaveform(pcmWaveform(samples), true)
 			for (event in evaluated.events) {
                 when (event) {
                     is UtteranceEvent.Started -> {
