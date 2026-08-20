@@ -2625,8 +2625,14 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 		case 1:
 			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"location-1","type":"function","function":{"name":"phone","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"action":"get_location"}`)
 		case 2:
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"start-1","type":"function","function":{"name":"session_start","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"title":"Aarhus events today","temporary":true}`)
+			// Reproduce the observed failure: a model may fabricate a phone action
+			// that was absent from the turn-specific schema, then retry it.
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"map-1","type":"function","function":{"name":"phone","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"action":"open_map","query":"Aarhus"}`)
 		case 3:
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"map-2","type":"function","function":{"name":"phone","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"action":"open_map","query":"Aarhus events"}`)
+		case 4:
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"start-1","type":"function","function":{"name":"session_start","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"title":"Aarhus events today","temporary":true}`)
+		case 5:
 			var request struct {
 				Messages []struct {
 					Role    string `json:"role"`
@@ -2649,7 +2655,7 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 			}
 			arguments := fmt.Sprintf(`{"session_id":%q,"message":"Find notable public events happening in Aarhus today and summarize the most relevant one."}`, target.ID)
 			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"delegate-1","type":"function","function":{"name":"session_delegate","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
-		case 4:
+		case 6:
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"You're in Aarhus, and DHL Stafetten is happening today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		default:
 			t.Errorf("unexpected voice model step %d", voiceStep.Load())
@@ -2702,17 +2708,19 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 	}
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
+	firstRequest := requests[0]
 	requestsMu.Unlock()
 	for _, expected := range []string{
 		"delegate it with the resolved place name",
 		"Find notable public events happening in Aarhus today",
+		"open_map requires an explicit request in the current voice utterance",
 	} {
 		if !strings.Contains(joinedRequests, expected) {
 			t.Fatalf("voice routing did not contain %q: %s", expected, joinedRequests)
 		}
 	}
-	if strings.Contains(joinedRequests, `"open_map"`) {
-		t.Fatalf("implicit local-information turn offered open_map to the voice model: %s", joinedRequests)
+	if strings.Contains(firstRequest, `"open_map"`) {
+		t.Fatalf("implicit local-information turn offered open_map to the voice model: %s", firstRequest)
 	}
 }
 

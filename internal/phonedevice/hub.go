@@ -230,7 +230,7 @@ func (h *Hub) Capabilities() []CatalogEntry {
 	}
 	out := make([]CatalogEntry, 0, len(h.active.actions))
 	for _, entry := range catalog {
-		if entry.Action == OpenMap && h.turn != nil && !h.turn.allowOpenMap {
+		if entry.Action == OpenMap && (h.turn == nil || !h.turn.allowOpenMap) {
 			continue
 		}
 		if h.active.actions[entry.Action] {
@@ -251,9 +251,9 @@ func (h *Hub) Execute(ctx context.Context, action Action, args map[string]string
 		h.mu.RUnlock()
 		return Result{}, fmt.Errorf("phone action %q is not enabled or the phone is disconnected", action)
 	}
-	if action == OpenMap && h.turn != nil && !h.turn.allowOpenMap {
+	if action == OpenMap && (h.turn == nil || !h.turn.allowOpenMap) {
 		h.mu.RUnlock()
-		return Result{}, errors.New("phone action open_map requires an explicit user request to view a map or navigate")
+		return Result{}, errors.New("phone action open_map requires an explicit request in the current voice utterance to view a map or navigate")
 	}
 	execute := active.execute
 	callID := active.callID

@@ -71,6 +71,12 @@ func TestHubVoiceTurnRequiresExplicitMapIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer releasePhone()
+	if actions := capabilityActions(hub.Capabilities()); !slices.Equal(actions, []Action{GetLocation}) {
+		t.Fatalf("between-turn capabilities = %v, want open_map default-denied", actions)
+	}
+	if _, err := hub.Execute(context.Background(), OpenMap, nil); err == nil {
+		t.Fatal("open_map executed without an active voice-turn policy")
+	}
 
 	releaseTurn := hub.BeginVoiceTurn("What's happening where I am?")
 	if actions := capabilityActions(hub.Capabilities()); !slices.Equal(actions, []Action{GetLocation}) {
@@ -88,6 +94,13 @@ func TestHubVoiceTurnRequiresExplicitMapIntent(t *testing.T) {
 	}
 	if _, err := hub.Execute(context.Background(), OpenMap, map[string]string{"query": "Aarhus"}); err != nil {
 		t.Fatal(err)
+	}
+	releaseTurn()
+	if actions := capabilityActions(hub.Capabilities()); !slices.Equal(actions, []Action{GetLocation}) {
+		t.Fatalf("post-turn capabilities = %v, want open_map default-denied", actions)
+	}
+	if _, err := hub.Execute(context.Background(), OpenMap, nil); err == nil {
+		t.Fatal("open_map remained executable after explicit voice turn ended")
 	}
 	if !slices.Equal(executed, []Action{OpenMap}) {
 		t.Fatalf("executed actions = %v", executed)
