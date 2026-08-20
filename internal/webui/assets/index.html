@@ -362,7 +362,14 @@
           <span class="sidebar-heading">Chats</span>
 		  <div class="d-flex align-items-center gap-1" x-show="workspaceSessionMode()">
             <button class="btn btn-sm btn-outline-secondary" title="Cleanup chats" @click="openCleanupDialog()"><i class="bi bi-magic"></i></button>
-            <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
+			<div class="new-chat-picker" @click.outside="newChatMenuOpen = false">
+			  <button class="btn btn-sm btn-outline-primary" type="button" title="New chat" :aria-expanded="newChatMenuOpen ? 'true' : 'false'" @click="toggleNewChatMenu()"><i class="bi bi-plus-lg"></i></button>
+			  <div class="new-chat-menu shadow" x-show="newChatMenuOpen" x-transition style="display: none;">
+				<button type="button" class="new-chat-option" @click="newChat('normal')"><i class="bi bi-chat-left-text"></i><span><strong>Normal chat</strong><small>Standard Koder conversation</small></span></button>
+				<button type="button" class="new-chat-option" @click="newChat('voice')"><i class="bi bi-mic-fill text-info"></i><span><strong>Voice chat</strong><small>Spoken conversation with tools</small></span></button>
+				<button type="button" class="new-chat-option" disabled title="Coming soon"><i class="bi bi-terminal"></i><span><strong>Codex chat <em>Soon</em></strong><small>Agent protocol / ACP conversation</small></span></button>
+			  </div>
+			</div>
           </div>
         </div>
 		<div class="status-filter-row" x-show="workspaceSessionMode() && chatStatusFilterOptions().length > 0">
@@ -380,7 +387,7 @@
               <div class="d-flex align-items-center gap-1">
                 <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
 				  <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder" x-show="workspaceSessionMode()"></i>
-                  <i class="bi" :class="chatArchived(chat) ? 'bi-archive' : 'bi-chat-left-text'"></i>
+				  <i class="bi" :class="chatTypeIcon(chat)"></i>
                   <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
 				  <button type="button" class="btn btn-sm p-0 border-0 bg-transparent chat-title-edit" title="Rename chat" x-show="workspaceSessionMode()" @click.stop="renameChat(chat)" @pointerdown.stop @mousedown.stop draggable="false">
                     <i class="bi bi-pencil"></i>
@@ -552,6 +559,20 @@
           </span>
         </template>
       </div>
+	  <div class="voice-composer mb-2" x-show="voiceChatMode()" :class="{'voice-composer-occupied': voiceOccupiedByOther()}" style="display: none;">
+		<div class="voice-composer-copy">
+		  <span class="voice-composer-status"><i class="bi" :class="voiceOccupiedByOther() ? 'bi-phone-fill' : (browserVoice.active ? 'bi-soundwave' : 'bi-mic')"></i><span x-text="voicePresenceLabel()"></span></span>
+		  <small x-show="voiceOccupiedByOther()">This chat's microphone is currently owned by another device. You can still type below.</small>
+		  <small x-show="!voiceOccupiedByOther() && browserVoice.mode === 'ptt'">Hold the microphone while speaking, or switch on voice activation.</small>
+		  <small x-show="!voiceOccupiedByOther() && browserVoice.mode === 'vad'">Koder listens automatically and stops when you pause.</small>
+		</div>
+		<div class="voice-composer-actions">
+		  <button type="button" class="btn voice-ptt-button" :class="{'active': browserVoice.pttHeld}" :disabled="voiceOccupiedByOther() || browserVoice.mode !== 'ptt'" title="Hold to talk" @pointerdown.prevent="beginBrowserVoicePTT($event)" @pointerup.prevent="endBrowserVoicePTT()" @pointerleave="endBrowserVoicePTT()" @pointercancel="endBrowserVoicePTT()" @keydown.space.prevent="beginBrowserVoicePTT($event)" @keyup.space.prevent="endBrowserVoicePTT()"><i class="bi bi-mic-fill"></i><span>Hold to talk</span></button>
+		  <button type="button" class="btn voice-mode-button" :class="browserVoice.mode === 'vad' ? 'btn-info' : 'btn-outline-secondary'" :disabled="voiceOccupiedByOther()" :aria-pressed="browserVoice.mode === 'vad' ? 'true' : 'false'" title="Toggle voice activation" @click="setBrowserVoiceMode(browserVoice.mode === 'vad' ? 'ptt' : 'vad')"><i class="bi bi-soundwave"></i><span>VAD</span></button>
+		  <button type="button" class="btn btn-outline-secondary" title="Open distraction-free voice mode" :disabled="voiceOccupiedByOther()" @click="openBrowserVoice()"><i class="bi bi-arrows-fullscreen"></i></button>
+		  <button type="button" class="btn btn-outline-danger" x-show="browserVoice.active" title="Disconnect browser voice" @click="stopBrowserVoice()"><i class="bi bi-telephone-x-fill"></i></button>
+		</div>
+	  </div>
       <div class="input-group" @click.outside="closeComposerSendMenu()">
         <button class="btn btn-danger interrupt-button" type="button" :disabled="!chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
@@ -591,15 +612,13 @@
         </div>
         <div class="browser-voice-state" x-text="browserVoiceStatusLabel()"></div>
         <div class="browser-voice-detail" x-text="browserVoice.detail || browserVoice.error || 'Speak naturally. Koder will listen when you start talking.'"></div>
-        <div class="browser-voice-text" x-show="browserVoice.transcript || browserVoice.response" style="display: none;">
-          <div x-show="browserVoice.transcript"><span class="browser-voice-speaker">You</span><span x-text="browserVoice.transcript"></span></div>
-          <div x-show="browserVoice.response"><span class="browser-voice-speaker">Koder</span><span x-text="browserVoice.response"></span></div>
-        </div>
       </div>
       <footer class="browser-voice-controls">
-        <button type="button" class="browser-voice-control" :class="{'active': browserVoice.muted}" :disabled="!browserVoice.active" :title="browserVoice.muted ? 'Unmute microphone' : 'Mute microphone'" @click="toggleBrowserVoiceMute()"><i class="bi" :class="browserVoice.muted ? 'bi-mic-mute-fill' : 'bi-mic-fill'"></i></button>
-        <button type="button" class="browser-voice-control browser-voice-control-main" :class="browserVoice.active ? 'hangup' : 'start'" :title="browserVoice.active ? 'End voice conversation' : 'Start voice conversation'" @click="toggleBrowserVoice()"><i class="bi" :class="browserVoice.active ? 'bi-telephone-x-fill' : 'bi-mic-fill'"></i></button>
-        <button type="button" class="browser-voice-control" :disabled="!browserVoice.active || browserVoice.state !== 'recording'" title="Finish speaking now" @click="finishBrowserVoiceUtterance()"><i class="bi bi-check-lg"></i></button>
+		<button type="button" class="browser-voice-control" :class="{'active': browserVoice.mode === 'vad'}" title="Toggle voice activation" @click="setBrowserVoiceMode(browserVoice.mode === 'vad' ? 'ptt' : 'vad')"><i class="bi bi-soundwave"></i></button>
+		<button type="button" class="browser-voice-control browser-voice-control-main start" :class="{'active': browserVoice.pttHeld}" x-show="browserVoice.mode === 'ptt'" title="Hold to talk" @pointerdown.prevent="beginBrowserVoicePTT($event)" @pointerup.prevent="endBrowserVoicePTT()" @pointerleave="endBrowserVoicePTT()" @pointercancel="endBrowserVoicePTT()"><i class="bi bi-mic-fill"></i></button>
+		<button type="button" class="browser-voice-control browser-voice-control-main hangup" x-show="browserVoice.mode === 'vad'" title="End browser voice" @click="stopBrowserVoice()"><i class="bi bi-telephone-x-fill"></i></button>
+		<button type="button" class="browser-voice-control" :disabled="!browserVoice.active" title="Disconnect browser voice" @click="stopBrowserVoice()"><i class="bi bi-stop-fill"></i></button>
+		<button type="button" class="browser-voice-control" title="Return to transcript" @click="closeBrowserVoice()"><i class="bi bi-layout-text-window-reverse"></i></button>
       </footer>
     </section>
   </div>

@@ -1724,11 +1724,19 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(document, `/assets/browser_voice.js`) ||
 		!strings.Contains(fullPage, `browser_voice_ticket`) ||
+		!strings.Contains(fullPage, `voice_chat_presence`) ||
 		!strings.Contains(fullPage, `audio_start`) ||
 		!strings.Contains(fullPage, `audio_commit`) ||
 		!strings.Contains(fullPage, `browser-voice-orb`) ||
+		!strings.Contains(fullPage, `newChat('normal')`) ||
+		!strings.Contains(fullPage, `newChat('voice')`) ||
+		!strings.Contains(fullPage, `Codex chat <em>Soon</em>`) ||
+		!strings.Contains(fullPage, `beginBrowserVoicePTT`) ||
+		!strings.Contains(fullPage, `setBrowserVoiceMode`) ||
+		!strings.Contains(fullPage, `Hold to talk`) ||
+		!strings.Contains(fullPage, `Open distraction-free voice mode`) ||
 		strings.Contains(fullPage, `toggleTTSOutput()`) {
-		t.Fatalf("expected browser voice conversation transport and no standalone TTS toggle")
+		t.Fatalf("expected typed chat creation and browser PTT/VAD voice controls without a standalone TTS toggle")
 	}
 	if !strings.Contains(fullPage, `welcomeMode()`) ||
 		!strings.Contains(fullPage, `welcome-view`) ||

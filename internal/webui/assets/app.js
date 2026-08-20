@@ -1048,7 +1048,8 @@
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
 		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserPanelOpen: false, browserTabs: [], browserTabsLoading: false, browserPanelError: '', browserPanelTimer: null,
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
-		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: ''}, browserVoiceClient: null,
+		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
+		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -1058,6 +1059,7 @@
           this.$watch('draft', () => this.writeComposerDraft());
           this.$watch('composerAttachments', () => this.writeComposerDraft());
           this.connect();
+		  this.voicePresenceTimer = setInterval(() => this.refreshVoiceChatPresence(), 2000);
           window.addEventListener('resize', () => { this.resizeComposer(); if (!this.isMobileLayout()) this.mobileSidebarOpen = false; this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
@@ -2214,8 +2216,10 @@
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
 		  if (this.browserVoiceClient && (this.browserVoiceClient.options.sessionID !== this.currentSessionID() || this.browserVoiceClient.options.chatID !== String(this.activeChatID() || '').trim())) {
-			this.closeBrowserVoice();
+			this.stopBrowserVoice();
+			this.browserVoice = {...this.browserVoice, open: false};
 		  }
+		  this.$nextTick(() => this.refreshVoiceChatPresence());
           this.syncBrowserTabActivity();
           this.hydratingSession = {active: false, id: '', title: '', error: ''};
           this.clearSwitchingChat();
@@ -4285,7 +4289,13 @@
           this.switchingChat = {active: false, id: '', title: '', startedAt: 0};
           this.reportClientStateSoon();
         },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message)); },
+        newChat(role = 'normal') {
+		  this.newChatMenuOpen = false;
+		  const voice = role === 'voice';
+		  this.rpc('new_chat', {title: voice ? 'Voice conversation' : 'Chat', role: voice ? 'voice' : 'orchestrator'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message));
+		},
+		toggleNewChatMenu() { this.newChatMenuOpen = !this.newChatMenuOpen; },
+		chatTypeIcon(chat) { return this.chatArchived(chat) ? 'bi-archive' : ((chat.workflow_role || chat.WorkflowRole) === 'voice' ? 'bi-mic-fill' : 'bi-chat-left-text'); },
         renameChat(chat) {
           const id = this.chatID(chat);
           if (!id) return;
@@ -4445,10 +4455,30 @@
             return;
           }
           this.browserVoice = {...this.browserVoice, open: true};
-          if (!this.browserVoice.active) await this.startBrowserVoice();
+		  if (this.browserVoice.mode === 'vad' && !this.browserVoice.active) await this.startBrowserVoice();
         },
+		async refreshVoiceChatPresence() {
+		  if (!this.connected || !this.voiceChatMode()) {
+			this.voicePresence = {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''};
+			return;
+		  }
+		  try {
+			this.voicePresence = await this.rpc('voice_chat_presence', {chat_id: String(this.activeChatID() || '')});
+		  } catch (_) {}
+		},
+		voiceOccupiedByOther() { return !!this.voicePresence.occupied && !this.voicePresence.owned_by_browser; },
+		voicePresenceLabel() {
+		  if (this.voiceOccupiedByOther()) return this.voicePresence.device_kind === 'phone' ? 'Active on phone' : 'Active in another browser';
+		  if (this.browserVoice.active) return this.browserVoiceStatusLabel();
+		  return this.browserVoice.mode === 'vad' ? 'Voice activation ready' : 'Hold to talk';
+		},
         async startBrowserVoice() {
           if (this.browserVoice.active) return;
+		  await this.refreshVoiceChatPresence();
+		  if (this.voiceOccupiedByOther()) {
+			this.showToast(this.voicePresenceLabel());
+			return;
+		  }
           if (!window.KoderBrowserVoice?.BrowserVoiceClient) {
             this.browserVoice = {...this.browserVoice, error: 'Browser voice support failed to load'};
             return;
@@ -4458,12 +4488,14 @@
           const client = new window.KoderBrowserVoice.BrowserVoiceClient({
             sessionID,
             chatID,
+			mode: this.browserVoice.mode,
             ticketProvider: () => this.rpc('browser_voice_ticket', {}),
             onLevel: level => { this.browserVoice = {...this.browserVoice, level}; },
             onEvent: (type, payload) => this.handleBrowserVoiceEvent(type, payload),
           });
           this.browserVoiceClient = client;
-          this.browserVoice = {open: true, active: true, state: 'connecting', detail: 'Requesting microphone access', transcript: '', response: '', level: 0, muted: false, error: ''};
+		  const keepOpen = this.browserVoice.open;
+		  this.browserVoice = {...this.browserVoice, open: keepOpen, active: true, state: 'connecting', detail: 'Requesting microphone access', transcript: '', response: '', level: 0, muted: false, error: ''};
           try {
             await client.start();
           } catch (error) {
@@ -4483,6 +4515,8 @@
           }
           if (type === 'ready') {
             this.browserVoice = {...this.browserVoice, active: true, error: ''};
+			this.voicePresence = {...this.voicePresence, occupied: true, owned_by_browser: true, device_kind: 'browser'};
+			if (this.browserVoice.mode === 'ptt' && this.browserVoice.pttHeld) this.browserVoiceClient?.startPTT();
             return;
           }
           if (type === 'transcript') {
@@ -4502,6 +4536,10 @@
             this.browserVoice = {...this.browserVoice, muted: !!payload.muted};
             return;
           }
+		  if (type === 'mode') {
+			this.browserVoice = {...this.browserVoice, mode: payload.mode === 'vad' ? 'vad' : 'ptt'};
+			return;
+		  }
           if (type === 'error') {
             this.browserVoice = {...this.browserVoice, error: String(payload.error || 'Voice conversation failed'), detail: ''};
           }
@@ -4511,15 +4549,34 @@
           this.browserVoiceClient = null;
           if (client) await client.stop();
           this.browserVoice = {...this.browserVoice, active: false, state: 'idle', level: 0, muted: false, detail: 'Conversation ended'};
+		  await this.refreshVoiceChatPresence();
         },
         async closeBrowserVoice() {
-          await this.stopBrowserVoice();
           this.browserVoice = {...this.browserVoice, open: false};
         },
         toggleBrowserVoice() {
           if (this.browserVoice.active) return this.stopBrowserVoice();
           return this.startBrowserVoice();
         },
+		async setBrowserVoiceMode(mode) {
+		  const next = mode === 'vad' ? 'vad' : 'ptt';
+		  writePreference('browserVoiceMode', next);
+		  this.browserVoice = {...this.browserVoice, mode: next, pttHeld: false};
+		  this.browserVoiceClient?.setMode(next);
+		  if (next === 'vad' && !this.browserVoice.active) await this.startBrowserVoice();
+		},
+		async beginBrowserVoicePTT(event) {
+		  if (event?.button !== undefined && event.button !== 0) return;
+		  if (this.voiceOccupiedByOther()) return this.showToast(this.voicePresenceLabel());
+		  this.browserVoice = {...this.browserVoice, mode: 'ptt', pttHeld: true};
+		  writePreference('browserVoiceMode', 'ptt');
+		  if (!this.browserVoice.active) await this.startBrowserVoice();
+		  if (this.browserVoice.pttHeld) this.browserVoiceClient?.startPTT();
+		},
+		endBrowserVoicePTT() {
+		  this.browserVoice = {...this.browserVoice, pttHeld: false};
+		  this.browserVoiceClient?.stopPTT();
+		},
         toggleBrowserVoiceMute() {
           if (this.browserVoiceClient) this.browserVoiceClient.setMuted(!this.browserVoice.muted);
         },

@@ -96,6 +96,8 @@
       this.playbackSources = new Set();
       this.playbackEndTimer = null;
       this.reconnectTimer = null;
+      this.mode = this.options.mode === 'vad' ? 'vad' : 'ptt';
+      this.pttActive = false;
     }
 
     emit(type, payload) {
@@ -220,6 +222,10 @@
       if (!this.active || this.muted || !this.audioConfig || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
 
       const copy = new Float32Array(samples);
+      if (this.mode === 'ptt') {
+        if (this.utterance) this.sendSamples(copy);
+        return;
+      }
       if (!this.utterance) {
         this.preRoll.push(copy);
         this.preRollSamples += copy.length;
@@ -250,6 +256,7 @@
     }
 
     beginUtterance() {
+      if (!this.audioConfig || !this.context || !this.socket || this.socket.readyState !== WebSocket.OPEN || this.utterance) return false;
       this.stopPlayback();
       this.outputSuppressed = true;
       this.utterance = randomID();
@@ -265,6 +272,29 @@
       this.preRollSamples = 0;
       buffered.forEach(chunk => this.sendSamples(chunk));
       this.emit('state', {state: 'recording'});
+      return true;
+    }
+
+    setMode(mode) {
+      const next = mode === 'vad' ? 'vad' : 'ptt';
+      if (this.mode === next) return;
+      if (this.utterance) this.finishUtterance();
+      this.pttActive = false;
+      this.mode = next;
+      this.preRoll = [];
+      this.preRollSamples = 0;
+      this.emit('mode', {mode: next});
+    }
+
+    startPTT() {
+      if (this.mode !== 'ptt' || this.muted) return false;
+      this.pttActive = true;
+      return this.beginUtterance();
+    }
+
+    stopPTT() {
+      this.pttActive = false;
+      if (this.mode === 'ptt') this.finishUtterance();
     }
 
     sendSamples(samples) {
@@ -327,6 +357,7 @@
 
     async stop() {
       this.active = false;
+	  this.pttActive = false;
       clearTimeout(this.reconnectTimer);
       if (this.utterance) this.send({type: 'audio_cancel', utterance_id: this.utterance});
       this.utterance = null;
