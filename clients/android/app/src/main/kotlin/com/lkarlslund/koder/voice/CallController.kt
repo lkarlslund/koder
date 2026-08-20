@@ -185,7 +185,7 @@ class CallController(
         if (!running || normalized.isEmpty()) return
         microphone.stop()
         listener.onUserMessage(normalized)
-        update(Stage.PROCESSING, "Understanding…", "")
+        update(Stage.PROCESSING, processingStatusText(), "")
         try {
             connection.sendUtterance(normalized)
         } catch (error: Exception) {
@@ -374,7 +374,7 @@ class CallController(
 			"state" -> if (!pausedByUser && !telecomHeld) when (frame.state) {
                 "recording" -> update(Stage.RECORDING, recordingStatus(interruptedPlayback))
                 "transcribing" -> update(Stage.TRANSCRIBING, "Recognizing speech…", "")
-                "processing" -> update(Stage.PROCESSING, "Choosing a chat…", "")
+                "processing" -> update(Stage.PROCESSING, processingStatusText(), "")
 				"working" -> update(
 					Stage.WORKING,
 					frame.workingOn?.title?.takeIf(String::isNotBlank)?.let { "Working in $it…" } ?: "Working…",

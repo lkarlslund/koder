@@ -11,6 +11,11 @@ class VoiceControlsTest {
 	}
 
 	@Test
+	fun processingDescribesModelWorkWithoutClaimingDelegation() {
+		assertEquals("Thinking…", processingStatusText())
+	}
+
+	@Test
 	fun primaryControlDistinguishesFailureFromPause() {
 		assertEquals("Retry", primaryVoiceControlLabel(CallController.Stage.ERROR, false))
 		assertEquals("Resume", primaryVoiceControlLabel(CallController.Stage.DISCONNECTED, false))
