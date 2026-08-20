@@ -1595,6 +1595,24 @@ func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID id.ID, summ
 	return planning.Plan{}, fmt.Errorf("no live session owner")
 }
 
+func (c *Controller) ArchiveMilestone(ctx context.Context, sessionID id.ID, milestoneKey string, archived bool) (planning.Milestone, error) {
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.ArchiveMilestone(ctx, sessionID, milestoneKey, archived)
+		}
+	}
+	return planning.Milestone{}, fmt.Errorf("no live session owner")
+}
+
+func (c *Controller) DeleteMilestone(ctx context.Context, sessionID id.ID, milestoneKey string) error {
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.DeleteMilestone(ctx, sessionID, milestoneKey)
+		}
+	}
+	return fmt.Errorf("no live session owner")
+}
+
 func (c *Controller) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
@@ -1619,6 +1637,24 @@ func (c *Controller) UpdateTask(ctx context.Context, sessionID, taskID id.ID, st
 		}
 	}
 	return planning.Task{}, fmt.Errorf("no live session owner")
+}
+
+func (c *Controller) ArchiveTask(ctx context.Context, sessionID id.ID, taskKey string, archived bool) (planning.Task, error) {
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.ArchiveTask(ctx, taskKey, archived)
+		}
+	}
+	return planning.Task{}, fmt.Errorf("no live session owner")
+}
+
+func (c *Controller) DeleteTask(ctx context.Context, sessionID id.ID, taskKey string) error {
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.DeleteTask(ctx, taskKey)
+		}
+	}
+	return fmt.Errorf("no live session owner")
 }
 
 func (c *Controller) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milestoneKey string, status planning.TaskStatus, position int, note string) (planning.Task, error) {

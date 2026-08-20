@@ -398,6 +398,120 @@ func TestScopedPlanningLimitsAssignedTask(t *testing.T) {
 	}
 }
 
+func TestPlanningArchiveAndDeleteLifecycle(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, "Lifecycle", []planning.Milestone{{Key: "M001", Title: "Ship", Status: planning.MilestoneStatusReady}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := owner.AddTasks(ctx, sessionRecord.ID, "M001", []string{"Implement"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskKey := planning.TaskKey(tasks[0])
+	if _, err := owner.UpdateTask(ctx, taskKey, planning.TaskStatusInProgress, "", "started"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ArchiveTask(ctx, taskKey, true); err == nil || !strings.Contains(err.Error(), "in_progress") {
+		t.Fatalf("archive in-progress task error = %v", err)
+	}
+	plan.Milestones[0].Status = planning.MilestoneStatusExecuting
+	if _, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, plan.Summary, plan.Milestones); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M001", true); err == nil || !strings.Contains(err.Error(), "executing") {
+		t.Fatalf("archive executing milestone error = %v", err)
+	}
+	if _, err := owner.UpdateTask(ctx, taskKey, planning.TaskStatusCompleted, "", "done"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = owner.GetMilestonePlan(ctx, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Milestones[0].Status = planning.MilestoneStatusCompleted
+	if _, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, plan.Summary, plan.Milestones); err != nil {
+		t.Fatal(err)
+	}
+	archivedTask, err := owner.ArchiveTask(ctx, taskKey, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archivedTask.Archived {
+		t.Fatal("task was not archived")
+	}
+	if _, err := owner.UpdateTask(ctx, taskKey, planning.TaskStatusPending, "", "reopen"); err == nil || !strings.Contains(err.Error(), "restore") {
+		t.Fatalf("update archived task error = %v", err)
+	}
+	archivedMilestone, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M001", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archivedMilestone.Archived {
+		t.Fatal("milestone was not archived")
+	}
+	if err := owner.DeleteMilestone(ctx, sessionRecord.ID, "M001"); err == nil || !strings.Contains(err.Error(), "still has 1 task") {
+		t.Fatalf("delete milestone with task error = %v", err)
+	}
+	if err := owner.DeleteTask(ctx, taskKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.DeleteMilestone(ctx, sessionRecord.ID, "M001"); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPlan, err := reloaded.GetMilestonePlan(ctx, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotTasks, err := reloaded.ListTasks(ctx, sessionRecord.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotPlan.Milestones) != 0 || len(gotTasks) != 0 {
+		t.Fatalf("deleted planning data reappeared: plan=%#v tasks=%#v", gotPlan, gotTasks)
+	}
+}
+
+func TestSetMilestonePlanRequiresExplicitDelete(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, "", []planning.Milestone{{Key: "M001", Title: "Keep", Status: planning.MilestoneStatusPending}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, "", nil); err == nil || !strings.Contains(err.Error(), "archive and delete it explicitly") {
+		t.Fatalf("replace-removal error = %v", err)
+	}
+}
+
 func TestSessionHydratesTasksWithoutPlanMilestone(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

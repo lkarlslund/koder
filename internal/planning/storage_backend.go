@@ -58,6 +58,17 @@ func (s *Source) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey st
 	return listTasks(ctx, st, sessionID, milestoneKey)
 }
 
+func (s *Source) DeleteTask(ctx context.Context, taskID id.ID) error {
+	st, err := s.requireStore()
+	if err != nil {
+		return err
+	}
+	if taskID == "" {
+		return fmt.Errorf("delete task: id is required")
+	}
+	return taskCollection(st).Delete(ctx, taskID)
+}
+
 func (s *Source) SaveLegacyTask(ctx context.Context, task LegacyTask) error {
 	st, err := s.requireStore()
 	if err != nil {

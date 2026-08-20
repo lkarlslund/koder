@@ -31,8 +31,12 @@ func RequireChatStatusControl(runtime Runtime) (ChatStatusControl, error) {
 type SessionControl interface {
 	GetMilestonePlan(context.Context, id.ID) (planning.Plan, error)
 	SetMilestonePlan(context.Context, id.ID, string, []planning.Milestone) (planning.Plan, error)
+	ArchiveMilestone(context.Context, id.ID, string, bool) (planning.Milestone, error)
+	DeleteMilestone(context.Context, id.ID, string) error
 	AddTasks(context.Context, id.ID, string, []string) ([]planning.Task, error)
 	UpdateTask(context.Context, string, planning.TaskStatus, string, string) (planning.Task, error)
+	ArchiveTask(context.Context, string, bool) (planning.Task, error)
+	DeleteTask(context.Context, string) error
 	ListTasks(context.Context, id.ID, string) ([]planning.Task, error)
 }
 

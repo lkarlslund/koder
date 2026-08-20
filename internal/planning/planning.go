@@ -25,6 +25,7 @@ type Milestone struct {
 	LegacyRef    string `json:",omitempty"`
 	Title        string
 	Status       MilestoneStatus
+	Archived     bool
 	Notes        string
 	DependsOnKey string
 	Position     int
@@ -39,6 +40,7 @@ type Task struct {
 	Content      string
 	Note         string
 	Status       TaskStatus
+	Archived     bool
 	Position     int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -52,6 +54,7 @@ func (m *Milestone) UnmarshalJSON(data []byte) error {
 		LegacyRef    string
 		Title        string
 		Status       MilestoneStatus
+		Archived     bool
 		Notes        string
 		DependsOnKey string
 		DependsOnRef string
@@ -82,6 +85,7 @@ func (m *Milestone) UnmarshalJSON(data []byte) error {
 		LegacyRef:    legacyRef,
 		Title:        raw.Title,
 		Status:       raw.Status,
+		Archived:     raw.Archived,
 		Notes:        raw.Notes,
 		DependsOnKey: dependsOnKey,
 		Position:     raw.Position,
@@ -100,6 +104,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 		Content      string
 		Note         string
 		Status       TaskStatus
+		Archived     bool
 		Position     int
 		CreatedAt    time.Time
 		UpdatedAt    time.Time
@@ -120,6 +125,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 		Content:      raw.Content,
 		Note:         raw.Note,
 		Status:       raw.Status,
+		Archived:     raw.Archived,
 		Position:     raw.Position,
 		CreatedAt:    raw.CreatedAt,
 		UpdatedAt:    raw.UpdatedAt,
@@ -532,12 +538,12 @@ func ValidateNoDuplicateTaskContent(existing []Task, added []string) error {
 
 func ActiveMilestone(plan Plan) (Milestone, bool) {
 	for _, item := range plan.Milestones {
-		if item.Status == MilestoneStatusExecuting {
+		if !item.Archived && item.Status == MilestoneStatusExecuting {
 			return item, true
 		}
 	}
 	for _, item := range plan.Milestones {
-		if item.Status == MilestoneStatusDecomposing {
+		if !item.Archived && item.Status == MilestoneStatusDecomposing {
 			return item, true
 		}
 	}
@@ -556,7 +562,7 @@ func MilestoneTitle(plan Plan, ref string) string {
 func ValidateTaskProgress(items []Task) error {
 	inProgress := 0
 	for _, item := range items {
-		if item.Status == TaskStatusInProgress {
+		if !item.Archived && item.Status == TaskStatusInProgress {
 			inProgress++
 		}
 	}

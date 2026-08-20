@@ -1434,6 +1434,9 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 	if err := s.requireSession(sessionID); err != nil {
 		return planning.Plan{}, err
 	}
+	s.mu.RLock()
+	current := cloneMilestonePlan(s.plan)
+	s.mu.RUnlock()
 	plan := planning.Plan{
 		SessionID:  sessionID,
 		Summary:    summary,
@@ -1441,6 +1444,12 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 		UpdatedAt:  time.Now().UTC(),
 	}
 	plan, _ = planning.NormalizePlanKeys(plan)
+	if err := preserveMilestoneLifecycle(current.Milestones, plan.Milestones); err != nil {
+		return planning.Plan{}, err
+	}
+	if err := planning.ValidateMilestoneProgress(plan.Milestones); err != nil {
+		return planning.Plan{}, err
+	}
 	if err := s.planSrc.SavePlan(ctx, plan); err != nil {
 		return planning.Plan{}, err
 	}
@@ -1454,6 +1463,108 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID id.ID, summary
 	return cloneMilestonePlan(plan), nil
 }
 
+func (s *Session) ArchiveMilestone(ctx context.Context, sessionID id.ID, milestoneKey string, archived bool) (planning.Milestone, error) {
+	if err := s.requireSession(sessionID); err != nil {
+		return planning.Milestone{}, err
+	}
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	if milestoneKey == "" {
+		return planning.Milestone{}, fmt.Errorf("milestone key is required")
+	}
+	s.mu.RLock()
+	plan := cloneMilestonePlan(s.plan)
+	tasks := slices.Clone(s.tasksByKey[milestoneKey])
+	busyChat, busy := s.busyPlanningChatLocked(milestoneKey, "")
+	s.mu.RUnlock()
+	idx := milestoneIndex(plan.Milestones, milestoneKey)
+	if idx < 0 {
+		return planning.Milestone{}, fmt.Errorf("milestone %q not found", milestoneKey)
+	}
+	item := plan.Milestones[idx]
+	if item.Archived == archived {
+		return item, nil
+	}
+	if archived {
+		if item.Status == planning.MilestoneStatusDecomposing || item.Status == planning.MilestoneStatusExecuting {
+			return planning.Milestone{}, fmt.Errorf("milestone %q is %s; finish or stop active work before archiving it", milestoneKey, item.Status.String())
+		}
+		for _, task := range tasks {
+			if !task.Archived && task.Status == planning.TaskStatusInProgress {
+				return planning.Milestone{}, fmt.Errorf("milestone %q has in-progress task %s; finish or stop it before archiving", milestoneKey, planning.TaskKey(task))
+			}
+		}
+		for _, candidate := range plan.Milestones {
+			if !candidate.Archived && planning.MilestoneDependsOnKey(candidate) == milestoneKey {
+				return planning.Milestone{}, fmt.Errorf("milestone %q is still the parent of visible milestone %q; archive or reparent the child first", milestoneKey, planning.MilestoneKey(candidate))
+			}
+		}
+		if busy {
+			return planning.Milestone{}, fmt.Errorf("milestone %q is being used by active chat %s; wait for or stop that chat before archiving", milestoneKey, busyChat)
+		}
+	}
+	plan.Milestones[idx].Archived = archived
+	plan.UpdatedAt = time.Now().UTC()
+	if err := s.planSrc.SavePlan(ctx, plan); err != nil {
+		return planning.Milestone{}, err
+	}
+	s.mu.Lock()
+	s.plan = plan
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Tasks: allTasks, TasksByKey: tasksByKey})
+	return plan.Milestones[idx], nil
+}
+
+func (s *Session) DeleteMilestone(ctx context.Context, sessionID id.ID, milestoneKey string) error {
+	if err := s.requireSession(sessionID); err != nil {
+		return err
+	}
+	milestoneKey = strings.TrimSpace(milestoneKey)
+	if milestoneKey == "" {
+		return fmt.Errorf("milestone key is required")
+	}
+	s.mu.RLock()
+	plan := cloneMilestonePlan(s.plan)
+	tasks := slices.Clone(s.tasksByKey[milestoneKey])
+	busyChat, busy := s.busyPlanningChatLocked(milestoneKey, "")
+	s.mu.RUnlock()
+	idx := milestoneIndex(plan.Milestones, milestoneKey)
+	if idx < 0 {
+		return fmt.Errorf("milestone %q not found", milestoneKey)
+	}
+	if !plan.Milestones[idx].Archived {
+		return fmt.Errorf("archive milestone %q before deleting it", milestoneKey)
+	}
+	if len(tasks) > 0 {
+		return fmt.Errorf("milestone %q still has %d task(s); archive and delete those tasks first", milestoneKey, len(tasks))
+	}
+	for _, candidate := range plan.Milestones {
+		if planning.MilestoneDependsOnKey(candidate) == milestoneKey {
+			return fmt.Errorf("milestone %q is still the parent of milestone %q; delete or reparent the child first", milestoneKey, planning.MilestoneKey(candidate))
+		}
+	}
+	if busy {
+		return fmt.Errorf("milestone %q is being used by active chat %s; wait for or stop that chat before deleting", milestoneKey, busyChat)
+	}
+	plan.Milestones = slices.Delete(plan.Milestones, idx, idx+1)
+	for pos := range plan.Milestones {
+		plan.Milestones[pos].Position = pos
+	}
+	plan.UpdatedAt = time.Now().UTC()
+	if err := s.planSrc.SavePlan(ctx, plan); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.plan = plan
+	delete(s.tasksByKey, milestoneKey)
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: cloneMilestonePlan(plan), Tasks: allTasks, TasksByKey: tasksByKey})
+	return nil
+}
+
 func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
@@ -1461,10 +1572,20 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey st
 	milestoneKey = strings.TrimSpace(milestoneKey)
 	now := time.Now().UTC()
 	s.mu.RLock()
+	milestone, milestoneFound := milestoneByKey(s.plan, milestoneKey)
 	existing := slices.Clone(s.tasksByKey[milestoneKey])
 	position := len(existing)
 	allTasks := flattenTasks(s.tasksByKey)
 	s.mu.RUnlock()
+	if !milestoneFound {
+		return nil, fmt.Errorf("milestone %q not found", milestoneKey)
+	}
+	if milestone.Archived {
+		return nil, fmt.Errorf("milestone %q is archived; restore it before adding tasks", milestoneKey)
+	}
+	if milestone.Status == planning.MilestoneStatusCompleted || milestone.Status == planning.MilestoneStatusCancelled {
+		return nil, fmt.Errorf("milestone %q is %s; reopen it before adding tasks", milestoneKey, milestone.Status.String())
+	}
 	if err := planning.ValidateNoDuplicateTaskContent(existing, contents); err != nil {
 		return nil, err
 	}
@@ -1533,6 +1654,9 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	if !found {
 		return planning.Task{}, fmt.Errorf("task %s not found", taskID)
 	}
+	if item.Archived {
+		return planning.Task{}, fmt.Errorf("task %s is archived; restore it before updating", taskID)
+	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
 		item.Content = content
@@ -1561,6 +1685,88 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	slog.Info("task stored", "session_id", sessionID, "task_id", item.ID, "task_key", item.Key, "milestone_key", ref, "status", item.Status, "note_bytes", len(item.Note))
 	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
 	return item, nil
+}
+
+func (s *Session) ArchiveTask(ctx context.Context, taskKey string, archived bool) (planning.Task, error) {
+	if s == nil {
+		return planning.Task{}, fmt.Errorf("session is required")
+	}
+	taskKey = strings.TrimSpace(taskKey)
+	if taskKey == "" {
+		return planning.Task{}, fmt.Errorf("task key is required")
+	}
+	s.mu.RLock()
+	item, milestoneKey, found := taskByKey(s.tasksByKey, taskKey)
+	busyChat, busy := s.busyPlanningChatLocked(milestoneKey, taskKey)
+	s.mu.RUnlock()
+	if !found {
+		return planning.Task{}, fmt.Errorf("task %s not found", taskKey)
+	}
+	if item.Archived == archived {
+		return item, nil
+	}
+	if archived && item.Status == planning.TaskStatusInProgress {
+		return planning.Task{}, fmt.Errorf("task %s is in_progress; finish or stop it before archiving", taskKey)
+	}
+	if archived && busy {
+		return planning.Task{}, fmt.Errorf("task %s is being used by active chat %s; wait for or stop that chat before archiving", taskKey, busyChat)
+	}
+	item.Archived = archived
+	item.UpdatedAt = time.Now().UTC()
+	if err := s.planSrc.SaveTask(ctx, item); err != nil {
+		return planning.Task{}, err
+	}
+	s.mu.Lock()
+	bucket := slices.Clone(s.tasksByKey[milestoneKey])
+	for idx := range bucket {
+		if planning.TaskKey(bucket[idx]) == taskKey {
+			bucket[idx] = item
+			break
+		}
+	}
+	s.tasksByKey[milestoneKey] = bucket
+	plan := cloneMilestonePlan(s.plan)
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
+	sessionID := s.session.ID
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
+	return item, nil
+}
+
+func (s *Session) DeleteTask(ctx context.Context, taskKey string) error {
+	if s == nil {
+		return fmt.Errorf("session is required")
+	}
+	taskKey = strings.TrimSpace(taskKey)
+	if taskKey == "" {
+		return fmt.Errorf("task key is required")
+	}
+	s.mu.RLock()
+	item, milestoneKey, found := taskByKey(s.tasksByKey, taskKey)
+	busyChat, busy := s.busyPlanningChatLocked(milestoneKey, taskKey)
+	s.mu.RUnlock()
+	if !found {
+		return fmt.Errorf("task %s not found", taskKey)
+	}
+	if !item.Archived {
+		return fmt.Errorf("archive task %s before deleting it", taskKey)
+	}
+	if busy {
+		return fmt.Errorf("task %s is being used by active chat %s; wait for or stop that chat before deleting", taskKey, busyChat)
+	}
+	if err := s.planSrc.DeleteTask(ctx, item.ID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.tasksByKey[milestoneKey] = removeTaskByKey(s.tasksByKey[milestoneKey], taskKey)
+	plan := cloneMilestonePlan(s.plan)
+	allTasks := flattenTasks(s.tasksByKey)
+	tasksByKey := cloneTasksByKey(s.tasksByKey)
+	sessionID := s.session.ID
+	s.mu.Unlock()
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
+	return nil
 }
 
 func (s *Session) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milestoneKey string, status planning.TaskStatus, position int, note string) (planning.Task, error) {
@@ -1594,6 +1800,9 @@ func (s *Session) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milest
 	s.mu.RUnlock()
 	if !found {
 		return planning.Task{}, fmt.Errorf("task %s not found", taskKey)
+	}
+	if item.Archived {
+		return planning.Task{}, fmt.Errorf("task %s is archived; restore it before moving", taskKey)
 	}
 	if milestoneKey == "" {
 		milestoneKey = oldMilestoneKey
@@ -1724,6 +1933,20 @@ func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	return p.session.SetMilestonePlan(ctx, sessionID, current.Summary, current.Milestones)
 }
 
+func (p scopedPlanning) ArchiveMilestone(ctx context.Context, sessionID id.ID, milestoneKey string, archived bool) (planning.Milestone, error) {
+	if assignedMilestoneKey(p.chat) != "" || assignedTaskRef(p.chat) != "" {
+		return planning.Milestone{}, fmt.Errorf("scoped chats cannot archive milestones")
+	}
+	return p.session.ArchiveMilestone(ctx, sessionID, milestoneKey, archived)
+}
+
+func (p scopedPlanning) DeleteMilestone(ctx context.Context, sessionID id.ID, milestoneKey string) error {
+	if assignedMilestoneKey(p.chat) != "" || assignedTaskRef(p.chat) != "" {
+		return fmt.Errorf("scoped chats cannot delete milestones")
+	}
+	return p.session.DeleteMilestone(ctx, sessionID, milestoneKey)
+}
+
 func (p scopedPlanning) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	if assignedTaskRef(p.chat) != "" {
 		return nil, fmt.Errorf("chat is scoped to task %q", assignedTaskRef(p.chat))
@@ -1760,6 +1983,20 @@ func (p scopedPlanning) UpdateTask(ctx context.Context, taskID string, status pl
 		return planning.Task{}, err
 	}
 	return updated, nil
+}
+
+func (p scopedPlanning) ArchiveTask(ctx context.Context, taskKey string, archived bool) (planning.Task, error) {
+	if assignedMilestoneKey(p.chat) != "" || assignedTaskRef(p.chat) != "" {
+		return planning.Task{}, fmt.Errorf("scoped chats cannot archive tasks")
+	}
+	return p.session.ArchiveTask(ctx, taskKey, archived)
+}
+
+func (p scopedPlanning) DeleteTask(ctx context.Context, taskKey string) error {
+	if assignedMilestoneKey(p.chat) != "" || assignedTaskRef(p.chat) != "" {
+		return fmt.Errorf("scoped chats cannot delete tasks")
+	}
+	return p.session.DeleteTask(ctx, taskKey)
 }
 
 func (p scopedPlanning) ListTasks(ctx context.Context, sessionID id.ID, milestoneKey string) ([]planning.Task, error) {
@@ -1958,6 +2195,65 @@ func cloneMilestones(src []planning.Milestone) []planning.Milestone {
 		}
 	}
 	return out
+}
+
+func preserveMilestoneLifecycle(current, next []planning.Milestone) error {
+	nextByKey := make(map[string]*planning.Milestone, len(next))
+	for idx := range next {
+		nextByKey[planning.MilestoneKey(next[idx])] = &next[idx]
+	}
+	for _, existing := range current {
+		key := planning.MilestoneKey(existing)
+		candidate := nextByKey[key]
+		if candidate == nil {
+			return fmt.Errorf("milestone %q cannot be removed by replacing the plan; archive and delete it explicitly", key)
+		}
+		if candidate.Archived != existing.Archived {
+			return fmt.Errorf("milestone %q archive state cannot be changed by replacing the plan; use milestone_archive", key)
+		}
+		if candidate.ID == "" {
+			candidate.ID = existing.ID
+		}
+	}
+	return nil
+}
+
+func milestoneIndex(items []planning.Milestone, key string) int {
+	for idx := range items {
+		if planning.MilestoneKey(items[idx]) == key {
+			return idx
+		}
+	}
+	return -1
+}
+
+func taskByKey(tasksByKey map[string][]planning.Task, taskKey string) (planning.Task, string, bool) {
+	for milestoneKey, tasks := range tasksByKey {
+		for _, task := range tasks {
+			if planning.TaskKey(task) == taskKey {
+				return task, milestoneKey, true
+			}
+		}
+	}
+	return planning.Task{}, "", false
+}
+
+func (s *Session) busyPlanningChatLocked(milestoneKey, taskKey string) (id.ID, bool) {
+	for _, chatRecord := range s.chats {
+		if chatRecord.Archived {
+			continue
+		}
+		matchesTask := taskKey != "" && strings.TrimSpace(chatRecord.AssignedTaskRef) == taskKey
+		matchesMilestone := taskKey == "" && assignedMilestoneKey(chatRecord) == milestoneKey
+		if !matchesTask && !matchesMilestone {
+			continue
+		}
+		status := s.chatStatusLocked(chatRecord.ID)
+		if status.Busy || status.QueuedInputs > 0 || status.PendingApprovals > 0 {
+			return chatRecord.ID, true
+		}
+	}
+	return "", false
 }
 
 func cloneTasksByKey(src map[string][]planning.Task) map[string][]planning.Task {

@@ -33,6 +33,45 @@ func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID id.ID, s
 	return plan, nil
 }
 
+func (c SessionControl) ArchiveMilestone(ctx context.Context, sessionID id.ID, milestoneKey string, archived bool) (planning.Milestone, error) {
+	plan, err := c.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return planning.Milestone{}, err
+	}
+	for idx := range plan.Milestones {
+		if planning.MilestoneKey(plan.Milestones[idx]) != milestoneKey {
+			continue
+		}
+		plan.Milestones[idx].Archived = archived
+		if err := modeltest.PutPlan(ctx, c.Store, plan); err != nil {
+			return planning.Milestone{}, err
+		}
+		return plan.Milestones[idx], nil
+	}
+	return planning.Milestone{}, fmt.Errorf("milestone %q not found", milestoneKey)
+}
+
+func (c SessionControl) DeleteMilestone(ctx context.Context, sessionID id.ID, milestoneKey string) error {
+	plan, err := c.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	found := false
+	next := make([]planning.Milestone, 0, len(plan.Milestones))
+	for _, item := range plan.Milestones {
+		if planning.MilestoneKey(item) == milestoneKey {
+			found = true
+			continue
+		}
+		next = append(next, item)
+	}
+	if !found {
+		return fmt.Errorf("milestone %q not found", milestoneKey)
+	}
+	plan.Milestones = next
+	return modeltest.PutPlan(ctx, c.Store, plan)
+}
+
 func (c SessionControl) AddTasks(ctx context.Context, sessionID id.ID, ref string, items []string) ([]planning.Task, error) {
 	now := time.Now().UTC()
 	milestoneKey := strings.TrimSpace(ref)
@@ -79,6 +118,27 @@ func (c SessionControl) UpdateTask(ctx context.Context, key string, status plann
 		return planning.Task{}, err
 	}
 	return item, nil
+}
+
+func (c SessionControl) ArchiveTask(ctx context.Context, key string, archived bool) (planning.Task, error) {
+	item, err := modeltest.GetTask(ctx, c.Store, id.ID(key))
+	if err != nil {
+		return planning.Task{}, err
+	}
+	item.Archived = archived
+	item.UpdatedAt = time.Now().UTC()
+	if err := modeltest.PutTask(ctx, c.Store, item); err != nil {
+		return planning.Task{}, err
+	}
+	return item, nil
+}
+
+func (c SessionControl) DeleteTask(ctx context.Context, key string) error {
+	item, err := modeltest.GetTask(ctx, c.Store, id.ID(key))
+	if err != nil {
+		return err
+	}
+	return modeltest.TaskCollection(c.Store).Delete(ctx, item.ID)
 }
 
 func (c SessionControl) ListTasks(ctx context.Context, sessionID id.ID, ref string) ([]planning.Task, error) {
