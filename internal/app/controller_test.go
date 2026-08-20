@@ -722,6 +722,70 @@ func TestValidateChatModelAvailableReturnsRecoverableErrorForRemovedModel(t *tes
 	}
 }
 
+func TestMissingCustomModelBackingIsVisibleButNeverSelectable(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slots", "/props":
+			http.NotFound(w, r)
+		case "/models", "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "missing alias"
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:       "test",
+			ModelID:          "missing alias",
+			SourceProviderID: "test",
+			SourceModelID:    "removed-provider-model",
+		})
+	})
+
+	options, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	var missingOption *ModelOption
+	for idx := range options {
+		if options[idx].ProviderID == "test" && options[idx].ModelID == "missing alias" {
+			missingOption = &options[idx]
+			break
+		}
+	}
+	if missingOption == nil || !missingOption.Custom || missingOption.BackingDetected {
+		t.Fatalf("expected settings catalog to retain missing custom model, got %#v", options)
+	}
+
+	backends := ctrl.ChatBackends(context.Background())
+	var koder ChatBackendState
+	for _, backend := range backends {
+		if backend.ID == domain.ChatBackendKoder {
+			koder = backend
+			break
+		}
+	}
+	if len(koder.Models) != 1 || koder.Models[0].ID != "live-model" || !koder.Models[0].Default {
+		t.Fatalf("expected only live fallback model in chat picker, got models=%#v catalog=%#v detail=%q", koder.Models, options, koder.Detail)
+	}
+
+	err = ctrl.SetModelForSelection(context.Background(), controllerSelection(ctrl), "test", "missing alias")
+	var unavailable *ModelUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("expected missing custom backing to be rejected as unavailable, got %v", err)
+	}
+	if _, err := ctrl.SetDefaultModel(context.Background(), "test", "missing alias"); err == nil || !strings.Contains(err.Error(), "not currently available") {
+		t.Fatalf("expected missing custom backing to be rejected as default, got %v", err)
+	}
+}
+
 func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
@@ -1323,9 +1387,21 @@ func TestControllerResetPromptRestoresEmbeddedDefault(t *testing.T) {
 }
 
 func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slots", "/props":
+			http.NotFound(w, r)
+		case "/models", "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {BaseURL: "https://example.invalid/v1"},
+			"test": {BaseURL: modelServer.URL + "/v1"},
 		}
 		cfg.SetModelConfig(config.ModelConfig{
 			ProviderID:       "test",

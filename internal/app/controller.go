@@ -538,10 +538,7 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 		if models, err := c.discoverModelOptions(ctx, cfg, "", ""); err != nil {
 			koder.Detail = "Model discovery: " + err.Error()
 		} else {
-			for _, model := range models {
-				if !model.SupportsChat {
-					continue
-				}
+			for _, model := range selectableChatModelOptions(models) {
 				koder.Models = append(koder.Models, ChatBackendModelOption{
 					ProviderID: model.ProviderID, ID: model.ModelID,
 					Name: model.ProviderLabel + " / " + model.ModelID, Default: model.Default,
@@ -627,7 +624,7 @@ func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord 
 		return nil
 	}
 	for _, option := range options {
-		if option.ProviderID == providerID && option.ModelID == modelID && option.SupportsChat && (option.Detected || option.BackingDetected) {
+		if option.ProviderID == providerID && option.ModelID == modelID && selectableChatModel(option) {
 			return nil
 		}
 	}

@@ -30,6 +30,58 @@ func hasStatusEvent(events []domain.Event, text string) bool {
 	return false
 }
 
+func TestCompleteModelRequestSendsBackingModelIDToProvider(t *testing.T) {
+	t.Parallel()
+
+	var receivedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		receivedModel = request.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:       "test",
+		ModelID:          "friendly alias",
+		SourceProviderID: "test",
+		SourceModelID:    "provider-model",
+	})
+	runtime := New(Config{Config: cfg})
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := domain.Session{ID: "session-test"}
+	chat := domain.Chat{ID: "chat-test", SessionID: session.ID, ProviderID: "test", ModelID: "friendly alias"}
+	response, err := runtime.CompleteModelRequest(context.Background(), session, chat, client, nil, provider.ChatRequest{
+		Model:    "friendly alias",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hello"}},
+	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
+	if err != nil {
+		t.Fatalf("complete model request: %v", err)
+	}
+	if response.Text != "ok" {
+		t.Fatalf("expected provider response, got %#v", response)
+	}
+	if receivedModel != "provider-model" {
+		t.Fatalf("provider received model %q, want backing model %q", receivedModel, "provider-model")
+	}
+}
+
 func TestCavemanThinkingHonorsMinimumTokenSetting(t *testing.T) {
 	t.Parallel()
 

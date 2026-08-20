@@ -28,6 +28,17 @@ func (r *Runtime) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, s
 }
 
 func (r *Runtime) CompleteModelRequest(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, assistantItem domain.TimelineItem) (chatpkg.ModelResponse, error) {
+	model, err := r.settings.Model(chat)
+	if err != nil {
+		return chatpkg.ModelResponse{}, err
+	}
+	if strings.TrimSpace(model.SourceModelID) == "" {
+		return chatpkg.ModelResponse{}, fmt.Errorf("chat %s resolved to an empty provider model", chat.ID)
+	}
+	// Requests can outlive the UI action that selected their chat model. Resolve
+	// the provider-facing ID again at the transport boundary so a configured
+	// display alias can never leak into an OpenAI-compatible request.
+	req.Model = model.SourceModelID
 	resp, streamed, cavemanJob, err := r.chatWithRetry(ctx, session, chat, client, out, req, assistantItem)
 	if err != nil {
 		return chatpkg.ModelResponse{}, err

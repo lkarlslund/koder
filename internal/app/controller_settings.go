@@ -702,8 +702,8 @@ func (c *Controller) SetDefaultModel(ctx context.Context, providerID, modelID st
 	found := false
 	for _, option := range options {
 		if option.ProviderID == providerID && option.ModelID == modelID {
-			if !option.SupportsChat {
-				return PreferencesState{}, fmt.Errorf("model %s/%s does not support chat completions", providerID, modelID)
+			if !selectableChatModel(option) {
+				return PreferencesState{}, fmt.Errorf("model %s/%s is not currently available for chat", providerID, modelID)
 			}
 			found = true
 			break
@@ -872,8 +872,8 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 		if option.ProviderID != providerID || option.ModelID != modelID {
 			continue
 		}
-		if !option.SupportsChat {
-			return fmt.Errorf("model %s/%s does not support chat completions", providerID, modelID)
+		if !selectableChatModel(option) {
+			return &ModelUnavailableError{ProviderID: providerID, ModelID: modelID}
 		}
 		found = true
 		break
@@ -1266,6 +1266,7 @@ func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPrefer
 }
 
 func repairPreferencesDefaultModel(state *PreferencesState, liveModels []ModelOption) {
+	liveModels = selectableChatModelOptions(liveModels)
 	if state == nil || len(liveModels) == 0 {
 		return
 	}
@@ -1279,6 +1280,30 @@ func repairPreferencesDefaultModel(state *PreferencesState, liveModels []ModelOp
 	state.General.DefaultModel = first.ModelID
 	state.Providers.DefaultProvider = first.ProviderID
 	state.Providers.DefaultModel = first.ModelID
+}
+
+// selectableChatModel is the single availability rule for model choices that
+// can start a Koder chat turn. Configured aliases remain visible in model
+// settings even when their source disappears, but interactive clients must not
+// offer or accept them until their detected backing model returns.
+func selectableChatModel(option ModelOption) bool {
+	return option.SupportsChat && (option.Detected || option.BackingDetected)
+}
+
+func selectableChatModelOptions(options []ModelOption) []ModelOption {
+	out := make([]ModelOption, 0, len(options))
+	defaultFound := false
+	for _, option := range options {
+		if !selectableChatModel(option) {
+			continue
+		}
+		defaultFound = defaultFound || option.Default
+		out = append(out, option)
+	}
+	if !defaultFound && len(out) > 0 {
+		out[0].Default = true
+	}
+	return out
 }
 
 func ensureModelOption(options []ModelOption, cfg config.Config, providerID, modelID string) []ModelOption {
