@@ -250,6 +250,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.servePhoneDevice(w, r)
 		return
 	}
+	if r.URL.Path == "/voice/v1/readiness" {
+		h.serveReadiness(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

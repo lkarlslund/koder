@@ -694,6 +694,75 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	}
 }
 
+func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
+	backend := &fakeBackend{}
+	handler := NewHandler(backend, "secret")
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx := context.Background()
+	header := http.Header{"Authorization": []string{"Bearer secret"}}
+
+	conversation, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1?call_id=active", &websocket.DialOptions{HTTPHeader: header})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conversation.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, conversation, "ready")
+
+	if _, response, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1/readiness", nil); err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated readiness response=%v err=%v", response, err)
+	}
+	readiness, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1/readiness", &websocket.DialOptions{HTTPHeader: header})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = readiness.Close(websocket.StatusNormalClosure, "") }()
+	ready := readType(t, ctx, readiness, "readiness_ready")
+	if ready.AudioConfig == nil {
+		t.Fatal("readiness did not advertise audio formats")
+	}
+	format := ready.AudioConfig.Input
+	if err := writeClientFrame(ctx, readiness, clientFrame{Type: "audio_start", Protocol: protocolVersion, UtteranceID: "check-1", AudioFormat: &format, Languages: []string{"en", "da"}}); err != nil {
+		t.Fatal(err)
+	}
+	if frame := readType(t, ctx, readiness, "state"); frame.State != "recording" {
+		t.Fatalf("recording state = %#v", frame)
+	}
+	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, PCM: []byte{7, 0, 8, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readiness.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeClientFrame(ctx, readiness, clientFrame{Type: "audio_commit", Protocol: protocolVersion, UtteranceID: "check-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if frame := readType(t, ctx, readiness, "state"); frame.State != "transcribing" {
+		t.Fatalf("transcribing state = %#v", frame)
+	}
+	transcript := readType(t, ctx, readiness, "transcript")
+	if transcript.Transcript != "check the laptop" || !slices.Equal(backend.languages, []string{"da", "en"}) {
+		t.Fatalf("transcript=%#v languages=%v", transcript, backend.languages)
+	}
+	if frame := readType(t, ctx, readiness, "state"); frame.State != "speaking" {
+		t.Fatalf("speaking state = %#v", frame)
+	}
+	readType(t, ctx, readiness, "tts_start")
+	output := readAudioFrame(t, ctx, readiness)
+	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.PCM) != 4 {
+		t.Fatalf("readiness output = %#v", output)
+	}
+	readType(t, ctx, readiness, "tts_end")
+	complete := readType(t, ctx, readiness, "readiness_complete")
+	if complete.Transcript != "check the laptop" || complete.State != "complete" || backend.spoken != readinessReply {
+		t.Fatalf("complete=%#v spoken=%q", complete, backend.spoken)
+	}
+	if lease, ok := handler.Lease.Snapshot(); !ok || lease.CallID != "active" {
+		t.Fatalf("readiness disturbed active conversation lease: %#v ok=%v", lease, ok)
+	}
+}
+
 func TestHandlerRejectsConcurrentCalls(t *testing.T) {
 	server := httptest.NewServer(NewHandler(&fakeBackend{}, ""))
 	defer server.Close()
