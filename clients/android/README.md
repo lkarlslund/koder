@@ -78,6 +78,12 @@ test.
 adb install -r ../../internal/androidupdate/bundle/koder.apk
 ```
 
+Koder and the app share an automatic `rNNNN` build identity derived from the
+repository's total commit count. Local builds append `-local`, plus `-dirty`
+when they include tracked changes. The exact commit remains available as
+diagnostic metadata. The internal Android version code is tracked separately
+so updates stay monotonic; no application version needs to be chosen by hand.
+
 This uses the ignored, stable local-development signing key and the
 `com.lkarlslund.koder.dev` app ID. Back up `.signing/local-development.jks`
 and its properties file: a lost signing key cannot update an installed app.

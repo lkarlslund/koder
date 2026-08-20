@@ -9,6 +9,8 @@ CACHE_DIR="$ANDROID_DIR/.update-cache/$CHANNEL"
 SIGNING_DIR="$ANDROID_DIR/.signing"
 BUNDLE_DIR="$ROOT_DIR/internal/androidupdate/bundle"
 
+BUILD_NAME="$("$ROOT_DIR/scripts/build-number" local)"
+
 case "$CHANNEL" in
   local|release) ;;
   *) echo "unsupported Android update channel: $CHANNEL" >&2; exit 2 ;;
@@ -72,6 +74,7 @@ source_fingerprint() {
       "$ANDROID_DIR/gradle.properties" \
       "$ANDROID_DIR/gradlew" \
       "$ANDROID_DIR/gradlew.bat" \
+      "$ROOT_DIR/scripts/build-number" \
       "$ROOT_DIR/scripts/prepare-embedded-android"
   } | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
 }
@@ -111,7 +114,7 @@ if [[ "$CHANNEL" == "local" ]]; then
   current="$(( $(date -u +%s) / 60 ))"
   (( current <= previous )) && current="$((previous + 1))"
   VERSION_CODE="$current"
-  VERSION_NAME="0.1.0-local.$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
+  VERSION_NAME="$BUILD_NAME"
   GRADLE_TASK=assembleDebug
   APK_PATH="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
   SIGNING_PROPERTY=koderLocalSigningProperties

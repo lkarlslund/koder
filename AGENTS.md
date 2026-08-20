@@ -21,3 +21,12 @@
 ## Debug API
 
 - The running browser server exposes operational debug endpoints under `/debug`; see `docs/debug-api.md` before using or changing them.
+
+## Build Versioning
+
+- `scripts/build-number` derives the shared Koder and Android build identity from
+  the repository's total commit count, formatted as `rNNNN`. Do not maintain a
+  separate semantic version by hand.
+- Clean local builds append `-local`; builds with tracked changes append
+  `-local-dirty`. Android's internal `versionCode` is independently monotonic
+  so existing development installations can always upgrade.

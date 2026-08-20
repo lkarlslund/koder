@@ -67,8 +67,15 @@ plugins {
 val sileroVadCommit = "806dcba3f0b5d95282d0889a074954a2f8c6397b"
 val sileroVadSHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
 val sileroVadAssets = layout.buildDirectory.dir("generated/sileroVadAssets")
-val koderVersionCode = providers.gradleProperty("koderVersionCode").getOrElse("1").toInt()
-val koderVersionName = providers.gradleProperty("koderVersionName").getOrElse("0.1.0-dev")
+val koderBuildName = providers.exec {
+    commandLine(rootProject.file("../../scripts/build-number"), "local")
+}.standardOutput.asText.map { it.trim() }
+val koderVersionCode = providers.gradleProperty("koderVersionCode")
+    .orElse(koderBuildName.map { it.substringAfter('r').substringBefore('-') })
+    .get().toInt()
+val koderVersionName = providers.gradleProperty("koderVersionName")
+    .orElse(koderBuildName)
+    .get()
 val koderTargetAbis = providers.gradleProperty("koderTargetAbis").orNull
     ?.split(',')
     ?.map(String::trim)
