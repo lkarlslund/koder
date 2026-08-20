@@ -2455,6 +2455,11 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := manager.DisconnectServer("docs"); err != nil {
+			t.Errorf("disconnect docs server: %v", err)
+		}
+	}()
 	if err := manager.ConnectAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
