@@ -275,6 +275,8 @@ func createRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 		ParentChatID:      req.ParentID,
 		Title:             strings.TrimSpace(req.Title),
 		WorkflowRole:      req.Role,
+		Backend:           domain.ChatBackendKoder,
+		InteractionMode:   domain.InteractionModeText,
 		ProviderID:        strings.TrimSpace(req.ProviderID),
 		ModelID:           strings.TrimSpace(req.ModelID),
 		PermissionProfile: strings.TrimSpace(req.PermissionProfile),
@@ -305,6 +307,7 @@ func createRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 			}
 		}
 	}
+	chatRecord = domain.NormalizeChatDimensions(chatRecord)
 	if err := putChat(ctx, st, chatRecord); err != nil {
 		return domain.Chat{}, err
 	}
@@ -355,6 +358,8 @@ func forkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sour
 		ParentChatID:          &parentID,
 		Title:                 strings.TrimSpace(title),
 		WorkflowRole:          source.WorkflowRole,
+		Backend:               source.EffectiveBackend(),
+		InteractionMode:       source.EffectiveInteractionMode(),
 		ProviderID:            strings.TrimSpace(source.ProviderID),
 		ModelID:               strings.TrimSpace(source.ModelID),
 		PermissionProfile:     source.PermissionProfile,
@@ -369,6 +374,7 @@ func forkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sour
 	if chatRecord.Title == "" {
 		chatRecord.Title = "Fork"
 	}
+	chatRecord = domain.NormalizeChatDimensions(chatRecord)
 	if err := putChat(ctx, st, chatRecord); err != nil {
 		return domain.Chat{}, err
 	}
@@ -427,6 +433,7 @@ func putChat(ctx context.Context, st *store.Store, chatRecord domain.Chat) error
 	if chatRecord.SessionID == "" {
 		return fmt.Errorf("put chat: session id is required")
 	}
+	chatRecord = domain.NormalizeChatDimensions(chatRecord)
 	return chatCollection(st).Put(ctx, chatRecord)
 }
 

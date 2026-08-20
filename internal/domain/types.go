@@ -368,12 +368,36 @@ func (r WorkflowRole) String() string {
 	return string(r)
 }
 
+// ChatBackend identifies the implementation that processes turns for a chat.
+// It is independent from the chat's workflow role and interaction mode.
+type ChatBackend string
+
+const (
+	ChatBackendKoder ChatBackend = "koder"
+	ChatBackendCodex ChatBackend = "codex"
+)
+
+func (b ChatBackend) String() string { return string(b) }
+
+// InteractionMode describes how a chat is presented to and controlled by the
+// user. Voice remains a durable chat; only its input/output adaptation differs.
+type InteractionMode string
+
+const (
+	InteractionModeText  InteractionMode = "text"
+	InteractionModeVoice InteractionMode = "voice"
+)
+
+func (m InteractionMode) String() string { return string(m) }
+
 type Chat struct {
 	ID                     ID
 	SessionID              ID
 	ParentChatID           *ID
 	Title                  string
 	WorkflowRole           WorkflowRole
+	Backend                ChatBackend
+	InteractionMode        InteractionMode
 	ProviderID             string
 	ModelID                string
 	PermissionProfile      string
@@ -395,6 +419,46 @@ type Chat struct {
 	Activity               ChatActivity
 }
 
+// EffectiveBackend returns the backend used by old and new chat records.
+func (c Chat) EffectiveBackend() ChatBackend {
+	if c.Backend == "" {
+		return ChatBackendKoder
+	}
+	return c.Backend
+}
+
+// EffectiveInteractionMode preserves compatibility with legacy voice-role
+// records while new records store voice independently from workflow role.
+func (c Chat) EffectiveInteractionMode() InteractionMode {
+	if c.InteractionMode != "" {
+		return c.InteractionMode
+	}
+	if c.WorkflowRole == WorkflowRoleVoice {
+		return InteractionModeVoice
+	}
+	return InteractionModeText
+}
+
+// EffectiveWorkflowRole maps the retired composite voice role to its actual
+// orchestration role. New records should store this normalized value directly.
+func (c Chat) EffectiveWorkflowRole() WorkflowRole {
+	if c.WorkflowRole == WorkflowRoleVoice {
+		return WorkflowRoleOrchestrator
+	}
+	if c.WorkflowRole == "" {
+		return WorkflowRoleGeneral
+	}
+	return c.WorkflowRole
+}
+
+// NormalizeChatDimensions fills compatibility defaults before persistence.
+func NormalizeChatDimensions(c Chat) Chat {
+	c.Backend = c.EffectiveBackend()
+	c.InteractionMode = c.EffectiveInteractionMode()
+	c.WorkflowRole = c.EffectiveWorkflowRole()
+	return c
+}
+
 // ChatActivity is durable model-authored work context. It complements, but
 // never replaces, the runtime execution state of a chat.
 type ChatActivity struct {
@@ -412,6 +476,8 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		ParentChatID           *ID
 		Title                  string
 		WorkflowRole           WorkflowRole
+		Backend                ChatBackend
+		InteractionMode        InteractionMode
 		ProviderID             string
 		ModelID                string
 		PermissionProfile      string
@@ -446,12 +512,29 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 	if assignedTaskBucketKey == "" {
 		assignedTaskBucketKey = raw.AssignedTaskBucketRef
 	}
+	role := raw.WorkflowRole
+	backend := raw.Backend
+	interactionMode := raw.InteractionMode
+	if backend == "" {
+		backend = ChatBackendKoder
+	}
+	if interactionMode == "" {
+		interactionMode = InteractionModeText
+	}
+	// Voice used to be encoded as a workflow role. Keep old records readable
+	// while normalizing the in-memory representation to orthogonal dimensions.
+	if role == WorkflowRoleVoice {
+		role = WorkflowRoleOrchestrator
+		interactionMode = InteractionModeVoice
+	}
 	*c = Chat{
 		ID:                     raw.ID,
 		SessionID:              raw.SessionID,
 		ParentChatID:           raw.ParentChatID,
 		Title:                  raw.Title,
-		WorkflowRole:           raw.WorkflowRole,
+		WorkflowRole:           role,
+		Backend:                backend,
+		InteractionMode:        interactionMode,
 		ProviderID:             raw.ProviderID,
 		ModelID:                raw.ModelID,
 		PermissionProfile:      raw.PermissionProfile,
