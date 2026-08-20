@@ -105,24 +105,31 @@ type ChatSidebarStatus struct {
 
 // ModelOption is a selectable provider/model pair exposed to web clients.
 type ModelOption struct {
-	ProviderID       string `json:"provider_id"`
-	ProviderLabel    string `json:"provider_label"`
-	ModelID          string `json:"model_id"`
-	SourceProviderID string `json:"source_provider_id,omitempty"`
-	SourceModelID    string `json:"source_model_id,omitempty"`
-	OwnedBy          string `json:"owned_by,omitempty"`
-	ContextWindow    int    `json:"context_window,omitempty"`
-	MaxContextWindow int    `json:"max_context_window,omitempty"`
-	MaxOutputTokens  int    `json:"max_output_tokens,omitempty"`
-	MetadataSource   string `json:"metadata_source,omitempty"`
-	SupportsChat     bool   `json:"supports_chat"`
-	SupportsTTS      bool   `json:"supports_tts"`
-	Detected         bool   `json:"detected"`
-	Custom           bool   `json:"custom"`
-	BackingDetected  bool   `json:"backing_detected"`
-	Editable         bool   `json:"editable"`
-	Current          bool   `json:"current"`
-	Default          bool   `json:"default"`
+	ProviderID        string `json:"provider_id"`
+	ProviderLabel     string `json:"provider_label"`
+	ModelID           string `json:"model_id"`
+	SourceProviderID  string `json:"source_provider_id,omitempty"`
+	SourceModelID     string `json:"source_model_id,omitempty"`
+	OwnedBy           string `json:"owned_by,omitempty"`
+	ContextWindow     int    `json:"context_window,omitempty"`
+	MaxContextWindow  int    `json:"max_context_window,omitempty"`
+	MaxOutputTokens   int    `json:"max_output_tokens,omitempty"`
+	MetadataSource    string `json:"metadata_source,omitempty"`
+	SupportsChat      bool   `json:"supports_chat"`
+	SupportsTTS       bool   `json:"supports_tts"`
+	SupportsTools     bool   `json:"supports_tools"`
+	SupportsImages    bool   `json:"supports_images"`
+	SupportsPDFs      bool   `json:"supports_pdfs"`
+	SupportsJSON      bool   `json:"supports_json"`
+	SupportsReasoning bool   `json:"supports_reasoning"`
+	CapabilitiesKnown bool   `json:"capabilities_known"`
+	CapabilitySource  string `json:"capability_source,omitempty"`
+	Detected          bool   `json:"detected"`
+	Custom            bool   `json:"custom"`
+	BackingDetected   bool   `json:"backing_detected"`
+	Editable          bool   `json:"editable"`
+	Current           bool   `json:"current"`
+	Default           bool   `json:"default"`
 }
 
 // ModelInfo describes the active model capabilities shown by web clients.

@@ -1039,7 +1039,7 @@
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
-        showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
+		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
@@ -4634,6 +4634,7 @@
         modelPickerModels() {
           const models = this.modelOptions || [];
           const target = this.modelPickerTarget;
+		  if (target?.kind === 'custom') return models.filter(model => model.detected && !model.custom);
           if (target?.kind === 'tts') {
             const current = this.modelPickerCurrentValue();
             return models.filter(model => model.supports_tts || this.modelOptionValue(model) === current);
@@ -4648,6 +4649,7 @@
         applyModelPickerSelection(model) {
           if (!model || !this.modelPickerTarget) return;
           const value = this.modelOptionValue(model);
+		  if (this.modelPickerTarget.kind === 'custom') { this.createCustomModelFromDetected(model); return; }
           if (this.modelPickerTarget.kind === 'default') this.setDefaultModelValue(value);
           if (this.modelPickerTarget.kind === 'tts') this.setTTSModelValue(value);
           if (this.modelPickerTarget.kind === 'compaction') this.setCompactionModelValue(value);
@@ -5255,8 +5257,8 @@
         },
         closeSettingsDialog() {
           if (this.settingsDirty() && !confirm('Discard unsaved settings changes?')) return;
-          this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
-          this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.reportClientStateSoon();
+		  this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
+		  this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.reportClientStateSoon();
         },
         setSettingsState(state) {
           this.settings = state || {};
@@ -5632,7 +5634,7 @@
         },
         settingsListRows(kind) {
           if (kind === 'providers') return this.providerRows();
-          if (kind === 'models') return this.settings?.model_configs || [];
+		  if (kind === 'models') return this.filteredSettingsModelRows();
           if (kind === 'mcp') return this.settings?.mcp_servers || [];
           return [];
         },
@@ -5644,7 +5646,13 @@
         },
         settingsItemSubtitle(kind, item) {
           if (kind === 'providers') return (item.id || '-') + (item.base_url ? ' / ' + item.base_url : '');
-          if (kind === 'models') return (item.provider_id || '-') + ' -> ' + ((item.source_provider_id || item.provider_id || '-') + ' / ' + (item.source_model_id || '-')) + ' / ' + (item.context_window || 32768) + ' context' + (item.thinking_mode && item.thinking_mode !== 'auto' ? ' / thinking ' + item.thinking_mode : '');
+		  if (kind === 'models') {
+			const parts = [item.provider_label || item.provider_id || '-'];
+			if (item.owned_by) parts.push(item.owned_by);
+			if (item.context_window) parts.push(this.formatTokens(item.context_window) + ' context');
+			if (item.custom && item.source_model_id) parts.push('uses ' + (item.source_provider_id || item.provider_id || '-') + ' / ' + item.source_model_id);
+			return parts.join(' · ');
+		  }
           if (kind === 'mcp') return (item.id || '-') + (item.url ? ' / ' + item.url : '');
           return '';
         },
@@ -5653,8 +5661,9 @@
           if (kind === 'providers' && item.default) badges.push('default');
           if (kind === 'providers') badges.push(this.promptProgressBadge(item));
 		  if (kind === 'providers') badges.push(...this.providerOfferingBadges(item.id));
-          if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
-          if (kind === 'models') badges.push('custom');
+		  if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
+		  if (kind === 'models') badges.push(item.custom ? 'custom' : 'detected');
+		  if (kind === 'models') badges.push(...this.modelCapabilityBadges(item));
           if (kind === 'models' && item.backing_detected === false) badges.push('source missing');
           if (kind === 'models') badges.push(...this.modelUsageBadges(item.provider_id, item.model_id).filter(label => label !== 'default'));
           if (kind === 'models') badges.push(this.providerHealthBadge(item.provider_id));
@@ -5675,7 +5684,7 @@
         },
         editSettingsItem(kind, id) {
           if (kind === 'providers') { this.editProvider(id); return; }
-          if (kind === 'models') { this.editModelConfig(id); return; }
+		  if (kind === 'models') { this.openSettingsModel(id); return; }
           if (kind === 'mcp') this.editMCPServer(id);
         },
         addSettingsItem(kind) {
@@ -5688,7 +5697,87 @@
           if (kind === 'models') { this.deleteModelConfig(id); return; }
           if (kind === 'mcp') this.deleteMCPServer(id);
         },
-        modelConfigRows() { return this.settings?.model_configs || []; },
+		modelConfigRows() { return this.settings?.model_configs || []; },
+		settingsModelRows() {
+		  const options = Array.isArray(this.settings?.models) ? this.settings.models : [];
+		  const rows = new Map();
+		  for (const option of options) {
+			if (option?.detected && !option.custom) rows.set(this.modelOptionValue(option), Object.assign({}, option, {custom: false, editable: false}));
+		  }
+		  for (const config of this.modelConfigRows()) {
+			const sourceProviderID = config.source_provider_id || config.provider_id || '';
+			const sourceModelID = config.source_model_id || '';
+			const source = options.find(option => !option.custom && option.provider_id === sourceProviderID && option.model_id === sourceModelID) || {};
+			const provider = this.providerRows().find(item => item.id === config.provider_id) || {};
+			const row = Object.assign({}, source, config, {
+			  provider_id: config.provider_id || '',
+			  provider_label: provider.name || config.provider_id || '',
+			  model_id: config.model_id || '',
+			  source_provider_id: sourceProviderID,
+			  source_model_id: sourceModelID,
+			  context_window: Number(config.context_window || source.context_window || 32768),
+			  custom: true,
+			  detected: false,
+			  editable: true,
+			  backing_detected: !!source.model_id,
+			});
+			rows.set(this.modelOptionValue(row), row);
+		  }
+		  return Array.from(rows.values()).sort((a, b) => {
+			const provider = String(a.provider_label || a.provider_id || '').localeCompare(String(b.provider_label || b.provider_id || ''));
+			if (provider) return provider;
+			if (!!a.custom !== !!b.custom) return a.custom ? -1 : 1;
+			return String(a.model_id || '').localeCompare(String(b.model_id || ''));
+		  });
+		},
+		settingsModelCountSummary() {
+		  const rows = this.settingsModelRows();
+		  const custom = rows.filter(item => item.custom).length;
+		  return rows.length + ' available' + (custom ? ' · ' + custom + ' custom' : '');
+		},
+		filteredSettingsModelRows() {
+		  const query = String(this.settingsModelQuery || '').trim().toLowerCase();
+		  const rows = this.settingsModelRows();
+		  if (!query) return rows;
+		  return rows.filter(model => [model.provider_id, model.provider_label, model.model_id, model.source_provider_id, model.source_model_id, model.owned_by, ...this.modelCapabilityBadges(model)].filter(Boolean).join(' ').toLowerCase().includes(query));
+		},
+		modelCapabilityBadges(model) {
+		  const badges = [];
+		  if (model?.supports_chat !== false) badges.push('Chat');
+		  if (model?.supports_tools) badges.push('Tools');
+		  if (model?.supports_images) badges.push('Vision');
+		  if (model?.supports_pdfs) badges.push('PDF');
+		  if (model?.supports_json) badges.push('JSON');
+		  if (model?.supports_reasoning) badges.push('Reasoning');
+		  if (model?.supports_tts) badges.push('TTS');
+		  return badges;
+		},
+		openSettingsModel(key) {
+		  const item = this.settingsModelRows().find(row => this.modelConfigKey(row) === key);
+		  if (!item) return;
+		  if (item.custom) { this.editModelConfig(key); return; }
+		  this.modelDetails = Object.assign({}, item);
+		  this.showModelDetails = true;
+		},
+		closeModelDetails() { this.showModelDetails = false; this.modelDetails = null; },
+		createCustomModelFromDetected(model) {
+		  if (!model?.provider_id || !model?.model_id) return;
+		  const providerID = model.provider_id;
+		  const sourceModelID = model.model_id;
+		  this.modelConfigDraft = this.normalizeModelSettingsDraft({
+			original_provider_id: '', original_model_id: '', provider_id: providerID,
+			model_id: this.uniqueCustomModelID(providerID, sourceModelID),
+			source_provider_id: providerID, source_model_id: sourceModelID,
+			context_window: Number(model.context_window || 32768), custom: true, editable: true,
+			model_preset: 'auto', model_options: {}, extra_body: {}
+		  });
+		  this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
+		  this.modelConfigExtraBodyOpen = false;
+		  this.modelConfigStatus = 'Choose a custom name and override only the parameters you need.';
+		  this.modelConfigStatusKind = 'secondary';
+		  this.closeModelDetails();
+		  this.showModelConfigEditor = true;
+		},
         modelConfigKey(item) { return JSON.stringify([item?.provider_id || '', item?.model_id || '']); },
         modelConfigIsDefault(item) {
           return !!(item && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id);

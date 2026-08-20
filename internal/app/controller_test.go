@@ -571,7 +571,7 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote","max_model_len":65536},{"id":"a-model","status":{"args":["llama-server","--ctx-size","49152"]}}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote","max_model_len":65536,"architecture":{"input_modalities":["text","image","pdf"]},"supported_parameters":["tools","structured_outputs","reasoning"]},{"id":"a-model","status":{"args":["llama-server","--ctx-size","49152"]}}]}`)
 	}))
 	defer modelServer.Close()
 
@@ -612,6 +612,12 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 	if options[1].ContextWindow != 49152 || options[2].ContextWindow != 65536 {
 		t.Fatalf("expected detected model context windows, got %#v", options)
+	}
+	if !options[2].SupportsTools || !options[2].SupportsImages || !options[2].SupportsPDFs || !options[2].SupportsJSON || !options[2].SupportsReasoning || !options[2].CapabilitiesKnown {
+		t.Fatalf("expected detected model capabilities, got %#v", options[2])
+	}
+	if !custom.SupportsTools || !custom.SupportsImages || !custom.SupportsPDFs || !custom.SupportsJSON || !custom.SupportsReasoning || !custom.CapabilitiesKnown {
+		t.Fatalf("expected custom model to inherit source capabilities, got %#v", custom)
 	}
 }
 

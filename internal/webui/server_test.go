@@ -2598,6 +2598,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `settingsListRows('models')`) ||
 		!strings.Contains(fullPage, `showModelConfigEditor`) ||
+		!strings.Contains(fullPage, `settingsModelRows()`) ||
+		!strings.Contains(fullPage, `showModelDetails`) ||
+		!strings.Contains(fullPage, `createCustomModelFromDetected`) ||
+		!strings.Contains(document, `Filter detected and custom models`) ||
+		!strings.Contains(document, `Create custom model`) ||
 		!strings.Contains(fullPage, `list="model-config-options"`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||
 		!strings.Contains(fullPage, `defaultModelValue()`) ||
