@@ -56,6 +56,15 @@ type Handler struct {
 	Devices *phonedevice.Hub
 	Auth    *deviceauth.Registry
 	turns   *turnRegistry
+	browser browserTickets
+}
+
+type browserDeviceContextKey struct{}
+
+// MintBrowserTicket creates a short-lived, single-use WebSocket credential
+// for an already-connected browser client.
+func (h *Handler) MintBrowserTicket(clientID string) (string, time.Time, error) {
+	return h.browser.mint("browser:" + strings.TrimSpace(clientID))
 }
 
 // NewHandler creates a process-scoped voice protocol handler.
@@ -245,10 +254,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveAndroidAPK(w, r)
 		return
 	}
-	if !authorized(r, h.Token, h.Auth) {
+	browserDeviceID, browserAuthorized := h.browser.consumeProtocol(r.Header.Get("Sec-WebSocket-Protocol"))
+	if !authorized(r, h.Token, h.Auth) && !browserAuthorized {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="koder-voice"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	if browserAuthorized {
+		r = r.WithContext(context.WithValue(r.Context(), browserDeviceContextKey{}, browserDeviceID))
 	}
 	if r.URL.Path == "/voice/v1/sessions" {
 		h.serveSessions(w, r)
@@ -346,7 +359,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Devices != nil {
 		defer h.Devices.DetachCall(callID)
 	}
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}})
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}, Subprotocols: []string{protocolVersion}})
 	if err != nil {
 		return
 	}
@@ -688,6 +701,9 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 
 func voiceDeviceLeaseID(r *http.Request) string {
 	if r != nil {
+		if browserID, ok := r.Context().Value(browserDeviceContextKey{}).(string); ok && strings.TrimSpace(browserID) != "" {
+			return browserID
+		}
 		if installationID := strings.TrimSpace(r.Header.Get("X-Koder-Device-ID")); installationID != "" {
 			return "installation:" + installationID
 		}

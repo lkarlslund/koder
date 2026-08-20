@@ -80,6 +80,7 @@ type Server struct {
 	clientSelectionMu sync.Mutex
 	clientSelections  map[string]clientSelection
 	devices           *deviceauth.Registry
+	voice             *voiceapi.Handler
 }
 
 type clientSelection struct {
@@ -146,6 +147,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	voiceHandler := voiceapi.NewHandler(controller, options.VoiceToken)
 	voiceHandler.Auth = devices
+	s.voice = voiceHandler
 	mux.Handle("/voice/v1", voiceHandler)
 	mux.Handle("/voice/v1/", voiceHandler)
 	if s.debug != nil {
@@ -1320,6 +1322,15 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"device": device, "devices": s.devices.List()}, nil
+	case "browser_voice_ticket":
+		if s.voice == nil {
+			return nil, errors.New("voice service is unavailable")
+		}
+		ticket, expiresAt, err := s.voice.MintBrowserTicket(clientID)
+		if err != nil {
+			return nil, fmt.Errorf("create browser voice ticket: %w", err)
+		}
+		return map[string]any{"ticket": ticket, "expires_at": expiresAt}, nil
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "browser_action":

@@ -490,6 +490,32 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	readType(t, ctx, conn, "ready")
 }
 
+func TestHandlerAcceptsSingleUseBrowserTicket(t *testing.T) {
+	handler := NewHandler(&fakeBackend{}, "required-device-token")
+	ticket, expiresAt, err := handler.MintBrowserTicket("web-client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket == "" || !expiresAt.After(time.Now()) {
+		t.Fatalf("ticket=%q expires=%v", ticket, expiresAt)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	url := "ws" + server.URL[len("http"):] + "/voice/v1?call_id=browser-call"
+	options := &websocket.DialOptions{Subprotocols: []string{protocolVersion, browserTicketProtocolPrefix + ticket}}
+	conn, response, err := websocket.Dial(context.Background(), url, options)
+	if err != nil {
+		t.Fatalf("browser ticket dial response=%v: %v", response, err)
+	}
+	readType(t, context.Background(), conn, "ready")
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+
+	_, response, err = websocket.Dial(context.Background(), url, options)
+	if err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("reused browser ticket response=%v err=%v", response, err)
+	}
+}
+
 func TestHandlerSwitchesDurableVoiceChat(t *testing.T) {
 	backend := &fakeBackend{}
 	server := httptest.NewServer(NewHandler(backend, ""))
