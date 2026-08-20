@@ -291,7 +291,12 @@ func codexSandbox(session domain.Session, chatRecord domain.Chat) string {
 func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turnID string, events <-chan codexapp.Message, out chan<- domain.Event) error {
 	chatID := rt.Snapshot().Chat.ID
 	defer m.clearApprovals(chatID)
-	assistantItem := rt.NextAssistantItem()
+	var assistantItem domain.TimelineItem
+	ensureAssistantItem := func() {
+		if assistantItem.ID == "" {
+			assistantItem = rt.NextAssistantItem()
+		}
+	}
 	var text, reasoning strings.Builder
 	activeMessageID := ""
 	assistantMessages := 0
@@ -302,6 +307,7 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 		if strings.TrimSpace(text.String()) == "" && strings.TrimSpace(reasoning.String()) == "" {
 			return nil
 		}
+		ensureAssistantItem()
 		item, err := rt.AppendAssistantMessage(ctx, assistantItem, domain.AssistantMessage{
 			Text:      text.String(),
 			Reasoning: domain.ReasoningContent{Text: reasoning.String()},
@@ -313,7 +319,7 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 		assistantMessages++
 		text.Reset()
 		reasoning.Reset()
-		assistantItem = rt.NextAssistantItem()
+		assistantItem = domain.TimelineItem{}
 		return nil
 	}
 	running := map[string]domain.ToolKind{}
@@ -351,10 +357,12 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 				if messageID != "" {
 					activeMessageID = messageID
 				}
+				ensureAssistantItem()
 				text.WriteString(delta)
 				out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: delta, Item: assistantItem}
 			case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
 				delta := stringField(msg.Params, "delta")
+				ensureAssistantItem()
 				reasoning.WriteString(delta)
 				out <- domain.Event{Kind: domain.EventKindReasoning, Text: delta, Item: assistantItem}
 			case "item/started":
@@ -378,6 +386,7 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 						}
 					}
 					if text.Len() == 0 {
+						ensureAssistantItem()
 						text.WriteString(completed)
 						out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: completed, Item: assistantItem}
 					}

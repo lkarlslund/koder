@@ -119,6 +119,11 @@ func TestManagerPreservesMessagesAroundCodexToolCall(t *testing.T) {
 	if !beforeOK || before.Text != "Let me check." || !toolOK || len(tool.Tools) != 1 || !afterOK || after.Text != "It worked." {
 		t.Fatalf("message/tool ordering = %#v", timeline)
 	}
+	for index, item := range timeline {
+		if item.Seq != int64(index+1) {
+			t.Fatalf("timeline sequence at index %d = %d, want %d", index, item.Seq, index+1)
+		}
+	}
 }
 
 func TestCodexSandboxUsesAppServerProtocolValues(t *testing.T) {
