@@ -5,6 +5,8 @@ import android.location.Location
 import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Color
+import android.provider.CalendarContract
 import android.provider.ContactsContract
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -22,12 +24,108 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.net.InetAddress
+import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PhoneDeviceConnectionInstrumentedTest {
+	@Test
+	fun editCalendarEventOpensReviewedChangesAndCancellationWithoutWriting() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		val context = instrumentation.targetContext
+		val accountName = "koder-test-${System.nanoTime()}"
+		instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CALENDAR)
+		val calendarURI = try {
+			val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+				.appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+				.appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+				.appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
+				.build()
+			context.contentResolver.insert(uri, ContentValues().apply {
+				put(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+				put(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
+				put(CalendarContract.Calendars.NAME, accountName)
+				put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, "Koder Test Calendar")
+				put(CalendarContract.Calendars.CALENDAR_COLOR, Color.BLUE)
+				put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
+				put(CalendarContract.Calendars.OWNER_ACCOUNT, accountName)
+				put(CalendarContract.Calendars.SYNC_EVENTS, 1)
+			}) ?: error("Could not create test calendar")
+		} finally {
+			instrumentation.uiAutomation.dropShellPermissionIdentity()
+		}
+		val calendarID = calendarURI.lastPathSegment?.toLongOrNull() ?: error("Missing calendar id")
+		val originalStart = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(2)
+		instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CALENDAR)
+		val eventURI = try {
+			context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, ContentValues().apply {
+				put(CalendarContract.Events.CALENDAR_ID, calendarID)
+				put(CalendarContract.Events.TITLE, "Steen planning review")
+				put(CalendarContract.Events.DTSTART, originalStart)
+				put(CalendarContract.Events.DTEND, originalStart + TimeUnit.HOURS.toMillis(1))
+				put(CalendarContract.Events.EVENT_TIMEZONE, "Europe/Copenhagen")
+			}) ?: error("Could not create test event")
+		} finally {
+			instrumentation.uiAutomation.dropShellPermissionIdentity()
+		}
+		val eventID = eventURI.lastPathSegment.orEmpty()
+		instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CALENDAR)
+		val settings = SecureSettings(context).also { it.savePhoneActionPolicy("edit_calendar_event", PhoneActionPolicy.ON) }
+		val launched = mutableListOf<Intent>()
+		val completed = CountDownLatch(3)
+		var provider: AndroidPhoneToolProvider? = null
+		try {
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				scenario.onActivity { activity ->
+					provider = AndroidPhoneToolProvider(activity, settings, intentLauncher = { intent -> launched += intent })
+					provider?.execute("edit_calendar_event", mapOf(
+						"event_id" to eventID,
+						"operation" to "edit",
+						"start_time" to "2026-08-22T09:00:00Z",
+						"location" to "Aarhus",
+					)) { result ->
+						assertTrue(result.getOrThrow().text.contains("Steen planning review"))
+						completed.countDown()
+					}
+					provider?.execute("edit_calendar_event", mapOf(
+						"event_id" to eventID,
+						"operation" to "cancel",
+					)) { result ->
+						assertTrue(result.getOrThrow().text.contains("delete control"))
+						completed.countDown()
+					}
+					provider?.execute("edit_calendar_event", mapOf(
+						"event_id" to eventID,
+						"operation" to "edit",
+						"start_time" to "tomorrow morning",
+					)) { result ->
+						assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("start_time must be RFC 3339"))
+						completed.countDown()
+					}
+				}
+				assertTrue(completed.await(5, TimeUnit.SECONDS))
+				assertEquals(2, launched.size)
+				assertTrue(launched.all { it.action == Intent.ACTION_EDIT && it.data?.lastPathSegment == eventID })
+				assertEquals("Aarhus", launched.first().getStringExtra(CalendarContract.Events.EVENT_LOCATION))
+				assertEquals(Instant.parse("2026-08-22T09:00:00Z").toEpochMilli(), launched.first().getLongExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, 0))
+				val stillExists = context.contentResolver.query(eventURI, arrayOf(CalendarContract.Events._ID), null, null, null)
+					?.use { it.moveToFirst() } ?: false
+				assertTrue(stillExists)
+			}
+		} finally {
+			provider?.close()
+			instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CALENDAR)
+			try {
+				context.contentResolver.delete(eventURI, null, null)
+				context.contentResolver.delete(calendarURI, null, null)
+			} finally {
+				instrumentation.uiAutomation.dropShellPermissionIdentity()
+			}
+		}
+	}
+
 	@Test
 	fun editContactResolvesExistingContactAndOpensProposedChangesForReview() {
 		val instrumentation = InstrumentationRegistry.getInstrumentation()

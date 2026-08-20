@@ -28,6 +28,7 @@ const (
 	CreateContact       Action = "create_contact"
 	EditContact         Action = "edit_contact"
 	CreateCalendarEvent Action = "create_calendar_event"
+	EditCalendarEvent   Action = "edit_calendar_event"
 	OpenMap             Action = "open_map"
 	SetAlarm            Action = "set_alarm"
 	SetTimer            Action = "set_timer"
@@ -66,6 +67,7 @@ var catalog = []CatalogEntry{
 	{CreateContact, "Open a prefilled new-contact screen for the user to save", "name; optional phone_number, email", true, true},
 	{EditContact, "Open one existing contact with proposed changes for review; never save directly", "contact_id or contact_name; one or more of phone_number, email, address, note", true, true},
 	{CreateCalendarEvent, "Open a prefilled calendar event for the user to review and save", "title, start_time; optional end_time, location, description", true, true},
+	{EditCalendarEvent, "Open one existing calendar event for reviewed changes or user-confirmed cancellation; never update or delete it directly", "event_id or query; operation: edit or cancel; for edit, one or more of title, start_time, end_time, location, description", true, true},
 	{OpenMap, "Display a place or route in the phone's map app only when the user explicitly asks to see a map, open a place, or navigate; never use this merely to determine or describe where the user is", "query or latitude and longitude", true, true},
 	{SetAlarm, "Open a prefilled alarm on the phone", "hour, minute; optional label", true, true},
 	{SetTimer, "Open a prefilled timer on the phone", "duration_seconds; optional label", true, true},
@@ -195,6 +197,9 @@ func explicitlyRequestedUserFacingActions(text string) map[Action]bool {
 	}
 	if containsAny("calendar", "appointment", "event", "meeting", "kalender", "aftale", "møde") && containsAny("add", "create", "schedule", "book", "make", "tilføj", "opret", "planlæg", "book", "lav") {
 		allowed[CreateCalendarEvent] = true
+	}
+	if containsAny("calendar", "appointment", "event", "meeting", "kalender", "aftale", "møde") && containsAny("edit", "update", "change", "move", "reschedule", "cancel", "delete", "rediger", "opdater", "ændr", "flyt", "aflys", "slet") {
+		allowed[EditCalendarEvent] = true
 	}
 	allow(PlaceCall, "call ", "phone call", "ring ", "dial ", "ring til", "ring op")
 	if containsAny("sms", "text message", "message", "besked") && containsAny("send", "write", "text ", "skriv") {

@@ -125,6 +125,7 @@ class AndroidPhoneToolProvider(
         "create_contact" -> createContact(args)
         "edit_contact" -> editContact(args)
         "create_calendar_event" -> createCalendarEvent(args)
+        "edit_calendar_event" -> editCalendarEvent(args)
         "open_map" -> openMap(args)
         "set_alarm" -> setAlarm(args)
         "set_timer" -> setTimer(args)
@@ -205,15 +206,16 @@ class AndroidPhoneToolProvider(
         }.build()
         val rows = JSONArray()
         activity.contentResolver.query(uri, arrayOf(
-            CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
+            CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
             CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.ALL_DAY,
         ), null, null, CalendarContract.Instances.BEGIN + " ASC").useCursor { cursor ->
             while (cursor.moveToNext() && rows.length() < limit(args)) {
-                val title = cursor.string(0)
-                val place = cursor.string(3)
+                val title = cursor.string(1)
+                val place = cursor.string(4)
                 if (query.isNotBlank() && query !in title.lowercase() && query !in place.lowercase()) continue
-                rows.put(JSONObject().put("title", title).put("start_time", Instant.ofEpochMilli(cursor.getLong(1)).toString())
-                    .put("end_time", Instant.ofEpochMilli(cursor.getLong(2)).toString()).put("location", place).put("all_day", cursor.getInt(4) != 0))
+                rows.put(JSONObject().put("event_id", cursor.string(0)).put("title", title)
+                    .put("start_time", Instant.ofEpochMilli(cursor.getLong(2)).toString())
+                    .put("end_time", Instant.ofEpochMilli(cursor.getLong(3)).toString()).put("location", place).put("all_day", cursor.getInt(5) != 0))
             }
         }
         return PhoneToolResult("Found ${rows.length()} calendar events", JSONObject().put("events", rows))
@@ -325,6 +327,29 @@ class AndroidPhoneToolProvider(
             .putExtra(CalendarContract.Events.EVENT_LOCATION, args["location"].orEmpty())
             .putExtra(CalendarContract.Events.DESCRIPTION, args["description"].orEmpty())
         launch(intent); return PhoneToolResult("Calendar entry opened for review")
+    }
+
+    private fun editCalendarEvent(args: Map<String, String>): PhoneToolResult {
+        val operation = args["operation"].orEmpty().ifBlank { "edit" }
+        if (operation !in setOf("edit", "cancel")) error("operation must be edit or cancel")
+        val proposed = listOf("title", "start_time", "end_time", "location", "description").filter { !args[it].isNullOrBlank() }
+        if (operation == "edit" && proposed.isEmpty()) error("At least one proposed title, start_time, end_time, location, or description is required")
+        if (operation == "cancel" && proposed.isNotEmpty()) error("Cancellation cannot include proposed event changes")
+        val proposedStart = args["start_time"]?.takeIf(String::isNotBlank)?.let { parseTime(it) ?: error("start_time must be RFC 3339") }
+        val proposedEnd = args["end_time"]?.takeIf(String::isNotBlank)?.let { parseTime(it) ?: error("end_time must be RFC 3339") }
+        val event = resolveCalendarEvent(args)
+        val intent = Intent(Intent.ACTION_EDIT, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, event.id))
+        args["title"]?.takeIf(String::isNotBlank)?.let { intent.putExtra(CalendarContract.Events.TITLE, it) }
+        proposedStart?.let { intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, it.toEpochMilli()) }
+        proposedEnd?.let { intent.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, it.toEpochMilli()) }
+        args["location"]?.takeIf(String::isNotBlank)?.let { intent.putExtra(CalendarContract.Events.EVENT_LOCATION, it) }
+        args["description"]?.takeIf(String::isNotBlank)?.let { intent.putExtra(CalendarContract.Events.DESCRIPTION, it) }
+        launch(intent)
+        return if (operation == "cancel") {
+            PhoneToolResult("Opened ${event.title}; use the calendar's delete control to confirm cancellation")
+        } else {
+            PhoneToolResult("Opened ${event.title} for review with proposed ${proposed.joinToString()}")
+        }
     }
 
     private fun openMap(args: Map<String, String>): PhoneToolResult {
@@ -444,6 +469,36 @@ class AndroidPhoneToolProvider(
     }
 
     private data class ResolvedContact(val name: String, val uri: Uri)
+
+    private data class ResolvedCalendarEvent(val id: Long, val title: String)
+
+    private fun resolveCalendarEvent(args: Map<String, String>): ResolvedCalendarEvent {
+        val requestedID = args["event_id"]?.trim().orEmpty()
+        val query = args["query"]?.trim().orEmpty()
+        if (requestedID.isBlank() && query.isBlank()) error("event_id or query is required")
+        val selection: String
+        val selectionArgs: Array<String>
+        if (requestedID.isNotBlank()) {
+            selection = CalendarContract.Events._ID + " = ?"
+            selectionArgs = arrayOf(requestedID)
+        } else {
+            selection = CalendarContract.Events.TITLE + " LIKE ?"
+            selectionArgs = arrayOf("%$query%")
+        }
+        val matches = mutableListOf<ResolvedCalendarEvent>()
+        activity.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            arrayOf(CalendarContract.Events._ID, CalendarContract.Events.TITLE),
+            selection, selectionArgs, CalendarContract.Events.DTSTART + " ASC",
+        ).useCursor { cursor ->
+            while (cursor.moveToNext() && matches.size < 2) {
+                matches += ResolvedCalendarEvent(cursor.getLong(0), cursor.string(1).ifBlank { query.ifBlank { "calendar event" } })
+            }
+        }
+        if (matches.isEmpty()) error("No matching calendar event was found")
+        if (matches.size > 1) error("More than one calendar event matched; use upcoming_calendar and pass event_id")
+        return matches.single()
+    }
 
     private fun resolveContact(args: Map<String, String>): ResolvedContact {
         val requestedID = args["contact_id"]?.trim().orEmpty()

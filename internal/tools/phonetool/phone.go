@@ -76,6 +76,8 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			"phone_number":     map[string]any{"type": "string"},
 			"contact_name":     map[string]any{"type": "string"},
 			"contact_id":       map[string]any{"type": "string"},
+			"event_id":         map[string]any{"type": "string"},
+			"operation":        map[string]any{"type": "string", "enum": []string{"edit", "cancel"}},
 			"message":          map[string]any{"type": "string"},
 			"to":               map[string]any{"type": "string"},
 			"subject":          map[string]any{"type": "string"},

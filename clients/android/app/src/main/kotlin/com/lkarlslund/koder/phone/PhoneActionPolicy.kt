@@ -11,7 +11,7 @@ enum class PhoneActionPolicy(val wireValue: String, val label: String) {
 		fun legacyDefault(action: String): PhoneActionPolicy = if (action in sensitiveActions) ASK else ON
 
 		val sensitiveActions = setOf(
-			"place_call", "send_sms", "compose_email", "create_contact", "edit_contact", "create_calendar_event", "open_map",
+			"place_call", "send_sms", "compose_email", "create_contact", "edit_contact", "create_calendar_event", "edit_calendar_event", "open_map",
 			"set_alarm", "set_timer", "write_clipboard", "open_url", "media_control", "open_app", "share_text",
 		)
 	}

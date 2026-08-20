@@ -90,6 +90,18 @@ func TestCatalogPublishesContactEditAsReviewedMutation(t *testing.T) {
 	}
 }
 
+func TestCatalogPublishesCalendarEditAsReviewedMutation(t *testing.T) {
+	entry, ok := known[EditCalendarEvent]
+	if !ok || !entry.Confirmation || !entry.UserFacing {
+		t.Fatalf("edit_calendar_event catalog entry = %#v, exists=%v", entry, ok)
+	}
+	for _, required := range []string{"event_id", "operation", "cancel", "never update or delete it directly"} {
+		if !strings.Contains(entry.Arguments+" "+entry.Summary, required) {
+			t.Fatalf("edit_calendar_event catalog entry lacks %q: %#v", required, entry)
+		}
+	}
+}
+
 func TestHubOwnershipAndReplacementRelease(t *testing.T) {
 	hub := &Hub{}
 	firstRelease, err := hub.Attach("call-1", []string{"device_status"}, func(context.Context, string, Action, map[string]string) (Result, error) {
@@ -198,6 +210,8 @@ func TestUserFacingPhoneActionsRequireMatchingExplicitRequest(t *testing.T) {
 		{"Show me the route on a map", []Action{OpenMap}},
 		{"Write and send an email to Steen", []Action{ComposeEmail}},
 		{"Create a calendar appointment tomorrow", []Action{CreateCalendarEvent}},
+		{"Move my calendar meeting to eleven", []Action{EditCalendarEvent}},
+		{"Cancel the dentist appointment", []Action{EditCalendarEvent}},
 		{"Update Steen's phone number", []Action{EditContact}},
 		{"Add Steen to my contacts", []Action{CreateContact}},
 		{"Ring til Steen", []Action{PlaceCall}},

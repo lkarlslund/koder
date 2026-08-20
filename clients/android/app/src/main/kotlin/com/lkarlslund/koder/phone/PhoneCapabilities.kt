@@ -33,7 +33,7 @@ object PhoneCapabilities {
         PhoneCapability(
             "calendar", "Calendar",
             "Read upcoming appointments and prepare calendar entries for review.",
-            setOf("upcoming_calendar", "create_calendar_event"),
+            setOf("upcoming_calendar", "create_calendar_event", "edit_calendar_event"),
             arrayOf(Manifest.permission.READ_CALENDAR),
         ),
         PhoneCapability(
