@@ -20,7 +20,9 @@ import android.os.Looper
 import android.provider.Settings as AndroidSettings
 import android.text.TextUtils
 import android.text.InputType
+import android.text.Html
 import android.text.format.DateUtils
+import android.text.method.LinkMovementMethod
 import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
 import android.view.Gravity
@@ -107,6 +109,7 @@ import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.isVoiceChat
 import com.lkarlslund.koder.voice.highContrastEnabled
 import com.lkarlslund.koder.voice.latestConversationLabel
+import com.lkarlslund.koder.voice.markdownToHtml
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
 import com.lkarlslund.koder.voice.voiceOrbMode
@@ -429,6 +432,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				!it.isTranscriptOnly && (it.isPresentation || it.uri.isNotBlank() || it.mimeType !in DISPLAYABLE_TEXT_TYPES)
 			}
 			if (visualParts.isNotEmpty()) {
+				addPresentationTranscriptLink(visualParts)
 				presentationFeed?.removeAllViews()
 				visualParts.filter(::rememberRenderPart).forEach(::addPresentationPart)
 				presentationShown = true
@@ -455,6 +459,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val transcriptOnly = fresh.filter(VoicePart::isTranscriptOnly)
 			transcriptOnly.forEach { addPart(it) }
 			if (visual.isNotEmpty()) {
+				addPresentationTranscriptLink(visual)
 				presentationFeed?.removeAllViews()
 				visual.forEach(::addPresentationPart)
 				presentationShown = true
@@ -2538,17 +2543,49 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			target.addView(bubble, bubbleLayout(entry.role == "user"))
 			first = bubble
 		}
-		entry.parts.filter { it.mimeType !in DISPLAYABLE_TEXT_TYPES }.forEach { part ->
+		val presentationParts = entry.parts.filterNot(VoicePart::isTranscriptOnly).filter {
+			it.isPresentation || it.uri.isNotBlank() || it.mimeType !in DISPLAYABLE_TEXT_TYPES
+		}
+		if (presentationParts.isNotEmpty()) {
+			val fresh = presentationParts.filter(::rememberRenderPart)
+			if (fresh.isNotEmpty()) {
+				val link = addPresentationTranscriptLink(fresh, target)
+				if (first == null) first = link
+			}
+		}
+		entry.parts.filter(VoicePart::isTranscriptOnly).forEach { part ->
 			if (!rememberRenderPart(part)) return@forEach
 			val before = target.childCount
-			when {
-				part.mimeType == KODER_TOOL_ACTIVITY_MIME -> addToolActivity(part, target)
-				part.mimeType.startsWith("image/") -> addImage(part, target)
-				else -> addGenericPart(part, target)
-			}
+			addToolActivity(part, target)
 			if (first == null && target.childCount > before) first = target.getChildAt(before)
 		}
 		return first
+	}
+
+	private fun addPresentationTranscriptLink(parts: List<VoicePart>, target: LinearLayout? = feed): View? {
+		val target = target ?: return null
+		if (target === feed) removeFeedPlaceholder()
+		val heading = parts.firstNotNullOfOrNull { it.title.takeIf(String::isNotBlank) ?: it.name.takeIf(String::isNotBlank) }
+			?: if (parts.size == 1) "Presented by Koder" else "${parts.size} items presented by Koder"
+		val formats = parts.map(VoicePart::mimeType).filter(String::isNotBlank).distinct().joinToString()
+		val view = card().apply {
+			isClickable = true
+			isFocusable = true
+			contentDescription = "$heading. Open presentation"
+			addView(label(heading).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+			addView(helper(if (formats.isBlank()) "Tap to view" else "$formats · Tap to view"), spaced(top = 4))
+			setOnClickListener { showPresentation(parts) }
+		}
+		target.addView(view, spaced(top = 5, bottom = 5))
+		return view
+	}
+
+	private fun showPresentation(parts: List<VoicePart>) {
+		presentationFeed?.removeAllViews()
+		parts.forEach(::addPresentationPart)
+		presentationShown = true
+		transcriptShown = false
+		updateConversationMode(latestCallSnapshot.stage)
 	}
 
     private fun leaveChat() {
@@ -2804,15 +2841,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun addInlinePresentation(part: VoicePart) {
 		val target = presentationFeed ?: return
-		val shown = when (part.mimeType) {
-			"text/markdown" -> renderPresentationMarkdown(part.text)
-			else -> part.text
-		}
 		val card = card()
 		val heading = part.title.ifBlank { part.name }.ifBlank { "Details" }
 		card.addView(label(heading), matchWrap())
-		card.addView(body(shown).apply {
-			if (part.mimeType == "text/markdown") typeface = Typeface.MONOSPACE
+		card.addView(body(part.text).apply {
+			if (part.mimeType == "text/markdown") {
+				text = Html.fromHtml(markdownToHtml(part.text), Html.FROM_HTML_MODE_LEGACY)
+				movementMethod = LinkMovementMethod.getInstance()
+			}
 			setTextIsSelectable(true)
 			contentDescription = "Koder presentation"
 		}, spaced(top = 8))
@@ -2893,19 +2929,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				else -> parsed.toString()
 			}
 		}.getOrDefault(raw)
-	}
-
-	private fun renderPresentationMarkdown(markdown: String): String {
-		return markdown.lineSequence().mapNotNull { raw ->
-			var line = raw.trimEnd()
-			if (line.trim().matches(Regex("\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?"))) return@mapNotNull null
-			line = line.replace(Regex("^\\s{0,3}#{1,6}\\s+"), "")
-			line = line.replace(Regex("^\\s*[-*+]\\s+"), "• ")
-			if (line.count { it == '|' } >= 2) {
-				line = line.trim().trim('|').split('|').joinToString("    ") { it.trim() }
-			}
-			line.replace("**", "").replace("__", "").replace("`", "")
-		}.joinToString("\n").trim()
 	}
 
     private fun downloadAndOpen(part: VoicePart) {
