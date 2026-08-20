@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -56,6 +57,7 @@ import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
 import com.lkarlslund.koder.phone.PhoneBindingClient
 import com.lkarlslund.koder.phone.PhoneIdentity
+import com.lkarlslund.koder.presentation.ZoomableImageView
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.AudioDiagnostics
 import com.lkarlslund.koder.voice.CallController
@@ -103,6 +105,7 @@ import kotlin.math.abs
 class MainActivity : ComponentActivity(), CallController.Listener {
     private enum class Screen { SETUP, SETTINGS, LOADING, HOME, CHAT }
 	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
+	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
     private lateinit var controller: CallController
     private lateinit var secureSettings: SecureSettings
@@ -155,6 +158,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var savedResponses: List<SavedVoiceResponse> = emptyList()
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
+	private var pendingImageSave: PresentedImage? = null
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
         pendingStart = false
@@ -180,6 +184,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	        if (notificationAccessGranted()) enablePhoneCapability(capability.id)
 		else phoneCapabilitySwitches[capability.id]?.isChecked = false
     }
+	private val imageSaveLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
+		val image = pendingImageSave
+		pendingImageSave = null
+		if (uri == null || image == null) return@registerForActivityResult
+		runCatching { contentResolver.openOutputStream(uri)?.use { it.write(image.bytes) } ?: error("Could not open destination") }
+			.onSuccess { Toast.makeText(this, "Saved ${image.name}", Toast.LENGTH_SHORT).show() }
+			.onFailure { Toast.makeText(this, it.message ?: "Could not save image", Toast.LENGTH_LONG).show() }
+	}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1775,18 +1787,26 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun addPresentationImage(target: LinearLayout, block: PresentationBlock.Image) {
 		if (block.title.isNotBlank()) target.addView(helper(block.title), spaced(top = 8))
+		var presented: PresentedImage? = null
+		val imageDescription = block.alt.ifBlank { block.title.ifBlank { "Presentation image" } }
 		val image = ImageView(this).apply {
 			adjustViewBounds = true
 			scaleType = ImageView.ScaleType.CENTER_INSIDE
 			minimumHeight = dp(120)
-			contentDescription = block.alt.ifBlank { block.title.ifBlank { "Presentation image" } }
+			contentDescription = "$imageDescription. Loading"
+			isClickable = true
+			setOnClickListener { presented?.let(::showImageViewer) }
 		}
 		target.addView(image, spaced(top = 4))
 		controller.loadBytes(block.uri) { bytes, error ->
 			runOnUiThread {
 				val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-				if (bitmap != null) image.setImageBitmap(bitmap)
-				else image.contentDescription = error ?: "Invalid presentation image"
+				if (bitmap != null) {
+					image.setImageBitmap(bitmap)
+					presented = PresentedImage(bytes, bitmap, imageName(block.uri, block.title), imageMIME(block.uri), block.title, block.alt)
+					image.contentDescription = "$imageDescription. Tap for fullscreen"
+				}
+				else image.contentDescription = "$imageDescription. ${error ?: "Invalid image"}"
 			}
 		}
 	}
@@ -1798,6 +1818,78 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(resolved))) }
 			.onFailure { Toast.makeText(this, "No app can open this link", Toast.LENGTH_LONG).show() }
+	}
+
+	private fun showImageViewer(image: PresentedImage) {
+		val zoom = ZoomableImageView(this).apply {
+			setImageBitmap(image.bitmap)
+			contentDescription = image.alt.ifBlank { image.title.ifBlank { "Fullscreen image" } } + ". Pinch to zoom, drag to pan, double tap to reset"
+		}
+		var dialog: AlertDialog? = null
+		val actions = LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			listOf(
+				"Rotate" to { zoom.rotateClockwise() },
+				"Reset" to { zoom.resetImage() },
+				"Save" to { savePresentedImage(image) },
+				"Share" to { sharePresentedImage(image) },
+				"Close" to { dialog?.dismiss() },
+			).forEach { (text, action) ->
+				addView(Button(this@MainActivity).apply {
+					this.text = text
+					contentDescription = "$text fullscreen image"
+					setOnClickListener { action() }
+				}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+			}
+		}
+		val content = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(8), dp(8), dp(8), dp(8))
+			addView(zoom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+			addView(helper("Pinch to zoom · drag to pan · double tap to reset").apply { gravity = Gravity.CENTER }, spaced(top = 6))
+			addView(actions, spaced(top = 4))
+		}
+		dialog = AlertDialog.Builder(this)
+			.setTitle(image.title.ifBlank { image.name })
+			.setView(content)
+			.create()
+		dialog?.setOnShowListener {
+			dialog?.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+		}
+		dialog?.show()
+	}
+
+	private fun savePresentedImage(image: PresentedImage) {
+		pendingImageSave = image
+		imageSaveLauncher.launch(image.name)
+	}
+
+	private fun sharePresentedImage(image: PresentedImage) {
+		runCatching {
+			val directory = File(cacheDir, "voice-presentations").apply { mkdirs() }
+			val file = File(directory, image.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96).ifBlank { "koder-image" })
+			file.outputStream().use { it.write(image.bytes) }
+			val uri = FileProvider.getUriForFile(this, "$packageName.presentations", file)
+			val share = Intent(Intent.ACTION_SEND).apply {
+				type = image.mimeType.ifBlank { "image/*" }
+				putExtra(Intent.EXTRA_STREAM, uri)
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			}
+			startActivity(Intent.createChooser(share, "Share ${image.name}"))
+		}.onFailure { Toast.makeText(this, it.message ?: "Could not share image", Toast.LENGTH_LONG).show() }
+	}
+
+	private fun imageName(uri: String, title: String): String {
+		val fromURI = runCatching { Uri.parse(uri).lastPathSegment.orEmpty() }.getOrDefault("")
+		val base = fromURI.ifBlank { title.ifBlank { "koder-image" } }.replace(Regex("[^A-Za-z0-9._-]"), "_").take(90).ifBlank { "koder-image" }
+		return if (base.contains('.')) base else "$base.png"
+	}
+
+	private fun imageMIME(uri: String): String = when (Uri.parse(uri).lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase()) {
+		"jpg", "jpeg" -> "image/jpeg"
+		"webp" -> "image/webp"
+		"gif" -> "image/gif"
+		else -> "image/png"
 	}
 
 	private fun addInlinePresentation(part: VoicePart) {
@@ -1822,11 +1914,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (target === feed) removeFeedPlaceholder()
 		val card = card()
 		val title = helper(part.title.ifBlank { part.name }.ifBlank { part.alt.ifBlank { part.mimeType } })
+		var presented: PresentedImage? = null
+		val imageDescription = part.alt.ifBlank { part.title.ifBlank { part.name.ifBlank { "Presented image" } } }
 		val image = ImageView(this).apply {
 			adjustViewBounds = true
 			scaleType = ImageView.ScaleType.CENTER_INSIDE
 			minimumHeight = dp(120)
-			contentDescription = part.alt
+			contentDescription = "$imageDescription. Loading"
+			isClickable = true
+			setOnClickListener { presented?.let(::showImageViewer) }
 		}
 		card.addView(title, matchWrap())
 		card.addView(image, matchWrap())
@@ -1837,8 +1933,22 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			controller.loadBytes(part.url) { bytes, error ->
 				runOnUiThread {
 					val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-					if (bitmap != null) image.setImageBitmap(bitmap)
-					else title.text = "${title.text} · ${error ?: "invalid image"}"
+					if (bitmap != null) {
+						image.setImageBitmap(bitmap)
+						presented = PresentedImage(
+							bytes,
+							bitmap,
+							part.name.ifBlank { imageName(part.url, part.title) },
+							part.mimeType,
+							part.title,
+							part.alt,
+						)
+						image.contentDescription = "$imageDescription. Tap for fullscreen"
+					}
+					else {
+						title.text = "${title.text} · ${error ?: "invalid image"}"
+						image.contentDescription = "$imageDescription. ${error ?: "Invalid image"}"
+					}
 				}
 			}
 		}

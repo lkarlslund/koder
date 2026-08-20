@@ -43,6 +43,7 @@ import mockwebserver3.RecordedRequest
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,6 +53,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.net.InetAddress
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.concurrent.CountDownLatch
 
 @RunWith(AndroidJUnit4::class)
@@ -533,10 +535,7 @@ class MainActivityInstrumentedTest {
 		}.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
 		val server = MockWebServer()
 		var voiceSocket: WebSocket? = null
-		server.enqueue(MockResponse.Builder().body(
-			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-card","title":"Visual test"}]}""",
-		).build())
-		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+		val voiceUpgrade = MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
 			override fun onOpen(webSocket: WebSocket, response: Response) {
 				voiceSocket = webSocket
 				webSocket.send(
@@ -550,8 +549,18 @@ class MainActivityInstrumentedTest {
 					"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Here are the details.","parts":[{"mime_type":"text/plain","data":"Here are the details."},{"mime_type":"application/vnd.koder.presentation+json","data":{"version":1,"blocks":[{"kind":"text","text":"Today in Aarhus","style":"heading"},{"kind":"image","uri":"/map.png","title":"Aarhus map","alt":"Map preview"},{"kind":"key_value","items":[{"key":"Event","value":"DHL Stafet"}]},{"kind":"list","items":[{"title":"Road closures","detail":"From 16:00"}]},{"kind":"progress","label":"Route check","value":2,"max":5,"detail":"Two areas checked"},{"kind":"action","label":"Open event details","uri":"https://example.com/event"},{"kind":"file","name":"event.ics","uri":"/event.ics","mime_type":"text/calendar","detail":"Calendar entry"}]},"metadata":{"title":"What is happening nearby","presentation":"true"}}]}}""",
 				)
 			}
-		}).build())
-		server.enqueue(MockResponse.Builder().body("not-an-image").build())
+		}).build()
+		val png = Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse = when {
+				request.target == "/voice/v1/sessions" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-card","title":"Visual test"}]}""",
+				).build()
+				request.target.startsWith("/voice/v1?") -> voiceUpgrade
+				request.target == "/map.png" -> MockResponse.Builder().setHeader("Content-Type", "image/png").body(Buffer().write(png)).build()
+				else -> MockResponse.Builder().code(404).build()
+			}
+		}
 		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
@@ -567,7 +576,14 @@ class MainActivityInstrumentedTest {
 				assertTrue(labels.any { it.contains("Open event details") })
 				assertTrue(labels.any { it.contains("Open event.ics") })
 				onView(withContentDescription("Koder structured presentation")).check(matches(isDisplayed()))
-				onView(withContentDescription("Map preview")).check(matches(isDisplayed()))
+				waitForDisplayedDescription("Map preview. Tap for fullscreen")
+				onView(withContentDescription("Map preview. Tap for fullscreen")).perform(click())
+				onView(withContentDescription("Map preview. Pinch to zoom, drag to pan, double tap to reset")).check(matches(isDisplayed()))
+				onView(withContentDescription("Rotate fullscreen image")).perform(click())
+				onView(withContentDescription("Reset fullscreen image")).perform(click())
+				onView(withContentDescription("Save fullscreen image")).check(matches(isDisplayed()))
+				onView(withContentDescription("Share fullscreen image")).check(matches(isDisplayed()))
+				onView(withContentDescription("Close fullscreen image")).perform(click())
 			}
 		} finally {
 			voiceSocket?.close(1000, "test complete")
@@ -624,6 +640,14 @@ class MainActivityInstrumentedTest {
 			repeat(childCount) { index -> runCatching { return getChildAt(index).firstScrollView() } }
 		}
 		error("No ScrollView found")
+	}
+
+	private fun waitForDisplayedDescription(wanted: String) {
+		repeat(50) {
+			if (runCatching { onView(withContentDescription(wanted)).check(matches(isDisplayed())) }.isSuccess) return
+			Thread.sleep(100)
+		}
+		error("Timed out waiting for displayed content description $wanted")
 	}
 
 	private fun waitForVoiceNotification(manager: NotificationManager, predicate: (Notification) -> Boolean): Notification {
