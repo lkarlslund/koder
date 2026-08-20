@@ -169,7 +169,7 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 		params["model"] = model
 	}
 	if err := m.client.Call(ctx, "turn/start", params, &started); err != nil {
-		return err
+		return fmt.Errorf("start Codex turn with model %q: %w", strings.TrimSpace(snapshot.Chat.ModelID), err)
 	}
 	if started.Turn.ID == "" {
 		return fmt.Errorf("codex turn/start returned no turn id")
@@ -214,8 +214,9 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 	if len(dynamicTools) > 0 {
 		params["dynamicTools"] = dynamicTools
 	}
-	if model := strings.TrimSpace(chatRecord.ModelID); model != "" {
-		params["model"] = model
+	requestedModel := strings.TrimSpace(chatRecord.ModelID)
+	if requestedModel != "" {
+		params["model"] = requestedModel
 	}
 	if m.instructions != nil {
 		if instruction := strings.TrimSpace(m.instructions(session, chatRecord)); instruction != "" {
@@ -229,10 +230,14 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 		Model string `json:"model"`
 	}
 	if err := m.client.Call(ctx, "thread/start", params, &started); err != nil {
-		return "", err
+		return "", fmt.Errorf("start Codex thread with model %q: %w", requestedModel, err)
 	}
 	if started.Thread.ID == "" {
 		return "", fmt.Errorf("codex thread/start returned no thread id")
+	}
+	if actualModel := strings.TrimSpace(started.Model); requestedModel != "" && actualModel != "" && actualModel != requestedModel {
+		m.deleteThreadBestEffort(started.Thread.ID)
+		return "", fmt.Errorf("codex thread started with model %q, requested %q", actualModel, requestedModel)
 	}
 	if title := strings.TrimSpace(chatRecord.Title); title != "" {
 		if err := m.client.Call(ctx, "thread/name/set", map[string]string{"threadId": started.Thread.ID, "name": title}, nil); err != nil {

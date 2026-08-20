@@ -35,14 +35,14 @@ func TestManagerPersistsCodexTurnInKoderTimeline(t *testing.T) {
 	client := codexapp.New(codexapp.Config{
 		Executable: os.Args[0],
 		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
-		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1"},
+		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_MODEL=codex-test"},
 	})
 	manager := New(client, st, func(domain.Session, domain.Chat) string { return "Be concise." })
 	bridge := &fakeToolBridge{}
 	manager.SetToolBridge(bridge)
 	t.Cleanup(func() { _ = manager.Close() })
 	sessionRecord := domain.Session{ID: id.ID("session-1"), ProjectRoot: t.TempDir()}
-	chatRecord := domain.Chat{ID: id.ID("chat-1"), SessionID: sessionRecord.ID, Backend: domain.ChatBackendCodex, InteractionMode: domain.InteractionModeText}
+	chatRecord := domain.Chat{ID: id.ID("chat-1"), SessionID: sessionRecord.ID, Backend: domain.ChatBackendCodex, InteractionMode: domain.InteractionModeText, ModelID: "codex-test"}
 	source := chat.NewSource(func() chat.Deps { return chat.Deps{Store: st} })
 	if err := source.PutRecord(context.Background(), chatRecord); err != nil {
 		t.Fatal(err)
@@ -203,13 +203,24 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 			if json.Unmarshal(msg.Params, &params) != nil || params["sandbox"] != "workspace-write" {
 				os.Exit(4)
 			}
+			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" && params["model"] != expected {
+				os.Exit(6)
+			}
 			if os.Getenv("KODER_CODEX_DRIVER_APPROVAL") == "1" {
 				if json.Unmarshal(msg.Params, &params) != nil || params["approvalPolicy"] != "on-request" {
 					os.Exit(4)
 				}
 			}
-			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": "fake"}})
+			responseModel := "fake"
+			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" {
+				responseModel = expected
+			}
+			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": responseModel}})
 		case "turn/start":
+			var params map[string]any
+			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" && (json.Unmarshal(msg.Params, &params) != nil || params["model"] != expected) {
+				os.Exit(6)
+			}
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]any{"turn": map[string]string{"id": "turn-1"}}})
 			if os.Getenv("KODER_CODEX_DRIVER_APPROVAL") == "1" {
 				_ = enc.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "command-1", "type": "commandExecution", "command": "touch marker", "cwd": "/workspace", "status": "inProgress"}}})
