@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -24,6 +25,7 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 		AccessSettings:    defaults.Access,
 		MaxChildChats:     defaults.MaxChildChats,
 	}
+	cfg.PrepareChatSpec = e.prepareChatCreateSpec
 	if e != nil && e.browser != nil {
 		cfg.OnChatArchived = e.browser.CleanupChat
 	}
@@ -41,6 +43,30 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 		cfg.BeforeChatDelete = e.codex.DeleteChat
 	}
 	return cfg
+}
+
+func (e *Engine) prepareChatCreateSpec(ctx context.Context, spec domain.ChatCreateSpec) (domain.ChatCreateSpec, error) {
+	spec = spec.Normalized()
+	if spec.Backend != domain.ChatBackendCodex || strings.TrimSpace(spec.ModelID) != "" {
+		return spec, nil
+	}
+	models, err := e.CodexModels(ctx)
+	if err != nil {
+		return domain.ChatCreateSpec{}, fmt.Errorf("resolve default codex model: %w", err)
+	}
+	for _, model := range models {
+		if model.IsDefault && !model.Hidden && strings.TrimSpace(model.ID) != "" {
+			spec.ModelID = strings.TrimSpace(model.ID)
+			return spec, nil
+		}
+	}
+	for _, model := range models {
+		if !model.Hidden && strings.TrimSpace(model.ID) != "" {
+			spec.ModelID = strings.TrimSpace(model.ID)
+			return spec, nil
+		}
+	}
+	return domain.ChatCreateSpec{}, fmt.Errorf("resolve default codex model: app-server returned no usable models")
 }
 
 // LoadSession returns the live owner for a persisted session, hydrating it on demand.

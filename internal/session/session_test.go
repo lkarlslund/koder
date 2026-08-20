@@ -133,8 +133,41 @@ func TestNewChatWithSpecDoesNotInheritKoderModelIntoCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatRecord := created.Snapshot().Chat
-	if chatRecord.Backend != domain.ChatBackendCodex || chatRecord.ModelID != "" || chatRecord.AssignedTaskRef != "T008" {
+	if chatRecord.Backend != domain.ChatBackendCodex || chatRecord.ProviderID != "" || chatRecord.ModelID != "" || chatRecord.AssignedTaskRef != "T008" {
 		t.Fatalf("created chat = %#v", chatRecord)
+	}
+}
+
+func TestNewChatWithSpecResolvesBackendDefaultModel(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.UpdateConfig(RegistryConfig{PrepareChatSpec: func(_ context.Context, spec domain.ChatCreateSpec) (domain.ChatCreateSpec, error) {
+		if spec.Backend == domain.ChatBackendCodex && spec.ModelID == "" {
+			spec.ModelID = "codex-default"
+		}
+		return spec, nil
+	}})
+	root := owner.Snapshot().Chats[0]
+	created, err := owner.NewChatWithSpec(ctx, &root.ID, domain.ChatCreateSpec{
+		Title: "Codex worker", Backend: domain.ChatBackendCodex, WorkflowRole: domain.WorkflowRoleExecution,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := created.Snapshot().Chat.ModelID; got != "codex-default" {
+		t.Fatalf("created codex model = %q, want codex-default", got)
 	}
 }
 
@@ -391,11 +424,19 @@ func TestStartChatCanSelectCodexBackendIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner.UpdateConfig(RegistryConfig{MaxChildChats: 2, BackendAvailable: func(domain.ChatBackend) error { return nil }})
+	owner.UpdateConfig(RegistryConfig{
+		MaxChildChats: 2, BackendAvailable: func(domain.ChatBackend) error { return nil },
+		PrepareChatSpec: func(_ context.Context, spec domain.ChatCreateSpec) (domain.ChatCreateSpec, error) {
+			if spec.Backend == domain.ChatBackendCodex && spec.ModelID == "" {
+				spec.ModelID = "gpt-test"
+			}
+			return spec, nil
+		},
+	})
 	parentID := owner.Snapshot().Chats[0].ID
 	_, err = owner.ChatToolControl(parentID).StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
 		Profile: chatrole.Planning, Objective: "Plan milestone five", Backend: domain.ChatBackendCodex,
-		ModelID: "gpt-test", PermissionProfile: "readonly", ToolStates: domain.ToolStates{domain.ToolKindSessionStart: false},
+		PermissionProfile: "readonly", ToolStates: domain.ToolStates{domain.ToolKindSessionStart: false},
 	})
 	if err != nil {
 		t.Fatal(err)

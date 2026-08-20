@@ -528,6 +528,14 @@ func (s *Session) NewRootChatWithDimensions(ctx context.Context, title string, r
 // NewChatWithSpec creates a chat from the shared surface-independent contract.
 func (s *Session) NewChatWithSpec(ctx context.Context, parentChatID *id.ID, spec domain.ChatCreateSpec) (*chatpkg.Chat, error) {
 	spec = spec.Normalized()
+	if prepare := s.configSnapshot().PrepareChatSpec; prepare != nil {
+		var err error
+		spec, err = prepare(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		spec = spec.Normalized()
+	}
 	if spec.MilestoneKey != "" && spec.TaskRef != "" {
 		return nil, fmt.Errorf("chat scope may select a milestone or a task, not both")
 	}
@@ -613,6 +621,10 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 	if modelID == "" && template.EffectiveBackend() == backend {
 		modelID = strings.TrimSpace(template.ModelID)
 	}
+	providerID := strings.TrimSpace(template.ProviderID)
+	if backend == domain.ChatBackendCodex {
+		providerID = ""
+	}
 	permissionProfile := spec.PermissionProfile
 	if permissionProfile == "" {
 		permissionProfile = strings.TrimSpace(template.PermissionProfile)
@@ -629,7 +641,7 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 		WorkflowRole:       role,
 		Backend:            backend,
 		InteractionMode:    interactionMode,
-		ProviderID:         strings.TrimSpace(template.ProviderID),
+		ProviderID:         providerID,
 		ModelID:            modelID,
 		PermissionProfile:  permissionProfile,
 		ToolStates:         toolStates,

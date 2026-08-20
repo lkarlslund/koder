@@ -163,6 +163,13 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 			modelID = strings.TrimSpace(config.DefaultModel)
 		}
 	}
+	if config.PrepareChatSpec != nil {
+		prepared, err := config.PrepareChatSpec(ctx, domain.ChatCreateSpec{Backend: backend, ModelID: modelID})
+		if err != nil {
+			return chattool.Status{}, err
+		}
+		modelID = strings.TrimSpace(prepared.ModelID)
+	}
 	permissionProfile := strings.TrimSpace(req.PermissionProfile)
 	if permissionProfile == "" {
 		permissionProfile = strings.TrimSpace(parentChat.PermissionProfile)

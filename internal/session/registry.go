@@ -23,6 +23,7 @@ type RegistryConfig struct {
 	PermissionProfile string
 	AccessSettings    accesssettings.Settings
 	MaxChildChats     int
+	PrepareChatSpec   func(context.Context, domain.ChatCreateSpec) (domain.ChatCreateSpec, error)
 	OnChatArchived    func(context.Context, id.ID)
 	BackendAvailable  func(domain.ChatBackend) error
 	BeforeChatUpdate  func(context.Context, domain.Chat, chattool.UpdateRequest) error
@@ -228,6 +229,16 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")
 	}
+	spec = spec.Normalized()
+	cfg := r.currentConfig()
+	if cfg.PrepareChatSpec != nil {
+		var err error
+		spec, err = cfg.PrepareChatSpec(ctx, spec)
+		if err != nil {
+			return nil, err
+		}
+		spec = spec.Normalized()
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "New Session"
@@ -254,10 +265,11 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 			return nil, fmt.Errorf("project root must be a directory: %s", projectRoot)
 		}
 	}
-	cfg := r.currentConfig()
 	modelID := cfg.DefaultModel
+	providerID := cfg.DefaultProvider
 	if spec.Backend == domain.ChatBackendCodex {
 		modelID = spec.ModelID
+		providerID = ""
 	} else if spec.ModelID != "" {
 		modelID = spec.ModelID
 	}
@@ -268,7 +280,7 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	session, err := createSessionRecordWithOptions(ctx, r.store, r.chatsSrc, createSessionOptions{
 		ID:                     sessionID,
 		Title:                  title,
-		ProviderID:             cfg.DefaultProvider,
+		ProviderID:             providerID,
 		ModelID:                modelID,
 		PermissionProfile:      permissionProfile,
 		Kind:                   kind,
