@@ -96,6 +96,24 @@ class SecureSettings(context: Context) {
 		preferences.edit().putString(RESPONSE_PACING, pacing.wireValue).apply()
 	}
 
+	fun recordPhoneActionUse(action: String, usedAtMillis: Long = System.currentTimeMillis()) {
+		if (action.isBlank()) return
+		val uses = phoneActionUses().toMutableMap()
+		uses[action] = maxOf(uses[action] ?: 0L, usedAtMillis.coerceAtLeast(0))
+		val root = JSONObject()
+		uses.forEach { (name, timestamp) -> root.put(name, timestamp) }
+		preferences.edit().putString(PHONE_ACTION_USES, root.toString()).apply()
+	}
+
+	fun phoneActionUses(): Map<String, Long> = runCatching {
+		val root = JSONObject(preferences.getString(PHONE_ACTION_USES, "{}").orEmpty())
+		buildMap {
+			root.keys().forEach { action ->
+				if (action.isNotBlank()) put(action, root.optLong(action).coerceAtLeast(0))
+			}
+		}
+	}.getOrDefault(emptyMap())
+
 	fun savedVoiceResponses(sessionId: String = ""): List<SavedVoiceResponse> {
 		val raw = preferences.getString(SAVED_RESPONSES, "[]").orEmpty()
 		return runCatching {
@@ -212,6 +230,7 @@ class SecureSettings(context: Context) {
 		const val VAD_SILENCE = "vad_silence"
 		const val AUDIO_ROUTE = "audio_route"
 		const val RESPONSE_PACING = "response_pacing"
+		const val PHONE_ACTION_USES = "phone_action_uses"
 		const val SAVED_RESPONSES = "saved_responses"
 		const val VOICE_READ_COUNTS = "voice_read_counts"
 		const val VOICE_READ_STATE_INITIALIZED = "voice_read_state_initialized"

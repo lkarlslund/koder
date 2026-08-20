@@ -68,7 +68,13 @@ class AndroidPhoneToolProvider(
             callback(Result.failure(IllegalStateException("$action is not enabled on this phone")))
             return
         }
-        val work = { executor.execute { callback(runCatching { perform(action, arguments) }) } }
+        val work = {
+			executor.execute {
+				val result = runCatching { perform(action, arguments) }
+				if (result.isSuccess) settings.recordPhoneActionUse(action)
+				callback(result)
+			}
+		}
         if (action in CONFIRM_ACTIONS) {
             activity.runOnUiThread {
                 AlertDialog.Builder(activity)

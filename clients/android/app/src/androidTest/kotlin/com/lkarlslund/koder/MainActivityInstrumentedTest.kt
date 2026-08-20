@@ -32,6 +32,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lkarlslund.koder.update.AndroidAppUpdater
+import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -57,6 +58,7 @@ import java.net.InetAddress
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -95,6 +97,54 @@ class MainActivityInstrumentedTest {
 		secureSettings.markVoiceSessionRead("voice-1", 5)
 		assertEquals(0L, SecureSettings(context).unreadVoiceResults(mapOf("voice-1" to 5))["voice-1"])
 		assertEquals(1L, secureSettings.unreadVoiceResults(mapOf("voice-1" to 5, "voice-2" to 1))["voice-2"])
+	}
+
+	@Test
+	fun permissionHealthIsSeparateAndShowsEffectiveAccessAndLastUse() {
+		val server = MockWebServer()
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""",
+		).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			val secureSettings = SecureSettings(context)
+			secureSettings.save(server.url("/").toString(), "")
+			secureSettings.savePhoneCapabilities(setOf("device"))
+			secureSettings.recordPhoneActionUse("device_status", 1_700_000_000_000)
+			assertEquals(1_700_000_000_000, secureSettings.phoneActionUses()["device_status"])
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Personal")
+				onView(withContentDescription("More options")).perform(click())
+				onView(withText("Permission health")).perform(click())
+				onView(withContentDescription("Permission health for Device information: ● Available to Koder")).check(matches(isDisplayed()))
+				val labels = waitForText(scenario, "Remote actions: device status")
+				assertTrue(labels.any { it.startsWith("Last used ") })
+				assertTrue(labels.contains("Android access: none required"))
+				onView(withContentDescription("Manage phone tool permissions")).check(matches(isDisplayed()))
+			}
+		} finally {
+			server.close()
+		}
+	}
+
+	@Test
+	fun successfulPhoneToolUseIsRecordedForPermissionHealth() {
+		val secureSettings = SecureSettings(context)
+		secureSettings.savePhoneCapabilities(setOf("device"))
+		val completed = CountDownLatch(1)
+		var provider: AndroidPhoneToolProvider? = null
+		ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+			scenario.onActivity { activity ->
+				provider = AndroidPhoneToolProvider(activity, secureSettings)
+				provider?.execute("device_status", emptyMap()) { result ->
+					assertTrue(result.isSuccess)
+					completed.countDown()
+				}
+			}
+			assertTrue(completed.await(5, TimeUnit.SECONDS))
+			assertTrue((secureSettings.phoneActionUses()["device_status"] ?: 0) > 0)
+			provider?.close()
+		}
 	}
 
     @Test

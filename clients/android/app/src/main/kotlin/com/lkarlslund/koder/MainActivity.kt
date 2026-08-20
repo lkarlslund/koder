@@ -105,7 +105,7 @@ import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
-    private enum class Screen { SETUP, SETTINGS, LOADING, HOME, CHAT }
+    private enum class Screen { SETUP, SETTINGS, PERMISSIONS, LOADING, HOME, CHAT }
 	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
@@ -218,6 +218,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     leaveChat()
                 } else if (screen == Screen.SETTINGS) {
                     loadHome()
+				} else if (screen == Screen.PERMISSIONS) {
+					loadHome()
                 } else if (screen == Screen.SETUP && settings.server.isNotBlank()) {
                     showSettings()
                 } else {
@@ -612,12 +614,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         PopupMenu(this, anchor).apply {
             menu.add("Server info")
 			menu.add("Audio diagnostics")
+			menu.add("Permission health")
             menu.add("Settings")
             menu.add("About")
             setOnMenuItemClickListener { item ->
                 when (item.title.toString()) {
-                    "Server info" -> loadServerInfo()
+					"Server info" -> loadServerInfo()
 					"Audio diagnostics" -> showAudioDiagnostics()
+					"Permission health" -> showPermissionHealth()
                     "Settings" -> showSettings()
                     "About" -> showAbout()
                 }
@@ -626,6 +630,71 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             show()
         }
     }
+
+	private fun showPermissionHealth() {
+		screen = Screen.PERMISSIONS
+		settings = secureSettings.load()
+		clearCallViews()
+		val uses = secureSettings.phoneActionUses()
+		val content = column()
+		content.addView(LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER_VERTICAL
+			addView(TextView(this@MainActivity).apply {
+				text = "‹"
+				textSize = 38f
+				gravity = Gravity.CENTER
+				minWidth = dp(48)
+				minHeight = dp(48)
+				contentDescription = "Back to conversations"
+				isClickable = true
+				setOnClickListener { loadHome() }
+			})
+			addView(title("Permission health"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+		}, matchWrap())
+		content.addView(body("This is the effective access Koder has through this phone. A tool must be switched on and have any required Android access before it is offered to the voice conversation."), spaced(top = 12, bottom = 16))
+		content.addView(Button(this).apply {
+			text = "Manage phone tools"
+			isAllCaps = false
+			contentDescription = "Manage phone tool permissions"
+			setOnClickListener { showSettings() }
+		}, spaced(bottom = 16))
+		PhoneCapabilities.all.forEach { capability ->
+			val enabled = capability.id in settings.enabledPhoneCapabilities
+			val granted = phoneCapabilityAvailable(capability)
+			val requiresAndroidAccess = capability.notificationAccess || capability.permissions.isNotEmpty()
+			val state = when {
+				enabled && granted -> "● Available to Koder"
+				enabled -> "● Enabled · Android access missing"
+				granted && requiresAndroidAccess -> "○ Off · Android access granted"
+				requiresAndroidAccess -> "○ Off · Android access not granted"
+				else -> "○ Off · no Android permission needed"
+			}
+			val stateColor = when {
+				enabled && granted -> ACTION_GREEN
+				enabled && !granted -> ACTION_RED
+				else -> ACTION_NEUTRAL
+			}
+			val lastUse = capability.actions.mapNotNull(uses::get).maxOrNull()?.takeIf { it > 0 }
+			val androidAccess = when {
+				capability.notificationAccess -> "Android access: notification listener"
+				capability.permissions.isNotEmpty() -> "Android access: ${capability.permissions.joinToString { it.substringAfterLast('.').lowercase().replace('_', ' ') }}"
+				else -> "Android access: none required"
+			}
+			content.addView(card().apply {
+				contentDescription = "Permission health for ${capability.title}: $state"
+				addView(label(capability.title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+				addView(body(state).apply { setTextColor(stateColor); setTypeface(typeface, Typeface.BOLD) }, spaced(top = 4))
+				addView(helper(capability.description), spaced(top = 6))
+				addView(helper(androidAccess), spaced(top = 5))
+				addView(helper("Remote actions: ${capability.actions.sorted().joinToString { it.replace('_', ' ') }}"), spaced(top = 3))
+				addView(helper(lastUse?.let {
+					"Last used ${DateUtils.getRelativeTimeSpanString(it, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)}"
+				} ?: "Never used on this phone"), spaced(top = 3))
+			}, spaced(bottom = 8))
+		}
+		showScrollable(content)
+	}
 
 	private fun showAudioDiagnostics() {
 		val content = column().apply { setPadding(dp(8), dp(4), dp(8), dp(4)) }
