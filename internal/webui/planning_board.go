@@ -20,11 +20,13 @@ const planningBoardAssetPath = "assets/board.html"
 var planningBoardHTML = mustReadAsset(planningBoardAssetPath)
 
 type planningBoardResponse struct {
-	SessionID   id.ID                      `json:"session_id"`
-	ProjectRoot string                     `json:"project_root"`
-	Plan        planning.Plan              `json:"plan"`
-	Tasks       []planning.Task            `json:"tasks"`
-	TasksByKey  map[string][]planning.Task `json:"tasks_by_milestone"`
+	SessionID              id.ID                      `json:"session_id"`
+	ProjectRoot            string                     `json:"project_root"`
+	Plan                   planning.Plan              `json:"plan"`
+	Tasks                  []planning.Task            `json:"tasks"`
+	TasksByKey             map[string][]planning.Task `json:"tasks_by_milestone"`
+	ArchivedMilestoneCount int                        `json:"archived_milestone_count"`
+	ArchivedTaskCount      int                        `json:"archived_task_count"`
 }
 
 type boardMilestoneRequest struct {
@@ -52,6 +54,15 @@ type boardTaskUpdateRequest struct {
 	Content      string `json:"content"`
 	Note         string `json:"note"`
 	Position     *int   `json:"position"`
+}
+
+type boardPlanningArchiveRequest struct {
+	Key      string `json:"key"`
+	Archived bool   `json:"archived"`
+}
+
+type boardPlanningDeleteRequest struct {
+	Key string `json:"key"`
 }
 
 type boardStartChatRequest struct {
@@ -113,10 +124,18 @@ func (s *Server) handlePlanningBoardAPI(w http.ResponseWriter, r *http.Request, 
 		s.handlePlanningBoardMilestone(w, r, sessionID)
 	case "milestones/order":
 		s.handlePlanningBoardMilestoneOrder(w, r, sessionID)
+	case "milestones/archive":
+		s.handlePlanningBoardMilestoneArchive(w, r, sessionID)
+	case "milestones/delete":
+		s.handlePlanningBoardMilestoneDelete(w, r, sessionID)
 	case "tasks":
 		s.handlePlanningBoardTaskAdd(w, r, sessionID)
 	case "tasks/update":
 		s.handlePlanningBoardTaskUpdate(w, r, sessionID)
+	case "tasks/archive":
+		s.handlePlanningBoardTaskArchive(w, r, sessionID)
+	case "tasks/delete":
+		s.handlePlanningBoardTaskDelete(w, r, sessionID)
 	case "chats/start":
 		s.handlePlanningBoardStartChat(w, r, sessionID)
 	default:
@@ -125,7 +144,8 @@ func (s *Server) handlePlanningBoardAPI(w http.ResponseWriter, r *http.Request, 
 }
 
 func (s *Server) handlePlanningBoardState(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	resp, err := s.planningBoardState(r.Context(), sessionID)
+	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("archived")), "true")
+	resp, err := s.planningBoardStateWithArchived(r.Context(), sessionID, includeArchived)
 	if err != nil {
 		writePlanningBoardError(w, err)
 		return
@@ -134,6 +154,10 @@ func (s *Server) handlePlanningBoardState(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) planningBoardState(ctx context.Context, sessionID id.ID) (planningBoardResponse, error) {
+	return s.planningBoardStateWithArchived(ctx, sessionID, false)
+}
+
+func (s *Server) planningBoardStateWithArchived(ctx context.Context, sessionID id.ID, includeArchived bool) (planningBoardResponse, error) {
 	session, err := s.controller.SessionByID(ctx, sessionID)
 	if err != nil {
 		return planningBoardResponse{}, err
@@ -146,8 +170,32 @@ func (s *Server) planningBoardState(ctx context.Context, sessionID id.ID) (plann
 	if err != nil {
 		return planningBoardResponse{}, err
 	}
-	tasksByKey := map[string][]planning.Task{}
+	archivedMilestones := 0
+	visibleMilestoneKeys := make(map[string]struct{}, len(plan.Milestones))
+	for _, milestone := range plan.Milestones {
+		if milestone.Archived {
+			archivedMilestones++
+			continue
+		}
+		visibleMilestoneKeys[planning.MilestoneKey(milestone)] = struct{}{}
+	}
+	archivedTasks := 0
 	for _, task := range tasks {
+		if task.Archived {
+			archivedTasks++
+		}
+	}
+	visiblePlan := plan
+	visibleTasks := tasks
+	if !includeArchived {
+		visiblePlan.Milestones = slices.DeleteFunc(slices.Clone(plan.Milestones), func(item planning.Milestone) bool { return item.Archived })
+		visibleTasks = slices.DeleteFunc(slices.Clone(tasks), func(item planning.Task) bool {
+			_, milestoneVisible := visibleMilestoneKeys[item.MilestoneKey]
+			return item.Archived || !milestoneVisible
+		})
+	}
+	tasksByKey := map[string][]planning.Task{}
+	for _, task := range visibleTasks {
 		tasksByKey[task.MilestoneKey] = append(tasksByKey[task.MilestoneKey], task)
 	}
 	for key, items := range tasksByKey {
@@ -155,11 +203,13 @@ func (s *Server) planningBoardState(ctx context.Context, sessionID id.ID) (plann
 		tasksByKey[key] = items
 	}
 	return planningBoardResponse{
-		SessionID:   sessionID,
-		ProjectRoot: session.ProjectRoot,
-		Plan:        plan,
-		Tasks:       tasks,
-		TasksByKey:  tasksByKey,
+		SessionID:              sessionID,
+		ProjectRoot:            session.ProjectRoot,
+		Plan:                   visiblePlan,
+		Tasks:                  visibleTasks,
+		TasksByKey:             tasksByKey,
+		ArchivedMilestoneCount: archivedMilestones,
+		ArchivedTaskCount:      archivedTasks,
 	}, nil
 }
 
@@ -224,6 +274,9 @@ func upsertBoardMilestone(plan planning.Plan, req boardMilestoneRequest) (planni
 				continue
 			}
 			found = true
+			if next.Milestones[idx].Archived {
+				return planning.Plan{}, fmt.Errorf("milestone %s is archived; restore it before editing", key)
+			}
 			if title != "" {
 				next.Milestones[idx].Title = title
 			}
@@ -274,6 +327,42 @@ func (s *Server) handlePlanningBoardMilestoneOrder(w http.ResponseWriter, r *htt
 	}
 	normalizeMilestonePositions(next.Milestones)
 	if _, err := s.controller.SetMilestonePlan(r.Context(), sessionID, next.Summary, next.Milestones); err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	s.handlePlanningBoardState(w, r, sessionID)
+}
+
+func (s *Server) handlePlanningBoardMilestoneArchive(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req boardPlanningArchiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode milestone archive: %v", err), http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		http.Error(w, "key is required", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.controller.ArchiveMilestone(r.Context(), sessionID, key, req.Archived); err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	s.handlePlanningBoardState(w, r, sessionID)
+}
+
+func (s *Server) handlePlanningBoardMilestoneDelete(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req boardPlanningDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode milestone delete: %v", err), http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		http.Error(w, "key is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.controller.DeleteMilestone(r.Context(), sessionID, key); err != nil {
 		writePlanningBoardError(w, err)
 		return
 	}
@@ -347,6 +436,42 @@ func (s *Server) handlePlanningBoardTaskUpdate(w http.ResponseWriter, r *http.Re
 	s.handlePlanningBoardState(w, r, sessionID)
 }
 
+func (s *Server) handlePlanningBoardTaskArchive(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req boardPlanningArchiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode task archive: %v", err), http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		http.Error(w, "key is required", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.controller.ArchiveTask(r.Context(), sessionID, key, req.Archived); err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	s.handlePlanningBoardState(w, r, sessionID)
+}
+
+func (s *Server) handlePlanningBoardTaskDelete(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
+	var req boardPlanningDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode task delete: %v", err), http.StatusBadRequest)
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		http.Error(w, "key is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.controller.DeleteTask(r.Context(), sessionID, key); err != nil {
+		writePlanningBoardError(w, err)
+		return
+	}
+	s.handlePlanningBoardState(w, r, sessionID)
+}
+
 func findBoardTask(tasks []planning.Task, taskKey string) (planning.Task, bool) {
 	for _, task := range tasks {
 		if planning.TaskKey(task) == taskKey {
@@ -390,6 +515,10 @@ func (s *Server) handlePlanningBoardStartChat(w http.ResponseWriter, r *http.Req
 		writePlanningBoardError(w, fmt.Errorf("milestone %s not found", milestoneKey))
 		return
 	}
+	if milestone.Archived {
+		writePlanningBoardError(w, fmt.Errorf("milestone %s is archived; restore it before starting a chat", milestoneKey))
+		return
+	}
 	objective := strings.TrimSpace(req.Objective)
 	if objective == "" {
 		objective = "Execute milestone " + milestoneKey + ": " + strings.TrimSpace(milestone.Title)
@@ -403,6 +532,10 @@ func (s *Server) handlePlanningBoardStartChat(w http.ResponseWriter, r *http.Req
 		task, ok := findBoardTask(tasks, taskKey)
 		if !ok {
 			writePlanningBoardError(w, fmt.Errorf("task %s not found", taskKey))
+			return
+		}
+		if task.Archived {
+			writePlanningBoardError(w, fmt.Errorf("task %s is archived; restore it before starting a chat", taskKey))
 			return
 		}
 		objective = "Execute task " + taskKey + " in milestone " + milestoneKey + ": " + task.Content

@@ -421,9 +421,10 @@
           </div>
         </template>
       </div>
-	  <div class="sidebar-section" x-show="workspaceSessionMode() && milestoneItems().length > 0" style="display: none;">
+	  <div class="sidebar-section" x-show="workspaceSessionMode() && allMilestoneItems().length > 0" style="display: none;">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
+		  <button type="button" class="btn btn-sm" :class="showArchivedPlanning ? 'btn-warning' : 'btn-outline-warning'" x-show="archivedPlanningCount() > 0" :title="showArchivedPlanning ? 'Hide archived milestones and tasks' : 'Show archived milestones and tasks'" @click="toggleArchivedPlanning()"><i class="bi bi-archive"></i><span class="visually-hidden">Toggle archived planning items</span><span class="badge text-bg-dark ms-1" x-text="archivedPlanningCount()"></span></button>
         </div>
         <div class="status-filter-row" x-show="milestoneStatusFilterOptions().length > 0">
           <template x-for="filter in milestoneStatusFilterOptions()" :key="filter.status">
@@ -442,7 +443,7 @@
         </template>
         <div class="planning-tree" x-show="visibleMilestones().length > 0">
           <template x-for="node in flattenedMilestones()" :key="milestoneKey(node.milestone)">
-            <div class="planning-node" :class="{'planning-node-orphan': node.orphan}" :style="'--milestone-depth:' + node.depth">
+			<div class="planning-node" :class="{'planning-node-orphan': node.orphan, 'planning-node-archived': milestoneArchived(node.milestone)}" :style="'--milestone-depth:' + node.depth">
               <button type="button" class="planning-row" :title="milestoneTreeTitle(node)" @click="toggleMilestone(milestoneKey(node.milestone))">
                 <i class="bi planning-expander" :class="milestoneExpanded(milestoneKey(node.milestone)) ? 'bi-dash-square' : 'bi-plus-square'"></i>
                 <i class="bi planning-status" :class="milestoneIcon(milestoneStatus(node.milestone))"></i>
@@ -450,6 +451,7 @@
                 <span class="planning-milestoneKey" x-text="milestoneKey(node.milestone)"></span>
                 <span class="planning-counts" x-text="node.orphan ? 'depends on ' + milestoneDependsOnKey(node.milestone) : milestoneTaskSummary(node.milestone)"></span>
                 <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(node.milestone))" x-text="milestoneStatus(node.milestone)"></span>
+				<span class="badge text-bg-warning" x-show="milestoneArchived(node.milestone)">archived</span>
               </button>
               <div class="milestone-progress" :title="milestoneProgressTitle(node.milestone)">
                 <span class="milestone-progress-segment milestone-progress-done" :style="milestoneProgressStyle(node.milestone, 'completed')"></span>
@@ -463,10 +465,11 @@
                   <div class="planning-empty">No tasks</div>
                 </template>
                 <template x-for="task in taskItemsForMilestone(node.milestone)" :key="task.ID || task.id">
-                  <div class="planning-task" :title="taskTitle(task)">
+				  <div class="planning-task" :class="{'planning-task-archived': taskArchived(task)}" :title="taskTitle(task)">
                     <i class="bi" :class="taskIcon(taskStatus(task))"></i>
                     <span class="text-truncate" x-text="task.Content || task.content"></span>
                     <span class="badge planning-badge planning-task-status" :class="taskBadge(taskStatus(task))" x-text="taskStatus(task)"></span>
+					<span class="badge text-bg-warning" x-show="taskArchived(task)">archived</span>
                   </div>
                 </template>
               </div>

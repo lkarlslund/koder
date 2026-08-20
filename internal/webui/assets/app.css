@@ -297,6 +297,8 @@
     .planning-tree { display: grid; gap: .05rem; margin-top: .2rem; }
     .planning-node { --milestone-depth: 0; border-bottom: 1px solid var(--bs-border-color-translucent); padding-bottom: .05rem; margin-left: calc(var(--milestone-depth) * .82rem); }
     .planning-node-orphan .planning-counts { color: var(--bs-warning-text-emphasis); }
+    .planning-node-archived, .planning-task-archived { opacity: .68; }
+    .planning-node-archived { border-bottom-style: dashed; }
     .planning-row { width: 100%; display: grid; grid-template-columns: 1rem 1rem minmax(0, 1fr) auto auto auto; align-items: center; gap: .28rem; border: 0; background: transparent; color: inherit; padding: .12rem 0; text-align: left; }
     .planning-row:hover { color: var(--bs-emphasis-color); background: var(--bs-secondary-bg); }
     .milestone-progress { height: 3px; display: flex; overflow: hidden; background: var(--bs-secondary-bg); border-radius: 999px; margin: 0 0 .16rem 2.56rem; }
@@ -325,7 +327,7 @@
     .tool-status-badge-error { color: var(--bs-danger-text-emphasis); background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); }
     .tool-status-badge-canceled { color: var(--bs-light-text-emphasis); background: var(--bs-dark-bg-subtle); border-color: var(--bs-dark-border-subtle); }
     .planning-children { margin-left: 1.35rem; padding: .05rem 0 .18rem .55rem; border-left: 1px solid var(--bs-border-color); }
-    .planning-task { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: .28rem; min-height: 1.25rem; font-size: .84rem; }
+    .planning-task { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto auto; align-items: center; gap: .28rem; min-height: 1.25rem; font-size: .84rem; }
     .planning-empty { color: var(--bs-secondary-color); font-size: .82rem; padding: .1rem 0; }
     .git-file { border-left: 3px solid transparent; }
     .git-file.git-added, .diff-add { color: var(--bs-success-text-emphasis); }

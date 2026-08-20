@@ -35,6 +35,9 @@
       error: '',
       plan: {summary: '', milestones: []},
       tasksByMilestone: {},
+	  showArchived: false,
+	  archivedMilestoneCount: 0,
+	  archivedTaskCount: 0,
       pollTimer: 0,
       dragTaskKey: '',
       dragMilestoneKey: '',
@@ -76,7 +79,8 @@
       },
 
       boardAPI(path) {
-        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/board' + (path || '');
+		const base = '/api/sessions/' + encodeURIComponent(this.sessionID) + '/board' + (path || '');
+		return this.showArchived ? base + '?archived=true' : base;
       },
 
       async loadBoard(options) {
@@ -103,7 +107,14 @@
         this.projectRoot = asText(data.project_root || data.ProjectRoot);
         this.plan = data.plan || data.Plan || {summary: '', milestones: []};
         this.tasksByMilestone = data.tasks_by_milestone || data.TasksByKey || {};
+		this.archivedMilestoneCount = Number(data.archived_milestone_count || 0);
+		this.archivedTaskCount = Number(data.archived_task_count || 0);
       },
+
+	  async toggleArchived() {
+		this.showArchived = !this.showArchived;
+		await this.loadBoard();
+	  },
 
       async postBoard(path, body) {
         this.saving = true;
@@ -178,6 +189,10 @@
         return statusValue(milestone, 'pending');
       },
 
+	  milestoneArchived(milestone) {
+		return !!(milestone && (milestone.archived || milestone.Archived));
+	  },
+
       milestoneStatusLabel(status) {
         const found = this.milestoneStatuses.find(item => item.key === status);
         return found ? found.label : status;
@@ -204,6 +219,10 @@
         return statusValue(task, 'pending');
       },
 
+	  taskArchived(task) {
+		return !!(task && (task.archived || task.Archived));
+	  },
+
       taskContent(task) {
         return asText(task && (task.content || task.Content));
       },
@@ -224,6 +243,10 @@
         const taskCount = milestones.reduce((count, milestone) => count + this.tasksForMilestone(milestone).length, 0);
         return milestones.length + ' milestones · ' + taskCount + ' tasks';
       },
+
+	  archivedSummary() {
+		return this.archivedMilestoneCount + ' milestones · ' + this.archivedTaskCount + ' tasks archived';
+	  },
 
       openMilestoneEditor(milestone) {
         this.milestoneEditor = {
@@ -254,6 +277,20 @@
         });
         this.closeMilestoneEditor();
       },
+
+	  async archiveMilestone(milestone, archived) {
+		const key = this.milestoneKey(milestone);
+		if (!key) return;
+		const verb = archived ? 'Archive' : 'Restore';
+		if (!confirm(verb + ' milestone ' + key + '?')) return;
+		await this.postBoard('/milestones/archive', {key, archived});
+	  },
+
+	  async deleteMilestone(milestone) {
+		const key = this.milestoneKey(milestone);
+		if (!key || !confirm('Permanently delete milestone ' + key + '? This cannot be undone.')) return;
+		await this.postBoard('/milestones/delete', {key});
+	  },
 
       openTaskEditor(milestone, task, status) {
         const milestoneKey = milestone ? this.milestoneKey(milestone) : '';
@@ -293,7 +330,22 @@
         this.closeTaskEditor();
       },
 
+	  async archiveTask(task, archived) {
+		const key = this.taskKey(task);
+		if (!key) return;
+		const verb = archived ? 'Archive' : 'Restore';
+		if (!confirm(verb + ' task ' + key + '?')) return;
+		await this.postBoard('/tasks/archive', {key, archived});
+	  },
+
+	  async deleteTask(task) {
+		const key = this.taskKey(task);
+		if (!key || !confirm('Permanently delete task ' + key + '? This cannot be undone.')) return;
+		await this.postBoard('/tasks/delete', {key});
+	  },
+
       startTaskDrag(task) {
+		if (this.taskArchived(task)) return;
         this.dragTaskKey = this.taskKey(task);
       },
 
@@ -312,6 +364,7 @@
       },
 
       startMilestoneDrag(milestone) {
+		if (this.milestoneArchived(milestone)) return;
         this.dragMilestoneKey = this.milestoneKey(milestone);
       },
 

@@ -425,6 +425,14 @@ func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 				return tools.Result{}, fmt.Errorf("milestone %q is still the parent of visible milestone %q", key, planning.MilestoneKey(candidate))
 			}
 		}
+	} else if dependencyKey := planning.MilestoneDependsOnKey(item); dependencyKey != "" {
+		dependency, found := milestoneForKey(plan.Milestones, dependencyKey)
+		if !found {
+			return tools.Result{}, fmt.Errorf("milestone %q depends on missing milestone %q; repair the dependency before restoring it", key, dependencyKey)
+		}
+		if dependency.Archived {
+			return tools.Result{}, fmt.Errorf("milestone %q depends on archived milestone %q; restore the dependency first", key, dependencyKey)
+		}
 	}
 	action := "archived"
 	if !archived {

@@ -489,6 +489,59 @@ func TestPlanningArchiveAndDeleteLifecycle(t *testing.T) {
 	}
 }
 
+func TestArchivedMilestonesCannotReceiveWorkOrExposeDependentWork(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.SetMilestonePlan(ctx, sessionRecord.ID, "Dependencies", []planning.Milestone{
+		{Key: "M001", Title: "Parent", Status: planning.MilestoneStatusReady},
+		{Key: "M002", Title: "Child", Status: planning.MilestoneStatusReady, DependsOnKey: "M001"},
+		{Key: "M003", Title: "Other", Status: planning.MilestoneStatusReady},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parentTasks, err := owner.AddTasks(ctx, sessionRecord.ID, "M001", []string{"Parent task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTasks, err := owner.AddTasks(ctx, sessionRecord.ID, "M003", []string{"Other task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M002", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M001", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.UpdateTask(ctx, planning.TaskKey(parentTasks[0]), planning.TaskStatusCompleted, "", "done"); err == nil || !strings.Contains(err.Error(), "restore it before updating") {
+		t.Fatalf("update under archived milestone error = %v", err)
+	}
+	if _, err := owner.MoveTask(ctx, sessionRecord.ID, planning.TaskKey(otherTasks[0]), "M001", planning.TaskStatusPending, 0, ""); err == nil || !strings.Contains(err.Error(), "restore it before moving") {
+		t.Fatalf("move into archived milestone error = %v", err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M002", false); err == nil || !strings.Contains(err.Error(), "restore the dependency first") {
+		t.Fatalf("restore dependent milestone error = %v", err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M001", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.ArchiveMilestone(ctx, sessionRecord.ID, "M002", false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSetMilestonePlanRequiresExplicitDelete(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

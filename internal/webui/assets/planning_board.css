@@ -82,6 +82,18 @@ body {
   background: var(--bs-tertiary-bg);
 }
 
+.planning-archived {
+  opacity: 0.68;
+}
+
+.milestone-swimlane.planning-archived {
+  border-color: color-mix(in srgb, var(--bs-warning) 45%, var(--bs-border-color));
+}
+
+.task-card.planning-archived {
+  border-style: dashed;
+}
+
 .milestone-rail {
   display: flex;
   flex-direction: column;

@@ -27,6 +27,7 @@
       </div>
       <div class="d-flex align-items-center gap-2">
         <span class="badge text-bg-secondary" x-show="saving" style="display: none;">Saving</span>
+		<button class="btn btn-sm" :class="showArchived ? 'btn-warning' : 'btn-outline-warning'" type="button" :title="showArchived ? 'Hide archived planning items' : 'Show archived planning items'" @click="toggleArchived()" x-show="archivedMilestoneCount + archivedTaskCount > 0" style="display: none;"><i class="bi bi-archive"></i> <span x-text="showArchived ? 'Hide archived' : 'Archived'"></span> <span class="badge text-bg-dark" x-text="archivedMilestoneCount + archivedTaskCount"></span></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Refresh board" @click="loadBoard()"><i class="bi bi-arrow-clockwise"></i></button>
         <button class="btn btn-sm btn-primary" type="button" title="Add milestone" @click="openMilestoneEditor()"><i class="bi bi-plus-lg"></i></button>
         <a class="btn btn-sm btn-outline-secondary" :href="sessionURL()" title="Open session"><i class="bi bi-chat-left-text"></i></a>
@@ -47,6 +48,8 @@
         <section class="planning-board-empty">
           <i class="bi bi-kanban"></i>
           <div>No milestones yet</div>
+		  <div class="small text-secondary" x-show="archivedMilestoneCount > 0" x-text="archivedSummary()"></div>
+		  <button class="btn btn-outline-warning" type="button" x-show="archivedMilestoneCount > 0 && !showArchived" @click="toggleArchived()"><i class="bi bi-archive"></i> Show archived</button>
           <button class="btn btn-primary" type="button" @click="openMilestoneEditor()"><i class="bi bi-plus-lg"></i> Add milestone</button>
         </section>
       </template>
@@ -65,7 +68,7 @@
         </header>
 
         <template x-for="(milestone, index) in milestones()" :key="milestoneKey(milestone)">
-          <section class="milestone-swimlane" :data-milestone-key="milestoneKey(milestone)" draggable="true" @dragstart="startMilestoneDrag(milestone)" @dragover.prevent @drop="dropMilestone(index)">
+          <section class="milestone-swimlane" :class="{'planning-archived': milestoneArchived(milestone)}" :data-milestone-key="milestoneKey(milestone)" :draggable="!milestoneArchived(milestone)" @dragstart="startMilestoneDrag(milestone)" @dragover.prevent @drop="dropMilestone(index)">
             <aside class="milestone-rail">
               <div class="milestone-rail-top">
                 <div class="milestone-order">
@@ -76,6 +79,7 @@
                   <div class="milestone-title-row">
                     <span class="badge milestone-key" x-text="milestoneKey(milestone)"></span>
                     <span class="badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatusLabel(milestoneStatus(milestone))"></span>
+					<span class="badge text-bg-warning" x-show="milestoneArchived(milestone)">Archived</span>
                   </div>
                   <h2 x-text="milestoneTitle(milestone)"></h2>
                   <p x-show="milestoneNotes(milestone)" x-text="milestoneNotes(milestone)"></p>
@@ -86,9 +90,12 @@
                 <span x-show="milestoneDependsOnKey(milestone)">depends on <strong x-text="milestoneDependsOnKey(milestone)"></strong></span>
               </div>
               <div class="milestone-actions">
-                <button type="button" class="btn btn-sm btn-outline-primary" @click="startChatForMilestone(milestone)" title="Start execution chat" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openMilestoneEditor(milestone)" title="Edit milestone"><i class="bi bi-pencil"></i></button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openTaskEditor(milestone)" title="Add task"><i class="bi bi-plus-lg"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-primary" x-show="!milestoneArchived(milestone)" @click="startChatForMilestone(milestone)" title="Start execution chat" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-secondary" x-show="!milestoneArchived(milestone)" @click="openMilestoneEditor(milestone)" title="Edit milestone"><i class="bi bi-pencil"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-secondary" x-show="!milestoneArchived(milestone)" @click="openTaskEditor(milestone)" title="Add task"><i class="bi bi-plus-lg"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-warning" x-show="!milestoneArchived(milestone)" @click="archiveMilestone(milestone, true)" title="Archive milestone"><i class="bi bi-archive"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-warning" x-show="milestoneArchived(milestone)" @click="archiveMilestone(milestone, false)" title="Restore milestone"><i class="bi bi-arrow-counterclockwise"></i></button>
+				<button type="button" class="btn btn-sm btn-outline-danger" x-show="milestoneArchived(milestone)" @click="deleteMilestone(milestone)" title="Delete milestone permanently"><i class="bi bi-trash"></i></button>
               </div>
             </aside>
 
@@ -101,19 +108,22 @@
                   </header>
                   <div class="task-stack">
                     <template x-for="task in tasksForStatus(milestone, status.key)" :key="taskKey(task)">
-                      <article class="task-card" draggable="true" @dragstart="startTaskDrag(task)" @dblclick="openTaskEditor(milestone, task)">
+					  <article class="task-card" :class="{'planning-archived': taskArchived(task)}" :draggable="!milestoneArchived(milestone) && !taskArchived(task)" @dragstart="startTaskDrag(task)" @dblclick="!milestoneArchived(milestone) && !taskArchived(task) && openTaskEditor(milestone, task)">
                         <div class="task-card-header">
                           <span class="task-key" x-text="taskKey(task)"></span>
                           <span class="d-flex align-items-center gap-1">
-                            <button type="button" class="task-edit-button" title="Start execution chat for task" @click.stop="startChatForMilestone(milestone, task)" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
-                            <button type="button" class="task-edit-button" title="Edit task" @click.stop="openTaskEditor(milestone, task)"><i class="bi bi-pencil"></i></button>
+							<button type="button" class="task-edit-button" x-show="!milestoneArchived(milestone) && !taskArchived(task)" title="Start execution chat for task" @click.stop="startChatForMilestone(milestone, task)" :disabled="saving || !parentChatID"><i class="bi bi-play-fill"></i></button>
+							<button type="button" class="task-edit-button" x-show="!milestoneArchived(milestone) && !taskArchived(task)" title="Edit task" @click.stop="openTaskEditor(milestone, task)"><i class="bi bi-pencil"></i></button>
+							<button type="button" class="task-edit-button text-warning" x-show="!taskArchived(task)" title="Archive task" @click.stop="archiveTask(task, true)"><i class="bi bi-archive"></i></button>
+							<button type="button" class="task-edit-button text-warning" x-show="taskArchived(task)" title="Restore task" @click.stop="archiveTask(task, false)"><i class="bi bi-arrow-counterclockwise"></i></button>
+							<button type="button" class="task-edit-button text-danger" x-show="taskArchived(task)" title="Delete task permanently" @click.stop="deleteTask(task)"><i class="bi bi-trash"></i></button>
                           </span>
                         </div>
                         <div class="task-card-body" x-text="taskContent(task)"></div>
                         <div class="task-card-note" x-show="taskNote(task)" x-text="taskNote(task)"></div>
                       </article>
                     </template>
-                    <button type="button" class="task-add-inline" @click="openTaskEditor(milestone, null, status.key)"><i class="bi bi-plus-lg"></i></button>
+					<button type="button" class="task-add-inline" x-show="!milestoneArchived(milestone)" @click="openTaskEditor(milestone, null, status.key)"><i class="bi bi-plus-lg"></i></button>
                   </div>
                 </section>
               </template>

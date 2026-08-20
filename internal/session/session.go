@@ -1501,6 +1501,14 @@ func (s *Session) ArchiveMilestone(ctx context.Context, sessionID id.ID, milesto
 		if busy {
 			return planning.Milestone{}, fmt.Errorf("milestone %q is being used by active chat %s; wait for or stop that chat before archiving", milestoneKey, busyChat)
 		}
+	} else if dependencyKey := planning.MilestoneDependsOnKey(item); dependencyKey != "" {
+		dependency, found := milestoneByKey(plan, dependencyKey)
+		if !found {
+			return planning.Milestone{}, fmt.Errorf("milestone %q depends on missing milestone %q; repair the dependency before restoring it", milestoneKey, dependencyKey)
+		}
+		if dependency.Archived {
+			return planning.Milestone{}, fmt.Errorf("milestone %q depends on archived milestone %q; restore the dependency first", milestoneKey, dependencyKey)
+		}
 	}
 	plan.Milestones[idx].Archived = archived
 	plan.UpdatedAt = time.Now().UTC()
@@ -1634,6 +1642,7 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	}
 	now := time.Now().UTC()
 	s.mu.RLock()
+	currentPlan := cloneMilestonePlan(s.plan)
 	var item planning.Task
 	var ref string
 	found := false
@@ -1656,6 +1665,13 @@ func (s *Session) UpdateTask(ctx context.Context, taskID string, status planning
 	}
 	if item.Archived {
 		return planning.Task{}, fmt.Errorf("task %s is archived; restore it before updating", taskID)
+	}
+	milestone, milestoneFound := milestoneByKey(currentPlan, item.MilestoneKey)
+	if !milestoneFound {
+		return planning.Task{}, fmt.Errorf("milestone %q not found", item.MilestoneKey)
+	}
+	if milestone.Archived {
+		return planning.Task{}, fmt.Errorf("milestone %q is archived; restore it before updating task %s", item.MilestoneKey, taskID)
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -1696,6 +1712,7 @@ func (s *Session) ArchiveTask(ctx context.Context, taskKey string, archived bool
 		return planning.Task{}, fmt.Errorf("task key is required")
 	}
 	s.mu.RLock()
+	plan := cloneMilestonePlan(s.plan)
 	item, milestoneKey, found := taskByKey(s.tasksByKey, taskKey)
 	busyChat, busy := s.busyPlanningChatLocked(milestoneKey, taskKey)
 	s.mu.RUnlock()
@@ -1704,6 +1721,15 @@ func (s *Session) ArchiveTask(ctx context.Context, taskKey string, archived bool
 	}
 	if item.Archived == archived {
 		return item, nil
+	}
+	if !archived {
+		milestone, milestoneFound := milestoneByKey(plan, milestoneKey)
+		if !milestoneFound {
+			return planning.Task{}, fmt.Errorf("milestone %q not found", milestoneKey)
+		}
+		if milestone.Archived {
+			return planning.Task{}, fmt.Errorf("milestone %q is archived; restore it before restoring task %s", milestoneKey, taskKey)
+		}
 	}
 	if archived && item.Status == planning.TaskStatusInProgress {
 		return planning.Task{}, fmt.Errorf("task %s is in_progress; finish or stop it before archiving", taskKey)
@@ -1725,12 +1751,12 @@ func (s *Session) ArchiveTask(ctx context.Context, taskKey string, archived bool
 		}
 	}
 	s.tasksByKey[milestoneKey] = bucket
-	plan := cloneMilestonePlan(s.plan)
+	emitPlan := cloneMilestonePlan(s.plan)
 	allTasks := flattenTasks(s.tasksByKey)
 	tasksByKey := cloneTasksByKey(s.tasksByKey)
 	sessionID := s.session.ID
 	s.mu.Unlock()
-	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: plan, Tasks: allTasks, TasksByKey: tasksByKey})
+	s.emit(Event{Kind: EventPlanningChanged, SessionID: sessionID, Plan: emitPlan, Tasks: allTasks, TasksByKey: tasksByKey})
 	return item, nil
 }
 
@@ -1781,6 +1807,7 @@ func (s *Session) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milest
 	now := time.Now().UTC()
 
 	s.mu.RLock()
+	currentPlan := cloneMilestonePlan(s.plan)
 	var item planning.Task
 	oldMilestoneKey := ""
 	found := false
@@ -1806,6 +1833,13 @@ func (s *Session) MoveTask(ctx context.Context, sessionID id.ID, taskKey, milest
 	}
 	if milestoneKey == "" {
 		milestoneKey = oldMilestoneKey
+	}
+	destination, destinationFound := milestoneByKey(currentPlan, milestoneKey)
+	if !destinationFound {
+		return planning.Task{}, fmt.Errorf("milestone %q not found", milestoneKey)
+	}
+	if destination.Archived {
+		return planning.Task{}, fmt.Errorf("milestone %q is archived; restore it before moving tasks into it", milestoneKey)
 	}
 	item.MilestoneKey = milestoneKey
 	item.Status = status

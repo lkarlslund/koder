@@ -260,6 +260,8 @@ func TestServerServesSessionPlanningBoardRoute(t *testing.T) {
 		`/assets/planning_board.js`,
 		`/assets/planning_board.css`,
 		`milestone-swimlane`,
+		`archiveMilestone(milestone, true)`,
+		`deleteTask(task)`,
 		currentAssetHash,
 	} {
 		if !strings.Contains(text, want) {
@@ -532,6 +534,101 @@ func TestSessionPlanningBoardAPI(t *testing.T) {
 	}
 	if got := board.TasksByKey["M001"]; len(got) != 2 {
 		t.Fatalf("expected two tasks, got %#v", got)
+	}
+}
+
+func TestSessionPlanningBoardArchiveDeleteLifecycle(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	ctx := context.Background()
+	if _, err := ctrl.SetMilestonePlan(ctx, state.Session.ID, "Lifecycle", []planning.Milestone{
+		{Key: "M001", Title: "Archive me", Status: planning.MilestoneStatusReady},
+	}); err != nil {
+		t.Fatalf("set milestone plan: %v", err)
+	}
+	tasks, err := ctrl.AddTasks(ctx, state.Session.ID, "M001", []string{"Archive me too"})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	taskKey := planning.TaskKey(tasks[0])
+
+	serverCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(serverCtx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	base := srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/board"
+	post := func(path, payload string, wantStatus int) []byte {
+		t.Helper()
+		resp, postErr := http.Post(base+path, "application/json", bytes.NewBufferString(payload))
+		if postErr != nil {
+			t.Fatalf("post %s: %v", path, postErr)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			t.Fatalf("read %s response: %v", path, readErr)
+		}
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("post %s: expected %d, got %d: %s", path, wantStatus, resp.StatusCode, body)
+		}
+		return body
+	}
+	decodeBoard := func(body []byte) planningBoardResponse {
+		t.Helper()
+		var board planningBoardResponse
+		if err := json.Unmarshal(body, &board); err != nil {
+			t.Fatalf("decode board: %v", err)
+		}
+		return board
+	}
+
+	post("/tasks/update", fmt.Sprintf(`{"task_key":%q,"status":"in_progress"}`, taskKey), http.StatusOK)
+	blocked := post("/tasks/archive", fmt.Sprintf(`{"key":%q,"archived":true}`, taskKey), http.StatusBadRequest)
+	if !strings.Contains(string(blocked), "in_progress") {
+		t.Fatalf("expected in-progress protection, got %s", blocked)
+	}
+	post("/tasks/update", fmt.Sprintf(`{"task_key":%q,"status":"pending"}`, taskKey), http.StatusOK)
+	blocked = post("/tasks/delete", fmt.Sprintf(`{"key":%q}`, taskKey), http.StatusBadRequest)
+	if !strings.Contains(string(blocked), "archive task") {
+		t.Fatalf("expected archive-before-delete protection, got %s", blocked)
+	}
+
+	board := decodeBoard(post("/tasks/archive", fmt.Sprintf(`{"key":%q,"archived":true}`, taskKey), http.StatusOK))
+	if board.ArchivedTaskCount != 1 || len(board.Tasks) != 0 {
+		t.Fatalf("default board should hide archived task: %#v", board)
+	}
+	resp, err := http.Get(base + "?archived=true")
+	if err != nil {
+		t.Fatalf("get archived board: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get archived board: status=%d err=%v body=%s", resp.StatusCode, err, body)
+	}
+	board = decodeBoard(body)
+	if len(board.Tasks) != 1 || !board.Tasks[0].Archived {
+		t.Fatalf("archived=true should include archived task: %#v", board.Tasks)
+	}
+	post("/tasks/delete?archived=true", fmt.Sprintf(`{"key":%q}`, taskKey), http.StatusOK)
+
+	blocked = post("/milestones/delete", `{"key":"M001"}`, http.StatusBadRequest)
+	if !strings.Contains(string(blocked), "archive milestone") {
+		t.Fatalf("expected archive-before-delete protection, got %s", blocked)
+	}
+	board = decodeBoard(post("/milestones/archive", `{"key":"M001","archived":true}`, http.StatusOK))
+	if board.ArchivedMilestoneCount != 1 || len(board.Plan.Milestones) != 0 {
+		t.Fatalf("default board should hide archived milestone: %#v", board)
+	}
+	blocked = post("/milestones?archived=true", `{"key":"M001","title":"Still archived","status":"ready"}`, http.StatusBadRequest)
+	if !strings.Contains(string(blocked), "restore it before editing") {
+		t.Fatalf("expected archived edit protection, got %s", blocked)
+	}
+	board = decodeBoard(post("/milestones/delete?archived=true", `{"key":"M001"}`, http.StatusOK))
+	if board.ArchivedMilestoneCount != 0 || len(board.Plan.Milestones) != 0 {
+		t.Fatalf("deleted milestone should be erased: %#v", board)
 	}
 }
 
@@ -1757,7 +1854,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && workspaceSessionMode()`) ||
 		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
 		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||
-		!strings.Contains(fullPage, `x-show="workspaceSessionMode() && milestoneItems().length > 0"`) {
+		!strings.Contains(fullPage, `x-show="workspaceSessionMode() && allMilestoneItems().length > 0"`) {
 		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
 	}
 	if !strings.Contains(fullPage, `voiceChatMode()`) ||
@@ -2382,8 +2479,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
-	if !strings.Contains(fullPage, `x-show="workspaceSessionMode() && milestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+	if !strings.Contains(fullPage, `x-show="workspaceSessionMode() && allMilestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
 		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
+	}
+	if !strings.Contains(fullPage, `showArchivedPlanning`) ||
+		!strings.Contains(fullPage, `archivedPlanningCount()`) ||
+		!strings.Contains(fullPage, `planning-node-archived`) ||
+		!strings.Contains(fullPage, `planning-task-archived`) {
+		t.Fatalf("expected archived planning items to be hidden by default and available on demand")
 	}
 	if !strings.Contains(fullPage, `planning-badge-executing`) || !strings.Contains(fullPage, `planning-badge-completed`) || !strings.Contains(fullPage, `planning-badge-blocked`) {
 		t.Fatalf("expected colorful milestone status badge classes")

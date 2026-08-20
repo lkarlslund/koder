@@ -216,6 +216,11 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if req.Args["archived"] != "true" {
+		if err := ensureMilestoneListed(plan, ref); err != nil {
+			return tools.Result{}, err
+		}
+	}
 	tasks = tools.ScopedTasks(runtime, tasks)
 	if req.Args["archived"] != "true" {
 		tasks = filterArchivedTasks(tasks)
@@ -287,6 +292,9 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if err := ensureMilestoneListed(plan, ref); err != nil {
+		return tools.Result{}, err
+	}
 	tasks = tools.ScopedTasks(runtime, tasks)
 	tasks = filterArchivedTasks(tasks)
 	for _, item := range tasks {
@@ -315,6 +323,15 @@ func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	archived := opts.Request.Args["archived"] == "true"
 	if archived && item.Status == planning.TaskStatusInProgress {
 		return tools.Result{}, fmt.Errorf("task %s is in_progress; finish or stop it before archiving", planning.TaskKey(item))
+	}
+	if !archived {
+		plan, err := control.GetMilestonePlan(ctx, opts.Runtime.SessionID)
+		if err != nil {
+			return tools.Result{}, err
+		}
+		if err := ensureMilestoneListed(plan, item.MilestoneKey); err != nil {
+			return tools.Result{}, fmt.Errorf("restore task %s: %w", planning.TaskKey(item), err)
+		}
 	}
 	action := "archived"
 	if !archived {
@@ -401,6 +418,11 @@ func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req t
 	plan, tasks, ref, err := persistedTaskBucket(ctx, control, runtime.SessionID, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if req.Args["archived"] != "true" {
+		if err := ensureMilestoneListed(plan, ref); err != nil {
+			return tools.Result{}, err
+		}
 	}
 	if req.Args["archived"] != "true" {
 		tasks = filterArchivedTasks(tasks)
@@ -563,6 +585,9 @@ func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, 
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if err := ensureMilestoneListed(plan, ref); err != nil {
+		return tools.Result{}, err
+	}
 	tasks = filterArchivedTasks(tasks)
 	message := ""
 	for _, item := range tasks {
@@ -597,6 +622,20 @@ func ensureMilestoneAcceptsTasks(plan planning.Plan, ref string) error {
 		return nil
 	}
 	return fmt.Errorf("milestone %q not found", ref)
+}
+
+func ensureMilestoneListed(plan planning.Plan, ref string) error {
+	ref = strings.TrimSpace(ref)
+	for _, milestone := range plan.Milestones {
+		if planning.MilestoneKey(milestone) != ref {
+			continue
+		}
+		if milestone.Archived {
+			return fmt.Errorf("milestone %q is archived; pass archived=true to inspect its tasks or restore the milestone before continuing work", ref)
+		}
+		return nil
+	}
+	return nil
 }
 
 func ensureTaskUpdateAllowed(runtime tools.Runtime, milestone planning.Milestone, task planning.Task) error {

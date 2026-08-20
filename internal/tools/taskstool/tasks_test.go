@@ -341,6 +341,49 @@ func TestTaskArchiveRejectsInProgressTask(t *testing.T) {
 	}
 }
 
+func TestArchivedMilestoneTasksRequireExplicitArchivedListing(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Hidden milestone", Status: planning.MilestoneStatusReady, Archived: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Hidden with parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st), ChatRole: chatrole.Orchestrator}
+
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskList, Args: map[string]string{"milestone_key": "M001"}}})
+	if err == nil || !strings.Contains(err.Error(), "pass archived=true") {
+		t.Fatalf("default task list should hide archived milestone tasks, got %v", err)
+	}
+	listed, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskList, Args: map[string]string{"milestone_key": "M001", "archived": "true"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed.Output, "Hidden with parent") {
+		t.Fatalf("archived=true should include tasks under archived milestones, got %q", listed.Output)
+	}
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskFetchNext, Args: map[string]string{"milestone_key": "M001"}}})
+	if err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("fetch next should reject archived milestone, got %v", err)
+	}
+
+	item := items[0]
+	item.Archived = true
+	if err := modeltest.PutTask(ctx, st, item); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskArchive, Args: map[string]string{"task_key": planning.TaskKey(item), "archived": "false"}}})
+	if err == nil || !strings.Contains(err.Error(), "restore the milestone") {
+		t.Fatalf("restoring task under archived milestone should fail, got %v", err)
+	}
+}
+
 func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)

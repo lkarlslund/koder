@@ -1051,7 +1051,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -3219,10 +3219,25 @@
           return '';
         },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },
-        milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
+		allMilestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
+		milestoneArchived(milestone) { return !!(milestone && (milestone.archived || milestone.Archived)); },
+		taskArchived(task) { return !!(task && (task.archived || task.Archived)); },
+		milestoneItems() {
+		  const items = this.allMilestoneItems();
+		  return this.showArchivedPlanning ? items : items.filter(item => !this.milestoneArchived(item));
+		},
+		archivedPlanningCount() {
+		  const milestones = this.allMilestoneItems().filter(item => this.milestoneArchived(item)).length;
+		  const tasks = this.taskItems().filter(item => this.taskArchived(item)).length;
+		  return milestones + tasks;
+		},
+		toggleArchivedPlanning() {
+		  this.showArchivedPlanning = !this.showArchivedPlanning;
+		  writePreference('showArchivedPlanning', this.showArchivedPlanning ? 'true' : 'false');
+		},
         visibleMilestones() {
           const items = this.milestoneItems();
-          return items.filter(milestone => this.milestoneStatusFilterEnabled(this.milestoneStatus(milestone)));
+		  return items.filter(milestone => this.milestoneArchived(milestone) || this.milestoneStatusFilterEnabled(this.milestoneStatus(milestone)));
         },
         visibleMilestoneTree() {
           const items = this.visibleMilestones();
@@ -3338,7 +3353,10 @@
         taskItemsForMilestone(milestone) {
           const milestoneKey = this.milestoneKey(milestone);
           const grouped = this.tasksByMilestone();
-          if (grouped && Object.prototype.hasOwnProperty.call(grouped, milestoneKey)) return grouped[milestoneKey] || [];
+		  if (grouped && Object.prototype.hasOwnProperty.call(grouped, milestoneKey)) {
+			const items = grouped[milestoneKey] || [];
+			return this.showArchivedPlanning ? items : items.filter(item => !this.taskArchived(item));
+		  }
           return [];
         },
         milestoneTaskCounts(milestone) {
