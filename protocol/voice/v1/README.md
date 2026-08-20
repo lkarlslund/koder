@@ -296,6 +296,30 @@ kind must open a separate presentation surface without making the transcript
 visible. A user can close that surface independently or explicitly open the
 transcript.
 
+Structured visuals use `application/vnd.koder.presentation+json`. Its `data`
+is a versioned document rather than a task-specific screen:
+
+```json
+{
+  "version": 1,
+  "blocks": [
+    {"kind":"text","text":"Tomorrow","style":"heading"},
+    {"kind":"key_value","items":[{"key":"Time","value":"10:00"}]},
+    {"kind":"list","items":[{"title":"DHL Stafet","detail":"Mindeparken"}]},
+    {"kind":"progress","label":"Calendar sync","value":1,"max":1},
+    {"kind":"image","uri":"/voice/v1/artifacts/session/id/map.png","alt":"Map"},
+    {"kind":"action","label":"Open details","uri":"https://example.com/event"},
+    {"kind":"file","name":"appointment.ics","uri":"/voice/v1/artifacts/offered/token","mime_type":"text/calendar"}
+  ]
+}
+```
+
+Text styles are `body`, `heading`, `caption`, or `code`. List items use
+`title` and optional `detail`; key-value items use `key` and `value`. URIs are
+relative to Koder or absolute HTTP(S) links. Clients should render known blocks
+with native controls, show a useful placeholder for unknown blocks, and fall
+back to the generic MIME-part view when a document version is unsupported.
+
 `transcript_id`, when present, is the stable ID of the durable assistant
 timeline entry represented by this live message. Clients use it to attach
 bookmarks, follow-ups, and transcript navigation to the same response after a

@@ -62,6 +62,9 @@ import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.ConversationAvailability
 import com.lkarlslund.koder.voice.ConversationSurface
+import com.lkarlslund.koder.voice.KODER_PRESENTATION_MIME
+import com.lkarlslund.koder.voice.PresentationBlock
+import com.lkarlslund.koder.voice.PresentationDocuments
 import com.lkarlslund.koder.voice.ServerInfo
 import com.lkarlslund.koder.voice.SpeechLanguage
 import com.lkarlslund.koder.voice.SpeechLanguages
@@ -76,6 +79,7 @@ import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
+import com.lkarlslund.koder.voice.VoiceProtocol
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.audioRouteChipText
@@ -1695,10 +1699,105 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun addPresentationPart(part: VoicePart) {
 		when {
+			part.mimeType == KODER_PRESENTATION_MIME -> addStructuredPresentation(part)
 			part.mimeType.startsWith("image/") -> addImage(part, presentationFeed)
 			part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addInlinePresentation(part)
 			else -> addGenericPart(part, presentationFeed)
 		}
+	}
+
+	private fun addStructuredPresentation(part: VoicePart) {
+		val target = presentationFeed ?: return
+		val document = PresentationDocuments.parse(part.data)
+		if (document == null) {
+			addGenericPart(part, target)
+			return
+		}
+		val container = card().apply { contentDescription = "Koder structured presentation" }
+		part.title.takeIf(String::isNotBlank)?.let { container.addView(label(it), matchWrap()) }
+		document.blocks.forEach { block -> addPresentationBlock(container, block) }
+		target.addView(container, spaced(top = 6, bottom = 6))
+	}
+
+	private fun addPresentationBlock(target: LinearLayout, block: PresentationBlock) {
+		when (block) {
+			is PresentationBlock.Text -> target.addView(body(block.text).apply {
+				when (block.style) {
+					"heading" -> { textSize = 20f; setTypeface(typeface, Typeface.BOLD) }
+					"caption" -> { textSize = 14f; alpha = 0.72f }
+					"code" -> typeface = Typeface.MONOSPACE
+				}
+				setTextIsSelectable(true)
+			}, spaced(top = 8))
+			is PresentationBlock.Image -> addPresentationImage(target, block)
+			is PresentationBlock.KeyValue -> block.items.forEach { item ->
+				target.addView(LinearLayout(this).apply {
+					orientation = LinearLayout.HORIZONTAL
+					addView(helper(item.key.ifBlank { item.title }).apply { setTypeface(typeface, Typeface.BOLD) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.4f))
+					addView(body(item.value.ifBlank { item.detail }).apply { gravity = Gravity.END; setTextIsSelectable(true) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.6f))
+				}, spaced(top = 7))
+			}
+			is PresentationBlock.ListItems -> block.items.forEach { item ->
+				val title = item.title.ifBlank { item.value.ifBlank { item.key } }
+				val detail = item.detail
+				target.addView(body(buildString {
+					append("• ").append(title)
+					if (detail.isNotBlank()) append("\n  ").append(detail)
+				}), spaced(top = 6))
+			}
+			is PresentationBlock.Progress -> {
+				target.addView(body(block.label.ifBlank { "Progress" }).apply { setTypeface(typeface, Typeface.BOLD) }, spaced(top = 8))
+				target.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+					max = block.max
+					progress = block.value.coerceIn(0, block.max)
+					contentDescription = "${block.label.ifBlank { "Progress" }} ${block.value} of ${block.max}"
+				}, spaced(top = 4))
+				if (block.detail.isNotBlank()) target.addView(helper(block.detail), spaced(top = 3))
+			}
+			is PresentationBlock.Action -> target.addView(Button(this).apply {
+				text = block.label
+				contentDescription = "Presentation action ${block.label}"
+				setOnClickListener { openPresentationLink(block.uri) }
+			}, spaced(top = 8))
+			is PresentationBlock.File -> target.addView(Button(this).apply {
+				text = buildString {
+					append("Open ").append(block.name)
+					if (block.detail.isNotBlank()) append(" · ").append(block.detail)
+				}
+				contentDescription = "Presentation file ${block.name}"
+				setOnClickListener {
+					downloadAndOpen(VoicePart(mimeType = block.mimeType, uri = block.uri, metadata = mapOf("name" to block.name)))
+				}
+			}, spaced(top = 8))
+			is PresentationBlock.Unknown -> target.addView(helper("Unsupported ${block.kind} content"), spaced(top = 8))
+		}
+	}
+
+	private fun addPresentationImage(target: LinearLayout, block: PresentationBlock.Image) {
+		if (block.title.isNotBlank()) target.addView(helper(block.title), spaced(top = 8))
+		val image = ImageView(this).apply {
+			adjustViewBounds = true
+			scaleType = ImageView.ScaleType.CENTER_INSIDE
+			minimumHeight = dp(120)
+			contentDescription = block.alt.ifBlank { block.title.ifBlank { "Presentation image" } }
+		}
+		target.addView(image, spaced(top = 4))
+		controller.loadBytes(block.uri) { bytes, error ->
+			runOnUiThread {
+				val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+				if (bitmap != null) image.setImageBitmap(bitmap)
+				else image.contentDescription = error ?: "Invalid presentation image"
+			}
+		}
+	}
+
+	private fun openPresentationLink(resource: String) {
+		val resolved = runCatching { VoiceProtocol.resourceUrl(settings.server, resource) }.getOrElse {
+			Toast.makeText(this, it.message ?: "Invalid link", Toast.LENGTH_LONG).show()
+			return
+		}
+		runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(resolved))) }
+			.onFailure { Toast.makeText(this, "No app can open this link", Toast.LENGTH_LONG).show() }
 	}
 
 	private fun addInlinePresentation(part: VoicePart) {

@@ -66,6 +66,8 @@ class VoiceProtocolTest {
 		val presentation = requireNotNull(frame.message).parts.last()
 		assertTrue(presentation.isPresentation)
 		assertEquals("Appointment", presentation.title)
+		assertEquals(KODER_PRESENTATION_MIME, presentation.mimeType)
+		assertEquals(7, requireNotNull(PresentationDocuments.parse(presentation.data)).blocks.size)
 		assertEquals(
 			ConversationSurface.PRESENTATION,
 			conversationSurface(active = true, transcriptShown = false, presentationShown = true),

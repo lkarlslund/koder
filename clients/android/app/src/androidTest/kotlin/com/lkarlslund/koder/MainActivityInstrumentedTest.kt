@@ -523,6 +523,58 @@ class MainActivityInstrumentedTest {
 		}
 	}
 
+	@Test
+	fun structuredPresentationRendersEveryGenericBlock() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		buildList {
+			add(Manifest.permission.RECORD_AUDIO)
+			if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
+			if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+		}.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
+		val server = MockWebServer()
+		var voiceSocket: WebSocket? = null
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-card","title":"Visual test"}]}""",
+		).build())
+		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+			override fun onOpen(webSocket: WebSocket, response: Response) {
+				voiceSocket = webSocket
+				webSocket.send(
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-card","active_session_id":"","sessions":[],"voice_sessions":[{"id":"voice-card","title":"Visual test"}]}}""",
+				)
+			}
+
+			override fun onMessage(webSocket: WebSocket, text: String) {
+				if (org.json.JSONObject(text).optString("type") != "hello") return
+				webSocket.send(
+					"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Here are the details.","parts":[{"mime_type":"text/plain","data":"Here are the details."},{"mime_type":"application/vnd.koder.presentation+json","data":{"version":1,"blocks":[{"kind":"text","text":"Today in Aarhus","style":"heading"},{"kind":"image","uri":"/map.png","title":"Aarhus map","alt":"Map preview"},{"kind":"key_value","items":[{"key":"Event","value":"DHL Stafet"}]},{"kind":"list","items":[{"title":"Road closures","detail":"From 16:00"}]},{"kind":"progress","label":"Route check","value":2,"max":5,"detail":"Two areas checked"},{"kind":"action","label":"Open event details","uri":"https://example.com/event"},{"kind":"file","name":"event.ics","uri":"/event.ics","mime_type":"text/calendar","detail":"Calendar entry"}]},"metadata":{"title":"What is happening nearby","presentation":"true"}}]}}""",
+				)
+			}
+		}).build())
+		server.enqueue(MockResponse.Builder().body("not-an-image").build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Visual test")
+				onView(withContentDescription("Open voice conversation Visual test")).perform(click())
+				val labels = waitForText(scenario, "DHL Stafet")
+				assertTrue(labels.contains("What is happening nearby"))
+				assertTrue(labels.contains("Today in Aarhus"))
+				assertTrue(labels.any { it.contains("Road closures") && it.contains("From 16:00") })
+				assertTrue(labels.contains("Route check"))
+				assertTrue(labels.contains("Two areas checked"))
+				assertTrue(labels.any { it.contains("Open event details") })
+				assertTrue(labels.any { it.contains("Open event.ics") })
+				onView(withContentDescription("Koder structured presentation")).check(matches(isDisplayed()))
+				onView(withContentDescription("Map preview")).check(matches(isDisplayed()))
+			}
+		} finally {
+			voiceSocket?.close(1000, "test complete")
+			server.close()
+		}
+	}
+
     private fun waitForText(scenario: ActivityScenario<MainActivity>, wanted: String): List<String> {
         var lastLabels = emptyList<String>()
         repeat(50) {
