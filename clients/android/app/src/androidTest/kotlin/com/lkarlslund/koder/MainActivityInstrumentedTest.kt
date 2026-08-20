@@ -439,6 +439,12 @@ class MainActivityInstrumentedTest {
 
 	@Test
 	fun newTemporaryConversationShowsProgressThenOpens() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		buildList {
+			add(Manifest.permission.RECORD_AUDIO)
+			if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
+			if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+		}.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
 		val allowCreateResponse = CountDownLatch(1)
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
@@ -492,13 +498,9 @@ class MainActivityInstrumentedTest {
 				orbStates.forEach { (stage, description) ->
 					scenario.onActivity { activity ->
 						activity.onSnapshot(com.lkarlslund.koder.voice.CallController.Snapshot(stage = stage, detail = if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) "Working in Laptop repair…" else description))
-					}
-					scenario.onActivity { activity ->
 						val orb = activity.findViewById<View>(android.R.id.content).findByDescription(description)
 						assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
-					}
-					if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) {
-						scenario.onActivity { activity ->
+						if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) {
 							val detail = activity.findViewById<View>(android.R.id.content).findByDescription("Working in Laptop repair…")
 							assertTrue(detail is TextView && detail.text == "Working in Laptop repair…" && detail.visibility == View.VISIBLE)
 						}
