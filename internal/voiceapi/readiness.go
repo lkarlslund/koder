@@ -31,8 +31,10 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 	ctx := r.Context()
 	var writeMu sync.Mutex
-	config := h.Backend.VoiceAudioConfig()
-	if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "readiness_ready", AudioConfig: &config, State: "listening"}); err != nil {
+	baseConfig := h.Backend.VoiceAudioConfig()
+	config := negotiatedAudioConfig(baseConfig, nil)
+	advertised := advertisedAudioConfig(baseConfig)
+	if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "readiness_ready", AudioConfig: &advertised, State: "listening"}); err != nil {
 		return
 	}
 	var audio *incomingAudio
@@ -61,13 +63,19 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch strings.TrimSpace(frame.Type) {
+		case "hello":
+			config = negotiatedAudioConfig(baseConfig, frame.AudioEncodings)
+			if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "readiness_ready", AudioConfig: &config, State: "listening"}) != nil {
+				return
+			}
 		case "ping":
 			if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "pong"}) != nil {
 				return
 			}
 		case "audio_start":
 			utteranceID := strings.TrimSpace(frame.UtteranceID)
-			if audio != nil || utteranceID == "" || frame.AudioFormat == nil || *frame.AudioFormat != config.Input {
+			transportFormat := selectedInputFormat(config)
+			if audio != nil || utteranceID == "" || frame.AudioFormat == nil || *frame.AudioFormat != transportFormat {
 				if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "readiness audio_start requires a unique id and the advertised input format"}) != nil {
 					return
 				}
@@ -80,7 +88,13 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			audio = &incomingAudio{utteranceID: utteranceID, format: *frame.AudioFormat, languages: languages}
+			audio, err = newIncomingAudio(utteranceID, baseConfig.Input, transportFormat, languages)
+			if err != nil {
+				if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "initialize audio decoder: " + err.Error()}) != nil {
+					return
+				}
+				continue
+			}
 			if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "state", UtteranceID: utteranceID, State: "recording"}) != nil {
 				return
 			}
@@ -99,7 +113,7 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := h.finishReadiness(ctx, conn, &writeMu, completed); err != nil {
+			if err := h.finishReadiness(ctx, conn, &writeMu, completed, selectedOutputFormat(config)); err != nil {
 				_ = writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: completed.utteranceID, Error: err.Error()})
 				continue
 			}
@@ -111,7 +125,7 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) finishReadiness(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, audio *incomingAudio) error {
+func (h *Handler) finishReadiness(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, audio *incomingAudio, outputTransport voice.AudioFormat) error {
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: audio.utteranceID, State: "transcribing"}); err != nil {
 		return err
 	}
@@ -125,7 +139,7 @@ func (h *Handler) finishReadiness(ctx context.Context, conn *websocket.Conn, wri
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "transcript", UtteranceID: audio.utteranceID, Transcript: transcript}); err != nil {
 		return err
 	}
-	if err := writeSpeech(ctx, conn, writeMu, h.Backend, audio.utteranceID, readinessReply); err != nil {
+	if err := writeSpeech(ctx, conn, writeMu, h.Backend, outputTransport, audio.utteranceID, readinessReply); err != nil {
 		return fmt.Errorf("speech synthesis: %w", err)
 	}
 	return writeFrame(ctx, conn, writeMu, serverFrame{Type: "readiness_complete", UtteranceID: audio.utteranceID, Transcript: transcript, State: "complete"})

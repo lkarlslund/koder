@@ -85,7 +85,7 @@ func TestLiveSynthesizedVoiceRoundTrip(t *testing.T) {
 		size := min(32*1024, len(inputPCM)-offset)
 		size -= size % 2
 		encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{
-			Kind: voice.AudioFrameInputPCM, Sequence: sequence, PCM: inputPCM[offset : offset+size],
+			Kind: voice.AudioFrameInputPCM, Sequence: sequence, Payload: inputPCM[offset : offset+size],
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -120,7 +120,7 @@ func TestLiveSynthesizedVoiceRoundTrip(t *testing.T) {
 			if frame.Kind != voice.AudioFrameOutputPCM {
 				t.Fatalf("unexpected output frame kind %d", frame.Kind)
 			}
-			outputPCM = append(outputPCM, frame.PCM...)
+			outputPCM = append(outputPCM, frame.Payload...)
 			continue
 		}
 		var frame serverFrame

@@ -122,6 +122,7 @@ type clientFrame struct {
 	Limit             int                 `json:"limit,omitempty"`
 	Query             string              `json:"query,omitempty"`
 	ResponsePacing    string              `json:"response_pacing,omitempty"`
+	AudioEncodings    []string            `json:"audio_encodings,omitempty"`
 	Backend           domain.ChatBackend  `json:"backend,omitempty"`
 	WorkflowRole      domain.WorkflowRole `json:"workflow_role,omitempty"`
 	ProviderID        string              `json:"provider_id,omitempty"`
@@ -223,6 +224,8 @@ type bindDeviceResponse struct {
 type incomingAudio struct {
 	utteranceID  string
 	format       voice.AudioFormat
+	transport    voice.AudioFormat
+	decoder      audioPacketDecoder
 	nextSequence uint32
 	pcm          []byte
 	languages    []string
@@ -421,8 +424,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var audio *incomingAudio
 	responsePacing := voice.ResponsePacingNormal
+	baseAudioConfig := h.Backend.VoiceAudioConfig()
+	connectionAudioConfig := negotiatedAudioConfig(baseAudioConfig, nil)
 	var writeMu sync.Mutex
-	if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+	if err := writeReady(ctx, conn, &writeMu, call, advertisedAudioConfig(baseAudioConfig), h.Updates); err != nil {
 		return
 	}
 	for {
@@ -431,7 +436,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if messageType == websocket.MessageBinary {
-			if err := appendIncomingAudio(h.Backend.VoiceAudioConfig(), audio, payload); err != nil {
+			if err := appendIncomingAudio(connectionAudioConfig, audio, payload); err != nil {
 				utteranceID := ""
 				if audio != nil {
 					utteranceID = audio.utteranceID
@@ -440,7 +445,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: err.Error()}); writeErr != nil {
 					return
 				}
-				if writeErr := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); writeErr != nil {
+				if writeErr := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); writeErr != nil {
 					return
 				}
 			}
@@ -475,7 +480,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			responsePacing = parsedPacing
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			connectionAudioConfig = negotiatedAudioConfig(baseAudioConfig, frame.AudioEncodings)
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "ping":
@@ -530,13 +536,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "select_session":
 			audio = nil
 			message, err := call.SelectSession(ctx, frame.SessionID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "select_voice_session":
 			audio = nil
 			message, err := call.SelectVoiceSession(ctx, frame.VoiceSessionID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "create_voice_session":
@@ -547,13 +553,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "select_voice_chat":
 			audio = nil
 			message, err := call.SelectVoiceChat(ctx, frame.SessionID, frame.ChatID)
-			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, frame.UtteranceID, "", message, err); err != nil {
 				return
 			}
 		case "create_voice_chat":
@@ -564,7 +570,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "create_temporary_voice_chat":
@@ -575,7 +581,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "audio_start":
@@ -586,7 +592,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			utteranceID := strings.TrimSpace(frame.UtteranceID)
-			if utteranceID == "" || frame.AudioFormat == nil || *frame.AudioFormat != h.Backend.VoiceAudioConfig().Input {
+			transportFormat := selectedInputFormat(connectionAudioConfig)
+			if utteranceID == "" || frame.AudioFormat == nil || *frame.AudioFormat != transportFormat {
 				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "audio_start requires an utterance id and the advertised input format"}); err != nil {
 					return
 				}
@@ -599,13 +606,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			audio = &incomingAudio{utteranceID: utteranceID, format: *frame.AudioFormat, languages: languages}
+			audio, err = newIncomingAudio(utteranceID, baseAudioConfig.Input, transportFormat, languages)
+			if err != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "initialize audio decoder: " + err.Error()}); writeErr != nil {
+					return
+				}
+				continue
+			}
 			if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "state", UtteranceID: utteranceID, State: "recording"}); err != nil {
 				return
 			}
 		case "audio_cancel":
 			audio = nil
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "audio_commit":
@@ -621,23 +634,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", UtteranceID: completed.utteranceID, Error: "audio utterance was empty"}); err != nil {
 					return
 				}
-				if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+				if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 					return
 				}
 				continue
 			}
 			state, stateErr := call.State(ctx)
 			if stateErr != nil {
-				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, completed.utteranceID, "", voice.Message{}, stateErr); err != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, completed.utteranceID, "", voice.Message{}, stateErr); err != nil {
 					return
 				}
 				continue
 			}
 			turn, _, startErr := h.startTurn(callID, completed.utteranceID, audioTurnFingerprint(completed), state, func(turn *cachedTurn) {
-				h.runAudioTurn(turn, completed, responsePacing)
+				h.runAudioTurn(turn, completed, responsePacing, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
-				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, completed.utteranceID, "", voice.Message{}, startErr); err != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, completed.utteranceID, "", voice.Message{}, startErr); err != nil {
 					return
 				}
 				continue
@@ -645,29 +658,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err := streamCachedTurn(ctx, conn, &writeMu, turn, resume); err != nil {
 				return
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		case "utterance":
 			utteranceID := strings.TrimSpace(frame.UtteranceID)
 			if utteranceID == "" || strings.TrimSpace(frame.Text) == "" {
-				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, "", voice.Message{}, errors.New("utterance requires an id and text")); err != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, "", voice.Message{}, errors.New("utterance requires an id and text")); err != nil {
 					return
 				}
 				continue
 			}
 			state, stateErr := call.State(ctx)
 			if stateErr != nil {
-				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
+				if writeErr := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, frame.Text, voice.Message{}, stateErr); writeErr != nil {
 					return
 				}
 				continue
 			}
 			turn, _, startErr := h.startTurn(callID, utteranceID, textTurnFingerprint(frame.Text), state, func(turn *cachedTurn) {
-				h.runTextTurn(turn, frame.Text, responsePacing)
+				h.runTextTurn(turn, frame.Text, responsePacing, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
-				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, utteranceID, frame.Text, voice.Message{}, startErr); err != nil {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, frame.Text, voice.Message{}, startErr); err != nil {
 					return
 				}
 				continue
@@ -675,7 +688,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err := streamCachedTurn(ctx, conn, &writeMu, turn, resume); err != nil {
 				return
 			}
-			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
 		default:
@@ -1238,39 +1251,50 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 	if err != nil {
 		return err
 	}
-	if frame.Kind != voice.AudioFrameInputPCM {
-		return fmt.Errorf("client may only send input PCM frames")
+	expectedKind := voice.AudioFrameInputPCM
+	if incoming.transport.Encoding == voice.Opus {
+		expectedKind = voice.AudioFrameInputOpus
+	}
+	if frame.Kind != expectedKind {
+		return fmt.Errorf("client sent audio frame kind %d; expected %d for %s", frame.Kind, expectedKind, incoming.transport.Encoding)
 	}
 	if frame.Sequence != incoming.nextSequence {
 		return fmt.Errorf("voice audio sequence %d arrived; expected %d", frame.Sequence, incoming.nextSequence)
 	}
+	decoded := frame.Payload
+	if incoming.decoder != nil {
+		decoded, err = incoming.decoder.Decode(frame.Payload)
+		if err != nil {
+			return err
+		}
+	}
 	maxBytes := int64(cfg.MaxUtteranceSeconds) * int64(incoming.format.SampleRate) * int64(incoming.format.Channels) * 2
-	if int64(len(incoming.pcm)+len(frame.PCM)) > maxBytes {
+	if int64(len(incoming.pcm)+len(decoded)) > maxBytes {
 		return fmt.Errorf("voice utterance exceeds %d seconds", cfg.MaxUtteranceSeconds)
 	}
-	incoming.pcm = append(incoming.pcm, frame.PCM...)
+	incoming.pcm = append(incoming.pcm, decoded...)
 	incoming.nextSequence++
 	return nil
 }
 
-func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, updates androidUpdateSource, utteranceID, _ string, message voice.Message, callErr error) error {
+func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, audioConfig voice.AudioConfig, updates androidUpdateSource, utteranceID, _ string, message voice.Message, callErr error) error {
 	if callErr != nil {
 		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error(), ErrorCode: clientErrorCode(callErr)}); err != nil {
 			return err
 		}
-		return writeReady(ctx, conn, writeMu, call, backend, updates)
+		return writeReady(ctx, conn, writeMu, call, audioConfig, updates)
 	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "message", UtteranceID: utteranceID, Message: &message}); err != nil {
 		return err
 	}
 	if strings.TrimSpace(message.SpokenText) != "" {
-		if err := writeSpeech(ctx, conn, writeMu, backend, utteranceID, message.SpokenText); err != nil {
+		if err := writeSpeech(ctx, conn, writeMu, backend, selectedOutputFormat(audioConfig), utteranceID, message.SpokenText); err != nil {
 			if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "speech synthesis: " + err.Error()}); writeErr != nil {
 				return writeErr
 			}
 		}
 	}
-	return writeReady(ctx, conn, writeMu, call, backend, updates)
+	return writeReady(ctx, conn, writeMu, call, audioConfig, updates)
 }
 
 func clientErrorCode(err error) string {
@@ -1281,8 +1305,12 @@ func clientErrorCode(err error) string {
 	return ""
 }
 
-func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, utteranceID, text string) error {
+func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, transport voice.AudioFormat, utteranceID, text string) error {
 	format := speech.VoiceAudioConfig().Output
+	packetEncoder, err := newAudioPacketEncoder(transport)
+	if err != nil {
+		return err
+	}
 	if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "state", UtteranceID: utteranceID, State: "speaking"}); err != nil {
 		return err
 	}
@@ -1290,42 +1318,36 @@ func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 		return err
 	}
 	var sequence uint32
-	var pending []byte
-	err := speech.StreamVoiceSpeech(ctx, text, func(chunk []byte) error {
-		pending = append(pending, chunk...)
-		for len(pending) >= 2 {
-			size := min(len(pending), voice.MaxAudioPayloadSize)
-			size -= size % 2
-			encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameOutputPCM, Sequence: sequence, PCM: pending[:size]})
-			if err != nil {
-				return err
-			}
-			writeMu.Lock()
-			err = conn.Write(ctx, websocket.MessageBinary, encoded)
-			writeMu.Unlock()
-			if err != nil {
-				return err
-			}
-			sequence++
-			pending = append(pending[:0], pending[size:]...)
+	emit := func(kind voice.AudioFrameKind, payload []byte) error {
+		encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: kind, Sequence: sequence, Payload: payload})
+		if err != nil {
+			return err
 		}
-		return nil
+		writeMu.Lock()
+		err = conn.Write(ctx, websocket.MessageBinary, encoded)
+		writeMu.Unlock()
+		if err == nil {
+			sequence++
+		}
+		return err
+	}
+	err = speech.StreamVoiceSpeech(ctx, text, func(chunk []byte) error {
+		return packetEncoder.appendPCM(chunk, emit)
 	})
 	if err != nil {
 		return err
 	}
-	if len(pending) != 0 {
-		return fmt.Errorf("TTS returned an odd PCM16 byte count")
+	if err := packetEncoder.finish(emit); err != nil {
+		return err
 	}
 	return writeFrame(ctx, conn, writeMu, serverFrame{Type: "tts_end", UtteranceID: utteranceID})
 }
 
-func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, speech voice.SpeechBackend, updates androidUpdateSource) error {
+func writeReady(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, audioConfig voice.AudioConfig, updates androidUpdateSource) error {
 	state, err := call.State(ctx)
 	if err != nil {
 		return writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", Error: err.Error()})
 	}
-	audioConfig := speech.VoiceAudioConfig()
 	frame := serverFrame{Type: "ready", CallState: &state, AudioConfig: &audioConfig, State: "listening"}
 	if updates != nil {
 		meta, available, err := updates.Manifest()

@@ -194,13 +194,13 @@ func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID, s
 	return turn, true, nil
 }
 
-func (h *Handler) runTextTurn(turn *cachedTurn, text string, pacing voice.ResponsePacing) {
+func (h *Handler) runTextTurn(turn *cachedTurn, text string, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
-	h.runVoiceTurn(ctx, turn, text, pacing)
+	h.runVoiceTurn(ctx, turn, text, pacing, outputTransport)
 }
 
-func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, pacing voice.ResponsePacing) {
+func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx = phonedevice.WithCallID(ctx, turn.callID)
 	turn.appendState("processing", nil)
 	onWorking := func(session voice.Session) error {
@@ -242,7 +242,7 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 	}
 	turn.setMessage(message)
 	if strings.TrimSpace(message.SpokenText) != "" {
-		if err := h.cacheSpeech(ctx, turn, message.SpokenText); err != nil {
+		if err := h.cacheSpeech(ctx, turn, message.SpokenText, outputTransport); err != nil {
 			turn.finish(fmt.Errorf("speech synthesis: %w", err))
 			return
 		}
@@ -250,7 +250,7 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 	turn.finish(nil)
 }
 
-func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing voice.ResponsePacing) {
+func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
 	turn.appendState("transcribing", nil)
@@ -260,43 +260,40 @@ func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing vo
 		return
 	}
 	turn.setTranscript(transcript)
-	h.runVoiceTurn(ctx, turn, transcript, pacing)
+	h.runVoiceTurn(ctx, turn, transcript, pacing, outputTransport)
 }
 
-func (h *Handler) cacheSpeech(ctx context.Context, turn *cachedTurn, text string) error {
+func (h *Handler) cacheSpeech(ctx context.Context, turn *cachedTurn, text string, outputTransport voice.AudioFormat) error {
 	format := h.Backend.VoiceAudioConfig().Output
+	packetEncoder, err := newAudioPacketEncoder(outputTransport)
+	if err != nil {
+		return err
+	}
 	turn.appendState("speaking", nil)
 	turn.startAudio(format)
 	var sequence uint32
-	var pending []byte
 	maxBytes := int64(h.Backend.VoiceAudioConfig().MaxUtteranceSeconds) * int64(format.SampleRate) * int64(format.Channels) * 2
 	var total int64
-	err := h.Backend.StreamVoiceSpeech(ctx, text, func(chunk []byte) error {
+	emit := func(kind voice.AudioFrameKind, payload []byte) error {
+		encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: kind, Sequence: sequence, Payload: payload})
+		if err != nil {
+			return err
+		}
+		turn.appendAudio(sequence, encoded)
+		sequence++
+		return nil
+	}
+	err = h.Backend.StreamVoiceSpeech(ctx, text, func(chunk []byte) error {
 		total += int64(len(chunk))
 		if total > maxBytes {
 			return errors.New("speech output exceeded the configured voice duration")
 		}
-		pending = append(pending, chunk...)
-		for len(pending) >= 2 {
-			size := min(len(pending), voice.MaxAudioPayloadSize)
-			size -= size % 2
-			encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameOutputPCM, Sequence: sequence, PCM: pending[:size]})
-			if err != nil {
-				return err
-			}
-			turn.appendAudio(sequence, encoded)
-			sequence++
-			pending = append(pending[:0], pending[size:]...)
-		}
-		return nil
+		return packetEncoder.appendPCM(chunk, emit)
 	})
 	if err != nil {
 		return err
 	}
-	if len(pending) != 0 {
-		return errors.New("TTS returned an odd PCM16 byte count")
-	}
-	return nil
+	return packetEncoder.finish(emit)
 }
 
 func streamCachedTurn(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, turn *cachedTurn, resume turnResume) error {

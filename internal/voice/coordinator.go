@@ -114,7 +114,10 @@ type Backend interface {
 	ListVoiceSessions(context.Context) ([]Session, error)
 }
 
-const PCM16LE = "pcm_s16le"
+const (
+	PCM16LE = "pcm_s16le"
+	Opus    = "opus"
+)
 
 // AudioFormat describes raw audio without tying presentations to a fixed set
 // of UI widgets.
@@ -126,9 +129,12 @@ type AudioFormat struct {
 
 // AudioConfig is the server-owned voice transport contract.
 type AudioConfig struct {
-	Input               AudioFormat `json:"input"`
-	Output              AudioFormat `json:"output"`
-	MaxUtteranceSeconds int         `json:"max_utterance_seconds"`
+	Input               AudioFormat  `json:"input"`
+	Output              AudioFormat  `json:"output"`
+	TransportEncodings  []string     `json:"transport_encodings,omitempty"`
+	InputTransport      *AudioFormat `json:"input_transport,omitempty"`
+	OutputTransport     *AudioFormat `json:"output_transport,omitempty"`
+	MaxUtteranceSeconds int          `json:"max_utterance_seconds"`
 }
 
 // TranscriptionHints are client-specific recognition preferences. An empty

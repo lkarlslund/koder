@@ -24,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
+	"github.com/lkarlslund/koder/internal/voicecodec"
 )
 
 type fakeUpdateSource struct {
@@ -307,7 +308,7 @@ func TestRunVoiceTurnKeepsGenericToolWorkTargetless(t *testing.T) {
 	backend := &fakeBackend{genericWorking: true}
 	handler := NewHandler(backend, "")
 	turn := newCachedTurn("call-1", "utterance-1", textTurnFingerprint("check it"), "voice-1")
-	handler.runVoiceTurn(t.Context(), turn, "check it", voice.ResponsePacingNormal)
+	handler.runVoiceTurn(t.Context(), turn, "check it", voice.ResponsePacingNormal, backend.VoiceAudioConfig().Output)
 
 	var working *serverFrame
 	for _, event := range turn.snapshot().events {
@@ -484,7 +485,7 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 		t.Fatalf("tts_start = %#v", ttsStart)
 	}
 	frame := readAudioFrame(t, ctx, conn)
-	if frame.Kind != voice.AudioFrameOutputPCM || frame.Sequence != 0 || len(frame.PCM) != 4 {
+	if frame.Kind != voice.AudioFrameOutputPCM || frame.Sequence != 0 || len(frame.Payload) != 4 {
 		t.Fatalf("output audio = %#v", frame)
 	}
 	readType(t, ctx, conn, "tts_end")
@@ -961,7 +962,7 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	readType(t, ctx, conn, "state")
-	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, PCM: []byte{7, 0, 8, 0}})
+	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, Payload: []byte{7, 0, 8, 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,7 +992,7 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	readType(t, ctx, conn, "state") // speaking
 	readType(t, ctx, conn, "tts_start")
 	output := readAudioFrame(t, ctx, conn)
-	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.PCM) != 4 {
+	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.Payload) != 4 {
 		t.Fatalf("output = %#v", output)
 	}
 	readType(t, ctx, conn, "tts_end")
@@ -999,6 +1000,78 @@ func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	if backend.spoken != "Done: check the laptop." {
 		t.Fatalf("synthesized text = %q", backend.spoken)
 	}
+}
+
+func TestHandlerNegotiatesAndTranscodesOpus(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := t.Context()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	advertised := readType(t, ctx, conn, "ready")
+	if advertised.AudioConfig == nil || !slices.Equal(advertised.AudioConfig.TransportEncodings, []string{voice.Opus, voice.PCM16LE}) || advertised.AudioConfig.InputTransport != nil {
+		t.Fatalf("advertised audio config = %#v", advertised.AudioConfig)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "hello", AudioEncodings: []string{voice.Opus, voice.PCM16LE}}); err != nil {
+		t.Fatal(err)
+	}
+	ready := readType(t, ctx, conn, "ready")
+	if ready.AudioConfig == nil || selectedInputFormat(*ready.AudioConfig).Encoding != voice.Opus || selectedOutputFormat(*ready.AudioConfig).Encoding != voice.Opus {
+		t.Fatalf("negotiated audio config = %#v", ready.AudioConfig)
+	}
+
+	inputFormat := selectedInputFormat(*ready.AudioConfig)
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_start", UtteranceID: "opus-1", AudioFormat: &inputFormat}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "state")
+	encoder, err := voicecodec.NewOpusEncoder(inputFormat.SampleRate, inputFormat.Channels, inputOpusBitrate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := encoder.Encode(make([]byte, encoder.FrameBytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputOpus, Payload: packet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "audio_commit", UtteranceID: "opus-1"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "state") // transcribing
+	readType(t, ctx, conn, "transcript")
+	readType(t, ctx, conn, "state") // processing
+	readType(t, ctx, conn, "state") // working
+	readType(t, ctx, conn, "message")
+	readType(t, ctx, conn, "state") // speaking
+	start := readType(t, ctx, conn, "tts_start")
+	if start.AudioFormat == nil || start.AudioFormat.Encoding != voice.PCM16LE {
+		t.Fatalf("playback format = %#v, want decoded PCM", start.AudioFormat)
+	}
+	output := readAudioFrame(t, ctx, conn)
+	if output.Kind != voice.AudioFrameOutputOpus || output.Sequence != 0 {
+		t.Fatalf("output = %#v", output)
+	}
+	decoder, err := voicecodec.NewOpusDecoder(ready.AudioConfig.Output.SampleRate, ready.AudioConfig.Output.Channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm, err := decoder.Decode(output.Payload)
+	if err != nil || len(pcm) != ready.AudioConfig.Output.SampleRate*voicecodec.FrameDurationMilliseconds/1000*2 {
+		t.Fatalf("decoded output bytes=%d err=%v", len(pcm), err)
+	}
+	readType(t, ctx, conn, "tts_end")
+	readType(t, ctx, conn, "ready")
 }
 
 func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
@@ -1035,7 +1108,7 @@ func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
 	if frame := readType(t, ctx, readiness, "state"); frame.State != "recording" {
 		t.Fatalf("recording state = %#v", frame)
 	}
-	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, PCM: []byte{7, 0, 8, 0}})
+	encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: voice.AudioFrameInputPCM, Sequence: 0, Payload: []byte{7, 0, 8, 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1057,7 +1130,7 @@ func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
 	}
 	readType(t, ctx, readiness, "tts_start")
 	output := readAudioFrame(t, ctx, readiness)
-	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.PCM) != 4 {
+	if output.Kind != voice.AudioFrameOutputPCM || output.Sequence != 0 || len(output.Payload) != 4 {
 		t.Fatalf("readiness output = %#v", output)
 	}
 	readType(t, ctx, readiness, "tts_end")
@@ -1269,7 +1342,7 @@ func TestHandlerResumesInFlightTurnWithoutDuplicateOutput(t *testing.T) {
 	readType(t, ctx, second, "state")
 	readType(t, ctx, second, "tts_start")
 	close(backend.continueAudio)
-	if frame := readAudioFrame(t, ctx, second); frame.Sequence != 1 || !slices.Equal(frame.PCM, []byte{2, 0}) {
+	if frame := readAudioFrame(t, ctx, second); frame.Sequence != 1 || !slices.Equal(frame.Payload, []byte{2, 0}) {
 		t.Fatalf("resumed output = %#v, want sequence 1 only", frame)
 	}
 	readType(t, ctx, second, "tts_end")

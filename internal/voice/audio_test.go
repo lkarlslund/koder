@@ -8,7 +8,7 @@ import (
 
 func TestAudioFrameWireFormat(t *testing.T) {
 	encoded, err := EncodeAudioFrame(AudioFrame{
-		Kind: AudioFrameInputPCM, Sequence: 0x01020304, PCM: []byte{0x34, 0x12, 0xcc, 0xff},
+		Kind: AudioFrameInputPCM, Sequence: 0x01020304, Payload: []byte{0x34, 0x12, 0xcc, 0xff},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -21,13 +21,13 @@ func TestAudioFrameWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Kind != AudioFrameInputPCM || decoded.Sequence != 0x01020304 || !bytes.Equal(decoded.PCM, []byte{0x34, 0x12, 0xcc, 0xff}) {
+	if decoded.Kind != AudioFrameInputPCM || decoded.Sequence != 0x01020304 || !bytes.Equal(decoded.Payload, []byte{0x34, 0x12, 0xcc, 0xff}) {
 		t.Fatalf("decoded frame = %#v", decoded)
 	}
 }
 
 func TestAudioFrameRejectsMalformedInput(t *testing.T) {
-	valid, err := EncodeAudioFrame(AudioFrame{Kind: AudioFrameOutputPCM, PCM: []byte{0, 0}})
+	valid, err := EncodeAudioFrame(AudioFrame{Kind: AudioFrameOutputPCM, Payload: []byte{0, 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +46,28 @@ func TestAudioFrameRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestAudioFrameAcceptsOddLengthOpusPacket(t *testing.T) {
+	want := AudioFrame{Kind: AudioFrameInputOpus, Sequence: 7, Payload: []byte{1, 2, 3}}
+	encoded, err := EncodeAudioFrame(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeAudioFrame(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != want.Kind || got.Sequence != want.Sequence || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
+	}
+}
+
 func FuzzAudioFrameRoundTrip(f *testing.F) {
 	f.Add(uint8(AudioFrameInputPCM), uint8(0), uint32(3), []byte{1, 0, 2, 0})
 	f.Fuzz(func(t *testing.T, kind, flags uint8, sequence uint32, pcm []byte) {
 		if (kind != uint8(AudioFrameInputPCM) && kind != uint8(AudioFrameOutputPCM)) || len(pcm) == 0 || len(pcm) > MaxAudioPayloadSize || len(pcm)%2 != 0 {
 			t.Skip()
 		}
-		want := AudioFrame{Kind: AudioFrameKind(kind), Flags: flags, Sequence: sequence, PCM: pcm}
+		want := AudioFrame{Kind: AudioFrameKind(kind), Flags: flags, Sequence: sequence, Payload: pcm}
 		encoded, err := EncodeAudioFrame(want)
 		if err != nil {
 			t.Fatal(err)
@@ -61,7 +76,7 @@ func FuzzAudioFrameRoundTrip(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Kind != want.Kind || got.Flags != want.Flags || got.Sequence != want.Sequence || !bytes.Equal(got.PCM, want.PCM) {
+		if got.Kind != want.Kind || got.Flags != want.Flags || got.Sequence != want.Sequence || !bytes.Equal(got.Payload, want.Payload) {
 			t.Fatalf("round trip mismatch: got %#v want %#v", got, want)
 		}
 	})
