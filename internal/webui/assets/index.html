@@ -392,9 +392,13 @@
                   </button>
                   <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)" :title="chatContextTooltip(chat)"></span>
                 </div>
-				<button type="button" class="btn btn-sm" x-show="workspaceSessionMode()" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Archive chat" @click.stop="deleteChat(chatID(chat))">
+				<button type="button" class="btn btn-sm" x-show="workspaceSessionMode() && !chatArchived(chat)" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-secondary'" title="Archive chat" @click.stop="archiveChat(chat)">
                   <i class="bi bi-archive"></i>
                 </button>
+				<div class="btn-group btn-group-sm" x-show="workspaceSessionMode() && chatArchived(chat)">
+				  <button type="button" class="btn btn-outline-secondary" title="Restore chat" @click.stop="restoreChat(chat)"><i class="bi bi-arrow-counterclockwise"></i></button>
+				  <button type="button" class="btn btn-outline-danger" title="Delete chat" @click.stop="deleteChat(chat)"><i class="bi bi-trash"></i></button>
+				</div>
               </div>
               <div class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'" :title="chatStatusLabel(chat)" style="display: none;">
                 <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]"></i>
@@ -1063,6 +1067,13 @@
         <button class="btn btn-primary" type="button" x-show="sessionTab === 'sessions'" @click="beginCreateSession()"><i class="bi bi-plus-lg"></i> New Session</button>
         <button class="btn btn-success" type="button" x-show="sessionTab === 'chats'" :disabled="quickChatCreating" @click="newQuickChat($event)" @auxclick.stop.prevent="newQuickChat($event)"><i class="bi bi-lightning-charge"></i> Quick Chat</button>
       </div>
+      <div class="d-flex gap-2 px-3 py-2 border-bottom" x-show="sessionTab !== 'chats'">
+        <template x-for="filter in [{id: 'active', label: 'Active'}, {id: 'starred', label: 'Starred'}, {id: 'archived', label: 'Archived'}]" :key="filter.id">
+          <button type="button" class="btn btn-sm" :class="sessionFilter === filter.id ? 'btn-primary' : 'btn-outline-secondary'" @click="sessionFilter = filter.id">
+            <span x-text="filter.label"></span> <span class="badge text-bg-secondary" x-text="sessionFilterCount(filter.id)"></span>
+          </button>
+        </template>
+      </div>
       <div class="session-list list-group list-group-flush" x-show="sessionTab === 'sessions'">
         <template x-if="sessionLoading">
           <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading sessions</div>
@@ -1082,7 +1093,9 @@
               </span>
             </button>
             <div class="btn-group btn-group-sm">
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
               <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit session" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
               <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete session" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
             </div>
           </div>
@@ -1126,7 +1139,9 @@
               </span>
             </button>
             <div class="btn-group btn-group-sm">
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
               <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit voice chat" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
               <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete voice chat" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
             </div>
           </div>

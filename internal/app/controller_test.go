@@ -474,7 +474,7 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 	selection := controllerSelection(ctrl)
 	active := selection.ChatID
 	side := newSelectedChat(t, ctrl, selection, "side chat").ID
-	if err := ctrl.DeleteChatForSelection(ctx, selection, side); err != nil {
+	if err := ctrl.ArchiveChatForSelection(ctx, selection, side); err != nil {
 		t.Fatalf("delete chat: %v", err)
 	}
 	state, err := ctrl.StateForSelection(ctx, selection)
@@ -499,7 +499,7 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	selection := controllerSelection(ctrl)
 	first := selection.ChatID
 	side := newSelectedChat(t, ctrl, selection, "side chat").ID
-	if err := ctrl.DeleteChatForSelection(ctx, Selection{SessionID: selection.SessionID, ChatID: side}, side); err != nil {
+	if err := ctrl.ArchiveChatForSelection(ctx, Selection{SessionID: selection.SessionID, ChatID: side}, side); err != nil {
 		t.Fatalf("delete active chat: %v", err)
 	}
 	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: selection.SessionID})

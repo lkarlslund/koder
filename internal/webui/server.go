@@ -41,6 +41,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
+	"github.com/lkarlslund/koder/internal/voice"
 	"github.com/lkarlslund/koder/internal/voiceapi"
 )
 
@@ -1097,7 +1098,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		s.setClientSelection(clientID, selection)
 		return s.stateForClient(ctx, clientID)
 	case "list_sessions":
-		return s.controller.Sessions(ctx)
+		return s.controller.ManageableSessions(ctx)
 	case "switch_session":
 		var in struct {
 			SessionID id.ID `json:"session_id"`
@@ -1184,6 +1185,30 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.stateForClient(ctx, clientID)
+	case "update_session":
+		var in struct {
+			SessionID id.ID `json:"session_id"`
+			Archived  *bool `json:"archived"`
+			Favorite  *bool `json:"favorite"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if in.Archived == nil && in.Favorite == nil {
+			return nil, fmt.Errorf("session update is empty")
+		}
+		if _, err := s.controller.UpdateClientSession(ctx, string(in.SessionID), voice.SessionUpdate{
+			Archived: in.Archived,
+			Favorite: in.Favorite,
+		}); err != nil {
+			return nil, err
+		}
+		selection := s.clientSelection(clientID)
+		if in.Archived != nil && *in.Archived && selection.SessionID == in.SessionID {
+			s.clearClientSelection(clientID)
+			return s.welcomeState(ctx, "Session archived."), nil
+		}
+		return s.stateForClient(ctx, clientID)
 	case "delete_session":
 		var in struct {
 			SessionID id.ID `json:"session_id"`
@@ -1206,6 +1231,23 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]string{"project_root": path}, nil
+	case "archive_chat":
+		var in struct {
+			ChatID   id.ID `json:"chat_id"`
+			Archived bool  `json:"archived"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		selection := s.clientSelection(clientID)
+		if _, err := s.controller.UpdateChat(ctx, selection.SessionID, selection.ChatID, in.ChatID, chattool.UpdateRequest{Archived: &in.Archived}); err != nil {
+			return nil, err
+		}
+		if in.Archived && selection.ChatID == in.ChatID {
+			selection.ChatID = ""
+			s.setClientSelection(clientID, selection)
+		}
+		return s.stateForClient(ctx, clientID)
 	case "delete_chat":
 		var in struct {
 			ChatID id.ID `json:"chat_id"`
@@ -1214,7 +1256,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		selection := s.clientSelection(clientID)
-		if err := s.controller.DeleteChatForSelection(ctx, s.appSelection(clientID), in.ChatID); err != nil {
+		if err := s.controller.DeleteClientChat(ctx, string(selection.SessionID), string(in.ChatID)); err != nil {
 			return nil, err
 		}
 		if selection.ChatID == in.ChatID {

@@ -1037,7 +1037,7 @@
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
-        showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -4457,8 +4457,19 @@
             });
         },
         endChatDrag() { this.dragChatID = ''; },
-        deleteChat(id) {
+        archiveChat(chat) {
+          const id = this.chatID(chat);
           if (!id || !confirm('Archive this chat?')) return;
+          this.rpc('archive_chat', {chat_id: id, archived: true}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
+        },
+        restoreChat(chat) {
+          const id = this.chatID(chat);
+          if (!id) return;
+          this.rpc('archive_chat', {chat_id: id, archived: false}).then(s => { this.applyState(s); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
+        },
+        deleteChat(chat) {
+          const id = this.chatID(chat);
+          if (!id || !confirm('Delete this chat and its history? This cannot be undone.')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
         },
         openObservabilityPanel() {
@@ -4530,7 +4541,7 @@
           this.cleanupDialog.error = '';
           try {
             let latest = null;
-            for (const chat of candidates) latest = await this.rpc('delete_chat', {chat_id: this.chatID(chat)});
+            for (const chat of candidates) latest = await this.rpc('archive_chat', {chat_id: this.chatID(chat), archived: true});
             if (latest) {
               this.applyState(latest, {scrollToBottom: true});
               this.writeSelectedChat();
@@ -5071,6 +5082,7 @@
         },
         openSessionDialog() {
           this.sessionTab = this.quickChatMode() ? 'chats' : (this.legacyVoiceSessionMode() ? 'voice' : 'sessions');
+          this.sessionFilter = 'active';
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });
@@ -5098,10 +5110,22 @@
           };
         },
         sessionRows() {
-          return this.allSessionRows().filter(session => !this.isVoiceSession(session));
+          return this.filterManagedSessions(this.allSessionRows().filter(session => !this.isVoiceSession(session)));
         },
         voiceSessionRows() {
-          return this.allSessionRows().filter(session => this.isVoiceSession(session));
+          return this.filterManagedSessions(this.allSessionRows().filter(session => this.isVoiceSession(session)));
+        },
+        filterManagedSessions(rows) {
+          if (!this.showSessions) return rows.filter(session => !this.sessionArchived(session));
+          if (this.sessionFilter === 'archived') return rows.filter(session => this.sessionArchived(session));
+          if (this.sessionFilter === 'starred') return rows.filter(session => this.sessionFavorite(session) && !this.sessionArchived(session));
+          return rows.filter(session => !this.sessionArchived(session));
+        },
+        sessionFilterCount(filter) {
+          const rows = this.allSessionRows().filter(session => this.sessionTab === 'voice' ? this.isVoiceSession(session) : !this.isVoiceSession(session));
+          if (filter === 'archived') return rows.filter(session => this.sessionArchived(session)).length;
+          if (filter === 'starred') return rows.filter(session => this.sessionFavorite(session) && !this.sessionArchived(session)).length;
+          return rows.filter(session => !this.sessionArchived(session)).length;
         },
         allSessionRows() {
           if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
@@ -5115,6 +5139,8 @@
         currentSession() { return this.state.session || this.state.Session || {}; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
+        sessionArchived(session) { return !!(session?.Archived || session?.archived); },
+        sessionFavorite(session) { return !!(session?.Favorite || session?.favorite); },
         isQuickSession(session) { return String(session?.kind || session?.Kind || '').toLowerCase() === 'quick'; },
         isVoiceSession(session) { return String(session?.kind || session?.Kind || '').toLowerCase() === 'voice'; },
         workspaceTitleSuffix() {
@@ -5281,11 +5307,30 @@
         },
         deleteSession(id) {
           if (!id) return;
-          if (!confirm('Delete this session and all chats?')) return;
+          if (!confirm('Delete this session and all of its chats and history? This cannot be undone.')) return;
           this.rpc('delete_session', {session_id: id}).then(s => {
             this.applyState(s);
             return this.rpc('list_sessions', {});
           }).then(result => { this.sessionState = this.normalizeSessionState(result || this.sessionState); });
+        },
+        updateSessionOrganization(session, changes) {
+          const id = this.sessionID(session);
+          if (!id) return;
+          this.rpc('update_session', Object.assign({session_id: id}, changes)).then(s => {
+            this.applyState(s);
+            return this.rpc('list_sessions', {});
+          }).then(result => { this.sessionState = this.normalizeSessionState(result || this.sessionState); })
+            .catch(err => this.showToast(err.message));
+        },
+        toggleSessionFavorite(session) {
+          this.updateSessionOrganization(session, {favorite: !this.sessionFavorite(session)});
+        },
+        archiveSession(session) {
+          if (!confirm('Archive this session?')) return;
+          this.updateSessionOrganization(session, {archived: true});
+        },
+        restoreSession(session) {
+          this.updateSessionOrganization(session, {archived: false});
         },
         openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },

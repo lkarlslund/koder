@@ -776,7 +776,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	}
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
-		base.Sessions, base.QuickChats = splitSessions(sessions)
+		base.Sessions, base.QuickChats = splitSessions(sessions, false)
 	} else if len(base.Sessions) == 0 {
 		return State{}, err
 	}
@@ -1701,8 +1701,8 @@ func (c *Controller) snapshotWithExecProcessesForSession(session domain.Session,
 	return c.snapshotWithExecProcessesLocked(snapshot)
 }
 
-// DeleteChatForSelection archives a chat in the selected session.
-func (c *Controller) DeleteChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
+// ArchiveChatForSelection archives a chat in the selected session.
+func (c *Controller) ArchiveChatForSelection(ctx context.Context, selection Selection, chatID id.ID) error {
 	archived := true
 	_, err := c.UpdateChat(ctx, selection.SessionID, selection.ChatID, chatID, chattool.UpdateRequest{Archived: &archived})
 	return err
@@ -1768,7 +1768,21 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	c.mu.RLock()
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
-	regular, quick := splitSessions(sessions)
+	regular, quick := splitSessions(sessions, false)
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick}, nil
+}
+
+// ManageableSessions returns workspace sessions including archived entries so
+// management UIs can restore or delete them. Deleted sessions remain omitted.
+func (c *Controller) ManageableSessions(ctx context.Context) (SessionState, error) {
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return SessionState{}, err
+	}
+	c.mu.RLock()
+	projectRoot := c.projectRoot
+	c.mu.RUnlock()
+	regular, quick := splitSessions(sessions, true)
 	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick}, nil
 }
 
@@ -1965,11 +1979,11 @@ func (c *Controller) PromoteQuickChat(ctx context.Context, sessionID id.ID, req 
 	return updated, nil
 }
 
-func splitSessions(items []domain.Session) ([]domain.Session, []domain.Session) {
+func splitSessions(items []domain.Session, includeArchived bool) ([]domain.Session, []domain.Session) {
 	regular := make([]domain.Session, 0, len(items))
 	quick := make([]domain.Session, 0)
 	for _, item := range items {
-		if item.Archived || !item.DeletedAt.IsZero() {
+		if (!includeArchived && item.Archived) || !item.DeletedAt.IsZero() {
 			continue
 		}
 		if item.Kind == domain.SessionKindQuick {

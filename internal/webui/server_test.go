@@ -2526,8 +2526,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `restoreSelectedChat()`) {
 		t.Fatalf("expected selected chat to be restored after reload")
 	}
-	if !strings.Contains(fullPage, `delete_chat`) {
-		t.Fatalf("expected chat deletion RPC")
+	if !strings.Contains(fullPage, `archive_chat`) || !strings.Contains(fullPage, `delete_chat`) {
+		t.Fatalf("expected separate chat archive and deletion RPCs")
 	}
 	if !strings.Contains(fullPage, `rename_chat`) ||
 		!strings.Contains(fullPage, `renameChat(chat)`) ||
@@ -2551,8 +2551,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `chat_ids: orderedIDs`) {
 		t.Fatalf("expected drag/drop chat reordering")
 	}
-	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
-		t.Fatalf("expected chat list trash action")
+	if !strings.Contains(fullPage, `archiveChat(chat)`) ||
+		!strings.Contains(fullPage, `restoreChat(chat)`) ||
+		!strings.Contains(fullPage, `deleteChat(chat)`) {
+		t.Fatalf("expected chat list archive, restore, and delete actions")
 	}
 	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-line`) {
 		t.Fatalf("expected chat sidebar to render detailed per-chat status lines")
@@ -2691,8 +2693,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `:readonly="sessionEditorMode === 'edit'"`) {
 		t.Fatalf("expected session create/edit dialog with locked edit project folder, browse action, and create-folder offer")
 	}
-	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `delete_session`) {
-		t.Fatalf("expected session dialog to rename and delete sessions")
+	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `update_session`) || !strings.Contains(fullPage, `delete_session`) ||
+		!strings.Contains(fullPage, `toggleSessionFavorite(session)`) || !strings.Contains(fullPage, `archiveSession(session)`) ||
+		!strings.Contains(fullPage, `restoreSession(session)`) || !strings.Contains(fullPage, `sessionFilter === 'starred'`) {
+		t.Fatalf("expected session dialog to rename, star, archive, restore, filter, and delete sessions")
 	}
 	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
@@ -3243,7 +3247,7 @@ func TestWebSocketReorderChatsAcknowledgesAndUpdatesOrder(t *testing.T) {
 	}
 }
 
-func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
+func TestWebSocketArchivesThenDeletesChat(t *testing.T) {
 	ctrl := newTestController(t)
 	state := selectedTestState(t, ctrl)
 	sessionID := state.Session.ID
@@ -3265,8 +3269,8 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":"%s"}}`, deletedID))); err != nil {
-		t.Fatalf("write delete_chat: %v", err)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"archive_chat","params":{"chat_id":"%s","archived":true}}`, deletedID))); err != nil {
+		t.Fatalf("write archive_chat: %v", err)
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
 	var resp struct {
@@ -3280,10 +3284,10 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if !resp.OK {
-		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
+		t.Fatalf("expected archive_chat ok, got %s", resp.Error)
 	}
 	if resp.Result.ActiveChatID == "" || resp.Result.ActiveChatID == deletedID {
-		t.Fatalf("expected delete_chat response to select a different chat, got %s", resp.Result.ActiveChatID)
+		t.Fatalf("expected archive_chat response to select a different chat, got %s", resp.Result.ActiveChatID)
 	}
 	state, err = ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
 	if err != nil {
@@ -3300,6 +3304,26 @@ func TestWebSocketDeleteChatAcknowledgesAndArchivesChat(t *testing.T) {
 	}
 	if !foundArchived {
 		t.Fatalf("expected archived chat to remain listed as archived: %#v", state.Chats)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":2,"method":"delete_chat","params":{"chat_id":"%s"}}`, deletedID))); err != nil {
+		t.Fatalf("write delete_chat: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
+	}
+	state, err = ctrl.StateForSelection(ctx, app.Selection{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("state after delete: %v", err)
+	}
+	for _, chat := range state.Chats {
+		if chat.ID == deletedID {
+			t.Fatalf("deleted chat remained listed: %#v", state.Chats)
+		}
 	}
 }
 
@@ -3482,10 +3506,53 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("expected switched back to %s, got %#v", initialID, switchResp.Result.Session)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":5,"method":"delete_session","params":{"session_id":"%s"}}`, newID))); err != nil {
-		t.Fatalf("write delete_session: %v", err)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":5,"method":"update_session","params":{"session_id":"%s","archived":true,"favorite":true}}`, newID))); err != nil {
+		t.Fatalf("write update_session: %v", err)
 	}
 	msg = readRPCResponse(t, ctx, conn, 5)
+	var updateResp struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &updateResp); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if !updateResp.OK {
+		t.Fatalf("expected update_session ok, got %s", updateResp.Error)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":6,"method":"list_sessions","params":{}}`)); err != nil {
+		t.Fatalf("write list_sessions after archive: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 6)
+	var managedResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Sessions []struct {
+				ID       id.ID
+				Archived bool
+				Favorite bool
+			} `json:"sessions"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &managedResp); err != nil {
+		t.Fatalf("decode managed sessions: %v", err)
+	}
+	managed := -1
+	for index, item := range managedResp.Result.Sessions {
+		if item.ID == newID {
+			managed = index
+			break
+		}
+	}
+	if !managedResp.OK || managed < 0 || !managedResp.Result.Sessions[managed].Archived || !managedResp.Result.Sessions[managed].Favorite {
+		t.Fatalf("expected archived starred session in management list: %#v, error=%s", managedResp.Result.Sessions, managedResp.Error)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":7,"method":"delete_session","params":{"session_id":"%s"}}`, newID))); err != nil {
+		t.Fatalf("write delete_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 7)
 	var deleteResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
