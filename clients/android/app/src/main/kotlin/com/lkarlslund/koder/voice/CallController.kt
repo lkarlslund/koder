@@ -42,6 +42,7 @@ class CallController(
 		val microphoneMuted: Boolean = false,
 		val audioEndpointName: String = "",
 		val audioEndpoints: List<VoiceAudioEndpoint> = emptyList(),
+		val phoneToolsConnected: Boolean = false,
     )
 
     interface Listener {
@@ -55,7 +56,12 @@ class CallController(
     }
 
     private val appContext = context.applicationContext
-	private val phoneDevice = PhoneDeviceConnection(phoneTools, identity = phoneIdentity)
+	private val phoneDevice = PhoneDeviceConnection(phoneTools, identity = phoneIdentity) { connected ->
+		onMain {
+			snapshot = snapshot.copy(phoneToolsConnected = connected)
+			publish()
+		}
+	}
 	private var connectedServer = ""
 	private var connectedToken = ""
     private val main = Handler(Looper.getMainLooper())
@@ -79,6 +85,7 @@ class CallController(
 		override fun onRoundTripMillis(milliseconds: Long) = diagnostics.recordRoundTrip(milliseconds)
         override fun onDisconnected(reason: String) = onMain {
             microphone.stop()
+			phoneDevice.close()
 			acceptingOutput = false
 			playback.stop()
 			diagnostics.recordReconnect()
@@ -332,7 +339,7 @@ class CallController(
         telecom.disconnect()
 		VoiceCallControlRegistry.detach(this)
         appContext.stopService(Intent(appContext, VoiceCallService::class.java))
-        snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused")
+		snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused", phoneToolsConnected = false)
         publish()
     }
 

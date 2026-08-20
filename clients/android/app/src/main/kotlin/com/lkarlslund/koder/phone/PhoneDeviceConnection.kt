@@ -12,9 +12,13 @@ class PhoneDeviceConnection(
     private val provider: PhoneToolProvider,
     private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build(),
 	private val identity: PhoneIdentity? = null,
+	private val onConnectionChanged: (Boolean) -> Unit = {},
 ) : AutoCloseable {
     private var socket: WebSocket? = null
     private var generation = 0L
+	@Volatile private var connected = false
+
+	fun isConnected(): Boolean = connected
 
     @Synchronized
     fun connect(server: String, token: String, callId: String) {
@@ -30,6 +34,7 @@ class PhoneDeviceConnection(
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (!owns(webSocket, currentGeneration)) return webSocket.close(1000, "superseded").let { }
+				setConnected(true)
                 webSocket.send(PhoneDeviceProtocol.hello(provider.actionPolicies()))
             }
 
@@ -59,12 +64,24 @@ class PhoneDeviceConnection(
     }
 
     @Synchronized private fun owns(candidate: WebSocket, expectedGeneration: Long) = socket === candidate && generation == expectedGeneration
-    @Synchronized private fun clear(candidate: WebSocket, expectedGeneration: Long) { if (owns(candidate, expectedGeneration)) socket = null }
+    @Synchronized private fun clear(candidate: WebSocket, expectedGeneration: Long) {
+		if (owns(candidate, expectedGeneration)) {
+			socket = null
+			setConnected(false)
+		}
+	}
+
+	private fun setConnected(value: Boolean) {
+		if (connected == value) return
+		connected = value
+		onConnectionChanged(value)
+	}
 
     @Synchronized
     private fun closeSocket() {
         socket?.close(1000, "voice conversation ended")
         socket = null
+		setConnected(false)
     }
 
     @Synchronized

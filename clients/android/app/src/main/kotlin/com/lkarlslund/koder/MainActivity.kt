@@ -59,6 +59,7 @@ import com.lkarlslund.koder.phone.PhoneActionPolicy
 import com.lkarlslund.koder.phone.actionTitle
 import com.lkarlslund.koder.phone.PhoneBindingClient
 import com.lkarlslund.koder.phone.PhoneIdentity
+import com.lkarlslund.koder.phone.permissionAvailability
 import com.lkarlslund.koder.presentation.ZoomableImageView
 import com.lkarlslund.koder.voice.AppUpdate
 import com.lkarlslund.koder.voice.AudioDiagnostics
@@ -354,8 +355,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (snapshot.stage == CallController.Stage.WORKING) delegatedWorkPending = true
 		if (snapshot.stage == CallController.Stage.RECORDING) delegatedWorkPending = false
 		runOnUiThread {
-            if (screen != Screen.CHAT) return@runOnUiThread
 			latestCallSnapshot = snapshot
+			if (screen != Screen.CHAT) return@runOnUiThread
 			voiceOrb?.mode = voiceOrbMode(snapshot.stage)
 			voiceOrbDetail?.apply {
 				text = snapshot.detail
@@ -886,15 +887,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val enabled = policies.values.any { it != PhoneActionPolicy.OFF }
 			val granted = phoneCapabilityAvailable(capability)
 			val requiresAndroidAccess = capability.notificationAccess || androidPermissions.isNotEmpty()
-			val state = when {
-				enabled && granted -> "● Available to Koder"
-				enabled -> "● Enabled · Android access missing"
-				granted && requiresAndroidAccess -> "○ Off · Android access granted"
-				requiresAndroidAccess -> "○ Off · Android access not granted"
-				else -> "○ Off · no Android permission needed"
-			}
+			val availability = permissionAvailability(enabled, granted, requiresAndroidAccess, latestCallSnapshot.phoneToolsConnected)
+			val state = availability.label
 			val stateColor = when {
-				enabled && granted -> ACTION_GREEN
+				availability.remotelyAvailable -> ACTION_GREEN
 				enabled && !granted -> ACTION_RED
 				else -> ACTION_NEUTRAL
 			}

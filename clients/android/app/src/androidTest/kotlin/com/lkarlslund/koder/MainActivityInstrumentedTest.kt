@@ -154,7 +154,7 @@ class MainActivityInstrumentedTest {
 				waitForText(scenario, "Personal")
 				onView(withContentDescription("More options")).perform(click())
 				onView(withText("Permission health")).perform(click())
-				onView(withContentDescription("Permission health for Device information: ● Available to Koder")).check(matches(isDisplayed()))
+				onView(withContentDescription("Permission health for Device information: ● Ready to offer · start or resume a conversation")).check(matches(isDisplayed()))
 				val labels = waitForText(scenario, "Remote access: Device status (On)")
 				assertTrue(labels.any { it.startsWith("Last used ") })
 				assertTrue(labels.contains("Android access: none required"))
