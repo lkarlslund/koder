@@ -110,7 +110,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	if err != nil {
 		return tools.ToolSpec{}, false
 	}
-	spec.Usage = "Use only for an action on the currently connected phone. Actions marked USER-FACING ACTION open UI, cause sound, communicate, or change phone state. Call one only when the current user utterance explicitly requests that exact action; never call one to gain knowledge, perform research, or inspect its result. For current local information, first read get_location; if outside research is needed, delegate it with the resolved place name. Enabled actions:\n- " + strings.Join(lines, "\n- ")
+	spec.Usage = "Use only for an action on the currently connected phone. Actions marked USER-FACING ACTION open UI, cause sound, communicate, or change phone state. Call one only when the current user utterance explicitly requests that exact action; never call one to gain knowledge, perform research, or inspect its result. For current local information, first read get_location; if outside research is needed, use the standard research tools or coordinate a sibling chat with the resolved place name. Enabled actions:\n- " + strings.Join(lines, "\n- ")
 	spec.Parameters = string(schema)
 	return spec, true
 }
@@ -155,6 +155,11 @@ func service(runtime tools.Runtime) (phonedevice.Control, error) {
 	control, err := tools.RequireService[phonedevice.Control](runtime, serviceKey)
 	if err != nil {
 		return nil, errors.New("connected phone is unavailable")
+	}
+	if resolver, ok := control.(interface {
+		ForChat(string) phonedevice.Control
+	}); ok {
+		control = resolver.ForChat(string(runtime.ChatID))
 	}
 	return control, nil
 }

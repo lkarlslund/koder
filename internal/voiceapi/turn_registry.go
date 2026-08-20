@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -27,6 +28,8 @@ type cachedTurn struct {
 	utteranceID    string
 	fingerprint    string
 	voiceSessionID string
+	sessionID      string
+	chatID         string
 	events         []turnEvent
 	audioStarted   bool
 	done           bool
@@ -128,10 +131,10 @@ func (t *cachedTurn) snapshot() turnSnapshot {
 
 type turnRegistry struct {
 	mu     sync.Mutex
-	active *cachedTurn
+	active map[string]*cachedTurn
 }
 
-func newTurnRegistry() *turnRegistry { return &turnRegistry{} }
+func newTurnRegistry() *turnRegistry { return &turnRegistry{active: make(map[string]*cachedTurn)} }
 
 func textTurnFingerprint(text string) string {
 	digest := sha256.Sum256([]byte("text\x00" + text))
@@ -145,7 +148,7 @@ func audioTurnFingerprint(audio *incomingAudio) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID string, run func(*cachedTurn)) (*cachedTurn, bool, error) {
+func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID, sessionID, chatID string, run func(*cachedTurn)) (*cachedTurn, bool, error) {
 	if r == nil {
 		return nil, false, errors.New("voice turn registry is unavailable")
 	}
@@ -156,7 +159,10 @@ func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID st
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if current := r.active; current != nil && current.callID == callID {
+	if r.active == nil {
+		r.active = make(map[string]*cachedTurn)
+	}
+	if current := r.active[callID]; current != nil {
 		if current.utteranceID == utteranceID {
 			if current.fingerprint != fingerprint {
 				return nil, false, errors.New("utterance id was reused with different content")
@@ -168,7 +174,9 @@ func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID st
 		}
 	}
 	turn := newCachedTurn(callID, utteranceID, fingerprint, voiceSessionID)
-	r.active = turn
+	turn.sessionID = strings.TrimSpace(sessionID)
+	turn.chatID = strings.TrimSpace(chatID)
+	r.active[callID] = turn
 	go run(turn)
 	return turn, true, nil
 }
@@ -180,8 +188,9 @@ func (h *Handler) runTextTurn(turn *cachedTurn, text string, pacing voice.Respon
 }
 
 func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, pacing voice.ResponsePacing) {
+	ctx = phonedevice.WithCallID(ctx, turn.callID)
 	turn.appendState("processing", nil)
-	message, err := h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing}, func(session voice.Session) error {
+	onWorking := func(session voice.Session) error {
 		if strings.TrimSpace(session.ID) == "" && strings.TrimSpace(session.Title) == "" {
 			turn.appendState("working", nil)
 			return nil
@@ -189,7 +198,19 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 		copy := session
 		turn.appendState("working", &copy)
 		return nil
-	})
+	}
+	var message voice.Message
+	var err error
+	if turn.sessionID != "" && turn.chatID != "" {
+		backend, ok := h.Backend.(voice.SessionChatBackend)
+		if !ok {
+			turn.finish(errors.New("session chat backend is unavailable"))
+			return
+		}
+		message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing}, onWorking)
+	} else {
+		message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing}, onWorking)
+	}
 	if err != nil {
 		turn.finish(err)
 		return

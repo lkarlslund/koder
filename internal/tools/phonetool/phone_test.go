@@ -54,7 +54,7 @@ func TestPhoneDefinitionKeepsLocalContextReadOnly(t *testing.T) {
 	description := definition.Function.Description
 	for _, required := range []string{
 		"first read get_location",
-		"delegate it with the resolved place name",
+		"coordinate a sibling chat with the resolved place name",
 		"only when the user explicitly asks",
 		"never use this merely to determine or describe where the user is",
 	} {

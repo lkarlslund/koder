@@ -59,6 +59,8 @@ class VoiceConnection(
     private var token = ""
     private var server = ""
 	private var voiceSessionId = ""
+	private var sessionId = ""
+	private var chatId = ""
 	private var callId = ""
 	private var responsePacing = VoiceResponsePacing.NORMAL
 	private var desired = false
@@ -75,11 +77,13 @@ class VoiceConnection(
 	}
 
 	@Synchronized
-	fun connect(server: String, bearerToken: String, voiceSessionId: String = "", responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL) {
+	fun connect(server: String, bearerToken: String, sessionId: String = "", chatId: String = "", responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL) {
 		stopSocket("new call")
         token = bearerToken.trim()
         this.server = server.trim()
-        this.voiceSessionId = voiceSessionId.trim()
+		this.sessionId = sessionId.trim()
+		this.chatId = chatId.trim()
+		this.voiceSessionId = ""
 		this.responsePacing = responsePacing
 		callId = UUID.randomUUID().toString()
 		pendingTurn = null
@@ -102,7 +106,11 @@ class VoiceConnection(
 		}
 		val url = requestURL.toHttpUrl().newBuilder()
 			.addQueryParameter("call_id", callId)
-			.apply { if (voiceSessionId.isNotBlank()) addQueryParameter("voice_session_id", voiceSessionId) }
+			.apply {
+				if (sessionId.isNotBlank()) addQueryParameter("session_id", sessionId)
+				if (chatId.isNotBlank()) addQueryParameter("chat_id", chatId)
+				if (sessionId.isBlank() && voiceSessionId.isNotBlank()) addQueryParameter("voice_session_id", voiceSessionId)
+			}
 			.apply {
 				pendingTurn?.let { turn ->
 					addQueryParameter("resume_utterance_id", turn.id)
@@ -323,6 +331,11 @@ class VoiceConnection(
 	@Synchronized
 	fun resumeVoiceSession(voiceSessionId: String) {
 		if (voiceSessionId.isNotBlank()) this.voiceSessionId = voiceSessionId.trim()
+	}
+
+	fun resumeSelection(sessionId: String, chatId: String) {
+		if (sessionId.isNotBlank()) this.sessionId = sessionId.trim()
+		if (chatId.isNotBlank()) this.chatId = chatId.trim()
 	}
 
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) {

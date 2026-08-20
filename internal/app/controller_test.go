@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -2386,10 +2385,14 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var listed voice.Session
 	for _, target := range targets {
 		if target.ID == string(voiceSession.ID) {
-			t.Fatal("voice coordination session leaked into delegation targets")
+			listed = target
 		}
+	}
+	if listed.ID == "" || listed.Kind != string(domain.SessionKindVoice) || listed.ChatCount != 1 || listed.VoiceChats != 1 {
+		t.Fatalf("voice session missing from native hierarchy: %#v", targets)
 	}
 	ensured, err := ctrl.EnsureVoiceSession(ctx, string(voiceSession.ID))
 	if err != nil {
@@ -2467,7 +2470,7 @@ func TestVoiceChatOrganizationIsDurableRecoverableAndDoesNotChangeLastUsed(t *te
 }
 
 func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
-	var targetID string
+	var targetChatID string
 	var requestsMu sync.Mutex
 	var requests []string
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2485,10 +2488,11 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		requests = append(requests, requestBody)
 		requestsMu.Unlock()
 		switch {
-		case strings.Contains(requestBody, "You are a voice assistant") && strings.Contains(requestBody, `"role":"tool"`):
+		case strings.Contains(requestBody, "voice orchestrator") && strings.Contains(requestBody, `"role":"tool"`):
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"We found that the laptop now boots normally."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
-		case strings.Contains(requestBody, "You are a voice assistant"):
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"delegate-1","type":"function","function":{"name":"session_delegate","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"session_id":"`+targetID+`","message":"Check whether the laptop fix still works"}`)
+		case strings.Contains(requestBody, "voice orchestrator"):
+			arguments := fmt.Sprintf(`{"chat_id":%q,"message":"Check whether the laptop fix still works","wait":true}`, targetChatID)
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"send-1","type":"function","function":{"name":"chat_send","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
 		default:
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The laptop now boots normally after the firmware fix."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		}
@@ -2508,20 +2512,28 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		t.Fatal("expected ordinary target session")
 	}
 	target := state.Sessions[0]
+	selected, err := ctrl.StateForSelection(context.Background(), Selection{SessionID: target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetChatID = string(selected.ActiveChatID)
 	target.Title = "Laptop repair"
 	if err := ctrl.RenameSession(context.Background(), target.ID, target.Title); err != nil {
 		t.Fatal(err)
 	}
-	targetID = string(target.ID)
-	voiceSession, _, err := ctrl.CreateVoiceChat(context.Background(), "Phone assistant")
+	voiceChat, err := ctrl.CreateVoiceChatInSession(context.Background(), string(target.ID), "Phone assistant")
 	if err != nil {
 		t.Fatal(err)
+	}
+	chats, err := ctrl.ListSessionChats(context.Background(), string(target.ID))
+	if err != nil || len(chats) < 2 {
+		t.Fatalf("session chats = %#v, %v", chats, err)
 	}
 
 	var working voice.Session
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "Does the laptop fix still work?", voice.TurnOptions{ResponsePacing: voice.ResponsePacingDetailed}, func(session voice.Session) error {
+	message, err := ctrl.RunVoiceChatTurn(ctx, string(target.ID), voiceChat.ID, "Does the laptop fix still work?", voice.TurnOptions{ResponsePacing: voice.ResponsePacingDetailed}, func(session voice.Session) error {
 		working = session
 		return nil
 	})
@@ -2534,18 +2546,24 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if message.TranscriptID == "" {
 		t.Fatalf("voice response omitted durable transcript id: %#v", message)
 	}
-	if working.ID != targetID || working.Title != "Laptop repair" {
+	if working.ID != targetChatID || working.Kind != "chat" {
 		t.Fatalf("working target = %#v", working)
 	}
-	voiceChats, err := ctrl.ListVoiceChats(ctx)
+	voiceChats, err := ctrl.ListVoiceSessions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(voiceChats) != 1 || voiceChats[0].LastMessage != message.SpokenText || voiceChats[0].ResultCount != 1 {
+	var parent voice.Session
+	for _, item := range voiceChats {
+		if item.ID == string(target.ID) {
+			parent = item
+		}
+	}
+	if parent.ID == "" || parent.LastMessage != message.SpokenText || parent.VoiceChats != 1 {
 		t.Fatalf("voice conversation preview = %#v", voiceChats)
 	}
 
-	_, _, _, runtime, err := ctrl.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: voiceSession.ID}, true)
+	_, _, _, runtime, err := ctrl.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: target.ID, ChatID: id.ID(voiceChat.ID)}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2562,7 +2580,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if userTurns != 1 {
 		t.Fatalf("voice transcript has %d user turns: %#v", userTurns, timeline)
 	}
-	searchResults, err := ctrl.SearchVoiceSessionHistory(ctx, string(voiceSession.ID), "boots normally", 20)
+	searchResults, err := ctrl.SearchVoiceChatHistory(ctx, string(target.ID), voiceChat.ID, "boots normally", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2572,8 +2590,8 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
 	requestsMu.Unlock()
-	if !strings.Contains(joinedRequests, `"name":"session_delegate"`) || !strings.Contains(joinedRequests, "Use the exact session_id returned by session_list") {
-		t.Fatalf("voice tool instructions were not offered with the tool: %s", joinedRequests)
+	if !strings.Contains(joinedRequests, `"name":"chat_send"`) || strings.Contains(joinedRequests, `"name":"session_delegate"`) {
+		t.Fatalf("voice chat did not receive native chat coordination tools: %s", joinedRequests)
 	}
 	if !strings.Contains(joinedRequests, "Response pacing for this call is detailed") {
 		t.Fatalf("voice pacing instruction was not offered transiently: %s", joinedRequests)
@@ -2616,7 +2634,7 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 		requestsMu.Lock()
 		requests = append(requests, requestBody)
 		requestsMu.Unlock()
-		if !strings.Contains(requestBody, "You are a voice assistant") {
+		if !strings.Contains(requestBody, "voice orchestrator") {
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"Aarhus has DHL Stafetten today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 			return
 		}
@@ -2631,31 +2649,6 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 		case 3:
 			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"map-2","type":"function","function":{"name":"phone","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"action":"open_map","query":"Aarhus events"}`)
 		case 4:
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"start-1","type":"function","function":{"name":"session_start","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, `{"title":"Aarhus events today","temporary":true}`)
-		case 5:
-			var request struct {
-				Messages []struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				} `json:"messages"`
-			}
-			if err := json.Unmarshal(body, &request); err != nil {
-				t.Errorf("decode model request: %v", err)
-				return
-			}
-			var target voice.Session
-			for index := len(request.Messages) - 1; index >= 0; index-- {
-				if request.Messages[index].Role == "tool" && json.Unmarshal([]byte(request.Messages[index].Content), &target) == nil && target.ID != "" {
-					break
-				}
-			}
-			if target.ID == "" {
-				t.Error("session_start result was not returned to the voice model")
-				return
-			}
-			arguments := fmt.Sprintf(`{"session_id":%q,"message":"Find notable public events happening in Aarhus today and summarize the most relevant one."}`, target.ID)
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"delegate-1","type":"function","function":{"name":"session_delegate","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
-		case 6:
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"You're in Aarhus, and DHL Stafetten is happening today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		default:
 			t.Errorf("unexpected voice model step %d", voiceStep.Load())
@@ -2710,17 +2703,16 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 	if !slices.Equal(gotActions, []phonedevice.Action{phonedevice.GetLocation}) {
 		t.Fatalf("phone actions = %v, want only get_location", gotActions)
 	}
-	if len(workingStates) != 2 || workingStates[0].ID != "" || workingStates[1].ID == "" {
-		t.Fatalf("working states = %#v, want generic tool work followed by delegated target", workingStates)
+	if len(workingStates) != 1 || workingStates[0].ID != "" {
+		t.Fatalf("working states = %#v, want one generic tool-work state", workingStates)
 	}
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
 	firstRequest := requests[0]
 	requestsMu.Unlock()
 	for _, expected := range []string{
-		"delegate it with the resolved place name",
-		"Find notable public events happening in Aarhus today",
 		"phone action open_map requires an explicit request for that user-facing action in the current voice utterance",
+		`"name":"web_search"`,
 	} {
 		if !strings.Contains(joinedRequests, expected) {
 			t.Fatalf("voice routing did not contain %q: %s", expected, joinedRequests)

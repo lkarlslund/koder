@@ -58,6 +58,24 @@ func TestCreateQuickSessionOwnsOneStandaloneChat(t *testing.T) {
 	}
 }
 
+func TestCreateQuickVoiceSessionOwnsOneVoiceChatAndScratchWorkspace(t *testing.T) {
+	engine, _ := newQuickTestEngine(t)
+	owner, err := engine.CreateQuickVoiceSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := owner.Snapshot()
+	if snapshot.Session.Kind != domain.SessionKindQuick || !snapshot.Session.ProjectRootManaged {
+		t.Fatalf("unexpected quick voice session: %#v", snapshot.Session)
+	}
+	if len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Voice {
+		t.Fatalf("unexpected quick voice chat: %#v", snapshot.Chats)
+	}
+	if info, err := os.Stat(snapshot.Session.ProjectRoot); err != nil || !info.IsDir() {
+		t.Fatalf("managed scratch workspace is missing: %v", err)
+	}
+}
+
 func TestCreateVoiceSessionOwnsOneVoiceChat(t *testing.T) {
 	engine, _ := newQuickTestEngine(t)
 	owner, err := engine.CreateVoiceSession(context.Background(), "Morning voice")
@@ -71,8 +89,12 @@ func TestCreateVoiceSessionOwnsOneVoiceChat(t *testing.T) {
 	if snapshot.Session.Title != "Morning voice" || len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Voice {
 		t.Fatalf("unexpected voice chat: %#v %#v", snapshot.Session, snapshot.Chats)
 	}
-	if _, err := owner.NewChat(context.Background(), snapshot.Chats[0].ID, "second"); err == nil || !strings.Contains(err.Error(), "voice sessions") {
-		t.Fatalf("expected new chat rejection, got %v", err)
+	second, err := owner.NewRootChat(context.Background(), "second", chatrole.Voice)
+	if err != nil {
+		t.Fatalf("create another voice chat: %v", err)
+	}
+	if second.Snapshot().Chat.WorkflowRole != chatrole.Voice || len(owner.Snapshot().Chats) != 2 {
+		t.Fatalf("unexpected second voice chat: %#v", owner.Snapshot().Chats)
 	}
 }
 

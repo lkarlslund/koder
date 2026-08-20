@@ -42,6 +42,8 @@ type fakeBackend struct {
 	languages      []string
 	spoken         string
 	artifact       voice.ArtifactFile
+	sessions       []voice.Session
+	chats          []voice.Chat
 	voiceChats     []voice.Session
 	history        []voice.TranscriptEntry
 	pacing         voice.ResponsePacing
@@ -108,7 +110,55 @@ func (f *fakeBackend) VoiceOfferedArtifact(context.Context, string) (voice.Artif
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error) {
+	if f.sessions != nil {
+		return append([]voice.Session(nil), f.sessions...), nil
+	}
 	return []voice.Session{{ID: "session-1", Title: "Laptop repair"}}, nil
+}
+
+func (f *fakeBackend) ListSessionChats(_ context.Context, sessionID string) ([]voice.Chat, error) {
+	var out []voice.Chat
+	for _, chat := range f.chats {
+		if chat.SessionID == sessionID {
+			out = append(out, chat)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBackend) EnsureVoiceChat(_ context.Context, sessionID, chatID string) (voice.Chat, error) {
+	for _, chat := range f.chats {
+		if chat.SessionID == sessionID && chat.ID == chatID && chat.Role == "voice" && !chat.Archived {
+			return chat, nil
+		}
+	}
+	return voice.Chat{}, fmt.Errorf("voice chat not found")
+}
+
+func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID, title string) (voice.Chat, error) {
+	chat := voice.Chat{ID: "chat-created", SessionID: sessionID, Title: title, Role: "voice"}
+	f.chats = append(f.chats, chat)
+	return chat, nil
+}
+
+func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, title string) (voice.Session, voice.Chat, error) {
+	session := voice.Session{ID: "temporary-session", Title: title, Kind: "quick", ChatCount: 1, VoiceChats: 1}
+	chat := voice.Chat{ID: "temporary-chat", SessionID: session.ID, Title: title, Role: "voice"}
+	f.sessions = append(f.sessions, session)
+	f.chats = append(f.chats, chat)
+	return session, chat, nil
+}
+
+func (f *fakeBackend) RunVoiceChatTurn(ctx context.Context, _, _ string, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	return f.RunVoiceTurn(ctx, "", text, options, onWorking)
+}
+
+func (f *fakeBackend) VoiceChatHistory(ctx context.Context, _, _, beforeID string, limit int) (voice.TranscriptPage, error) {
+	return f.VoiceSessionHistory(ctx, "", beforeID, limit)
+}
+
+func (f *fakeBackend) SearchVoiceChatHistory(ctx context.Context, _, _, query string, limit int) ([]voice.TranscriptSearchResult, error) {
+	return f.SearchVoiceSessionHistory(ctx, "", query, limit)
 }
 
 func (f *fakeBackend) ListVoiceChats(context.Context) ([]voice.Session, error) {
@@ -429,6 +479,43 @@ func TestHandlerSwitchesDurableVoiceChat(t *testing.T) {
 	}
 }
 
+func TestHandlerConnectsToNativeVoiceChatSelection(t *testing.T) {
+	backend := &fakeBackend{
+		sessions: []voice.Session{{ID: "session-1", Title: "Laptop"}},
+		chats: []voice.Chat{
+			{ID: "work-1", SessionID: "session-1", Title: "Firmware", Role: "execution"},
+			{ID: "voice-1", SessionID: "session-1", Title: "Talk", Role: "voice"},
+			{ID: "voice-2", SessionID: "session-1", Title: "Another talk", Role: "voice"},
+		},
+		history: []voice.TranscriptEntry{{ID: "answer-1", Role: "assistant", Text: "It boots."}},
+	}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := context.Background()
+	url := "ws" + server.URL[len("http"):] + "/voice/v1?session_id=session-1&chat_id=voice-1"
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	ready := readType(t, ctx, conn, "ready")
+	if ready.CallState == nil || ready.CallState.SessionID != "session-1" || ready.CallState.ChatID != "voice-1" || len(ready.CallState.Chats) != 3 || len(ready.CallState.History) != 1 {
+		t.Fatalf("native ready state = %#v", ready.CallState)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "select_voice_chat", Protocol: protocolVersion, SessionID: "session-1", ChatID: "voice-2"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "message")
+	readType(t, ctx, conn, "state")
+	readType(t, ctx, conn, "tts_start")
+	readAudioFrame(t, ctx, conn)
+	readType(t, ctx, conn, "tts_end")
+	ready = readType(t, ctx, conn, "ready")
+	if ready.CallState == nil || ready.CallState.ChatID != "voice-2" {
+		t.Fatalf("selected native chat state = %#v", ready.CallState)
+	}
+}
+
 func TestHandlerCreatesAndSelectsDurableVoiceChat(t *testing.T) {
 	backend := &fakeBackend{}
 	server := httptest.NewServer(NewHandler(backend, ""))
@@ -506,6 +593,55 @@ func TestHandlerListsAndCreatesVoiceSessionsWithoutStartingCall(t *testing.T) {
 	}
 	if len(created.VoiceSessions) != 3 || created.VoiceSessions[2].ID != "voice-created" {
 		t.Fatalf("created voice sessions = %#v", created.VoiceSessions)
+	}
+}
+
+func TestHandlerExposesNativeSessionChatHierarchy(t *testing.T) {
+	backend := &fakeBackend{
+		sessions: []voice.Session{{ID: "session-1", Title: "Laptop repair", Kind: "regular", ChatCount: 2, VoiceChats: 1}},
+		chats: []voice.Chat{
+			{ID: "work-1", SessionID: "session-1", Title: "BIOS investigation", Role: "execution"},
+			{ID: "voice-1", SessionID: "session-1", Title: "Laptop conversation", Role: "voice"},
+		},
+	}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+
+	do := func(method, path, body string) (int, sessionsResponse) {
+		t.Helper()
+		request, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		var decoded sessionsResponse
+		if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, decoded
+	}
+
+	status, listed := do(http.MethodGet, "/voice/v1/sessions", "")
+	if status != http.StatusOK || len(listed.Sessions) != 1 || listed.Sessions[0].VoiceChats != 1 {
+		t.Fatalf("session list status=%d body=%#v", status, listed)
+	}
+	status, chats := do(http.MethodGet, "/voice/v1/sessions/session-1/chats", "")
+	if status != http.StatusOK || len(chats.Chats) != 2 || chats.Chats[0].Role != "execution" || chats.Chats[1].Role != "voice" {
+		t.Fatalf("chat list status=%d body=%#v", status, chats)
+	}
+	status, created := do(http.MethodPost, "/voice/v1/sessions/session-1/chats", `{"title":"Another voice chat"}`)
+	if status != http.StatusCreated || created.Chat == nil || created.Chat.SessionID != "session-1" || created.Chat.Role != "voice" {
+		t.Fatalf("chat creation status=%d body=%#v", status, created)
+	}
+	status, temporary := do(http.MethodPost, "/voice/v1/sessions/temporary", `{"title":"One-off task"}`)
+	if status != http.StatusCreated || temporary.Session == nil || temporary.Session.Kind != "quick" || temporary.Chat == nil || temporary.Chat.Role != "voice" {
+		t.Fatalf("temporary creation status=%d body=%#v", status, temporary)
 	}
 }
 
@@ -618,11 +754,16 @@ func TestHandlerProtectsAndValidatesVoiceSessionsEndpoint(t *testing.T) {
 
 func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
 	handler := NewHandler(&fakeBackend{}, "secret")
-	release, err := handler.Lease.Acquire("phone-1", "voice-1")
+	release, _, err := handler.Lease.AcquireDeviceConnection("phone-1", "call-1", "voice-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
+	secondRelease, _, err := handler.Lease.AcquireDeviceConnection("phone-2", "call-2", "voice-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondRelease()
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -652,7 +793,7 @@ func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
 	if info.SessionCount != 1 || info.VoiceSessionCount != 2 {
 		t.Fatalf("server info session counts = %d, %d", info.SessionCount, info.VoiceSessionCount)
 	}
-	if !info.TokenRequired || !info.VoiceConnectionActive || info.VoiceConnectionSince == nil {
+	if !info.TokenRequired || !info.VoiceConnectionActive || info.VoiceConnectionCount != 2 || info.VoiceConnectionSince == nil {
 		t.Fatalf("server info connection state = %#v", info)
 	}
 }
@@ -785,24 +926,32 @@ func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
 	}
 }
 
-func TestHandlerRejectsConcurrentCalls(t *testing.T) {
+func TestHandlerEnforcesOneCallPerDeviceAndAllowsDifferentDevices(t *testing.T) {
 	server := httptest.NewServer(NewHandler(&fakeBackend{}, ""))
 	defer server.Close()
 	ctx := context.Background()
 	url := "ws" + server.URL[len("http"):] + "/voice/v1"
-	first, _, err := websocket.Dial(ctx, url+"?call_id=first", nil)
+	phoneOne := &websocket.DialOptions{HTTPHeader: http.Header{"X-Koder-Device-ID": []string{"phone-1"}}}
+	first, _, err := websocket.Dial(ctx, url+"?call_id=first", phoneOne)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Close(websocket.StatusNormalClosure, "") }()
 	readType(t, ctx, first, "ready")
-	_, response, err := websocket.Dial(ctx, url+"?call_id=second", nil)
+	_, response, err := websocket.Dial(ctx, url+"?call_id=second", phoneOne)
 	if response != nil {
 		defer func() { _ = response.Body.Close() }()
 	}
 	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
 		t.Fatalf("concurrent dial response=%v err=%v", response, err)
 	}
+	phoneTwo := &websocket.DialOptions{HTTPHeader: http.Header{"X-Koder-Device-ID": []string{"phone-2"}}}
+	secondDevice, _, err := websocket.Dial(ctx, url+"?call_id=second", phoneTwo)
+	if err != nil {
+		t.Fatalf("second device was not allowed: %v", err)
+	}
+	defer func() { _ = secondDevice.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, secondDevice, "ready")
 }
 
 func TestPhoneDeviceSidecarRequiresAndServesActiveCall(t *testing.T) {

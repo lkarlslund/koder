@@ -29,6 +29,24 @@ class VoiceSessionClient(
         )
     }
 
+	fun listChats(server: String, token: String, sessionId: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(server, token, "/voice/v1/sessions/$sessionId/chats", null, VoiceProtocol::parseHome, callback)
+	}
+
+	fun createVoiceChat(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(
+			server, token, "/voice/v1/sessions/$sessionId/chats",
+			VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback,
+		)
+	}
+
+	fun createTemporary(server: String, token: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(
+			server, token, "/voice/v1/sessions/temporary",
+			VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback,
+		)
+	}
+
 	fun rename(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
 		update(server, token, sessionId, title = title, callback = callback)
 	}

@@ -123,6 +123,27 @@ class VoiceProtocolTest {
     }
 
     @Test
+    fun decodesNativeSessionAndChatHierarchy() {
+        val home = VoiceProtocol.parseHome(
+            """{"protocol":"voice.v1","sessions":[{"id":"session-1","title":"Laptop","kind":"regular","chat_count":2,"voice_chat_count":1}],"chats":[{"id":"work-1","session_id":"session-1","title":"Firmware","role":"execution"},{"id":"voice-1","session_id":"session-1","title":"Talk","role":"voice","status_text":"Checking the BIOS"}],"session":{"id":"session-1","title":"Laptop","kind":"regular"},"chat":{"id":"voice-1","session_id":"session-1","title":"Talk","role":"voice"}}""",
+        )
+        assertEquals("session-1", home.sessions.single().id)
+        assertEquals(2, home.sessions.single().chatCount)
+        assertEquals(1, home.sessions.single().voiceChatCount)
+        assertEquals(listOf("execution", "voice"), home.chats.map { it.role })
+		assertEquals("Checking the BIOS", home.chats.last().statusText)
+        assertEquals("session-1", home.createdSession?.id)
+        assertEquals("voice-1", home.createdChat?.id)
+
+        val frame = VoiceProtocol.parse(
+            """{"type":"ready","protocol":"voice.v1","call_state":{"session_id":"session-1","chat_id":"voice-1","sessions":[{"id":"session-1","title":"Laptop"}],"chats":[{"id":"voice-1","session_id":"session-1","title":"Talk","role":"voice"}],"history":[{"id":"answer-1","role":"assistant","text":"It boots."}]}}""",
+        )
+        assertEquals("session-1", frame.callState?.sessionId)
+        assertEquals("voice-1", frame.callState?.chatId)
+        assertEquals("It boots.", frame.callState?.history?.single()?.text)
+    }
+
+    @Test
     fun decodesSignedAppUpdate() {
         val frame = VoiceProtocol.parse(
             """{"type":"ready","protocol":"voice.v1","app_update":{"channel":"local","application_id":"com.lkarlslund.koder.dev","version_code":42,"version_name":"0.1.0-local.test","signing_certificate_sha256":"${"a".repeat(64)}","apk_sha256":"${"b".repeat(64)}","apk_size":1234,"download_uri":"/voice/v1/android/koder.apk"}}""",
@@ -149,13 +170,14 @@ class VoiceProtocolTest {
     @Test
     fun decodesServerDiagnostics() {
         val info = VoiceProtocol.parseServerInfo(
-            """{"protocol":"voice.v1","server_time":"2026-08-19T12:00:05Z","version":"0.1.0","commit":"abc123","dirty":"false","build_time":"2026-08-19T11:00:00Z","started_at":"2026-08-19T12:00:00Z","uptime_seconds":5,"platform":"linux/amd64","go_version":"go1.26.6","logical_cpus":16,"max_procs":12,"goroutines":42,"heap_alloc_bytes":1048576,"heap_sys_bytes":4194304,"heap_objects":1234,"gc_cycles":9,"session_count":7,"voice_session_count":3,"voice_connection_active":true,"voice_connection_since":"2026-08-19T12:00:01Z","token_required":true}""",
+            """{"protocol":"voice.v1","server_time":"2026-08-19T12:00:05Z","version":"0.1.0","commit":"abc123","dirty":"false","build_time":"2026-08-19T11:00:00Z","started_at":"2026-08-19T12:00:00Z","uptime_seconds":5,"platform":"linux/amd64","go_version":"go1.26.6","logical_cpus":16,"max_procs":12,"goroutines":42,"heap_alloc_bytes":1048576,"heap_sys_bytes":4194304,"heap_objects":1234,"gc_cycles":9,"session_count":7,"voice_session_count":3,"voice_connection_count":2,"voice_connection_active":true,"voice_connection_since":"2026-08-19T12:00:01Z","token_required":true}""",
         )
         assertEquals("abc123", info.commit)
         assertEquals("linux/amd64", info.platform)
         assertEquals(42, info.goroutines)
         assertEquals(7, info.sessionCount)
         assertEquals(3, info.voiceSessionCount)
+		assertEquals(2, info.voiceConnectionCount)
         assertTrue(info.voiceConnectionActive)
         assertTrue(info.tokenRequired)
         assertEquals("2026-08-19T12:00:01Z", info.voiceConnectionSince.toString())

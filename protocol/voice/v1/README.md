@@ -14,33 +14,40 @@ Authorization: Bearer <token>
 
 Authentication happens before WebSocket upgrade. The same header is required
 for `/voice/v1/sessions` and `/voice/v1/artifacts/...`. Failed authentication
-returns HTTP 401. A second simultaneous live voice connection returns HTTP 409.
+returns HTTP 401. A second simultaneous live voice connection from the same
+Android installation returns HTTP 409; different registered devices may hold
+calls concurrently. Reconnects with the same device and `call_id` replace the
+old socket atomically.
 
-Before opening a live WebSocket, native clients use the authenticated
-conversation endpoint:
+Before opening a live WebSocket, native clients use the authenticated session
+and chat endpoints:
 
-- `GET /voice/v1/sessions` lists durable voice conversations and advertises an
-  optional signed Android update;
-- `POST /voice/v1/sessions` with `{"title":"Personal"}` creates a durable
-  conversation and returns it as `voice_session` alongside the refreshed list;
-- `PATCH /voice/v1/sessions/<id>` changes any supplied `title`, `archived`,
-  `pinned`, `favorite`, or `deleted` field and returns the updated conversation
-  alongside the refreshed list;
-- `DELETE /voice/v1/sessions/<id>` moves the conversation to the recoverable
-  deleted state. Restore it with `PATCH` and `{"deleted":false}`; and
+- `GET /voice/v1/sessions` lists normal Koder sessions in `sessions` and
+  advertises an optional signed Android update;
+- `GET /voice/v1/sessions/<session-id>/chats` lists every chat in a session.
+  Clients show ordinary chats as context but only select chats whose role is
+  `voice`;
+- `POST /voice/v1/sessions/<session-id>/chats` with an optional `title` creates
+  a top-level voice chat in that regular session;
+- `POST /voice/v1/sessions/temporary` creates a quick session with one voice
+  chat and returns them as `session` and `chat`;
 - `GET /voice/v1/server-info` returns a live, authenticated diagnostics snapshot
   with build/runtime identity, uptime, memory and concurrency counters, session
   counts, and current voice-connection state. Clients measure request round-trip
   time themselves so the displayed latency includes the network path.
 
-These requests do not acquire the single-live-voice-connection lease, start
+For compatibility with pre-hierarchy clients, `POST /voice/v1/sessions`
+creates a legacy one-chat voice session, while `PATCH` and `DELETE` on
+`/voice/v1/sessions/<id>` manage those legacy conversations.
+
+These requests do not acquire a device's live-voice-connection lease, start
 audio routing, or request microphone permission.
 
 Optional query parameters:
 
 - `call_id`: stable client-generated ID for reconnects;
-- `voice_session_id`: durable voice chat to resume. With no value, Koder uses
-  the most recently updated voice chat or creates the first one;
+- `session_id` and `chat_id`: native session and voice chat to resume;
+- `voice_session_id`: legacy one-chat voice session to resume;
 - `resume_utterance_id`: the in-flight utterance the client will resend after
   `ready` on a replacement socket;
 - `resume_transcript` and `resume_message`: whether those text events already
@@ -61,11 +68,16 @@ are PCM envelopes described below.
   on this connection. The pacing instruction is never added to chat history.
 - `ping`: request `pong`.
 - `select_voice_session` with `voice_session_id`: switch the durable voice-chat
-  transcript owned by the current live call.
+  transcript owned by a legacy client.
 - `create_voice_session` with an optional `title`: create and select a durable
   voice chat. Native clients own creation; the browser only lists voice chats.
-- `select_session` with `session_id`: select an ordinary work target. An empty
-  ID restores semantic automatic selection.
+- `select_session` with `session_id`: open a normal session.
+- `select_voice_chat` with `session_id` and `chat_id`: select a voice chat in
+  that session. Selecting an ordinary chat is rejected.
+- `create_voice_chat` with `session_id` and optional `title`: create and select
+  a voice chat in an existing regular session.
+- `create_temporary_voice_chat` with optional `title`: create and select a
+  quick session containing one voice chat.
 - `utterance` with unique `utterance_id`, final `text`, and optional
   `session_id`: submit typed or already-transcribed input.
 - `audio_start` with unique `utterance_id`, the exact advertised
@@ -119,10 +131,12 @@ Examples:
   is followed by a fresh `ready`.
 - `pong`: UTC `server_time`.
 
-`call_state.sessions` lists ordinary and quick work targets.
+`call_state.sessions` lists normal Koder sessions, `session_id` identifies the
+selected session, `chats` lists its chats, and `chat_id` identifies the selected
+voice chat. Chat summaries include role, activity, runtime state, and the
+model-authored `status_text` published through the global `chat_status` tool.
 `call_state.voice_sessions` lists selectable durable voice chats and omits
-archived and deleted ones. The REST list includes every state so a
-native client can present management views and undo destructive actions.
+archived and deleted ones for compatibility with older clients.
 Session summaries carry `archived`, `pinned`, `favorite`, and `deleted` flags
 plus an RFC 3339 `updated_at` timestamp. `last_message` is the latest completed
 spoken result, and monotonic `result_count` lets each client maintain its own
@@ -144,7 +158,7 @@ without interrupting the busy state. Clients may delay their local waiting cue
 for brief processing, but start it immediately for `working`. `speaking` is
 always sent before streamed TTS audio so that cue can stop first. Working states
 are ephemeral and are never persisted as transcript turns.
-`voice_session_id` and `active_session_id` identify the current choices.
+`voice_session_id` and `active_session_id` are legacy selection fields.
 
 ```json
 {
@@ -157,10 +171,10 @@ are ephemeral and are never persisted as transcript turns.
     "max_utterance_seconds": 60
   },
   "call_state": {
-    "voice_session_id": "voice-id",
-    "active_session_id": "work-id",
+    "session_id": "session-id",
+    "chat_id": "voice-chat-id",
     "sessions": [],
-    "voice_sessions": []
+    "chats": []
   },
   "app_update": {
     "channel": "local",

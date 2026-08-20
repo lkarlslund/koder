@@ -142,7 +142,8 @@ class CallController(
     fun start(
 		server: String,
 		token: String,
-		voiceSessionId: String = "",
+		sessionId: String,
+		chatId: String,
 		languages: Set<String> = emptySet(),
 		vadSensitivityPercent: Int = 50,
 		vadSilenceMilliseconds: Int = 600,
@@ -172,12 +173,12 @@ class CallController(
 		))
 		telecom.setBuiltInAudioRoute(builtInAudioRoute)
 		VoiceCallControlRegistry.attach(this)
-        snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", voiceSessionId = voiceSessionId)
+		snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", activeSessionId = sessionId, voiceSessionId = chatId)
         publish()
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
         telecom.start()
         try {
-			connection.connect(server, token, voiceSessionId, responsePacing)
+			connection.connect(server, token, sessionId, chatId, responsePacing)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Connection failed")
         }
@@ -348,8 +349,10 @@ class CallController(
     }
 
     private fun handleFrame(frame: VoiceServerFrame) {
-        frame.callState?.let { state ->
-			val sameVoiceSession = state.voiceSessionId == snapshot.voiceSessionId
+		frame.callState?.let { state ->
+			val selectedSessionId = state.sessionId.ifBlank { state.activeSessionId }
+			val selectedChatId = state.chatId.ifBlank { state.voiceSessionId }
+			val sameVoiceSession = selectedChatId == snapshot.voiceSessionId
 			val mergedHistory = if (sameVoiceSession) {
 				mergeTranscriptHistory(snapshot.history, state.history)
 			} else {
@@ -359,13 +362,13 @@ class CallController(
             snapshot = snapshot.copy(
                 sessions = state.sessions,
                 voiceSessions = state.voiceSessions,
-                activeSessionId = state.activeSessionId,
-                voiceSessionId = state.voiceSessionId,
+				activeSessionId = selectedSessionId,
+				voiceSessionId = selectedChatId,
 				history = mergedHistory,
 				historyHasMore = if (retainedOlderPage) snapshot.historyHasMore else state.historyHasMore,
 				historyLoading = false,
             )
-			connection.resumeVoiceSession(state.voiceSessionId)
+			connection.resumeSelection(selectedSessionId, selectedChatId)
         }
         frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {

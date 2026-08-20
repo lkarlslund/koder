@@ -90,6 +90,16 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, c
 
 // CreateQuickSession creates a standalone one-chat session with a managed workspace.
 func (e *Engine) CreateQuickSession(ctx context.Context) (*sessionpkg.Session, error) {
+	return e.createQuickSession(ctx, false)
+}
+
+// CreateQuickVoiceSession creates a voice-orchestrated quick session with its
+// own managed scratch workspace.
+func (e *Engine) CreateQuickVoiceSession(ctx context.Context) (*sessionpkg.Session, error) {
+	return e.createQuickSession(ctx, true)
+}
+
+func (e *Engine) createQuickSession(ctx context.Context, voice bool) (*sessionpkg.Session, error) {
 	if e == nil || e.registry == nil {
 		return nil, fmt.Errorf("session registry is required")
 	}
@@ -98,7 +108,13 @@ func (e *Engine) CreateQuickSession(ctx context.Context) (*sessionpkg.Session, e
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create quick chat project root: %w", err)
 	}
-	owner, err := e.registry.CreateQuick(ctx, sessionID, root)
+	var owner *sessionpkg.Session
+	var err error
+	if voice {
+		owner, err = e.registry.CreateQuickVoice(ctx, sessionID, root)
+	} else {
+		owner, err = e.registry.CreateQuick(ctx, sessionID, root)
+	}
 	if err != nil {
 		_ = os.RemoveAll(root)
 		return nil, err

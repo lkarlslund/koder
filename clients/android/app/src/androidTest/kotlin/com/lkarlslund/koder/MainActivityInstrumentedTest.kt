@@ -18,7 +18,6 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.lifecycle.Lifecycle
 import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -42,7 +41,6 @@ import com.lkarlslund.koder.voice.VoiceCallService
 import com.lkarlslund.koder.voice.VoiceResultNotifier
 import com.lkarlslund.koder.voice.VoiceHapticCue
 import com.lkarlslund.koder.voice.VoiceHaptics
-import com.lkarlslund.koder.voice.audioRouteChipText
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.Dispatcher
@@ -334,7 +332,7 @@ class MainActivityInstrumentedTest {
         server.enqueue(
             MockResponse.Builder()
                 .code(200)
-                .body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal","last_message":"Calendar updated"}]}""")
+                .body("""{"protocol":"voice.v1","sessions":[{"id":"session-1","title":"Personal","kind":"regular","chat_count":2,"voice_chat_count":1,"last_message":"Calendar updated"}],"voice_sessions":[]}""")
                 .build(),
         )
         server.enqueue(
@@ -351,7 +349,8 @@ class MainActivityInstrumentedTest {
 				assertTrue(labels.contains("Active 1"))
                 assertTrue(labels.contains("Koder Voice"))
                 assertTrue(labels.any { it.startsWith("Personal") })
-                assertTrue(labels.any { it.contains("New conversation") })
+				assertTrue(labels.any { it.contains("New temporary conversation") })
+				assertTrue(labels.contains("Session · 2 chats · 1 voice"))
                 assertTrue(labels.contains("⋮"))
                 assertFalse(labels.contains("Send"))
                 assertFalse(labels.any { it.contains("Message Koder") })
@@ -439,19 +438,19 @@ class MainActivityInstrumentedTest {
     }
 
 	@Test
-	fun newConversationOpensWhileServerCreatesIt() {
+	fun newTemporaryConversationShowsProgressThenOpens() {
 		val allowCreateResponse = CountDownLatch(1)
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when {
-				request.method == "POST" && request.target == "/voice/v1/sessions" -> {
+				request.method == "POST" && request.target == "/voice/v1/sessions/temporary" -> {
 					allowCreateResponse.await()
 					MockResponse.Builder().code(201).body(
-						"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-new","title":"Trip planning"}],"voice_session":{"id":"voice-new","title":"Trip planning"}}""",
+						"""{"protocol":"voice.v1","session":{"id":"session-new","title":"Trip planning","kind":"quick","chat_count":1,"voice_chat_count":1},"chat":{"id":"voice-new","session_id":"session-new","title":"Trip planning","role":"voice"},"chats":[{"id":"voice-new","session_id":"session-new","title":"Trip planning","role":"voice"}],"voice_sessions":[]}""",
 					).build()
 				}
 				else -> MockResponse.Builder().body(
-					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""",
+					"""{"protocol":"voice.v1","sessions":[{"id":"session-1","title":"Personal","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[]}""",
 				).build()
 			}
 		}
@@ -461,9 +460,11 @@ class MainActivityInstrumentedTest {
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
 				waitForText(scenario, "Personal")
 				onView(withContentDescription("Create a new voice conversation")).perform(click())
-				onView(withContentDescription("Conversation name")).perform(replaceText("Trip planning"))
+				onView(withContentDescription("Temporary conversation name")).perform(replaceText("Trip planning"))
 				onView(withText("Create")).perform(click())
-				val labels = waitForText(scenario, "Creating conversation…")
+				waitForDisplayedText("Creating temporary conversation…")
+				allowCreateResponse.countDown()
+				val labels = waitForText(scenario, "Trip planning")
 				assertTrue(labels.contains("Trip planning"))
 				onView(withContentDescription("Show transcript")).perform(click())
 				onView(withContentDescription("Send message")).check(matches(isDisplayed()))
@@ -511,65 +512,30 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
-	fun conversationsCanBePinnedStarredArchivedDeletedAndUndone() {
+	fun sessionBrowserShowsEveryChatButOnlyVoiceChatsAreSelectable() {
 		val server = MockWebServer()
-		var pinned = false
-		var favorite = false
-		var archived = false
-		var deleted = false
 		server.dispatcher = object : Dispatcher() {
-			override fun dispatch(request: RecordedRequest): MockResponse {
-				if (request.method == "PATCH") {
-					val body = org.json.JSONObject(request.body?.utf8().orEmpty())
-					if (body.has("pinned")) pinned = body.getBoolean("pinned")
-					if (body.has("favorite")) favorite = body.getBoolean("favorite")
-					if (body.has("archived")) {
-						archived = body.getBoolean("archived")
-						if (archived) pinned = false
-					}
-					if (body.has("deleted")) deleted = body.getBoolean("deleted")
-				}
-				if (request.method == "DELETE") {
-					deleted = true
-					pinned = false
-				}
-				val session = buildString {
-					append("""{"id":"voice-1","title":"Personal","updated_at":"2026-08-20T12:00:00Z"""")
-					if (pinned) append(",\"pinned\":true")
-					if (favorite) append(",\"favorite\":true")
-					if (archived) append(",\"archived\":true")
-					if (deleted) append(",\"deleted\":true")
-					append("}")
-				}
-				return MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[$session],"voice_session":$session}""").build()
+			override fun dispatch(request: RecordedRequest): MockResponse = when (request.target) {
+				"/voice/v1/sessions" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","sessions":[{"id":"session-1","title":"Laptop repair","kind":"regular","chat_count":3,"voice_chat_count":1}],"voice_sessions":[]}""",
+				).build()
+				"/voice/v1/sessions/session-1/chats" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","chats":[{"id":"work-1","session_id":"session-1","title":"BIOS investigation","role":"execution","status_text":"Checking firmware"},{"id":"plan-1","session_id":"session-1","title":"Repair plan","role":"planning"},{"id":"voice-1","session_id":"session-1","title":"Laptop conversation","role":"voice"}],"voice_sessions":[]}""",
+				).build()
+				else -> MockResponse.Builder().code(404).build()
 			}
 		}
 		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-				waitForText(scenario, "Personal")
-				onView(withContentDescription("Options for Personal")).perform(click())
-				onView(withText("Pin to top")).perform(click())
-				waitForDisplayedText("◆ Personal")
-				onView(withContentDescription("Options for Personal")).perform(click())
-				onView(withText("Add star")).perform(click())
-				waitForDisplayedText("◆ ★ Personal")
-				onView(withContentDescription("Starred conversations, 1")).perform(click())
-				onView(withContentDescription("Options for Personal")).perform(click())
-				onView(withText("Archive")).perform(click())
-				waitForDisplayedText("Conversation archived")
-				onView(withText("Undo")).inRoot(isDialog()).perform(click())
-				waitForText(scenario, "★ Personal")
-				onView(withContentDescription("Options for Personal")).perform(click())
-				onView(withText("Delete")).perform(click())
-				onView(withText("Delete")).inRoot(isDialog()).perform(click())
-				waitForDisplayedText("Conversation deleted")
-				onView(withText("Undo")).inRoot(isDialog()).perform(click())
-				waitForText(scenario, "★ Personal")
-				assertTrue(favorite)
-				assertFalse(archived)
-				assertFalse(deleted)
+				waitForText(scenario, "Laptop repair")
+				onView(withContentDescription("Open Laptop repair. 3 chats · 1 voice")).perform(click())
+				val labels = waitForText(scenario, "Laptop conversation")
+				assertTrue(labels.contains("BIOS investigation"))
+				assertTrue(labels.any { it.contains("Checking firmware") })
+				onView(withContentDescription("BIOS investigation, execution chat, visible but not selectable")).check(matches(isDisplayed()))
+				onView(withContentDescription("Open voice conversation Laptop conversation")).check(matches(isDisplayed()))
 			}
 		} finally {
 			server.close()
@@ -577,26 +543,22 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
-	fun compactConversationCardsShowPreviewBusyUnreadAndTenRows() {
-		SecureSettings(context).unreadVoiceResults(mapOf("voice-1" to 1))
+	fun sessionCardsShowCountsAndTenRows() {
 		val sessions = (1..10).joinToString(",") { index ->
 			buildString {
-				append("""{"id":"voice-$index","title":"Conversation $index","last_message":"${if (index == 2) "Still checking" else "Preview $index"}"""")
-				if (index == 1) append(",\"result_count\":3")
-				if (index == 2) append(",\"busy\":true,\"status\":\"running_tools\"")
+				append("""{"id":"session-$index","title":"Session $index","kind":"regular","chat_count":$index,"voice_chat_count":${if (index % 2 == 0) 1 else 0},"updated_at":"2026-08-${index.toString().padStart(2, '0')}T12:00:00Z"""")
 				append("}")
 			}
 		}
 		val server = MockWebServer()
-		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[$sessions]}""").build())
+		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","sessions":[$sessions],"voice_sessions":[]}""").build())
 		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-				waitForText(scenario, "Conversation 10")
-				onView(withText("2 new · Preview 1")).check(matches(isDisplayed()))
-				onView(withText("● Working · Still checking")).check(matches(isDisplayed()))
-				onView(withContentDescription("Open voice conversation Conversation 10. Preview 10")).check(matches(isDisplayed()))
+				val labels = waitForText(scenario, "Session 10")
+				assertTrue(labels.any { it.startsWith("Session · 10 chats · 1 voice · ") })
+				onView(withContentDescription("Open Session 10. 10 chats · 1 voice")).check(matches(isDisplayed()))
 			}
 		} finally {
 			server.close()
@@ -652,13 +614,16 @@ class MainActivityInstrumentedTest {
 		val server = MockWebServer()
 		var voiceSocket: WebSocket? = null
 		server.enqueue(MockResponse.Builder().body(
-			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-search","title":"Searchable"}]}""",
+			"""{"protocol":"voice.v1","sessions":[{"id":"session-search","title":"Search project","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[]}""",
+		).build())
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","chats":[{"id":"voice-search","session_id":"session-search","title":"Searchable","role":"voice"}],"voice_sessions":[]}""",
 		).build())
 		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
 			override fun onOpen(webSocket: WebSocket, response: Response) {
 				voiceSocket = webSocket
 				webSocket.send(
-					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-search","active_session_id":"","sessions":[],"voice_sessions":[{"id":"voice-search","title":"Searchable"}],"history":[{"id":"latest","role":"assistant","text":"Newest answer"}]}}""",
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"session_id":"session-search","chat_id":"voice-search","sessions":[{"id":"session-search","title":"Search project"}],"chats":[{"id":"voice-search","session_id":"session-search","title":"Searchable","role":"voice"}],"history":[{"id":"latest","role":"assistant","text":"Newest answer"}]}}""",
 				)
 			}
 
@@ -674,35 +639,15 @@ class MainActivityInstrumentedTest {
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Search project")
+				onView(withContentDescription("Open Search project. 1 chat · 1 voice")).perform(click())
 				waitForText(scenario, "Searchable")
 				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
 				waitForText(scenario, "Speaker  ▾")
 				val notificationManager = context.getSystemService(NotificationManager::class.java)
-				var callNotification = waitForVoiceNotification(notificationManager) { notification ->
-					notification.actions?.map { it.title.toString() } == listOf("Mute", "Pause", "End", "Audio")
+				scenario.onActivity { activity ->
+					activity.findViewById<View>(android.R.id.content).findByDescription("Search transcript").performClick()
 				}
-				callNotification.action("Mute").actionIntent.send()
-				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Unmute") }
-				callNotification.action("Pause").actionIntent.send()
-				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Resume") }
-				callNotification.action("Resume").actionIntent.send()
-				callNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Pause") }
-				val routeBefore = callNotification.extras.getString(Notification.EXTRA_SUB_TEXT).orEmpty()
-				callNotification.action("Audio").actionIntent.send()
-				val routedNotification = waitForVoiceNotification(notificationManager) { notification -> notification.hasAction("Audio") }
-				val activeRoute = routedNotification.extras.getString(Notification.EXTRA_SUB_TEXT).orEmpty()
-				assertTrue(activeRoute.isNotBlank())
-				assertTrue(routeBefore.isNotBlank())
-				onView(withText(audioRouteChipText(activeRoute))).perform(click())
-				onView(withText("✓  $activeRoute")).check(matches(isDisplayed()))
-				pressBack()
-				onView(withText(audioRouteChipText(activeRoute))).perform(click())
-				onView(withText("Audio diagnostics…")).perform(click())
-				waitForDisplayedText("Audio diagnostics")
-				onView(withText("16000 Hz · mono · pcm_s16le")).check(matches(isDisplayed()))
-				onView(withText("Close")).inRoot(isDialog()).perform(click())
-				Thread.sleep(350) // Let the native diagnostics dialog's dim layer disappear.
-				onView(withContentDescription("Search transcript")).perform(click())
 				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
 				onView(withText("Search")).perform(click())
 				waitForDisplayedText("Transcript matches")
@@ -752,7 +697,7 @@ class MainActivityInstrumentedTest {
 			override fun onOpen(webSocket: WebSocket, response: Response) {
 				voiceSocket = webSocket
 				webSocket.send(
-					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-card","active_session_id":"","sessions":[],"voice_sessions":[{"id":"voice-card","title":"Visual test"}]}}""",
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"session_id":"session-card","chat_id":"voice-card","sessions":[{"id":"session-card","title":"Visual project"}],"chats":[{"id":"voice-card","session_id":"session-card","title":"Visual test","role":"voice"}]}}""",
 				)
 			}
 
@@ -767,7 +712,10 @@ class MainActivityInstrumentedTest {
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when {
 				request.target == "/voice/v1/sessions" -> MockResponse.Builder().body(
-					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-card","title":"Visual test"}]}""",
+					"""{"protocol":"voice.v1","sessions":[{"id":"session-card","title":"Visual project","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[]}""",
+				).build()
+				request.target == "/voice/v1/sessions/session-card/chats" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","chats":[{"id":"voice-card","session_id":"session-card","title":"Visual test","role":"voice"}],"voice_sessions":[]}""",
 				).build()
 				request.target.startsWith("/voice/v1?") -> voiceUpgrade
 				request.target == "/map.png" -> MockResponse.Builder().setHeader("Content-Type", "image/png").body(Buffer().write(png)).build()
@@ -778,6 +726,8 @@ class MainActivityInstrumentedTest {
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Visual project")
+				onView(withContentDescription("Open Visual project. 1 chat · 1 voice")).perform(click())
 				waitForText(scenario, "Visual test")
 				onView(withContentDescription("Open voice conversation Visual test")).perform(click())
 				val labels = waitForText(scenario, "DHL Stafet")
@@ -823,14 +773,17 @@ class MainActivityInstrumentedTest {
 				connectionCount++
 				val history = if (connectionCount > 1) ""","history":[{"id":"assistant-result-1","role":"assistant","text":"The delegated result is ready."}]""" else ""
 				webSocket.send(
-					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-result","active_session_id":"work-1","sessions":[{"id":"work-1","title":"Research"}],"voice_sessions":[{"id":"voice-result","title":"Background work"}]$history}}""",
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"session_id":"session-result","chat_id":"voice-result","sessions":[{"id":"session-result","title":"Research"}],"chats":[{"id":"voice-result","session_id":"session-result","title":"Background work","role":"voice"}]$history}}""",
 				)
 			}
 		}
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when {
 				request.target == "/voice/v1/sessions" -> MockResponse.Builder().body(
-					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-result","title":"Background work"}]}""",
+					"""{"protocol":"voice.v1","sessions":[{"id":"session-result","title":"Research","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[]}""",
+				).build()
+				request.target == "/voice/v1/sessions/session-result/chats" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","chats":[{"id":"voice-result","session_id":"session-result","title":"Background work","role":"voice"}],"voice_sessions":[]}""",
 				).build()
 				request.target.startsWith("/voice/v1?") -> MockResponse.Builder().webSocketUpgrade(listener).build()
 				else -> MockResponse.Builder().code(404).build()
@@ -842,6 +795,8 @@ class MainActivityInstrumentedTest {
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Research")
+				onView(withContentDescription("Open Research. 1 chat · 1 voice")).perform(click())
 				waitForText(scenario, "Background work")
 				onView(withContentDescription("Open voice conversation Background work")).perform(click())
 				waitForText(scenario, "Speaker")
@@ -860,6 +815,7 @@ class MainActivityInstrumentedTest {
 				waitForNoVoiceNotification(notificationManager)
 			}
 			val resultIntent = Intent(context, MainActivity::class.java)
+				.putExtra(VoiceResultNotifier.EXTRA_SESSION_ID, "session-result")
 				.putExtra(VoiceResultNotifier.EXTRA_VOICE_SESSION_ID, "voice-result")
 				.putExtra(VoiceResultNotifier.EXTRA_TRANSCRIPT_ID, "assistant-result-1")
 			ActivityScenario.launch<MainActivity>(resultIntent).use { scenario ->

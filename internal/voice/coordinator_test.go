@@ -30,9 +30,50 @@ func TestResponsePacingValidationAndLimits(t *testing.T) {
 type fakeBackend struct {
 	sessions      []Session
 	voiceSessions []Session
+	chats         []Chat
 	history       []TranscriptEntry
 	before        string
 	limit         int
+}
+
+func (f *fakeBackend) ListSessionChats(context.Context, string) ([]Chat, error) {
+	return append([]Chat(nil), f.chats...), nil
+}
+
+func (f *fakeBackend) EnsureVoiceChat(_ context.Context, sessionID, chatID string) (Chat, error) {
+	for _, chat := range f.chats {
+		if chat.SessionID == sessionID && chat.ID == chatID && chat.Role == "voice" {
+			return chat, nil
+		}
+	}
+	return Chat{}, context.Canceled
+}
+
+func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID, title string) (Chat, error) {
+	chat := Chat{ID: "created-chat", SessionID: sessionID, Title: title, Role: "voice"}
+	f.chats = append(f.chats, chat)
+	return chat, nil
+}
+
+func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, title string) (Session, Chat, error) {
+	session := Session{ID: "temporary-session", Title: title, Kind: "quick"}
+	chat := Chat{ID: "temporary-chat", SessionID: session.ID, Title: title, Role: "voice"}
+	f.sessions = append(f.sessions, session)
+	f.chats = append(f.chats, chat)
+	return session, chat, nil
+}
+
+func (f *fakeBackend) RunVoiceChatTurn(context.Context, string, string, string, TurnOptions, func(Session) error) (Message, error) {
+	return Message{}, nil
+}
+
+func (f *fakeBackend) VoiceChatHistory(_ context.Context, _, _ string, before string, limit int) (TranscriptPage, error) {
+	f.before, f.limit = before, limit
+	return TranscriptPage{Entries: append([]TranscriptEntry(nil), f.history...), HasMore: true}, nil
+}
+
+func (f *fakeBackend) SearchVoiceChatHistory(context.Context, string, string, string, int) ([]TranscriptSearchResult, error) {
+	return nil, nil
 }
 
 func (f *fakeBackend) ListVoiceSessions(context.Context) ([]Session, error) {
@@ -84,7 +125,7 @@ func TestCallStateSortsAndSelectsWorkSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.ActiveSessionID != "older" || state.Sessions[0].ID != "newer" || message.SpokenText != "Using Older." {
+	if state.SessionID != "older" || state.Sessions[0].ID != "newer" || message.SpokenText != "Opened Older." {
 		t.Fatalf("state=%#v message=%#v", state, message)
 	}
 }
@@ -142,7 +183,33 @@ func TestCallCanReturnToAutomaticSessionSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.ActiveSessionID != "" || message.SpokenText != "Automatic session selection is on." {
+	if state.SessionID != "" || message.SpokenText != "No session selected." {
 		t.Fatalf("state = %#v, message = %#v", state, message)
+	}
+}
+
+func TestNativeCallSelectsVoiceChatAndLoadsItsHistory(t *testing.T) {
+	backend := &fakeBackend{
+		sessions: []Session{{ID: "session-1", Title: "Laptop"}},
+		chats: []Chat{
+			{ID: "work", SessionID: "session-1", Title: "Firmware", Role: "execution"},
+			{ID: "voice", SessionID: "session-1", Title: "Talk", Role: "voice"},
+		},
+		history: []TranscriptEntry{{ID: "turn", Role: "assistant", Text: "It boots."}},
+	}
+	call := NewSessionCall(backend, "session-1", "voice")
+	state, err := call.State(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SessionID != "session-1" || state.ChatID != "voice" || len(state.Chats) != 2 || len(state.History) != 1 {
+		t.Fatalf("native state = %#v", state)
+	}
+	if _, err := call.SelectVoiceChat(context.Background(), "session-1", "work"); err == nil {
+		t.Fatal("selected a non-voice chat")
+	}
+	created, err := call.CreateVoiceChat(context.Background(), "session-1", "Another conversation")
+	if err != nil || created.ID != "created-chat" {
+		t.Fatalf("created chat = %#v, %v", created, err)
 	}
 }

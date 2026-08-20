@@ -5,16 +5,20 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/voice"
 )
 
@@ -129,17 +133,152 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 	all := append(append([]domain.Session(nil), state.Sessions...), state.QuickChats...)
 	out := make([]voice.Session, 0, len(all))
 	for _, session := range all {
-		if session.Kind != domain.SessionKindRegular && session.Kind != domain.SessionKindQuick {
+		if session.Kind != domain.SessionKindRegular && session.Kind != domain.SessionKindQuick && session.Kind != domain.SessionKindVoice {
 			continue
 		}
-		out = append(out, voice.Session{
+		summary := voice.Session{
 			ID:          string(session.ID),
 			Title:       voiceSessionTitle(session),
+			Kind:        string(session.Kind),
 			LastMessage: session.LastMessage,
 			UpdatedAt:   session.UpdatedAt,
-		})
+			Archived:    session.Archived,
+			Pinned:      session.Pinned,
+			Favorite:    session.Favorite,
+			Deleted:     !session.DeletedAt.IsZero(),
+		}
+		owner, loadErr := c.agent.LoadSession(ctx, session.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		for _, chatRecord := range owner.Snapshot().Chats {
+			if chatRecord.Archived {
+				continue
+			}
+			summary.ChatCount++
+			if chatRecord.WorkflowRole == chatrole.Voice {
+				summary.VoiceChats++
+			}
+		}
+		out = append(out, summary)
 	}
 	return out, nil
+}
+
+// ListSessionChats returns bounded metadata for every chat in one session.
+func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]voice.Chat, error) {
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return nil, err
+	}
+	snapshot := owner.Snapshot()
+	if !c.sessionInWorkspace(snapshot.Session) {
+		return nil, fmt.Errorf("session %s does not belong to this workspace", snapshot.Session.ID)
+	}
+	out := make([]voice.Chat, 0, len(snapshot.Chats))
+	for _, chatRecord := range snapshot.Chats {
+		status, statusErr := owner.ChatStatus(ctx, chatRecord.ID)
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		out = append(out, voice.Chat{
+			ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID),
+			Title: chatRecord.Title, Role: string(chatRecord.WorkflowRole),
+			LastMessage: chatRecord.LastMessage, UpdatedAt: chatRecord.UpdatedAt,
+			Archived: chatRecord.Archived, Busy: status.Busy,
+			Status: string(status.State), StatusText: status.StatusText,
+		})
+	}
+	slices.SortStableFunc(out, func(a, b voice.Chat) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
+	return out, nil
+}
+
+// EnsureVoiceChat verifies that chatID is a selectable voice chat inside
+// sessionID. When chatID is omitted, it selects the newest voice chat.
+func (c *Controller) EnsureVoiceChat(ctx context.Context, sessionID, chatID string) (voice.Chat, error) {
+	chats, err := c.ListSessionChats(ctx, sessionID)
+	if err != nil {
+		return voice.Chat{}, err
+	}
+	chatID = strings.TrimSpace(chatID)
+	for _, item := range chats {
+		if item.Archived || item.Role != string(chatrole.Voice) {
+			continue
+		}
+		if chatID == "" || item.ID == chatID {
+			return item, nil
+		}
+	}
+	if chatID == "" {
+		return voice.Chat{}, fmt.Errorf("session %s has no voice chat", strings.TrimSpace(sessionID))
+	}
+	return voice.Chat{}, fmt.Errorf("voice chat %s was not found in session %s", chatID, strings.TrimSpace(sessionID))
+}
+
+// CreateVoiceChatInSession creates a selectable top-level voice orchestrator
+// alongside the session's existing chats.
+func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, title string) (voice.Chat, error) {
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return voice.Chat{}, err
+	}
+	snapshot := owner.Snapshot()
+	if !c.sessionInWorkspace(snapshot.Session) {
+		return voice.Chat{}, fmt.Errorf("session %s does not belong to this workspace", snapshot.Session.ID)
+	}
+	if snapshot.Session.Kind == domain.SessionKindQuick {
+		return voice.Chat{}, fmt.Errorf("quick sessions cannot create additional chats")
+	}
+	title = truncateVoiceText(strings.TrimSpace(title), 80)
+	if title == "" {
+		title = "Voice conversation"
+	}
+	runtime, err := owner.NewRootChat(ctx, title, chatrole.Voice)
+	if err != nil {
+		return voice.Chat{}, err
+	}
+	chatRecord := runtime.Snapshot().Chat
+	c.broadcast("chats_delta", map[string]any{"session_id": snapshot.Session.ID, "chats": owner.Snapshot().Chats})
+	return voice.Chat{
+		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
+		Role: string(chatRecord.WorkflowRole), UpdatedAt: chatRecord.UpdatedAt,
+	}, nil
+}
+
+// CreateTemporaryVoiceChat creates a quick session whose only chat is a voice
+// orchestrator and whose project root is Koder-managed scratch storage.
+func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, title string) (voice.Session, voice.Chat, error) {
+	owner, err := c.agent.CreateQuickVoiceSession(ctx)
+	if err != nil {
+		return voice.Session{}, voice.Chat{}, err
+	}
+	snapshot := owner.Snapshot()
+	if len(snapshot.Chats) != 1 {
+		return voice.Session{}, voice.Chat{}, fmt.Errorf("temporary voice session must contain exactly one chat")
+	}
+	title = truncateVoiceText(strings.TrimSpace(title), 80)
+	if title != "" {
+		if err := c.RenameSession(ctx, snapshot.Session.ID, title); err != nil {
+			return voice.Session{}, voice.Chat{}, err
+		}
+		if _, _, err := owner.UpdateChat(ctx, snapshot.Chats[0].ID, chattool.UpdateRequest{Title: title}); err != nil {
+			return voice.Session{}, voice.Chat{}, err
+		}
+		snapshot.Session.Title = title
+		snapshot.Chats[0].Title = title
+	}
+	sessionSummary := voice.Session{
+		ID: string(snapshot.Session.ID), Title: voiceSessionTitle(snapshot.Session), Kind: string(snapshot.Session.Kind),
+		UpdatedAt: snapshot.Session.UpdatedAt, ChatCount: 1, VoiceChats: 1,
+	}
+	chatRecord := snapshot.Chats[0]
+	chatSummary := voice.Chat{
+		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
+		Role: string(chatRecord.WorkflowRole), UpdatedAt: chatRecord.UpdatedAt,
+	}
+	return sessionSummary, chatSummary, nil
 }
 
 // ListVoiceChats returns the durable coordination transcripts available to a
@@ -335,12 +474,22 @@ func (c *Controller) DeleteVoiceSession(ctx context.Context, sessionID string) e
 // VoiceSessionHistory returns a bounded, presentation-safe transcript for a
 // native client reconnecting to an existing voice conversation.
 func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, beforeID string, limit int) (voice.TranscriptPage, error) {
-	owner, session, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true, false)
+	return c.voiceChatHistory(ctx, strings.TrimSpace(voiceSessionID), "", beforeID, limit)
+}
+
+// VoiceChatHistory returns transcript turns for a voice chat inside an
+// ordinary or quick session.
+func (c *Controller) VoiceChatHistory(ctx context.Context, sessionID, chatID, beforeID string, limit int) (voice.TranscriptPage, error) {
+	return c.voiceChatHistory(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), beforeID, limit)
+}
+
+func (c *Controller) voiceChatHistory(ctx context.Context, sessionID, chatID, beforeID string, limit int) (voice.TranscriptPage, error) {
+	owner, session, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true, false)
 	if err != nil {
 		return voice.TranscriptPage{}, err
 	}
-	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
-		return voice.TranscriptPage{}, fmt.Errorf("session %s is not a voice chat", session.ID)
+	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return voice.TranscriptPage{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if limit <= 0 || limit > 20 {
 		limit = 5
@@ -368,6 +517,15 @@ func (c *Controller) VoiceSessionHistory(ctx context.Context, voiceSessionID, be
 // SearchVoiceSessionHistory searches the complete durable voice transcript and
 // returns recent matches with enough neighboring messages for an anchored jump.
 func (c *Controller) SearchVoiceSessionHistory(ctx context.Context, voiceSessionID, query string, limit int) ([]voice.TranscriptSearchResult, error) {
+	return c.searchVoiceChatHistory(ctx, strings.TrimSpace(voiceSessionID), "", query, limit)
+}
+
+// SearchVoiceChatHistory searches one selected voice chat inside a session.
+func (c *Controller) SearchVoiceChatHistory(ctx context.Context, sessionID, chatID, query string, limit int) ([]voice.TranscriptSearchResult, error) {
+	return c.searchVoiceChatHistory(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), query, limit)
+}
+
+func (c *Controller) searchVoiceChatHistory(ctx context.Context, sessionID, chatID, query string, limit int) ([]voice.TranscriptSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("transcript search query is required")
@@ -375,12 +533,12 @@ func (c *Controller) SearchVoiceSessionHistory(ctx context.Context, voiceSession
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
 	if err != nil {
 		return nil, err
 	}
-	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
-		return nil, fmt.Errorf("session %s is not a voice chat", session.ID)
+	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return nil, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	timeline, err := runtime.FullTimeline(ctx)
 	if err != nil {
@@ -452,6 +610,16 @@ func transcriptPageStart(entries []voice.TranscriptEntry, turns int) int {
 // RunVoiceTurn executes an utterance through the durable voice chat's normal
 // model loop, history, role prompt, and profile-scoped tools.
 func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(voiceSessionID), "", text, options, onWorking)
+}
+
+// RunVoiceChatTurn executes an utterance in a selected voice chat inside its
+// owning session.
+func (c *Controller) RunVoiceChatTurn(ctx context.Context, sessionID, chatID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), text, options, onWorking)
+}
+
+func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return voice.Message{}, fmt.Errorf("voice transcript is required")
@@ -460,12 +628,12 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	if err != nil {
 		return voice.Message{}, err
 	}
-	owner, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	owner, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
 	if err != nil {
 		return voice.Message{}, err
 	}
-	if session.Kind != domain.SessionKindVoice || chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
-		return voice.Message{}, fmt.Errorf("session %s is not a voice chat", session.ID)
+	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		return voice.Message{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if err := runtime.EnsureTimeline(ctx); err != nil {
 		return voice.Message{}, err
@@ -474,7 +642,7 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	if initial.Active || (initial.Status != "" && initial.Status != chat.StatusIdle && initial.Status != chat.StatusErrored) {
 		return voice.Message{}, fmt.Errorf("voice chat is already busy")
 	}
-	releasePhonePolicy := c.phone.BeginVoiceTurn(text)
+	releasePhonePolicy := c.phone.BeginVoiceTurnForChat(phonedevice.CallIDFromContext(ctx), string(chatRecord.ID), text)
 	defer releasePhonePolicy()
 	initialSeq := latestTimelineSequence(initial.Timeline)
 	updates, unsubscribe := runtime.Subscribe()
@@ -634,6 +802,17 @@ func (c *Controller) describeVoiceTarget(ctx context.Context, target voice.Sessi
 		if session.ID == target.ID {
 			return session
 		}
+		chats, chatErr := c.ListSessionChats(ctx, session.ID)
+		if chatErr != nil {
+			continue
+		}
+		for _, chat := range chats {
+			if chat.ID == target.ID {
+				target.Title = chat.Title
+				target.Kind = "chat"
+				return target
+			}
+		}
 	}
 	return target
 }
@@ -649,10 +828,15 @@ func voiceWorkingTarget(timeline []domain.TimelineItem, after int64) (voice.Sess
 			continue
 		}
 		for _, call := range message.Tools {
-			if call.Tool != domain.ToolKindSessionDelegate || (call.Status != domain.ToolStatusPending && call.Status != domain.ToolStatusRunning) {
+			if call.Status != domain.ToolStatusPending && call.Status != domain.ToolStatusRunning {
 				continue
 			}
-			return voice.Session{ID: strings.TrimSpace(call.Args["session_id"]), Title: "Work session"}, true
+			switch call.Tool {
+			case domain.ToolKindChatSend:
+				return voice.Session{ID: strings.TrimSpace(call.Args["chat_id"]), Title: "Chat", Kind: "chat"}, true
+			case domain.ToolKindSessionDelegate:
+				return voice.Session{ID: strings.TrimSpace(call.Args["session_id"]), Title: "Work session"}, true
+			}
 		}
 	}
 	return voice.Session{}, false

@@ -68,6 +68,65 @@ func TestUpdateChatCallsArchiveLifecycleHook(t *testing.T) {
 	}
 }
 
+func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := owner.Snapshot().Chats[0]
+	created, err := owner.NewRootChat(ctx, "Voice", chatrole.Voice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := created.Snapshot().Chat
+	if chatRecord.ParentChatID != nil || chatRecord.WorkflowRole != chatrole.Voice {
+		t.Fatalf("unexpected root voice chat: %#v", chatRecord)
+	}
+	if chatRecord.ProviderID != original.ProviderID || chatRecord.ModelID != original.ModelID || chatRecord.PermissionProfile != original.PermissionProfile {
+		t.Fatalf("voice chat did not inherit settings: original=%#v created=%#v", original, chatRecord)
+	}
+}
+
+func TestVoiceChatCanCoordinateSiblingChats(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := owner.Snapshot().Chats[0]
+	voiceRuntime, err := owner.NewRootChat(ctx, "Voice", chatrole.Voice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceChat := voiceRuntime.Snapshot().Chat
+	status, err := owner.ChatToolControl(voiceChat.ID).UpdateChat(ctx, sessionRecord.ID, voiceChat.ID, original.ID, chattool.UpdateRequest{Title: "Inspected by voice"})
+	if err != nil {
+		t.Fatalf("voice chat could not coordinate sibling: %v", err)
+	}
+	if status.Title != "Inspected by voice" {
+		t.Fatalf("updated sibling status = %#v", status)
+	}
+}
+
 func testAddTasks(ctx context.Context, planSrc *planning.Source, sessionID id.ID, milestoneKey string, contents []string) ([]planning.Task, error) {
 	existing, err := planSrc.ListTasks(ctx, sessionID, milestoneKey)
 	if err != nil {

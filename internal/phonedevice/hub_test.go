@@ -116,16 +116,50 @@ func TestHubOwnershipAndReplacementRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := hub.Attach("call-2", nil, func(context.Context, string, Action, map[string]string) (Result, error) { return Result{}, nil }); err == nil {
-		t.Fatal("different call replaced active provider")
+	thirdRelease, err := hub.Attach("call-2", []string{"device_status"}, func(context.Context, string, Action, map[string]string) (Result, error) { return Result{}, nil })
+	if err != nil {
+		t.Fatalf("parallel call provider: %v", err)
 	}
 	firstRelease()
-	if capabilities := hub.Capabilities(); len(capabilities) != 1 || capabilities[0].Action != GetLocation {
+	if capabilities := hub.CapabilitiesForCall("call-1"); len(capabilities) != 1 || capabilities[0].Action != GetLocation {
 		t.Fatalf("stale release detached replacement: %#v", capabilities)
 	}
 	secondRelease()
+	if capabilities := hub.Capabilities(); len(capabilities) != 1 || capabilities[0].Action != DeviceStatus {
+		t.Fatalf("release disturbed other call = %#v", capabilities)
+	}
+	thirdRelease()
 	if capabilities := hub.Capabilities(); len(capabilities) != 0 {
-		t.Fatalf("released capabilities = %#v", capabilities)
+		t.Fatalf("all released capabilities = %#v", capabilities)
+	}
+}
+
+func TestHubRoutesParallelVoiceChatsToTheirOwnPhones(t *testing.T) {
+	hub := &Hub{}
+	var routed []string
+	for _, callID := range []string{"call-1", "call-2"} {
+		callID := callID
+		release, err := hub.Attach(callID, []string{"device_status"}, func(_ context.Context, gotCallID string, _ Action, _ map[string]string) (Result, error) {
+			routed = append(routed, gotCallID)
+			return Result{Text: gotCallID}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+	}
+	releaseOne := hub.BeginVoiceTurnForChat("call-1", "chat-1", "status")
+	defer releaseOne()
+	releaseTwo := hub.BeginVoiceTurnForChat("call-2", "chat-2", "status")
+	defer releaseTwo()
+	if _, err := hub.ForChat("chat-1").Execute(context.Background(), DeviceStatus, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.ForChat("chat-2").Execute(context.Background(), DeviceStatus, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(routed, []string{"call-1", "call-2"}) {
+		t.Fatalf("routed calls = %v", routed)
 	}
 }
 

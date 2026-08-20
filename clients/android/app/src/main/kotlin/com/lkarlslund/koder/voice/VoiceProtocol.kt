@@ -12,6 +12,11 @@ const val VOICE_PROTOCOL = "voice.v1"
 data class VoiceSession(
     val id: String,
     val title: String,
+	val sessionId: String = "",
+	val kind: String = "",
+	val role: String = "",
+	val chatCount: Int = 0,
+	val voiceChatCount: Int = 0,
     val lastMessage: String = "",
     val updatedAt: Instant? = null,
 	val archived: Boolean = false,
@@ -21,6 +26,7 @@ data class VoiceSession(
 	val resultCount: Long = 0,
 	val busy: Boolean = false,
 	val status: String = "",
+	val statusText: String = "",
 )
 
 data class VoicePart(
@@ -73,6 +79,9 @@ data class VoiceTranscriptSearchResult(
 )
 
 data class VoiceCallState(
+	val sessionId: String = "",
+	val chatId: String = "",
+	val chats: List<VoiceSession> = emptyList(),
     val voiceSessionId: String,
     val activeSessionId: String,
     val sessions: List<VoiceSession>,
@@ -106,6 +115,10 @@ data class AppUpdate(
 
 data class VoiceHome(
     val voiceSessions: List<VoiceSession>,
+	val sessions: List<VoiceSession> = emptyList(),
+	val chats: List<VoiceSession> = emptyList(),
+	val createdSession: VoiceSession? = null,
+	val createdChat: VoiceSession? = null,
     val createdVoiceSession: VoiceSession? = null,
     val appUpdate: AppUpdate? = null,
 )
@@ -129,6 +142,7 @@ data class ServerInfo(
     val gcCycles: Long,
     val sessionCount: Int,
     val voiceSessionCount: Int,
+	val voiceConnectionCount: Int,
     val voiceConnectionActive: Boolean,
     val voiceConnectionSince: Instant?,
     val tokenRequired: Boolean,
@@ -195,6 +209,12 @@ object VoiceProtocol {
 		val protocol = root.optString("protocol")
 		require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
 		return VoiceHome(
+			sessions = root.optJSONArray("sessions").mapObjects { it.toVoiceSession() }
+				.sortedByDescending { it.updatedAt ?: Instant.MIN },
+			chats = root.optJSONArray("chats").mapObjects { it.toVoiceSession() }
+				.sortedByDescending { it.updatedAt ?: Instant.MIN },
+			createdSession = root.optJSONObject("session")?.toVoiceSession(),
+			createdChat = root.optJSONObject("chat")?.toVoiceSession(),
 			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() }
 				.sortedWith(compareByDescending<VoiceSession> { it.pinned }.thenByDescending { it.updatedAt ?: Instant.MIN }),
 			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
@@ -225,6 +245,7 @@ object VoiceProtocol {
             gcCycles = root.getLong("gc_cycles"),
             sessionCount = root.getInt("session_count"),
             voiceSessionCount = root.getInt("voice_session_count"),
+			voiceConnectionCount = root.optInt("voice_connection_count", if (root.optBoolean("voice_connection_active")) 1 else 0),
             voiceConnectionActive = root.getBoolean("voice_connection_active"),
             voiceConnectionSince = root.optString("voice_connection_since")
                 .takeIf(String::isNotBlank)?.let(Instant::parse),
@@ -417,7 +438,10 @@ object VoiceProtocol {
             base.effectivePort() == resource.effectivePort()
     }
 
-    private fun JSONObject.toCallState(): VoiceCallState = VoiceCallState(
+	private fun JSONObject.toCallState(): VoiceCallState = VoiceCallState(
+		sessionId = optString("session_id"),
+		chatId = optString("chat_id"),
+		chats = optJSONArray("chats").mapObjects { it.toVoiceSession() },
 		voiceSessionId = optString("voice_session_id"),
         activeSessionId = optString("active_session_id"),
 		sessions = optJSONArray("sessions").mapObjects { it.toVoiceSession() },
@@ -438,6 +462,11 @@ object VoiceProtocol {
 	private fun JSONObject.toVoiceSession(): VoiceSession = VoiceSession(
 		id = getString("id"),
 		title = getString("title"),
+		sessionId = optString("session_id"),
+		kind = optString("kind"),
+		role = optString("role"),
+		chatCount = optInt("chat_count"),
+		voiceChatCount = optInt("voice_chat_count"),
 		lastMessage = optString("last_message"),
 		updatedAt = optString("updated_at").takeIf(String::isNotBlank)?.let {
 			runCatching { Instant.parse(it) }.getOrNull()
@@ -449,6 +478,7 @@ object VoiceProtocol {
 		resultCount = optLong("result_count").coerceAtLeast(0),
 		busy = optBoolean("busy"),
 		status = optString("status"),
+		statusText = optString("status_text"),
 	)
 
 	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()

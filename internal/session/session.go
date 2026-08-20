@@ -501,8 +501,23 @@ func (s *Session) TimelinePageAfter(ctx context.Context, chatID, after id.ID, li
 
 // NewChat creates a new orchestrator chat under parentChatID.
 func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string) (*chatpkg.Chat, error) {
+	return s.newChat(ctx, &parentChatID, title, chatrole.Orchestrator)
+}
+
+// NewRootChat creates a top-level chat with the requested registered profile.
+// It inherits model, permission, and tool settings from the session's first
+// top-level chat so alternate surfaces such as voice remain in the same
+// workspace and policy boundary.
+func (s *Session) NewRootChat(ctx context.Context, title string, role chatrole.Role) (*chatpkg.Chat, error) {
+	return s.newChat(ctx, nil, title, role)
+}
+
+func (s *Session) newChat(ctx context.Context, parentChatID *id.ID, title string, role chatrole.Role) (*chatpkg.Chat, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
+	}
+	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
+		return nil, fmt.Errorf("profile %q is not registered", role)
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -510,35 +525,50 @@ func (s *Session) NewChat(ctx context.Context, parentChatID id.ID, title string)
 	}
 	s.mu.RLock()
 	session := s.session
-	parent, ok := chatByID(s.chats, parentChatID)
+	chats := slices.Clone(s.chats)
 	position := len(s.chats)
 	s.mu.RUnlock()
 	if session.Kind == domain.SessionKindQuick {
 		return nil, fmt.Errorf("quick sessions cannot create additional chats")
 	}
-	if session.Kind == domain.SessionKindVoice {
-		return nil, fmt.Errorf("voice sessions cannot create additional chats")
-	}
 	if session.ID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	if !ok {
-		return nil, fmt.Errorf("parent chat %s not found", parentChatID)
+	var template domain.Chat
+	if parentChatID != nil {
+		var ok bool
+		template, ok = chatByID(chats, *parentChatID)
+		if !ok {
+			return nil, fmt.Errorf("parent chat %s not found", *parentChatID)
+		}
+	} else {
+		for _, candidate := range chats {
+			if candidate.ParentChatID == nil {
+				template = candidate
+				break
+			}
+		}
+		if template.ID == "" && len(chats) > 0 {
+			template = chats[0]
+		}
+		if template.ID == "" {
+			return nil, fmt.Errorf("session %s has no chat to inherit settings from", session.ID)
+		}
 	}
-	parentID := parent.ID
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:           id.New(),
-		SessionID:    session.ID,
-		ParentChatID: &parentID,
-		Title:        title,
-		WorkflowRole: chatrole.Orchestrator,
-		ProviderID:   strings.TrimSpace(parent.ProviderID),
-		ModelID:      strings.TrimSpace(parent.ModelID),
-		ToolStates:   cloneToolStateMap(session.ToolStates),
-		Position:     position,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                id.New(),
+		SessionID:         session.ID,
+		ParentChatID:      parentChatID,
+		Title:             title,
+		WorkflowRole:      role,
+		ProviderID:        strings.TrimSpace(template.ProviderID),
+		ModelID:           strings.TrimSpace(template.ModelID),
+		PermissionProfile: strings.TrimSpace(template.PermissionProfile),
+		ToolStates:        cloneToolStateMap(template.ToolStates),
+		Position:          position,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	return s.createChat(ctx, session, chatRecord)
 }
@@ -636,9 +666,6 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	s.mu.RUnlock()
 	if session.Kind == domain.SessionKindQuick && hasChat {
 		return nil, fmt.Errorf("quick sessions cannot create additional chats")
-	}
-	if session.Kind == domain.SessionKindVoice && hasChat {
-		return nil, fmt.Errorf("voice sessions cannot create additional chats")
 	}
 	if err := s.chatsSrc.PutRecord(ctx, chatRecord); err != nil {
 		return nil, err

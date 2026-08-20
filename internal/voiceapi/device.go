@@ -59,7 +59,7 @@ func (h *Handler) servePhoneDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	callID := strings.TrimSpace(r.URL.Query().Get("call_id"))
-	if callID == "" || !h.Lease.Owns(callID) {
+	if callID == "" || !h.Lease.OwnsDevice(voiceDeviceLeaseID(r), callID) {
 		http.Error(w, "voice call is not active", http.StatusConflict)
 		return
 	}
@@ -83,7 +83,7 @@ func (h *Handler) servePhoneDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	defer peer.close(errors.New("phone device disconnected"))
-	capabilities := h.Devices.Capabilities()
+	capabilities := h.Devices.CapabilitiesForCall(callID)
 	accepted := make([]string, 0, len(capabilities))
 	for _, capability := range capabilities {
 		accepted = append(accepted, string(capability.Action))

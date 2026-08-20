@@ -73,6 +73,7 @@ type clientFrame struct {
 	UtteranceID    string             `json:"utterance_id,omitempty"`
 	Text           string             `json:"text,omitempty"`
 	SessionID      string             `json:"session_id,omitempty"`
+	ChatID         string             `json:"chat_id,omitempty"`
 	VoiceSessionID string             `json:"voice_session_id,omitempty"`
 	Title          string             `json:"title,omitempty"`
 	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
@@ -104,6 +105,10 @@ type serverFrame struct {
 
 type sessionsResponse struct {
 	Protocol      string                  `json:"protocol"`
+	Session       *voice.Session          `json:"session,omitempty"`
+	Sessions      []voice.Session         `json:"sessions,omitempty"`
+	Chat          *voice.Chat             `json:"chat,omitempty"`
+	Chats         []voice.Chat            `json:"chats,omitempty"`
 	VoiceSession  *voice.Session          `json:"voice_session,omitempty"`
 	VoiceSessions []voice.Session         `json:"voice_sessions"`
 	AppUpdate     *androidupdate.Manifest `json:"app_update,omitempty"`
@@ -129,6 +134,7 @@ type serverInfoResponse struct {
 	GCCycles              uint32     `json:"gc_cycles"`
 	SessionCount          int        `json:"session_count"`
 	VoiceSessionCount     int        `json:"voice_session_count"`
+	VoiceConnectionCount  int        `json:"voice_connection_count"`
 	VoiceConnectionActive bool       `json:"voice_connection_active"`
 	VoiceConnectionSince  *time.Time `json:"voice_connection_since,omitempty"`
 	TokenRequired         bool       `json:"token_required"`
@@ -162,6 +168,10 @@ type incomingAudio struct {
 	nextSequence uint32
 	pcm          []byte
 	languages    []string
+}
+
+func (h *Handler) startTurn(callID, utteranceID, fingerprint string, state voice.CallState, run func(*cachedTurn)) (*cachedTurn, bool, error) {
+	return h.turns.start(callID, utteranceID, fingerprint, state.VoiceSessionID, state.SessionID, state.ChatID, run)
 }
 
 func normalizeLanguages(values []string) ([]string, error) {
@@ -238,6 +248,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSessions(w, r)
 		return
 	}
+	if r.URL.Path == "/voice/v1/sessions/temporary" {
+		h.serveTemporaryVoiceSession(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/voice/v1/sessions/") {
 		h.serveVoiceSession(w, r)
 		return
@@ -284,12 +298,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	voiceSession, err := h.Backend.EnsureVoiceSession(r.Context(), r.URL.Query().Get("voice_session_id"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	requestedChatID := strings.TrimSpace(r.URL.Query().Get("chat_id"))
+	if requestedChatID == "" {
+		requestedChatID = strings.TrimSpace(r.URL.Query().Get("voice_chat_id"))
 	}
-	release, replaced, err := h.Lease.AcquireConnection(callID, voiceSession.ID)
+	var call *voice.Call
+	leaseTarget := ""
+	if requestedSessionID != "" || requestedChatID != "" {
+		backend, ok := h.Backend.(voice.SessionChatBackend)
+		if !ok {
+			http.Error(w, "session chat backend is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		selected, selectErr := backend.EnsureVoiceChat(r.Context(), requestedSessionID, requestedChatID)
+		if selectErr != nil {
+			http.Error(w, selectErr.Error(), http.StatusBadRequest)
+			return
+		}
+		call = voice.NewSessionCall(h.Backend, selected.SessionID, selected.ID)
+		leaseTarget = selected.ID
+	} else {
+		voiceSession, ensureErr := h.Backend.EnsureVoiceSession(r.Context(), r.URL.Query().Get("voice_session_id"))
+		if ensureErr != nil {
+			http.Error(w, ensureErr.Error(), http.StatusBadRequest)
+			return
+		}
+		call = voice.NewCall(h.Backend, voiceSession.ID)
+		leaseTarget = voiceSession.ID
+	}
+	release, replaced, err := h.Lease.AcquireDeviceConnection(voiceDeviceLeaseID(r), callID, leaseTarget)
 	if err != nil {
 		if err == voice.ErrCallActive {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -319,7 +357,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	ctx := r.Context()
-	call := voice.NewCall(h.Backend, voiceSession.ID)
 	var audio *incomingAudio
 	responsePacing := voice.ResponsePacingNormal
 	var writeMu sync.Mutex
@@ -395,13 +432,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "search_history":
-			search, ok := h.Backend.(voice.VoiceHistorySearchBackend)
-			if !ok {
-				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: "transcript search is unavailable"}); err != nil {
-					return
-				}
-				continue
-			}
 			state, stateErr := call.State(ctx)
 			if stateErr != nil {
 				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: stateErr.Error()}); err != nil {
@@ -409,7 +439,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			results, searchErr := search.SearchVoiceSessionHistory(ctx, state.VoiceSessionID, frame.Query, frame.Limit)
+			var results []voice.TranscriptSearchResult
+			var searchErr error
+			if state.SessionID != "" && state.ChatID != "" {
+				search, ok := h.Backend.(voice.SessionChatHistoryBackend)
+				if !ok {
+					searchErr = errors.New("transcript search is unavailable")
+				} else {
+					results, searchErr = search.SearchVoiceChatHistory(ctx, state.SessionID, state.ChatID, frame.Query, frame.Limit)
+				}
+			} else {
+				search, ok := h.Backend.(voice.VoiceHistorySearchBackend)
+				if !ok {
+					searchErr = errors.New("transcript search is unavailable")
+				} else {
+					results, searchErr = search.SearchVoiceSessionHistory(ctx, state.VoiceSessionID, frame.Query, frame.Limit)
+				}
+			}
 			if searchErr != nil {
 				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "history_search", Error: searchErr.Error()}); err != nil {
 					return
@@ -434,6 +480,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "create_voice_session":
 			audio = nil
 			if _, err := call.CreateVoiceSession(ctx, frame.Title); err != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
+					return
+				}
+				continue
+			}
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+				return
+			}
+		case "select_voice_chat":
+			audio = nil
+			message, err := call.SelectVoiceChat(ctx, frame.SessionID, frame.ChatID)
+			if err := writeResult(ctx, conn, &writeMu, call, h.Backend, h.Updates, frame.UtteranceID, "", message, err); err != nil {
+				return
+			}
+		case "create_voice_chat":
+			audio = nil
+			if _, err := call.CreateVoiceChat(ctx, frame.SessionID, frame.Title); err != nil {
+				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
+					return
+				}
+				continue
+			}
+			if err := writeReady(ctx, conn, &writeMu, call, h.Backend, h.Updates); err != nil {
+				return
+			}
+		case "create_temporary_voice_chat":
+			audio = nil
+			if _, _, err := call.CreateTemporaryVoiceChat(ctx, frame.Title); err != nil {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
 					return
 				}
@@ -497,7 +571,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			turn, _, startErr := h.turns.start(callID, completed.utteranceID, audioTurnFingerprint(completed), state.VoiceSessionID, func(turn *cachedTurn) {
+			turn, _, startErr := h.startTurn(callID, completed.utteranceID, audioTurnFingerprint(completed), state, func(turn *cachedTurn) {
 				h.runAudioTurn(turn, completed, responsePacing)
 			})
 			if startErr != nil {
@@ -527,7 +601,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			turn, _, startErr := h.turns.start(callID, utteranceID, textTurnFingerprint(frame.Text), state.VoiceSessionID, func(turn *cachedTurn) {
+			turn, _, startErr := h.startTurn(callID, utteranceID, textTurnFingerprint(frame.Text), state, func(turn *cachedTurn) {
 				h.runTextTurn(turn, frame.Text, responsePacing)
 			})
 			if startErr != nil {
@@ -571,26 +645,27 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	response := serverInfoResponse{
-		Protocol:          protocolVersion,
-		ServerTime:        now,
-		Version:           build.Version,
-		Commit:            build.Commit,
-		Dirty:             build.Dirty,
-		BuildTime:         build.BuildTime,
-		StartedAt:         build.StartedAt,
-		UptimeSeconds:     max(0, int64(now.Sub(build.StartedAt)/time.Second)),
-		Platform:          runtime.GOOS + "/" + runtime.GOARCH,
-		GoVersion:         build.GoVersion,
-		LogicalCPUs:       runtime.NumCPU(),
-		MaxProcs:          runtime.GOMAXPROCS(0),
-		Goroutines:        runtime.NumGoroutine(),
-		HeapAllocBytes:    memory.Alloc,
-		HeapSysBytes:      memory.HeapSys,
-		HeapObjects:       memory.HeapObjects,
-		GCCycles:          memory.NumGC,
-		SessionCount:      len(sessions),
-		VoiceSessionCount: len(voiceSessions),
-		TokenRequired:     strings.TrimSpace(h.Token) != "" || h.Auth != nil,
+		Protocol:             protocolVersion,
+		ServerTime:           now,
+		Version:              build.Version,
+		Commit:               build.Commit,
+		Dirty:                build.Dirty,
+		BuildTime:            build.BuildTime,
+		StartedAt:            build.StartedAt,
+		UptimeSeconds:        max(0, int64(now.Sub(build.StartedAt)/time.Second)),
+		Platform:             runtime.GOOS + "/" + runtime.GOARCH,
+		GoVersion:            build.GoVersion,
+		LogicalCPUs:          runtime.NumCPU(),
+		MaxProcs:             runtime.GOMAXPROCS(0),
+		Goroutines:           runtime.NumGoroutine(),
+		HeapAllocBytes:       memory.Alloc,
+		HeapSysBytes:         memory.HeapSys,
+		HeapObjects:          memory.HeapObjects,
+		GCCycles:             memory.NumGC,
+		SessionCount:         len(sessions),
+		VoiceSessionCount:    len(voiceSessions),
+		VoiceConnectionCount: h.Lease.ActiveCount(),
+		TokenRequired:        strings.TrimSpace(h.Token) != "" || h.Auth != nil,
 	}
 	if active, ok := h.Lease.Snapshot(); ok {
 		response.VoiceConnectionActive = true
@@ -601,6 +676,15 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		return
 	}
+}
+
+func voiceDeviceLeaseID(r *http.Request) string {
+	if r != nil {
+		if installationID := strings.TrimSpace(r.Header.Get("X-Koder-Device-ID")); installationID != "" {
+			return "installation:" + installationID
+		}
+	}
+	return "legacy"
 }
 
 func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
@@ -638,8 +722,14 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortVoiceSessions(sessions)
+	workSessions, err := h.Backend.ListVoiceSessions(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slices.SortStableFunc(workSessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	response := sessionsResponse{
-		Protocol: protocolVersion, VoiceSession: created, VoiceSessions: sessions,
+		Protocol: protocolVersion, Sessions: workSessions, VoiceSession: created, VoiceSessions: sessions,
 	}
 	if h.Updates != nil {
 		meta, available, err := h.Updates.Manifest()
@@ -662,9 +752,38 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) serveTemporaryVoiceSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	backend, ok := h.Backend.(voice.SessionChatBackend)
+	if !ok {
+		http.Error(w, "session chat backend is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	request, ok := decodeCreateSessionRequest(w, r)
+	if !ok {
+		return
+	}
+	session, chat, err := backend.CreateTemporaryVoiceChat(r.Context(), request.Title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeSessionsResponse(w, http.StatusCreated, sessionsResponse{Protocol: protocolVersion, Session: &session, Chat: &chat, Chats: []voice.Chat{chat}})
+}
+
 func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/voice/v1/sessions/"))
-	if sessionID == "" || strings.Contains(sessionID, "/") {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/voice/v1/sessions/"), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 2 && parts[1] == "chats" {
+		h.serveSessionChats(w, r, parts[0])
+		return
+	}
+	sessionID := strings.TrimSpace(path)
+	if sessionID == "" || len(parts) != 1 {
 		http.NotFound(w, r)
 		return
 	}
@@ -721,6 +840,66 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &updated, VoiceSessions: sessions})
+}
+
+func (h *Handler) serveSessionChats(w http.ResponseWriter, r *http.Request, sessionID string) {
+	backend, ok := h.Backend.(voice.SessionChatBackend)
+	if !ok {
+		http.Error(w, "session chat backend is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var created *voice.Chat
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPost:
+		request, valid := decodeCreateSessionRequest(w, r)
+		if !valid {
+			return
+		}
+		chat, err := backend.CreateVoiceChatInSession(r.Context(), sessionID, request.Title)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		created = &chat
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	chats, err := backend.ListSessionChats(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	status := http.StatusOK
+	if created != nil {
+		status = http.StatusCreated
+	}
+	writeSessionsResponse(w, status, sessionsResponse{Protocol: protocolVersion, Chat: created, Chats: chats})
+}
+
+func decodeCreateSessionRequest(w http.ResponseWriter, r *http.Request) (createSessionRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request createSessionRequest
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid session request: "+err.Error(), http.StatusBadRequest)
+		return createSessionRequest{}, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid session request: expected one JSON object", http.StatusBadRequest)
+		return createSessionRequest{}, false
+	}
+	return request, true
+}
+
+func writeSessionsResponse(w http.ResponseWriter, status int, response sessionsResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func sortVoiceSessions(sessions []voice.Session) {

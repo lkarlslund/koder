@@ -13,8 +13,11 @@ import (
 type Session struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
+	Kind        string    `json:"kind,omitempty"`
 	LastMessage string    `json:"last_message,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	ChatCount   int       `json:"chat_count,omitempty"`
+	VoiceChats  int       `json:"voice_chat_count,omitempty"`
 	Archived    bool      `json:"archived,omitempty"`
 	Pinned      bool      `json:"pinned,omitempty"`
 	Favorite    bool      `json:"favorite,omitempty"`
@@ -22,6 +25,22 @@ type Session struct {
 	ResultCount uint64    `json:"result_count,omitempty"`
 	Busy        bool      `json:"busy,omitempty"`
 	Status      string    `json:"status,omitempty"`
+}
+
+// Chat is a bounded chat summary shown beneath a session in the native app.
+// Only chats with the voice role may be selected as the live conversation;
+// the remaining chats are visible coordination targets.
+type Chat struct {
+	ID          string    `json:"id"`
+	SessionID   string    `json:"session_id"`
+	Title       string    `json:"title"`
+	Role        string    `json:"role"`
+	LastMessage string    `json:"last_message,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	Archived    bool      `json:"archived,omitempty"`
+	Busy        bool      `json:"busy,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	StatusText  string    `json:"status_text,omitempty"`
 }
 
 // SessionUpdate changes user-managed voice conversation metadata.
@@ -90,6 +109,17 @@ type VoiceSessionBackend interface {
 	RunVoiceTurn(context.Context, string, string, TurnOptions, func(Session) error) (Message, error)
 }
 
+// SessionChatBackend exposes Koder's native session/chat hierarchy to voice
+// clients. It supersedes the legacy model where every voice chat occupied its
+// own special session.
+type SessionChatBackend interface {
+	ListSessionChats(context.Context, string) ([]Chat, error)
+	EnsureVoiceChat(context.Context, string, string) (Chat, error)
+	CreateVoiceChatInSession(context.Context, string, string) (Chat, error)
+	CreateTemporaryVoiceChat(context.Context, string) (Session, Chat, error)
+	RunVoiceChatTurn(context.Context, string, string, string, TurnOptions, func(Session) error) (Message, error)
+}
+
 // ResponsePacing controls spoken answer length without adding instructions to chat history.
 type ResponsePacing string
 
@@ -153,6 +183,13 @@ type VoiceHistorySearchBackend interface {
 	SearchVoiceSessionHistory(context.Context, string, string, int) ([]TranscriptSearchResult, error)
 }
 
+// SessionChatHistoryBackend serves history for a selected voice chat within a
+// normal session.
+type SessionChatHistoryBackend interface {
+	VoiceChatHistory(context.Context, string, string, string, int) (TranscriptPage, error)
+	SearchVoiceChatHistory(context.Context, string, string, string, int) ([]TranscriptSearchResult, error)
+}
+
 // TranscriptEntry is one user-visible turn from a durable voice chat.
 type TranscriptEntry struct {
 	ID        string    `json:"id"`
@@ -208,6 +245,9 @@ type Message struct {
 
 // CallState is the current server-owned routing state for one connection.
 type CallState struct {
+	SessionID       string            `json:"session_id,omitempty"`
+	ChatID          string            `json:"chat_id,omitempty"`
+	Chats           []Chat            `json:"chats,omitempty"`
 	VoiceSessionID  string            `json:"voice_session_id"`
 	ActiveSessionID string            `json:"active_session_id,omitempty"`
 	Sessions        []Session         `json:"sessions"`
@@ -219,8 +259,15 @@ type CallState struct {
 // Call is an ephemeral coordinator bound to one voice connection.
 type Call struct {
 	backend         Backend
+	sessionID       string
+	chatID          string
 	voiceSessionID  string
 	activeSessionID string
+}
+
+// NewSessionCall starts a voice call in Koder's native session/chat hierarchy.
+func NewSessionCall(backend Backend, sessionID, chatID string) *Call {
+	return &Call{backend: backend, sessionID: strings.TrimSpace(sessionID), chatID: strings.TrimSpace(chatID)}
 }
 
 // NewCall starts a voice call coordinator.
@@ -266,8 +313,34 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 	if c.activeSessionID != "" && !sessionExists(sessions, c.activeSessionID) {
 		c.activeSessionID = ""
 	}
+	var chats []Chat
+	if c.sessionID != "" {
+		if !sessionExists(sessions, c.sessionID) {
+			c.sessionID, c.chatID = "", ""
+		} else if backend, ok := c.backend.(SessionChatBackend); ok {
+			chats, err = backend.ListSessionChats(ctx, c.sessionID)
+			if err != nil {
+				return CallState{}, err
+			}
+			if c.chatID != "" {
+				selected, ensureErr := backend.EnsureVoiceChat(ctx, c.sessionID, c.chatID)
+				if ensureErr != nil {
+					c.chatID = ""
+				} else {
+					c.chatID = selected.ID
+				}
+			}
+		}
+	}
 	var history TranscriptPage
-	if c.voiceSessionID != "" {
+	if c.sessionID != "" && c.chatID != "" {
+		if backend, ok := c.backend.(SessionChatHistoryBackend); ok {
+			history, err = backend.VoiceChatHistory(ctx, c.sessionID, c.chatID, "", 5)
+			if err != nil {
+				return CallState{}, err
+			}
+		}
+	} else if c.voiceSessionID != "" {
 		if backend, ok := c.backend.(VoiceHistoryBackend); ok {
 			history, err = backend.VoiceSessionHistory(ctx, c.voiceSessionID, "", 5)
 			if err != nil {
@@ -276,6 +349,7 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 		}
 	}
 	return CallState{
+		SessionID: c.sessionID, ChatID: c.chatID, Chats: chats,
 		VoiceSessionID: c.voiceSessionID, ActiveSessionID: c.activeSessionID,
 		Sessions: sessions, VoiceSessions: voiceSessions,
 		History: history.Entries, HistoryHasMore: history.HasMore,
@@ -284,6 +358,11 @@ func (c *Call) State(ctx context.Context) (CallState, error) {
 
 // History returns older transcript turns for the selected durable voice chat.
 func (c *Call) History(ctx context.Context, beforeID string, limit int) (TranscriptPage, error) {
+	if c != nil && c.sessionID != "" && c.chatID != "" {
+		if backend, ok := c.backend.(SessionChatHistoryBackend); ok {
+			return backend.VoiceChatHistory(ctx, c.sessionID, c.chatID, strings.TrimSpace(beforeID), limit)
+		}
+	}
 	if c == nil || c.backend == nil || c.voiceSessionID == "" {
 		return TranscriptPage{}, nil
 	}
@@ -301,20 +380,63 @@ func (c *Call) SelectSession(ctx context.Context, sessionID string) (Message, er
 		return Message{}, err
 	}
 	if strings.TrimSpace(sessionID) == "" {
-		c.activeSessionID = ""
-		return textMessage("Automatic session selection is on."), nil
+		c.sessionID, c.chatID, c.activeSessionID = "", "", ""
+		return textMessage("No session selected."), nil
 	}
 	session, ok := sessionByID(state.Sessions, strings.TrimSpace(sessionID))
 	if !ok {
 		return Message{}, fmt.Errorf("session %q was not found", sessionID)
 	}
-	c.activeSessionID = session.ID
-	text := "Using " + session.Title + "."
+	c.sessionID, c.chatID, c.activeSessionID = session.ID, "", session.ID
+	text := "Opened " + session.Title + "."
 	return textMessage(text), nil
 }
 
+// SelectVoiceChat selects a voice chat inside the currently selected session.
+func (c *Call) SelectVoiceChat(ctx context.Context, sessionID, chatID string) (Message, error) {
+	backend, ok := c.backend.(SessionChatBackend)
+	if !ok {
+		return Message{}, fmt.Errorf("session chat backend is unavailable")
+	}
+	chat, err := backend.EnsureVoiceChat(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID))
+	if err != nil {
+		return Message{}, err
+	}
+	c.sessionID, c.chatID, c.activeSessionID = chat.SessionID, chat.ID, chat.SessionID
+	return textMessage("Using voice chat " + chat.Title + "."), nil
+}
+
+// CreateVoiceChat creates and selects a voice chat in an existing session.
+func (c *Call) CreateVoiceChat(ctx context.Context, sessionID, title string) (Chat, error) {
+	backend, ok := c.backend.(SessionChatBackend)
+	if !ok {
+		return Chat{}, fmt.Errorf("session chat backend is unavailable")
+	}
+	chat, err := backend.CreateVoiceChatInSession(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(title))
+	if err != nil {
+		return Chat{}, err
+	}
+	c.sessionID, c.chatID, c.activeSessionID = chat.SessionID, chat.ID, chat.SessionID
+	return chat, nil
+}
+
+// CreateTemporaryVoiceChat creates and selects a quick session backed by a
+// managed scratch folder.
+func (c *Call) CreateTemporaryVoiceChat(ctx context.Context, title string) (Session, Chat, error) {
+	backend, ok := c.backend.(SessionChatBackend)
+	if !ok {
+		return Session{}, Chat{}, fmt.Errorf("session chat backend is unavailable")
+	}
+	session, chat, err := backend.CreateTemporaryVoiceChat(ctx, strings.TrimSpace(title))
+	if err != nil {
+		return Session{}, Chat{}, err
+	}
+	c.sessionID, c.chatID, c.activeSessionID = session.ID, chat.ID, session.ID
+	return session, chat, nil
+}
+
 // SelectVoiceSession changes the durable coordination transcript used by this
-// call without releasing or acquiring the process-wide live-call lease.
+// call without releasing or acquiring the connected device's live-call lease.
 func (c *Call) SelectVoiceSession(ctx context.Context, sessionID string) (Message, error) {
 	backend, ok := c.backend.(VoiceSessionBackend)
 	if !ok {

@@ -113,7 +113,7 @@ import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
-    private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, CHAT }
+	private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, SESSION, CHAT }
 	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var settings = SecureSettings.Values("", "")
     private var requestGeneration = 0L
     private var pendingSession: VoiceSession? = null
-	private var pendingCreateTitle: String? = null
+	private var selectedKoderSession: VoiceSession? = null
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
 	private var pendingPhoneAction = ""
@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var appVisible = false
 	private var delegatedWorkPending = false
 	private var pendingResultSessionId = ""
+	private var pendingResultOwnerSessionId = ""
 	private var pendingResultTranscriptId = ""
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
@@ -241,6 +242,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             override fun handleOnBackPressed() {
                 if (screen == Screen.CHAT) {
                     leaveChat()
+				} else if (screen == Screen.SESSION) {
+					loadHome()
                 } else if (screen == Screen.SETTINGS) {
                     loadHome()
 				} else if (screen == Screen.PERMISSIONS) {
@@ -317,6 +320,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val sessionId = intent?.getStringExtra(VoiceResultNotifier.EXTRA_VOICE_SESSION_ID).orEmpty()
 		if (sessionId.isBlank()) return false
 		pendingResultSessionId = sessionId
+		pendingResultOwnerSessionId = intent?.getStringExtra(VoiceResultNotifier.EXTRA_SESSION_ID).orEmpty()
 		pendingResultTranscriptId = intent?.getStringExtra(VoiceResultNotifier.EXTRA_TRANSCRIPT_ID).orEmpty()
 		VoiceResultNotifier.cancel(this, pendingResultSessionId, pendingResultTranscriptId)
 		return true
@@ -396,7 +400,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val title = pendingSession?.title.orEmpty().ifBlank {
 				latestCallSnapshot.voiceSessions.firstOrNull { it.id == sessionId }?.title.orEmpty()
 			}
-			VoiceResultNotifier.show(this, sessionId, title, message.transcriptId, message.spokenText)
+			VoiceResultNotifier.show(this, latestCallSnapshot.activeSessionId, sessionId, title, message.transcriptId, message.spokenText)
 		}
 		delegatedWorkPending = false
 		runOnUiThread {
@@ -680,17 +684,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         showContent(content)
     }
 
-    private fun showHome(home: VoiceHome) {
+	private fun showHome(home: VoiceHome) {
 		readinessHome = home
 		if (pendingResultSessionId.isNotBlank()) {
+			if (pendingResultOwnerSessionId.isNotBlank()) {
+				home.sessions.firstOrNull { it.id == pendingResultOwnerSessionId }?.let {
+					loadSession(it)
+					return
+				}
+			}
 			home.voiceSessions.firstOrNull { it.id == pendingResultSessionId }?.let {
 				openChat(it)
 				return
 			}
 			pendingResultSessionId = ""
+			pendingResultOwnerSessionId = ""
 			pendingResultTranscriptId = ""
 		}
         screen = Screen.HOME
+        selectedKoderSession = null
         clearCallViews()
         val root = column()
 
@@ -716,11 +728,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             })
         }
 		root.addView(appBar, spaced(bottom = 6))
+		val availableSessions = home.sessions.ifEmpty { home.voiceSessions }
 		val counts = mapOf(
-			ConversationFilter.ACTIVE to home.voiceSessions.count { !it.archived && !it.deleted },
-			ConversationFilter.FAVORITES to home.voiceSessions.count { it.favorite && !it.archived && !it.deleted },
-			ConversationFilter.ARCHIVED to home.voiceSessions.count { it.archived && !it.deleted },
-			ConversationFilter.DELETED to home.voiceSessions.count { it.deleted },
+			ConversationFilter.ACTIVE to availableSessions.count { !it.archived && !it.deleted },
+			ConversationFilter.FAVORITES to availableSessions.count { it.favorite && !it.archived && !it.deleted },
+			ConversationFilter.ARCHIVED to availableSessions.count { it.archived && !it.deleted },
+			ConversationFilter.DELETED to availableSessions.count { it.deleted },
 		)
 		root.addView(LinearLayout(this).apply {
 			orientation = LinearLayout.HORIZONTAL
@@ -765,8 +778,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         root.addView(updateProgress, spaced(top = 6, bottom = 10))
 
-		val unreadBySession = secureSettings.unreadVoiceResults(home.voiceSessions.associate { it.id to it.resultCount })
-		val visibleSessions = home.voiceSessions.filter { session ->
+		val visibleSessions = availableSessions.filter { session ->
 			when (conversationFilter) {
 				ConversationFilter.ACTIVE -> !session.archived && !session.deleted
 				ConversationFilter.FAVORITES -> session.favorite && !session.archived && !session.deleted
@@ -778,7 +790,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (visibleSessions.isEmpty()) {
 			list.addView(emptyConversationCard(conversationFilter), spaced(top = 8, bottom = 12))
         } else {
-			visibleSessions.forEach { session -> list.addView(sessionCard(session, unreadBySession[session.id] ?: 0), spaced(bottom = 4)) }
+			visibleSessions.forEach { session -> list.addView(koderSessionCard(session), spaced(bottom = 4)) }
         }
         val sessionScroll = ScrollView(this).apply { addView(list, matchWrap()) }
         val refresh = SwipeRefreshLayout(this).apply {
@@ -789,12 +801,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         root.addView(refresh, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(Button(this).apply {
-            text = "+  New conversation"
+			text = "+  New temporary conversation"
             isAllCaps = false
             contentDescription = "Create a new voice conversation"
             backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
             setTextColor(themeColor(android.R.attr.colorBackground))
-            setOnClickListener { showCreateVoiceSessionDialog() }
+			setOnClickListener { showCreateTemporaryConversationDialog() }
 		}, spaced(top = 8))
         showContent(root)
 
@@ -1235,8 +1247,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             addDiagnosticsSection("Sessions", listOf(
                 "Regular" to info.sessionCount.toString(),
                 "Voice" to info.voiceSessionCount.toString(),
-                "Live voice" to if (info.voiceConnectionActive) {
-                    "Active${info.voiceConnectionSince?.let { since ->
+				"Live devices" to if (info.voiceConnectionActive) {
+					"${info.voiceConnectionCount} active${info.voiceConnectionSince?.let { since ->
                         " · ${formatUptime(Duration.between(since, info.serverTime).seconds)}"
                     }.orEmpty()}"
                 } else {
@@ -1314,7 +1326,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             appendLine("Goroutines: ${info.goroutines}")
             appendLine("Heap: ${formatBytes(info.heapAllocBytes)} live · ${formatBytes(info.heapSysBytes)} reserved")
             appendLine("Sessions: ${info.sessionCount} regular · ${info.voiceSessionCount} voice")
-            append("Voice connection: ${if (info.voiceConnectionActive) "active" else "idle"}")
+			append("Voice connections: ${info.voiceConnectionCount} active devices")
         }
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Koder server info", text))
         Toast.makeText(this, "Server info copied", Toast.LENGTH_SHORT).show()
@@ -1338,6 +1350,114 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         bytes >= 1024L -> String.format(Locale.US, "%.1f KiB", bytes / 1024.0)
         else -> "$bytes B"
     }
+
+	private fun koderSessionCard(session: VoiceSession) = LinearLayout(this).apply {
+		orientation = LinearLayout.VERTICAL
+		setPadding(dp(14), dp(12), dp(14), dp(12))
+		background = cardBackground()
+		isClickable = true
+		isFocusable = true
+		val titleText = session.title.ifBlank { "Untitled session" }
+		val kind = when (session.kind) {
+			"quick" -> "Temporary"
+			"voice" -> "Voice"
+			else -> "Session"
+		}
+		val counts = "${session.chatCount} chat${if (session.chatCount == 1) "" else "s"} · ${session.voiceChatCount} voice"
+		val time = session.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty()
+		addView(label(titleText).apply {
+			setTypeface(typeface, Typeface.BOLD)
+			maxLines = 1
+			ellipsize = TextUtils.TruncateAt.END
+		}, matchWrap())
+		addView(helper(listOf(kind, counts, time).filter(String::isNotBlank).joinToString(" · ")).apply {
+			maxLines = 1
+			ellipsize = TextUtils.TruncateAt.END
+		}, spaced(top = 3))
+		contentDescription = "Open $titleText. $counts"
+		setOnClickListener { loadSession(session) }
+	}
+
+	private fun loadSession(session: VoiceSession) {
+		selectedKoderSession = session
+		screen = Screen.LOADING
+		showContent(column(Gravity.CENTER_HORIZONTAL).apply {
+			gravity = Gravity.CENTER
+			addView(logo(), centeredSquare(72, bottom = 18))
+			addView(ProgressBar(this@MainActivity))
+			addView(body("Loading chats…"), spaced(top = 12))
+		})
+		val generation = ++requestGeneration
+		sessionClient.listChats(settings.server, settings.token, session.id) { result ->
+			runOnUiThread {
+				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+				result.fold(
+					onSuccess = { showSession(session, it) },
+					onFailure = ::showConnectionError,
+				)
+			}
+		}
+	}
+
+	private fun showSession(session: VoiceSession, home: VoiceHome) {
+		if (pendingResultSessionId.isNotBlank() && pendingResultOwnerSessionId == session.id) {
+			home.chats.firstOrNull { it.id == pendingResultSessionId && it.role == "voice" }?.let {
+				selectedKoderSession = session
+				openChat(it)
+				return
+			}
+		}
+		selectedKoderSession = session
+		screen = Screen.SESSION
+		clearCallViews()
+		val root = column()
+		root.addView(LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER_VERTICAL
+			addView(iconActionButton(R.drawable.ic_voice_back, "Back to sessions", ACTION_NEUTRAL).apply {
+				setOnClickListener { loadHome() }
+			}, actionLayout())
+			addView(title(session.title.ifBlank { "Session" }).apply {
+				textSize = 23f
+				maxLines = 1
+				ellipsize = TextUtils.TruncateAt.END
+			}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(10) })
+		}, spaced(bottom = 10))
+		root.addView(helper("Voice conversations can use this session’s workspace, tools, and other chats."), spaced(bottom = 12))
+		val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+		if (home.chats.isEmpty()) {
+			list.addView(helper("This session has no chats."), spaced(top = 12, bottom = 12))
+		} else {
+			home.chats.forEach { chat -> list.addView(koderChatCard(chat), spaced(bottom = 5)) }
+		}
+		root.addView(ScrollView(this).apply { addView(list, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+		root.addView(Button(this).apply {
+			text = "+  New voice conversation"
+			isAllCaps = false
+			isEnabled = session.kind != "quick"
+			contentDescription = if (isEnabled) "Create a voice conversation in this session" else "Temporary sessions contain one chat"
+			setOnClickListener { showCreateVoiceSessionDialog() }
+		}, spaced(top = 8))
+		showContent(root)
+	}
+
+	private fun koderChatCard(chat: VoiceSession) = LinearLayout(this).apply {
+		orientation = LinearLayout.VERTICAL
+		setPadding(dp(14), dp(11), dp(14), dp(11))
+		background = cardBackground()
+		val selectable = chat.role == "voice" && !chat.archived
+		alpha = if (selectable) 1f else 0.72f
+		addView(label(chat.title.ifBlank { "Untitled chat" }).apply {
+			setTypeface(typeface, if (selectable) Typeface.BOLD else Typeface.NORMAL)
+		}, matchWrap())
+		val detail = listOf(chat.role.ifBlank { "chat" }.replaceFirstChar { it.titlecase() }, chat.statusText.ifBlank { chat.status }, chat.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty())
+			.filter(String::isNotBlank).joinToString(" · ")
+		addView(helper(detail), spaced(top = 3))
+		isClickable = selectable
+		isFocusable = selectable
+		contentDescription = if (selectable) "Open voice conversation ${chat.title}" else "${chat.title}, ${chat.role} chat, visible but not selectable"
+		if (selectable) setOnClickListener { openChat(chat) }
+	}
 
     private fun showAbout() {
         val version = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
@@ -1583,49 +1703,91 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun withAlpha(color: Int, alpha: Int) = (color and 0x00ffffff) or (alpha.coerceIn(0, 255) shl 24)
 
     private fun showCreateVoiceSessionDialog() {
+		val session = selectedKoderSession ?: return
         val titleField = EditText(this).apply {
-            hint = "For example: Personal"
+			hint = "For example: Voice planning"
             contentDescription = "Conversation name"
             setSingleLine()
         }
         AlertDialog.Builder(this)
             .setTitle("New conversation")
-            .setMessage("Give this ongoing voice conversation a name so you can find it again.")
+			.setMessage("Create a voice conversation inside ${session.title}.")
             .setView(titleField)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Create") { _, _ -> createSession(titleField.text.toString()) }
+			.setPositiveButton("Create") { _, _ -> createVoiceChat(session, titleField.text.toString()) }
             .show()
     }
 
-    private fun createSession(title: String) {
-		val normalizedTitle = title.trim().ifBlank { "Voice Chat" }
-		pendingCreateTitle = normalizedTitle
-        val generation = ++requestGeneration
-		openChat(VoiceSession(id = "", title = normalizedTitle), startConnection = false, initialDetail = "Creating conversation…")
-        sessionClient.create(settings.server, settings.token, normalizedTitle) { result ->
-            runOnUiThread {
-                if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
-                result.fold(
-                    onSuccess = { home ->
-						home.createdVoiceSession?.let { created ->
-							pendingCreateTitle = null
-							pendingSession = created
-							updateConversationStatus(CallController.Stage.CONNECTING, "Connecting…")
-							requestCallStart()
-						} ?: showCreateFailure(IllegalStateException("Koder did not return the new conversation"))
-                    },
+	private fun showCreateTemporaryConversationDialog() {
+		val titleField = EditText(this).apply {
+			hint = "Temporary conversation"
+			contentDescription = "Temporary conversation name"
+			setSingleLine()
+		}
+		AlertDialog.Builder(this)
+			.setTitle("New temporary conversation")
+			.setMessage("Koder will create a quick session with a private scratch folder and one fully tooled voice chat.")
+			.setView(titleField)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Create") { _, _ -> createTemporaryConversation(titleField.text.toString()) }
+			.show()
+	}
+
+	private fun createVoiceChat(session: VoiceSession, title: String) {
+		val normalizedTitle = title.trim().ifBlank { "Voice conversation" }
+		showConversationCreationProgress("Creating voice conversation…")
+		val generation = ++requestGeneration
+		sessionClient.createVoiceChat(settings.server, settings.token, session.id, normalizedTitle) { result ->
+			runOnUiThread {
+				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+				result.fold(
+					onSuccess = { home -> home.createdChat?.let(::openChat) ?: showSession(session, home) },
+					onFailure = {
+						Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+						loadSession(session)
+					},
+				)
+			}
+		}
+	}
+
+	private fun createTemporaryConversation(title: String) {
+		val normalizedTitle = title.trim().ifBlank { "Temporary conversation" }
+		showConversationCreationProgress("Creating temporary conversation…")
+		val generation = ++requestGeneration
+		sessionClient.createTemporary(settings.server, settings.token, normalizedTitle) { result ->
+			runOnUiThread {
+				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
+				result.fold(
+					onSuccess = { home ->
+					val chat = home.createdChat
+					val session = home.createdSession
+					if (chat != null && session != null) {
+						selectedKoderSession = session
+						openChat(chat)
+					} else showCreateFailure(IllegalStateException("Koder did not return the temporary conversation"))
+				},
 					onFailure = ::showCreateFailure,
-                )
-            }
-        }
-    }
+				)
+			}
+		}
+	}
+
+	private fun showConversationCreationProgress(message: String) {
+		screen = Screen.LOADING
+		showContent(column(Gravity.CENTER_HORIZONTAL).apply {
+			gravity = Gravity.CENTER
+			addView(logo(), centeredSquare(72, bottom = 18))
+			addView(ProgressBar(this@MainActivity))
+			addView(body(message), spaced(top = 12))
+		})
+	}
 
     private fun openChat(session: VoiceSession, startConnection: Boolean = true, initialDetail: String = "Connecting…") {
         screen = Screen.CHAT
         clearCallViews()
         pendingSession = session
 		secureSettings.markVoiceSessionRead(session.id, session.resultCount)
-		if (startConnection) pendingCreateTitle = null
 		transcriptShown = false
 		transcriptOpened = false
 		followConversationBottom = true
@@ -1660,7 +1822,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				setOnClickListener {
 					if (tag == "Pause") controller.setPaused(true)
 					else if (latestCallSnapshot.stage == CallController.Stage.HELD) controller.setPaused(false)
-					else pendingCreateTitle?.let(::createSession) ?: requestCallStart()
+					else requestCallStart()
 				}
 			}.also { addView(it, actionLayout(start = 6)) }
 			muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
@@ -2046,6 +2208,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		feedScroll?.post { target?.let { feedScroll?.smoothScrollTo(0, it.top) } }
 		pendingResultSessionId = ""
+		pendingResultOwnerSessionId = ""
 		pendingResultTranscriptId = ""
 	}
 
@@ -2065,12 +2228,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
     private fun leaveChat() {
+		val ownerSession = selectedKoderSession
         pendingStart = false
         pendingSession = null
-		pendingCreateTitle = null
         controller.end()
 		window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        loadHome("Refreshing conversations…")
+		if (ownerSession != null) loadSession(ownerSession) else loadHome("Refreshing sessions…")
     }
 
     private fun requestCallStart() {
@@ -2084,9 +2247,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun startCall() {
         val session = pendingSession ?: return
 		if (session.id.isBlank()) return
+		val ownerSessionId = session.sessionId.ifBlank { selectedKoderSession?.id.orEmpty() }
+		if (ownerSessionId.isBlank()) {
+			updateConversationStatus(CallController.Stage.ERROR, "This conversation is missing its Koder session")
+			return
+		}
 		controller.start(
 			settings.server,
 			settings.token,
+			ownerSessionId,
 			session.id,
 			settings.speechLanguages,
 			settings.vadSensitivityPercent,
@@ -2766,6 +2935,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			Screen.READINESS -> "Voice adjustments"
 			Screen.LOADING -> "Koder loading"
 			Screen.HOME -> "Voice conversations"
+			Screen.SESSION -> selectedKoderSession?.title?.ifBlank { "Koder session" } ?: "Koder session"
 			Screen.CHAT -> pendingSession?.title?.ifBlank { "Voice conversation" } ?: "Voice conversation"
 		})
         ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->

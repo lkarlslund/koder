@@ -176,10 +176,20 @@ func (r *Registry) Create(ctx context.Context, title, projectRoot string, create
 
 // CreateQuick creates a one-chat quick session in a caller-owned managed project root.
 func (r *Registry) CreateQuick(ctx context.Context, sessionID id.ID, projectRoot string) (*Session, error) {
+	return r.createQuick(ctx, sessionID, projectRoot, chatrole.Standalone)
+}
+
+// CreateQuickVoice creates a one-chat managed session whose chat uses the
+// voice orchestrator profile.
+func (r *Registry) CreateQuickVoice(ctx context.Context, sessionID id.ID, projectRoot string) (*Session, error) {
+	return r.createQuick(ctx, sessionID, projectRoot, chatrole.Voice)
+}
+
+func (r *Registry) createQuick(ctx context.Context, sessionID id.ID, projectRoot string, role chatrole.Role) (*Session, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	return r.create(ctx, "New Session", projectRoot, false, sessionID, domain.SessionKindQuick, true, chatrole.Standalone)
+	return r.create(ctx, "New Session", projectRoot, false, sessionID, domain.SessionKindQuick, true, role)
 }
 
 // CreateVoice creates a durable one-chat voice coordination session.

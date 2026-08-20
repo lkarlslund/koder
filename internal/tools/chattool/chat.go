@@ -30,8 +30,8 @@ func init() {
 	tools.Register(sendTool{}, tools.ToolSpec{
 		Title:       "Send chat message",
 		Description: "Send a message to a direct child chat.",
-		Usage:       "Send work instructions only to a direct child chat you own. Do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy child chat; otherwise it is queued as the next user turn.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Direct child chat UUID to message"},"message":{"type":"string","description":"Message to queue for the child chat"},"steer":{"type":"boolean","description":"Deliver as a turn-boundary steer instead of the next user turn"}},"required":["chat_id","message"],"additionalProperties":false}`,
+		Usage:       "Send work instructions to a chat you may coordinate. Do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy chat; otherwise it is queued as the next user turn. Pass wait=true when the current response needs the target chat's sealed answer; voice chats wait by default.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to message"},"message":{"type":"string","description":"Message to queue for the chat"},"steer":{"type":"boolean","description":"Deliver as a turn-boundary steer instead of the next user turn"},"wait":{"type":"boolean","description":"Wait for and return the target chat's next sealed answer"}},"required":["chat_id","message"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(cancelTool{}, tools.ToolSpec{
@@ -100,6 +100,7 @@ type Status struct {
 	PendingApprovals   int
 	LastError          string
 	StatusText         string
+	Response           string
 }
 
 type StartRequest struct {
@@ -114,6 +115,7 @@ type UpdateRequest struct {
 	Title     string
 	Message   string
 	Steer     bool
+	Wait      bool
 	Interrupt bool
 	Hard      bool
 }
@@ -223,6 +225,13 @@ func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 			return nil, fmt.Errorf("steer: %w", err)
 		}
 		out["steer"] = strconv.FormatBool(value)
+	}
+	if wait := strings.TrimSpace(args["wait"]); wait != "" {
+		value, err := strconv.ParseBool(wait)
+		if err != nil {
+			return nil, fmt.Errorf("wait: %w", err)
+		}
+		out["wait"] = strconv.FormatBool(value)
 	}
 	return out, nil
 }
@@ -386,6 +395,7 @@ func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	status, err := updateChat(ctx, runtime, req, UpdateRequest{
 		Message: req.Args["message"],
 		Steer:   req.Args["steer"] == "true",
+		Wait:    req.Args["wait"] == "true" || runtime.ChatRole == chatrole.Voice,
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -511,8 +521,12 @@ func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, u
 
 func chatResult(tool tools.ID, status Status) (tools.Result, error) {
 	stored := storedResult([]Status{status})
+	output := tools.DisplayTextForStored(tool, stored)
+	if response := strings.TrimSpace(status.Response); response != "" {
+		output += "\n\nTarget chat response:\n" + response
+	}
 	return tools.Result{
-		Output: tools.DisplayTextForStored(tool, stored),
+		Output: output,
 		Stored: stored,
 	}, nil
 }

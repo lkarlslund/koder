@@ -152,23 +152,52 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 	if !ok {
 		return chattool.Status{}, fmt.Errorf("chat %s not found", chatID)
 	}
-	if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
-		return chattool.Status{}, err
+	owner, ownerOK := chatByID(snapshot.Chats, ownerChatID)
+	if !ownerOK {
+		return chattool.Status{}, fmt.Errorf("owner chat %s not found", ownerChatID)
+	}
+	if owner.WorkflowRole != chatrole.Voice {
+		if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
+			return chattool.Status{}, err
+		}
 	}
 	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
 		return chattool.Status{}, fmt.Errorf("chat_send cannot send a message to its own chat; target a direct child chat instead")
 	}
+	var waitStart int64
+	var updates <-chan chatpkg.Update
+	var unsubscribe func()
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		rt, err := c.session.Chat(ctx, chatID)
 		if err != nil {
 			return chattool.Status{}, err
 		}
 		if strings.TrimSpace(update.Message) != "" {
+			if update.Wait {
+				if err := rt.EnsureTimeline(ctx); err != nil {
+					return chattool.Status{}, err
+				}
+				waitStart = latestChatSequence(rt.SnapshotTimeline())
+				updates, unsubscribe = rt.Subscribe()
+				defer unsubscribe()
+			}
 			kind := chatpkg.QueueKindUser
 			if update.Steer {
 				kind = chatpkg.QueueKindSteer
 			}
 			rt.Enqueue(chatpkg.QueueItem{Kind: kind, Source: domain.UserMessageSourceSubchat, Text: update.Message})
+			if update.Wait {
+				response, err := waitForChatResponse(ctx, rt, updates, waitStart, update.Message)
+				if err != nil {
+					return chattool.Status{}, err
+				}
+				status, err := c.session.ChatStatus(ctx, chatID)
+				if err != nil {
+					return chattool.Status{}, err
+				}
+				status.Response = response
+				return status, nil
+			}
 		}
 		if update.Interrupt {
 			reason := chatpkg.CancelReasonUserInterrupt
@@ -183,6 +212,79 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 	}
 	status, _, err := c.session.UpdateChat(ctx, chatID, update)
 	return status, err
+}
+
+func waitForChatResponse(ctx context.Context, runtime *chatpkg.Chat, updates <-chan chatpkg.Update, after int64, requestText string) (string, error) {
+	started := false
+	requestSequence := int64(0)
+	for {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("wait for chat response: %w", ctx.Err())
+		case update, ok := <-updates:
+			if !ok {
+				return "", fmt.Errorf("chat closed before replying")
+			}
+			if update.Active || update.Status == chatpkg.StatusWaitingLLM || update.Status == chatpkg.StatusRunningTools {
+				started = true
+				continue
+			}
+			switch update.Status {
+			case chatpkg.StatusWaitingApproval:
+				return "", fmt.Errorf("chat %s needs approval", update.Snapshot.Chat.ID)
+			case chatpkg.StatusWaitingInput:
+				return "", fmt.Errorf("chat %s needs user input", update.Snapshot.Chat.ID)
+			case chatpkg.StatusErrored:
+				return "", fmt.Errorf("chat %s stopped with an error", update.Snapshot.Chat.ID)
+			}
+			timeline := runtime.SnapshotTimeline()
+			if requestSequence == 0 {
+				requestSequence = chatRequestSequence(timeline, after, requestText)
+			}
+			if requestSequence != 0 {
+				if response := latestChatResponse(timeline, requestSequence); response != "" {
+					return response, nil
+				}
+			}
+			if !started {
+				continue
+			}
+		}
+	}
+}
+
+func chatRequestSequence(timeline []domain.TimelineItem, after int64, requestText string) int64 {
+	for _, item := range timeline {
+		if item.Seq <= after {
+			continue
+		}
+		message, ok := item.Content.(domain.UserMessage)
+		if ok && message.Source == domain.UserMessageSourceSubchat && strings.TrimSpace(message.Text) == strings.TrimSpace(requestText) {
+			return item.Seq
+		}
+	}
+	return 0
+}
+
+func latestChatSequence(timeline []domain.TimelineItem) int64 {
+	if len(timeline) == 0 {
+		return 0
+	}
+	return timeline[len(timeline)-1].Seq
+}
+
+func latestChatResponse(timeline []domain.TimelineItem, after int64) string {
+	for index := len(timeline) - 1; index >= 0; index-- {
+		item := timeline[index]
+		if item.Seq <= after {
+			break
+		}
+		message, ok := item.Content.(domain.AssistantMessage)
+		if ok && strings.TrimSpace(message.Text) != "" {
+			return strings.TrimSpace(message.Text)
+		}
+	}
+	return ""
 }
 
 func (s *Session) startPreparedChat(ctx context.Context, chatID id.ID, milestone planning.Milestone, scopedTask *planning.Task, role domain.WorkflowRole, objective string) (chattool.Status, error) {

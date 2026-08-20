@@ -11,11 +11,12 @@ import com.lkarlslund.koder.R
 
 object VoiceResultNotifier {
 	const val EXTRA_VOICE_SESSION_ID = "com.lkarlslund.koder.extra.VOICE_SESSION_ID"
+	const val EXTRA_SESSION_ID = "com.lkarlslund.koder.extra.SESSION_ID"
 	const val EXTRA_TRANSCRIPT_ID = "com.lkarlslund.koder.extra.TRANSCRIPT_ID"
 	private const val CHANNEL_ID = "koder_voice_results"
 	private const val NOTIFICATION_BASE = 879_000
 
-	fun show(context: Context, voiceSessionId: String, sessionTitle: String, transcriptId: String, spokenText: String) {
+	fun show(context: Context, sessionId: String, voiceSessionId: String, sessionTitle: String, transcriptId: String, spokenText: String) {
 		if (voiceSessionId.isBlank()) return
 		val manager = context.getSystemService(NotificationManager::class.java)
 		manager.createNotificationChannel(
@@ -27,6 +28,7 @@ object VoiceResultNotifier {
 			context,
 			notificationId(voiceSessionId, transcriptId),
 			Intent(context, MainActivity::class.java)
+				.putExtra(EXTRA_SESSION_ID, sessionId)
 				.putExtra(EXTRA_VOICE_SESSION_ID, voiceSessionId)
 				.putExtra(EXTRA_TRANSCRIPT_ID, transcriptId)
 				.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),

@@ -15,19 +15,20 @@ protocol in `protocol/voice/v1`.
 
 There are three distinct objects:
 
-- A **voice chat** is a durable `SessionKindVoice` session with one
-  `WorkflowRoleVoice` chat. It records final user transcripts and concise
-  assistant results. A user creates and selects voice chats in Android, while
-  the Web UI lists them in a separate Voice Chats tab for inspection.
+- A **session** is the same project or quick session shown by Koder's Web UI.
+  Android lists these first, including their ordinary and voice-chat counts.
+- A **voice chat** is a normal top-level chat with `WorkflowRoleVoice` inside a
+  session. A regular session may contain several voice chats and several other
+  chats. Android shows all of them, but only voice chats can be opened as a
+  conversation. A new temporary conversation creates a quick session with one
+  voice chat and a Koder-managed scratch folder.
 - A **voice call** is one ephemeral authenticated WebSocket connection. Koder
-  enforces one live call process-wide while allowing any number of durable
-  voice chats.
-- A **work target** is an ordinary or quick Koder session. Its existing chat
-  performs the work with its own tools, permissions, approvals, transcript,
-  and workspace boundary.
+  permits multiple phones to use different voice chats concurrently, while
+  enforcing exactly one live voice chat per Android installation.
 
-The voice chat is a coordination and audit layer, not a privileged agent. It
-cannot bypass a target chat's permission or approval state.
+The voice chat is that session's conversational orchestrator, not a privileged
+agent. It uses the session's workspace and standard tool configuration and can
+coordinate sibling chats, but cannot bypass their permission or approval state.
 
 ## Request flow
 
@@ -39,9 +40,8 @@ Android Core-Telecom call
   -> remote OpenAI-compatible STT
   -> normal persistent chat with the Voice profile
   -> optional permission-gated tool call to the connected Android phone
-  -> voice-scoped session tools when other work is needed
-  -> existing, quick, or persistent Koder session
-  -> ordinary target chat and its normal tools
+  -> standard tools, including native chat coordination
+  -> optional sibling chat and its normal tools
   -> concise result plus generic MIME parts
   -> remote streaming TTS
   -> AudioTrack and Android companion feed
@@ -52,15 +52,15 @@ chat. The Voice role supplies short, conversational behavior and the normal
 chat loop supplies history, model execution, tool calls, and the final answer.
 There is no separate stateless router or summarizer model call.
 
-Session mechanics live in the voice-only tool definitions, not in the role
-prompt. `session_list` returns bounded work-session summaries,
-`session_delegate` asks an existing session to inspect its history or do work,
-and `session_start` creates a temporary or persistent target. Tool arguments
-and lifecycle guidance therefore stay synchronized with the capabilities the
-model is actually offered. Quick chats remain visible and can be closed or
-promoted in the Web UI.
+Tool mechanics live in each normal tool definition, not in the role prompt.
+The voice profile receives the standard catalog and uses `chat_list`,
+`chat_send`, and `chat_start` to coordinate work inside its selected session.
+The obsolete voice-only `session_list`, `session_delegate`, and `session_start`
+abstraction is not offered. Android, rather than the model, chooses the session
+boundary and creates quick sessions.
 
-Delegation waits for the target chat's sealed response. A busy target, approval
+`chat_send` waits for the target chat's sealed response when called by a voice
+chat. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
 Android labels the initial model phase as **Thinking** and begins its local busy
@@ -83,25 +83,27 @@ mechanics; the role prompt only defines the generic conversational behavior.
 
 ## Server boundaries
 
-- `internal/voice` owns call state, delegation contracts,
-  audio framing, and the process-wide call lease.
+- `internal/voice` owns session/chat call selection contracts, audio framing,
+  and the per-device call lease registry.
 - `internal/voiceapi` owns HTTP/WebSocket authentication and `voice.v1` wire
   DTOs.
 - `internal/app/voice.go` adapts the controller, sessions, providers, chat
   runtime, and artifacts to those interfaces.
 - `internal/provider` exposes OpenAI-compatible transcription and streaming
   speech APIs.
-- `internal/chatstatus` and the `chat_status` tool provide model-authored,
-  descriptive chat status without replacing runtime states such as reasoning,
-  streaming, waiting, error, or idle.
-- `internal/phonedevice` owns the one-active-call phone capability catalog and
-  RPC hub. `internal/tools/phonetool` exposes one dynamic voice-only `phone`
-  tool whose action enum contains only capabilities currently advertised by
-  Android.
+- `internal/chatstatus` and the global `chat_status` tool let every normal chat
+  profile publish a model-authored descriptive status. It is not voice-specific
+  and does not replace runtime states such as reasoning, streaming, waiting,
+  error, or idle.
+- `internal/phonedevice` owns the call-scoped phone capability catalog and RPC
+  hub. It routes each running voice chat to the Android call that submitted the
+  turn, so parallel phones cannot see or invoke one another's capabilities.
+  `internal/tools/phonetool` exposes one dynamic voice-only `phone` tool whose
+  action enum contains only capabilities advertised by that phone.
 
-Voice chats and their transcripts are normal selectable Web UI sessions. Voice
-and quick sessions use one chat; Android intentionally does not reproduce the
-browser workspace or planning UI.
+Voice chats and their transcripts are normal chats and remain inspectable in
+the Web UI. Android intentionally exposes only the session/chat browser rather
+than reproducing the browser workspace or planning UI.
 
 Transcript history uses the same indexed timeline-page storage path as the Web
 UI. A ready snapshot carries only the newest five complete user/assistant

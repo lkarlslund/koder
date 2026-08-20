@@ -1,5 +1,5 @@
-// Package phonedevice owns the process-wide, permission-gated Android tool
-// provider connected to the active voice conversation.
+// Package phonedevice owns permission-gated Android tool providers connected
+// to active voice conversations.
 package phonedevice
 
 import (
@@ -106,6 +106,22 @@ type Control interface {
 	Execute(context.Context, Action, map[string]string) (Result, error)
 }
 
+type callIDContextKey struct{}
+
+// WithCallID binds backend work to the Android call that submitted it.
+func WithCallID(ctx context.Context, callID string) context.Context {
+	return context.WithValue(ctx, callIDContextKey{}, strings.TrimSpace(callID))
+}
+
+// CallIDFromContext returns the Android call bound by the voice transport.
+func CallIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(callIDContextKey{}).(string)
+	return strings.TrimSpace(value)
+}
+
 type connection struct {
 	callID               string
 	actions              map[Action]bool
@@ -114,34 +130,50 @@ type connection struct {
 	generation           uint64
 }
 
-// Hub owns at most one Android tool provider, matching the one-active-call
-// invariant. Its zero value is usable.
+// Hub owns one Android tool provider per active call. Its zero value is usable.
 type Hub struct {
 	mu             sync.RWMutex
-	active         *connection
+	connections    map[string]*connection
 	generation     uint64
-	turn           *voiceTurnPolicy
+	turns          map[string]*voiceTurnPolicy
 	turnGeneration uint64
 }
 
 type voiceTurnPolicy struct {
 	generation        uint64
+	callID            string
 	allowedUserFacing map[Action]bool
 }
 
-// BeginVoiceTurn limits intent-sensitive phone actions to those explicitly
-// requested in the current utterance. The returned release must be called when
-// the turn finishes. The one-active-voice-conversation invariant means this
-// policy is process-wide in the same way as the attached phone provider.
+// BeginVoiceTurn supports legacy single-provider callers.
 func (h *Hub) BeginVoiceTurn(userText string) func() {
+	return h.BeginVoiceTurnForChat("", "legacy", userText)
+}
+
+// BeginVoiceTurnForChat binds a voice chat's current turn to the phone call
+// that submitted it and limits user-facing actions to explicit requests.
+func (h *Hub) BeginVoiceTurnForChat(callID, chatID, userText string) func() {
 	if h == nil {
 		return func() {}
 	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return func() {}
+	}
 	h.mu.Lock()
+	if callID = strings.TrimSpace(callID); callID == "" && len(h.connections) == 1 {
+		for connectedCallID := range h.connections {
+			callID = connectedCallID
+		}
+	}
 	h.turnGeneration++
 	generation := h.turnGeneration
-	h.turn = &voiceTurnPolicy{
+	if h.turns == nil {
+		h.turns = make(map[string]*voiceTurnPolicy)
+	}
+	h.turns[chatID] = &voiceTurnPolicy{
 		generation:        generation,
+		callID:            callID,
 		allowedUserFacing: explicitlyRequestedUserFacingActions(userText),
 	}
 	h.mu.Unlock()
@@ -150,8 +182,8 @@ func (h *Hub) BeginVoiceTurn(userText string) func() {
 		once.Do(func() {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			if h.turn != nil && h.turn.generation == generation {
-				h.turn = nil
+			if turn := h.turns[chatID]; turn != nil && turn.generation == generation {
+				delete(h.turns, chatID)
 			}
 		})
 	}
@@ -265,19 +297,19 @@ func (h *Hub) AttachWithPolicies(callID string, advertised []string, policies ma
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.active != nil && h.active.callID != callID {
-		return nil, errors.New("another phone device provider is active")
+	if h.connections == nil {
+		h.connections = make(map[string]*connection)
 	}
 	h.generation++
 	generation := h.generation
-	h.active = &connection{callID: callID, actions: actions, confirmationPolicies: confirmationPolicies, execute: execute, generation: generation}
+	h.connections[callID] = &connection{callID: callID, actions: actions, confirmationPolicies: confirmationPolicies, execute: execute, generation: generation}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			if h.active != nil && h.active.generation == generation {
-				h.active = nil
+			if active := h.connections[callID]; active != nil && active.generation == generation {
+				delete(h.connections, callID)
 			}
 		})
 	}, nil
@@ -290,29 +322,56 @@ func (h *Hub) DetachCall(callID string) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.active != nil && h.active.callID == strings.TrimSpace(callID) {
-		h.active = nil
-		h.generation++
+	callID = strings.TrimSpace(callID)
+	delete(h.connections, callID)
+	for chatID, turn := range h.turns {
+		if turn.callID == callID {
+			delete(h.turns, chatID)
+		}
 	}
+	h.generation++
 }
 
-// Capabilities returns only server-known actions advertised by Android.
+// ForChat resolves the phone provider bound to a running voice chat.
+func (h *Hub) ForChat(chatID string) Control {
+	return scopedControl{hub: h, chatID: strings.TrimSpace(chatID)}
+}
+
+type scopedControl struct {
+	hub    *Hub
+	chatID string
+}
+
+func (c scopedControl) Capabilities() []CatalogEntry {
+	return c.hub.capabilities(c.chatID)
+}
+
+func (c scopedControl) Execute(ctx context.Context, action Action, args map[string]string) (Result, error) {
+	return c.hub.execute(ctx, c.chatID, action, args)
+}
+
+// Capabilities supports legacy callers when exactly one phone is connected.
 func (h *Hub) Capabilities() []CatalogEntry {
+	return h.capabilities("legacy")
+}
+
+func (h *Hub) capabilities(chatID string) []CatalogEntry {
 	if h == nil {
 		return nil
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	if h.active == nil {
+	active, turn := h.connectionForChatLocked(chatID)
+	if active == nil {
 		return nil
 	}
-	out := make([]CatalogEntry, 0, len(h.active.actions))
+	out := make([]CatalogEntry, 0, len(active.actions))
 	for _, entry := range catalog {
-		if entry.UserFacing && (h.turn == nil || !h.turn.allowedUserFacing[entry.Action]) {
+		if entry.UserFacing && (turn == nil || !turn.allowedUserFacing[entry.Action]) {
 			continue
 		}
-		if h.active.actions[entry.Action] {
-			switch h.active.confirmationPolicies[entry.Action] {
+		if active.actions[entry.Action] {
+			switch active.confirmationPolicies[entry.Action] {
 			case "ask":
 				entry.Confirmation = true
 			case "on":
@@ -324,19 +383,44 @@ func (h *Hub) Capabilities() []CatalogEntry {
 	return out
 }
 
-// Execute invokes one currently advertised action.
+// CapabilitiesForCall returns every server-known action advertised by one
+// sidecar, without applying utterance-specific visibility.
+func (h *Hub) CapabilitiesForCall(callID string) []CatalogEntry {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	active := h.connections[strings.TrimSpace(callID)]
+	if active == nil {
+		return nil
+	}
+	out := make([]CatalogEntry, 0, len(active.actions))
+	for _, entry := range catalog {
+		if active.actions[entry.Action] {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// Execute supports legacy callers when exactly one phone is connected.
 func (h *Hub) Execute(ctx context.Context, action Action, args map[string]string) (Result, error) {
+	return h.execute(ctx, "legacy", action, args)
+}
+
+func (h *Hub) execute(ctx context.Context, chatID string, action Action, args map[string]string) (Result, error) {
 	if h == nil {
 		return Result{}, errors.New("phone device provider is unavailable")
 	}
 	h.mu.RLock()
-	active := h.active
+	active, turn := h.connectionForChatLocked(chatID)
 	if active == nil || !active.actions[action] {
 		h.mu.RUnlock()
 		return Result{}, fmt.Errorf("phone action %q is not enabled or the phone is disconnected", action)
 	}
 	entry, knownAction := known[action]
-	if knownAction && entry.UserFacing && (h.turn == nil || !h.turn.allowedUserFacing[action]) {
+	if knownAction && entry.UserFacing && (turn == nil || !turn.allowedUserFacing[action]) {
 		h.mu.RUnlock()
 		return Result{}, fmt.Errorf("phone action %s requires an explicit request for that user-facing action in the current voice utterance", action)
 	}
@@ -355,4 +439,16 @@ func (h *Hub) Execute(ctx context.Context, action Action, args map[string]string
 		return Result{}, errors.New("phone result exceeded 64 KiB")
 	}
 	return result, nil
+}
+
+func (h *Hub) connectionForChatLocked(chatID string) (*connection, *voiceTurnPolicy) {
+	if turn := h.turns[strings.TrimSpace(chatID)]; turn != nil {
+		return h.connections[turn.callID], turn
+	}
+	if len(h.connections) == 1 {
+		for _, active := range h.connections {
+			return active, h.turns["legacy"]
+		}
+	}
+	return nil, nil
 }
