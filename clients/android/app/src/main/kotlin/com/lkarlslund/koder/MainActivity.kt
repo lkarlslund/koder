@@ -84,6 +84,7 @@ import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.VoiceProtocol
 import com.lkarlslund.koder.voice.VoiceResultNotifier
+import com.lkarlslund.koder.voice.VoiceStateOrbView
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.audioRouteChipText
@@ -95,6 +96,7 @@ import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
+import com.lkarlslund.koder.voice.voiceOrbMode
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -138,6 +140,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var feedPlaceholder: View? = null
     private var typedMessage: EditText? = null
 	private var activePanel: View? = null
+	private var voiceOrb: VoiceStateOrbView? = null
+	private var voiceOrbDetail: TextView? = null
 	private var presentationPanel: View? = null
 	private var presentationFeed: LinearLayout? = null
 	private var presentationShown = false
@@ -323,6 +327,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
 			latestCallSnapshot = snapshot
+			voiceOrb?.mode = voiceOrbMode(snapshot.stage)
+			voiceOrbDetail?.apply {
+				text = snapshot.detail
+				contentDescription = snapshot.detail
+			}
 			snapshot.voiceSessions.firstOrNull { it.id == snapshot.voiceSessionId }?.let {
 				secureSettings.markVoiceSessionRead(it.id, it.resultCount)
 			}
@@ -392,6 +401,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		runOnUiThread {
 			prependHistory(entries)
 			focusPendingResult()
+		}
+	}
+
+	override fun onAudioLevel(level: Float, user: Boolean) {
+		runOnUiThread {
+			if (screen != Screen.CHAT) return@runOnUiThread
+			val expected = if (user) CallController.Stage.RECORDING else CallController.Stage.SPEAKING
+			if (latestCallSnapshot.stage == expected) voiceOrb?.setAudioLevel(level)
 		}
 	}
 
@@ -1497,9 +1514,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		activePanel = LinearLayout(this).apply {
 			orientation = LinearLayout.VERTICAL
 			gravity = Gravity.CENTER
-			addView(logo(), centeredSquare(88, bottom = 18))
-			addView(title("Voice is active").apply { gravity = Gravity.CENTER }, matchWrap())
-			addView(helper("Just speak — you can interrupt Koder at any time.").apply { gravity = Gravity.CENTER }, spaced(top = 7))
+			voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
+				mode = voiceOrbMode(CallController.Stage.CONNECTING)
+			}.also { addView(it, centeredSquare(252, bottom = 22)) }
+			voiceOrbDetail = body(initialDetail).apply {
+				gravity = Gravity.CENTER
+				textSize = 17f
+			}.also { addView(it, matchWrap()) }
 		}
 		root.addView(activePanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -1659,6 +1680,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			ViewCompat.setTooltipText(this, contentDescription)
 		}
 		val surface = conversationSurface(active, transcriptShown, presentationShown)
+		status?.visibility = if (surface == ConversationSurface.ACTIVE) View.GONE else View.VISIBLE
 		activePanel?.visibility = if (surface == ConversationSurface.ACTIVE) View.VISIBLE else View.GONE
 		presentationPanel?.visibility = if (surface == ConversationSurface.PRESENTATION) View.VISIBLE else View.GONE
 		feedScroll?.visibility = if (surface == ConversationSurface.TRANSCRIPT) View.VISIBLE else View.GONE

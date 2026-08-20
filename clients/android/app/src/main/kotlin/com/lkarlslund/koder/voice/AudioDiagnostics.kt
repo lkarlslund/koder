@@ -4,6 +4,30 @@ import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.sqrt
 
+internal fun pcmLevel(samples: ShortArray): Float {
+	if (samples.isEmpty()) return 0f
+	val meanSquare = samples.sumOf { sample ->
+		val normalized = sample.toDouble() / Short.MAX_VALUE
+		normalized * normalized
+	} / samples.size
+	return sqrt(meanSquare).toFloat().coerceIn(0f, 1f)
+}
+
+internal fun pcmLevel(bytes: ByteArray): Float {
+	if (bytes.size < 2) return 0f
+	var sum = 0.0
+	var count = 0
+	var index = 0
+	while (index + 1 < bytes.size) {
+		val sample = ((bytes[index].toInt() and 0xff) or (bytes[index + 1].toInt() shl 8)).toShort()
+		val normalized = sample.toDouble() / Short.MAX_VALUE
+		sum += normalized * normalized
+		count++
+		index += 2
+	}
+	return sqrt(sum / count.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
+}
+
 data class AudioDiagnostics(
 	val active: Boolean = false,
 	val microphoneLevelDbfs: Double = -96.0,
@@ -60,11 +84,8 @@ internal class AudioDiagnosticsTracker(
 
 	@Synchronized
 	fun recordInput(samples: ShortArray, vad: VadResult, speechActive: Boolean) {
-		val meanSquare = if (samples.isEmpty()) 0.0 else samples.sumOf { sample ->
-			val normalized = sample.toDouble() / Short.MAX_VALUE
-			normalized * normalized
-		} / samples.size
-		val measured = if (meanSquare <= 0.0) -96.0 else (20.0 * log10(sqrt(meanSquare))).coerceIn(-96.0, 0.0)
+		val linearLevel = pcmLevel(samples).toDouble()
+		val measured = if (linearLevel <= 0.0) -96.0 else (20.0 * log10(linearLevel)).coerceIn(-96.0, 0.0)
 		microphoneLevelDbfs = if (capturedFrames == 0L) measured else microphoneLevelDbfs * 0.72 + measured * 0.28
 		vadProbabilityPercent = (vad.speechProbability * 100).toInt().coerceIn(0, 100)
 		vadState = when {

@@ -408,7 +408,32 @@ class MainActivityInstrumentedTest {
 				onView(withText("Create")).perform(click())
 				val labels = waitForText(scenario, "Creating conversation…")
 				assertTrue(labels.contains("Trip planning"))
-				onView(withContentDescription("Conversation connecting")).check(matches(isDisplayed()))
+				scenario.onActivity { activity ->
+					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is thinking")
+					assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
+				}
+				val orbStates = listOf(
+					com.lkarlslund.koder.voice.CallController.Stage.LISTENING to "Koder is listening",
+					com.lkarlslund.koder.voice.CallController.Stage.RECORDING to "You are speaking",
+					com.lkarlslund.koder.voice.CallController.Stage.PROCESSING to "Koder is thinking",
+					com.lkarlslund.koder.voice.CallController.Stage.WORKING to "Koder is using tools",
+					com.lkarlslund.koder.voice.CallController.Stage.SPEAKING to "Koder is speaking",
+				)
+				orbStates.forEach { (stage, description) ->
+					scenario.onActivity { activity ->
+						activity.onSnapshot(com.lkarlslund.koder.voice.CallController.Snapshot(stage = stage, detail = if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) "Working in Laptop repair…" else description))
+					}
+					scenario.onActivity { activity ->
+						val orb = activity.findViewById<View>(android.R.id.content).findByDescription(description)
+						assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
+					}
+					if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) {
+						scenario.onActivity { activity ->
+							val detail = activity.findViewById<View>(android.R.id.content).findByDescription("Working in Laptop repair…")
+							assertTrue(detail is TextView && detail.text == "Working in Laptop repair…" && detail.visibility == View.VISIBLE)
+						}
+					}
+				}
 			}
 		} finally {
 			allowCreateResponse.countDown()

@@ -49,6 +49,7 @@ class CallController(
         fun onAssistantMessage(message: VoiceMessage)
 		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
 		fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) = Unit
+		fun onAudioLevel(level: Float, user: Boolean) = Unit
     }
 
     private val appContext = context.applicationContext
@@ -439,7 +440,7 @@ class CallController(
     }
 
     @Synchronized
-    private fun handleOutputAudio(frame: VoiceAudioFrame) {
+	private fun handleOutputAudio(frame: VoiceAudioFrame) {
         if (!running || !acceptingOutput) return
 		audioConfig?.output?.let { diagnostics.recordOutput(frame, it) }
         if (frame.kind != VoiceAudioFrameKind.OUTPUT_PCM || frame.sequence != outputSequence) {
@@ -448,6 +449,7 @@ class CallController(
             onMain { update(Stage.ERROR, "Speech audio arrived out of order") }
             return
         }
+		listener.onAudioLevel(pcmLevel(frame.pcm), false)
         outputSequence++
         playback.write(frame.pcm)
     }
@@ -496,6 +498,7 @@ class CallController(
         try {
 			val evaluated = endpoint.evaluate(samples)
 			diagnostics.recordInput(samples, evaluated.vad, utteranceId.isNotBlank())
+			listener.onAudioLevel(pcmLevel(samples), true)
 			for (event in evaluated.events) {
                 when (event) {
                     is UtteranceEvent.Started -> {
