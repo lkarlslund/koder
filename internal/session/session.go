@@ -621,7 +621,10 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 	if modelID == "" && template.EffectiveBackend() == backend {
 		modelID = strings.TrimSpace(template.ModelID)
 	}
-	providerID := strings.TrimSpace(template.ProviderID)
+	providerID := strings.TrimSpace(spec.ProviderID)
+	if providerID == "" && template.EffectiveBackend() == backend {
+		providerID = strings.TrimSpace(template.ProviderID)
+	}
 	if backend == domain.ChatBackendCodex {
 		providerID = ""
 	}

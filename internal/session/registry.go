@@ -267,6 +267,12 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	}
 	modelID := cfg.DefaultModel
 	providerID := cfg.DefaultProvider
+	if strings.TrimSpace(spec.ProviderID) != "" {
+		providerID = strings.TrimSpace(spec.ProviderID)
+	}
+	if strings.TrimSpace(spec.ModelID) != "" {
+		modelID = strings.TrimSpace(spec.ModelID)
+	}
 	if spec.Backend == domain.ChatBackendCodex {
 		modelID = spec.ModelID
 		providerID = ""

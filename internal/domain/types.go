@@ -396,6 +396,7 @@ type ChatCreateSpec struct {
 	Backend           ChatBackend     `json:"backend,omitempty"`
 	WorkflowRole      WorkflowRole    `json:"workflow_role,omitempty"`
 	InteractionMode   InteractionMode `json:"interaction_mode,omitempty"`
+	ProviderID        string          `json:"provider_id,omitempty"`
 	ModelID           string          `json:"model_id,omitempty"`
 	PermissionProfile string          `json:"permission_profile,omitempty"`
 	MilestoneKey      string          `json:"milestone_key,omitempty"`
@@ -405,6 +406,7 @@ type ChatCreateSpec struct {
 
 func (s ChatCreateSpec) Normalized() ChatCreateSpec {
 	s.Title = strings.TrimSpace(s.Title)
+	s.ProviderID = strings.TrimSpace(s.ProviderID)
 	s.ModelID = strings.TrimSpace(s.ModelID)
 	s.PermissionProfile = strings.TrimSpace(s.PermissionProfile)
 	s.MilestoneKey = strings.TrimSpace(s.MilestoneKey)

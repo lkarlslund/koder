@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -703,6 +704,21 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	providerState := ctrl.Providers()
 	if len(providerState.Providers) != 1 || providerState.Providers[0].Health.Status != "healthy" || providerState.Providers[0].Health.ModelCount != 2 || providerState.Providers[0].Health.CheckedAt == nil || providerState.Providers[0].Health.CheckedAt.IsZero() {
 		t.Fatalf("expected provider runtime health after discovery, got %#v", providerState.Providers)
+	}
+}
+
+func TestValidateChatModelAvailableReturnsRecoverableErrorForRemovedModel(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"current-model","supported_parameters":["tools"]}]}`)
+	}))
+	defer modelServer.Close()
+	cfg := config.Default()
+	cfg.Providers = map[string]config.Provider{"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"}}
+	ctrl := &Controller{cfg: cfg, providerHealth: provider.NewHealthTracker()}
+	err := ctrl.validateChatModelAvailable(context.Background(), domain.Chat{Backend: domain.ChatBackendKoder, ProviderID: "test", ModelID: "removed-model"})
+	var unavailable *ModelUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.ClientErrorCode() != "model_unavailable" {
+		t.Fatalf("expected recoverable unavailable-model error, got %v", err)
 	}
 }
 

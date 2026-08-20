@@ -160,12 +160,13 @@ class VoiceProtocolTest {
 	fun voiceChatCreationKeepsBackendRoleAndInteractionIndependent() {
 		val request = JSONObject(VoiceProtocol.createVoiceChatRequest(VoiceChatCreateSpec(
 			title = "Implement milestone", backend = "codex", workflowRole = "execution",
-			modelId = "gpt-5.6-codex", permissionProfile = "workspace-write", milestoneKey = "M4",
+			providerId = "remote", modelId = "gpt-5.6-codex", permissionProfile = "workspace-write", milestoneKey = "M4",
 			toolStates = mapOf("chat_status" to true, "session_start" to false),
 		)))
 		assertEquals("codex", request.getString("backend"))
 		assertEquals("execution", request.getString("workflow_role"))
 		assertEquals("voice", request.getString("interaction_mode"))
+		assertEquals("remote", request.getString("provider_id"))
 		assertEquals("M4", request.getString("milestone_key"))
 		assertFalse(request.getJSONObject("tool_states").getBoolean("session_start"))
 
@@ -178,6 +179,17 @@ class VoiceProtocolTest {
 		assertEquals("chat_status", home.chatBackends.last().additionalTools.single().id)
 		assertTrue(home.chats.single().isVoiceChat)
 		assertEquals("execution", home.chats.single().workflowRole)
+	}
+
+	@Test
+	fun decodesRecoverableServerErrorsAndModelProviders() {
+		val frame = VoiceProtocol.parse("""{"type":"error","protocol":"voice.v1","error":"Choose another model","error_code":"model_unavailable"}""")
+		assertEquals("model_unavailable", frame.errorCode)
+		val home = VoiceProtocol.parseHome("""{"protocol":"voice.v1","chat_backends":[{"id":"koder","label":"Koder","available":true,"models":[{"provider_id":"local","id":"fast","name":"Fast","default":true}]}]}""")
+		assertEquals("local", home.chatBackends.single().models.single().providerId)
+		val update = JSONObject(VoiceProtocol.updateChatRequest(providerId = "local", modelId = "fast"))
+		assertEquals("local", update.getString("provider_id"))
+		assertEquals("fast", update.getString("model_id"))
 	}
 
     @Test

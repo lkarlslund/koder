@@ -18,6 +18,7 @@ data class VoiceSession(
 	val backend: String = "koder",
 	val workflowRole: String = "",
 	val interactionMode: String = "",
+	val providerId: String = "",
 	val modelId: String = "",
 	val permissionProfile: String = "",
 	val chatCount: Int = 0,
@@ -40,6 +41,7 @@ val VoiceSession.isVoiceChat: Boolean
 data class VoiceChatModelOption(
 	val id: String,
 	val name: String,
+	val providerId: String = "",
 	val description: String = "",
 	val isDefault: Boolean = false,
 )
@@ -70,6 +72,7 @@ data class VoiceChatCreateSpec(
 	val title: String,
 	val backend: String = "koder",
 	val workflowRole: String = "orchestrator",
+	val providerId: String = "",
 	val modelId: String = "",
 	val permissionProfile: String = "",
 	val milestoneKey: String = "",
@@ -236,6 +239,7 @@ data class VoiceServerFrame(
 	val parts: List<VoicePart> = emptyList(),
     val appUpdate: AppUpdate? = null,
     val error: String = "",
+	val errorCode: String = "",
 )
 
 object VoiceProtocol {
@@ -249,6 +253,7 @@ object VoiceProtocol {
 		.put("workflow_role", spec.workflowRole)
 		.put("interaction_mode", "voice")
 		.apply {
+			if (spec.providerId.isNotBlank()) put("provider_id", spec.providerId)
 			if (spec.modelId.isNotBlank()) put("model_id", spec.modelId)
 			if (spec.permissionProfile.isNotBlank()) put("permission_profile", spec.permissionProfile)
 			if (spec.milestoneKey.isNotBlank()) put("milestone_key", spec.milestoneKey)
@@ -271,9 +276,11 @@ object VoiceProtocol {
 		deleted?.let { put("deleted", it) }
 	}.toString()
 
-	fun updateChatRequest(title: String? = null, archived: Boolean? = null): String = JSONObject().apply {
+	fun updateChatRequest(title: String? = null, archived: Boolean? = null, providerId: String? = null, modelId: String? = null): String = JSONObject().apply {
 		title?.let { put("title", it.trim()) }
 		archived?.let { put("archived", it) }
+		providerId?.let { put("provider_id", it.trim()) }
+		modelId?.let { put("model_id", it.trim()) }
 	}.toString()
 
 	fun parseHome(payload: String): VoiceHome {
@@ -296,7 +303,10 @@ object VoiceProtocol {
 					id = backend.getString("id"), label = backend.optString("label", backend.getString("id")),
 					available = backend.optBoolean("available"), detail = backend.optString("detail"),
 					models = backend.optJSONArray("models").mapObjects { model ->
-						VoiceChatModelOption(model.getString("id"), model.optString("name", model.getString("id")), model.optString("description"), model.optBoolean("default"))
+						VoiceChatModelOption(
+							id = model.getString("id"), name = model.optString("name", model.getString("id")),
+							providerId = model.optString("provider_id"), description = model.optString("description"), isDefault = model.optBoolean("default"),
+						)
 					},
 					permissionProfiles = backend.optJSONArray("permission_profiles").mapObjects { profile ->
 						VoiceChatPermissionOption(profile.getString("id"), profile.optString("label", profile.getString("id")), profile.optString("description"))
@@ -471,6 +481,7 @@ object VoiceProtocol {
 			parts = root.optJSONArray("parts").mapObjects { it.toVoicePart() },
             appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
             error = root.optString("error"),
+			errorCode = root.optString("error_code"),
         )
     }
 
@@ -557,6 +568,7 @@ object VoiceProtocol {
 		backend = optString("backend", "koder"),
 		workflowRole = optString("workflow_role", optString("role")),
 		interactionMode = optString("interaction_mode", if (optString("role") == "voice") "voice" else "text"),
+		providerId = optString("provider_id"),
 		modelId = optString("model_id"),
 		permissionProfile = optString("permission_profile"),
 		chatCount = optInt("chat_count"),

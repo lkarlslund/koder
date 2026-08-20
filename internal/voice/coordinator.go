@@ -40,6 +40,7 @@ type Chat struct {
 	Backend           string    `json:"backend"`
 	WorkflowRole      string    `json:"workflow_role"`
 	InteractionMode   string    `json:"interaction_mode"`
+	ProviderID        string    `json:"provider_id,omitempty"`
 	ModelID           string    `json:"model_id,omitempty"`
 	PermissionProfile string    `json:"permission_profile,omitempty"`
 	LastMessage       string    `json:"last_message,omitempty"`
@@ -62,6 +63,7 @@ type ChatBackendOption struct {
 }
 
 type ChatModelOption struct {
+	ProviderID  string `json:"provider_id,omitempty"`
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -91,8 +93,10 @@ type SessionUpdate struct {
 
 // ChatUpdate changes user-managed chat metadata without affecting history.
 type ChatUpdate struct {
-	Title    *string
-	Archived *bool
+	Title      *string
+	Archived   *bool
+	ProviderID *string
+	ModelID    *string
 }
 
 // DelegationResult is the public outcome of work performed in an ordinary chat.

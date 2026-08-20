@@ -54,11 +54,13 @@ class VoiceSessionClient(
 		chatId: String,
 		title: String? = null,
 		archived: Boolean? = null,
+		providerId: String? = null,
+		modelId: String? = null,
 		callback: (Result<VoiceHome>) -> Unit,
 	) {
 		request(
 			server, token, "/voice/v1/sessions/$sessionId/chats/$chatId",
-			VoiceProtocol.updateChatRequest(title, archived), VoiceProtocol::parseHome, callback, "PATCH",
+			VoiceProtocol.updateChatRequest(title, archived, providerId, modelId), VoiceProtocol::parseHome, callback, "PATCH",
 		)
 	}
 

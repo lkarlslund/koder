@@ -143,6 +143,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var requestGeneration = 0L
     private var pendingSession: VoiceSession? = null
 	private var selectedKoderSession: VoiceSession? = null
+	private var currentSessionChats: List<VoiceSession> = emptyList()
+	private var lastRecoveryError = ""
+	private var startAfterModelRecovery = false
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
 	private var pendingPhoneAction = ""
@@ -362,6 +365,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (snapshot.stage == CallController.Stage.RECORDING) delegatedWorkPending = false
 		runOnUiThread {
 			latestCallSnapshot = snapshot
+			if (snapshot.errorCode == "model_unavailable" && snapshot.detail != lastRecoveryError) {
+				lastRecoveryError = snapshot.detail
+				pendingSession?.let(::showChatModelDialog)
+			}
 			if (screen != Screen.CHAT) return@runOnUiThread
 			voiceOrb?.mode = voiceOrbMode(snapshot.stage)
 			voiceOrbDetail?.apply {
@@ -1481,6 +1488,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
 	private fun showSession(session: VoiceSession, home: VoiceHome) {
+		currentSessionChats = home.chats
 		if (pendingResultSessionId.isNotBlank() && pendingResultOwnerSessionId == session.id) {
 			home.chats.firstOrNull { it.id == pendingResultSessionId && it.isVoiceChat }?.let {
 				selectedKoderSession = session
@@ -1570,11 +1578,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun showKoderChatMenu(anchor: View, chat: VoiceSession) {
 		PopupMenu(this, anchor).apply {
 			menu.add("Rename")
+			if (chat.backend == "koder") menu.add("Change model")
 			menu.add(if (chat.archived) "Restore from archive" else "Archive")
 			if (chat.archived) menu.add("Delete permanently")
 			setOnMenuItemClickListener { item ->
 				when (item.title.toString()) {
 					"Rename" -> showRenameKoderChatDialog(chat)
+					"Change model" -> showChatModelDialog(chat)
 					"Archive" -> updateKoderChat(chat, archived = true)
 					"Restore from archive" -> updateKoderChat(chat, archived = false)
 					"Delete permanently" -> showDeleteKoderChatDialog(chat)
@@ -1583,6 +1593,50 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			show()
 		}
+	}
+
+	private fun showChatModelDialog(chat: VoiceSession) {
+		val backend = readinessHome?.chatBackends.orEmpty().firstOrNull { it.id == "koder" }
+		val models = backend?.models.orEmpty()
+		if (models.isEmpty()) {
+			Toast.makeText(this, "Koder could not load any available chat models", Toast.LENGTH_LONG).show()
+			return
+		}
+		val labels = models.map { model ->
+			buildString {
+				append(model.name)
+				if (model.isDefault) append(" — system default")
+			}
+		}.toTypedArray()
+		val current = models.indexOfFirst { it.providerId == chat.providerId && it.id == chat.modelId }.coerceAtLeast(0)
+		AlertDialog.Builder(this)
+			.setTitle("Choose a model")
+			.setMessage("The previous model may no longer be available. The system default is listed first.")
+			.setSingleChoiceItems(labels, current) { dialog, which ->
+				val model = models[which]
+				val ownerSessionId = chat.sessionId.ifBlank { selectedKoderSession?.id.orEmpty() }
+				sessionClient.updateChat(
+					settings.server, settings.token, ownerSessionId, chat.id,
+					providerId = model.providerId, modelId = model.id,
+				) { result ->
+					runOnUiThread {
+						result.fold(
+							onSuccess = {
+								dialog.dismiss()
+								lastRecoveryError = ""
+								if (startAfterModelRecovery) {
+									startAfterModelRecovery = false
+									requestCallStart()
+								} else if (::controller.isInitialized) controller.resumeAfterRecovery()
+								Toast.makeText(this, "Model changed to ${model.name}", Toast.LENGTH_SHORT).show()
+							},
+							onFailure = ::showManagementError,
+						)
+					}
+				}
+			}
+			.setNegativeButton("Cancel", null)
+			.show()
 	}
 
 	private fun updateKoderChat(chat: VoiceSession, title: String? = null, archived: Boolean? = null) {
@@ -1900,9 +1954,21 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		fun updateBackendOptions(position: Int) {
 			val backend = backends[position.coerceIn(backends.indices)]
 			val models = backend.models
-			modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Backend default") + models.map { it.name })
+			val temporary = dialogTitle.contains("temporary", ignoreCase = true)
+			val sessionDefault = currentSessionChats.firstOrNull { it.backend == backend.id }
+			val inheritedAvailable = sessionDefault == null || models.any { it.providerId == sessionDefault.providerId && it.id == sessionDefault.modelId }
+			val inheritedLabel = if (temporary) {
+				models.firstOrNull { it.isDefault }?.name?.let { "System default — $it" } ?: "System default"
+			} else if (!inheritedAvailable) {
+				"Session default unavailable — choose a model"
+			} else {
+				sessionDefault?.let { "Session default — ${it.providerId} / ${it.modelId}" } ?: "Session default"
+			}
+			modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf(inheritedLabel) + models.map { model ->
+				model.name + if (model.isDefault) " — system default" else ""
+			})
 			modelSpinner.isEnabled = models.isNotEmpty()
-			modelSpinner.setSelection((models.indexOfFirst { it.isDefault } + 1).coerceAtLeast(0))
+			modelSpinner.setSelection(if (!temporary && !inheritedAvailable) (models.indexOfFirst { it.isDefault }.coerceAtLeast(0) + 1) else 0)
 			permissionSpinner.adapter = ArrayAdapter(
 				this, android.R.layout.simple_spinner_dropdown_item,
 				listOf("Inherit session policy") + backend.permissionProfiles.map { profile ->
@@ -1954,7 +2020,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}
 				create(VoiceChatCreateSpec(
 					title = titleField.text.toString().trim().ifBlank { "Voice conversation" }, backend = backend.id,
-					workflowRole = roles[roleSpinner.selectedItemPosition], modelId = backend.models.getOrNull(modelIndex)?.id.orEmpty(),
+					workflowRole = roles[roleSpinner.selectedItemPosition],
+					providerId = backend.models.getOrNull(modelIndex)?.providerId.orEmpty(),
+					modelId = backend.models.getOrNull(modelIndex)?.id.orEmpty(),
 					permissionProfile = permission, milestoneKey = milestone, taskRef = task,
 					toolStates = toolChecks.mapValues { (_, check) -> check.isChecked },
 				))
@@ -2213,7 +2281,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         showContent(root)
 		updateConversationStatus(CallController.Stage.CONNECTING, initialDetail)
 		updateConversationMode(CallController.Stage.CONNECTING)
-        if (startConnection) requestCallStart()
+		if (startConnection) {
+			val available = session.backend != "koder" || readinessHome?.chatBackends.orEmpty()
+				.firstOrNull { it.id == "koder" }?.models.orEmpty()
+				.any { it.providerId == session.providerId && it.id == session.modelId }
+			if (available) requestCallStart() else {
+				startAfterModelRecovery = true
+				updateConversationStatus(CallController.Stage.ERROR, "This conversation's model is no longer available")
+				root.post { showChatModelDialog(session) }
+			}
+		}
     }
 
 	private fun showCreateFailure(failure: Throwable) {

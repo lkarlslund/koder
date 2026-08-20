@@ -138,6 +138,34 @@ func TestNewChatWithSpecDoesNotInheritKoderModelIntoCodex(t *testing.T) {
 	}
 }
 
+func TestNewChatWithSpecUsesExplicitKoderProviderAndModel(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := owner.Snapshot().Chats[0]
+	created, err := owner.NewChatWithSpec(ctx, &root.ID, domain.ChatCreateSpec{
+		Title: "Other model", Backend: domain.ChatBackendKoder, ProviderID: "other-provider", ModelID: "other-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := created.Snapshot().Chat
+	if chatRecord.ProviderID != "other-provider" || chatRecord.ModelID != "other-model" {
+		t.Fatalf("created chat model = %s/%s", chatRecord.ProviderID, chatRecord.ModelID)
+	}
+}
+
 func TestNewChatWithSpecResolvesBackendDefaultModel(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

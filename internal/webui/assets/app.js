@@ -1050,7 +1050,7 @@
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
-		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
+		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -1547,7 +1547,10 @@
         onMessage(msg) {
           if (msg.type) { this.onPush(msg); return; }
           const p = this.pending[msg.id]; if (!p) return; delete this.pending[msg.id];
-          msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error || 'rpc failed'));
+          if (msg.ok) { p.resolve(msg.result); return; }
+          const error = new Error(msg.error || 'rpc failed');
+          error.code = msg.error_code || '';
+          p.reject(error);
         },
         onPush(msg) {
           if (msg.type === 'heartbeat') return;
@@ -1761,7 +1764,7 @@
             this.state.snapshot = next;
             this.state.Snapshot = next;
           }
-          if (delta.error) this.error = delta.error;
+          if (delta.error) { this.error = delta.error; this.showToast(delta.error); }
           this.syncInterruptArmed();
           if (active) {
             const changedItemID = delta.item ? this.timelineItemID(delta.item) : '';
@@ -1809,7 +1812,11 @@
           this.syncBrowserTabActivity();
         },
         rpc(method, params) {
-          return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
+          return this.rpcOn(this.ws, method, params).catch(err => {
+            this.error = err.message; this.showToast(err.message);
+            if (err.code === 'model_unavailable' && !this.showModels) this.openModelDialog();
+            throw err;
+          });
         },
         rpcOn(ws, method, params) {
           const id = this.nextID++;
@@ -4278,7 +4285,7 @@
           const target = String(id || '').trim();
           if (!target || target === String(this.activeChatID() || '')) return;
           this.beginSwitchingChat(target);
-          this.rpc('switch_chat', {chat_id: target}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.clearSwitchingChat(); this.showToast(err.message); });
+          this.rpc('switch_chat', {chat_id: target}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); this.checkActiveModelAvailability(); }).catch(err => { this.clearSwitchingChat(); this.showToast(err.message); });
         },
         beginSwitchingChat(id) {
           const chat = this.chatByID(id);
@@ -4292,12 +4299,40 @@
         },
 		openChatCreator() {
 		  this.newChatMenuOpen = false;
-		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
+		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
 		  this.rpc('chat_backends', {}).then(backends => {
 			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
+			this.configureChatCreatorInheritedModel();
 			(this.chatCreatorBackend('codex')?.additional_tools || []).forEach(tool => { this.chatCreator.draft.tool_states[tool.id] = true; });
 			this.chatCreator.loading = false;
 		  }).catch(err => { this.chatCreator.loading = false; this.chatCreator.error = err.message; });
+		},
+		configureChatCreatorInheritedModel() {
+		  const backend = this.chatCreatorBackend();
+		  const chat = this.activeChat();
+		  if (!backend || !chat || String(chat.Backend || chat.backend || 'koder') !== backend.id) return;
+		  const provider = String(chat.ProviderID || chat.provider_id || '');
+		  const modelID = String(chat.ModelID || chat.model_id || '');
+		  if (!provider || !modelID || (backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) return;
+		  const replacement = (backend.models || []).find(model => model.default) || backend.models?.[0];
+		  if (replacement) {
+			this.chatCreator.draft.provider_id = String(replacement.provider_id || '');
+			this.chatCreator.draft.model_id = String(replacement.id || '');
+		  }
+		  this.chatCreator.error = `The session model ${provider} / ${modelID} is no longer available. Choose a replacement; the system default is selected.`;
+		},
+		checkActiveModelAvailability() {
+		  const chat = this.activeChat();
+		  if (!chat || String(chat.Backend || chat.backend || 'koder') !== 'koder') return;
+		  const provider = String(chat.ProviderID || chat.provider_id || '');
+		  const modelID = String(chat.ModelID || chat.model_id || '');
+		  this.rpc('chat_backends', {}).then(backends => {
+			const backend = (backends || []).find(item => item.id === 'koder');
+			if (backend && !(backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) {
+			  this.showToast(`The model ${provider} / ${modelID} is no longer available. Choose another model.`);
+			  this.openModelDialog();
+			}
+		  }).catch(() => {});
 		},
 		closeChatCreator() { if (!this.chatCreator.busy) this.chatCreator.open = false; },
 		chatCreatorBackend(id = this.chatCreator.draft.backend) { return (this.chatCreator.backends || []).find(item => item.id === id) || null; },
@@ -4305,11 +4340,24 @@
 		  const backend = this.chatCreatorBackend(id);
 		  if (!backend || !backend.available) return;
 		  this.chatCreator.draft.backend = id;
-		  this.chatCreator.draft.model_id = id === 'codex' ? String((backend.models || []).find(model => model.default)?.id || backend.models?.[0]?.id || '') : '';
+		  this.chatCreator.draft.provider_id = '';
+		  this.chatCreator.draft.model_id = '';
 		  (backend.additional_tools || []).forEach(tool => { if (!(tool.id in this.chatCreator.draft.tool_states)) this.chatCreator.draft.tool_states[tool.id] = true; });
 		},
 		chatCreatorRoleOptions() { return [{id: 'orchestrator', label: 'Orchestrator', help: 'Coordinates work and other chats'}, {id: 'planning', label: 'Planning', help: 'Plans milestones and tasks'}, {id: 'execution', label: 'Execution', help: 'Implements a focused objective'}, {id: 'general', label: 'General', help: 'A flexible conversation'}]; },
 		chatCreatorPermissionProfiles() { return this.chatCreatorBackend()?.permission_profiles || []; },
+		chatCreatorModels() { return this.chatCreatorBackend()?.models || []; },
+		chatCreatorModelValue() { return JSON.stringify([this.chatCreator.draft.provider_id || '', this.chatCreator.draft.model_id || '']); },
+		setChatCreatorModelValue(value) {
+		  let pair = ['', '']; try { pair = JSON.parse(value); } catch (_) {}
+		  this.chatCreator.draft.provider_id = String(pair[0] || ''); this.chatCreator.draft.model_id = String(pair[1] || '');
+		},
+		chatCreatorInheritedModelLabel() {
+		  const chat = this.activeChat();
+		  const provider = String(chat?.ProviderID || chat?.provider_id || '');
+		  const model = String(chat?.ModelID || chat?.model_id || '');
+		  return provider && model ? `Session default — ${provider} / ${model}` : 'Session default';
+		},
 		codexToolChoices() { return this.chatCreatorBackend('codex')?.additional_tools || []; },
 		createChatFromDraft() {
 		  const draft = this.chatCreator.draft;
@@ -4710,7 +4758,7 @@
           this.modelLoading = true; this.modelOptions = [];
           this.rpc('list_models', {})
             .then(result => {
-              this.modelOptions = result.models || [];
+              this.modelOptions = (result.models || []).slice().sort((a, b) => Number(!!b.default) - Number(!!a.default));
             })
             .catch(err => { this.showToast(err.message); })
             .finally(() => { this.modelLoading = false; });

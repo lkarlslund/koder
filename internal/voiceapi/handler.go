@@ -124,6 +124,7 @@ type clientFrame struct {
 	ResponsePacing    string              `json:"response_pacing,omitempty"`
 	Backend           domain.ChatBackend  `json:"backend,omitempty"`
 	WorkflowRole      domain.WorkflowRole `json:"workflow_role,omitempty"`
+	ProviderID        string              `json:"provider_id,omitempty"`
 	ModelID           string              `json:"model_id,omitempty"`
 	PermissionProfile string              `json:"permission_profile,omitempty"`
 	MilestoneKey      string              `json:"milestone_key,omitempty"`
@@ -144,6 +145,7 @@ type serverFrame struct {
 	Message       *voice.Message                 `json:"message,omitempty"`
 	Parts         []voice.Part                   `json:"parts,omitempty"`
 	Error         string                         `json:"error,omitempty"`
+	ErrorCode     string                         `json:"error_code,omitempty"`
 	ServerTime    time.Time                      `json:"server_time,omitempty"`
 	AppUpdate     *androidupdate.Manifest        `json:"app_update,omitempty"`
 	History       []voice.TranscriptEntry        `json:"history,omitempty"`
@@ -202,8 +204,10 @@ type updateSessionRequest struct {
 }
 
 type updateChatRequest struct {
-	Title    *string `json:"title,omitempty"`
-	Archived *bool   `json:"archived,omitempty"`
+	Title      *string `json:"title,omitempty"`
+	Archived   *bool   `json:"archived,omitempty"`
+	ProviderID *string `json:"provider_id,omitempty"`
+	ModelID    *string `json:"model_id,omitempty"`
 }
 
 type bindDeviceRequest struct {
@@ -554,7 +558,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "create_voice_chat":
 			audio = nil
-			if _, err := call.CreateVoiceChat(ctx, frame.SessionID, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
+			if _, err := call.CreateVoiceChat(ctx, frame.SessionID, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ProviderID, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
 					return
 				}
@@ -565,7 +569,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "create_temporary_voice_chat":
 			audio = nil
-			if _, _, err := call.CreateTemporaryVoiceChat(ctx, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
+			if _, _, err := call.CreateTemporaryVoiceChat(ctx, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ProviderID, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
 					return
 				}
@@ -1039,11 +1043,15 @@ func (h *Handler) serveSessionChat(w http.ResponseWriter, r *http.Request, sessi
 			http.Error(w, "invalid chat request: expected one JSON object", http.StatusBadRequest)
 			return
 		}
-		if request.Title == nil && request.Archived == nil {
+		if request.Title == nil && request.Archived == nil && request.ProviderID == nil && request.ModelID == nil {
 			http.Error(w, "chat update is empty", http.StatusBadRequest)
 			return
 		}
-		if _, err := backend.UpdateClientChat(r.Context(), sessionID, chatID, voice.ChatUpdate{Title: request.Title, Archived: request.Archived}); err != nil {
+		if (request.ProviderID == nil) != (request.ModelID == nil) {
+			http.Error(w, "provider_id and model_id must be changed together", http.StatusBadRequest)
+			return
+		}
+		if _, err := backend.UpdateClientChat(r.Context(), sessionID, chatID, voice.ChatUpdate{Title: request.Title, Archived: request.Archived, ProviderID: request.ProviderID, ModelID: request.ModelID}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1081,9 +1089,9 @@ func decodeCreateSessionRequest(w http.ResponseWriter, r *http.Request) (createS
 	return request, true
 }
 
-func voiceChatCreateSpec(title string, backend domain.ChatBackend, role domain.WorkflowRole, modelID, permissionProfile, milestoneKey, taskRef string, toolStates domain.ToolStates) domain.ChatCreateSpec {
+func voiceChatCreateSpec(title string, backend domain.ChatBackend, role domain.WorkflowRole, providerID, modelID, permissionProfile, milestoneKey, taskRef string, toolStates domain.ToolStates) domain.ChatCreateSpec {
 	return normalizeVoiceChatSpec(domain.ChatCreateSpec{
-		Title: title, Backend: backend, WorkflowRole: role, ModelID: modelID,
+		Title: title, Backend: backend, WorkflowRole: role, ProviderID: providerID, ModelID: modelID,
 		PermissionProfile: permissionProfile, MilestoneKey: milestoneKey, TaskRef: taskRef, ToolStates: toolStates,
 	})
 }
@@ -1247,7 +1255,7 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 
 func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, updates androidUpdateSource, utteranceID, _ string, message voice.Message, callErr error) error {
 	if callErr != nil {
-		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error()}); err != nil {
+		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error(), ErrorCode: clientErrorCode(callErr)}); err != nil {
 			return err
 		}
 		return writeReady(ctx, conn, writeMu, call, backend, updates)
@@ -1263,6 +1271,14 @@ func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 		}
 	}
 	return writeReady(ctx, conn, writeMu, call, backend, updates)
+}
+
+func clientErrorCode(err error) string {
+	var coded interface{ ClientErrorCode() string }
+	if errors.As(err, &coded) {
+		return coded.ClientErrorCode()
+	}
+	return ""
 }
 
 func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, utteranceID, text string) error {

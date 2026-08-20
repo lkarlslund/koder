@@ -83,6 +83,19 @@ type Selection struct {
 	ChatID    id.ID
 }
 
+// ModelUnavailableError tells interactive clients that the selected chat can
+// be recovered by choosing another model. It is intentionally transport-neutral.
+type ModelUnavailableError struct {
+	ProviderID string
+	ModelID    string
+}
+
+func (e *ModelUnavailableError) Error() string {
+	return fmt.Sprintf("The model %s/%s used by this chat is no longer available. Choose another model to continue.", e.ProviderID, e.ModelID)
+}
+
+func (e *ModelUnavailableError) ClientErrorCode() string { return "model_unavailable" }
+
 // RestartBuildInfo describes the already-built binary waiting for a process restart.
 type RestartBuildInfo struct {
 	Version   string `json:"version,omitempty"`
@@ -429,7 +442,7 @@ type ChatBackendState struct {
 	Label              string                   `json:"label"`
 	Available          bool                     `json:"available"`
 	Detail             string                   `json:"detail,omitempty"`
-	Models             []CodexModelOption       `json:"models,omitempty"`
+	Models             []ChatBackendModelOption `json:"models,omitempty"`
 	PermissionProfiles []ChatPermissionOption   `json:"permission_profiles,omitempty"`
 	AdditionalTools    []ChatCreationToolOption `json:"additional_tools,omitempty"`
 }
@@ -446,7 +459,8 @@ type ChatCreationToolOption struct {
 	Description string `json:"description,omitempty"`
 }
 
-type CodexModelOption struct {
+type ChatBackendModelOption struct {
+	ProviderID             string   `json:"provider_id,omitempty"`
 	ID                     string   `json:"id"`
 	Name                   string   `json:"name"`
 	Description            string   `json:"description,omitempty"`
@@ -516,7 +530,35 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 // ChatBackends reports runtime availability and models for chat creation.
 func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 	permissions := c.chatPermissionOptions()
-	states := []ChatBackendState{{ID: domain.ChatBackendKoder, Label: "Koder", Available: c != nil && c.agent != nil, PermissionProfiles: permissions}}
+	koder := ChatBackendState{ID: domain.ChatBackendKoder, Label: "Koder", Available: c != nil && c.agent != nil, PermissionProfiles: permissions}
+	if c != nil {
+		c.mu.RLock()
+		cfg := c.cfg
+		c.mu.RUnlock()
+		if models, err := c.discoverModelOptions(ctx, cfg, "", ""); err != nil {
+			koder.Detail = "Model discovery: " + err.Error()
+		} else {
+			for _, model := range models {
+				if !model.SupportsChat {
+					continue
+				}
+				koder.Models = append(koder.Models, ChatBackendModelOption{
+					ProviderID: model.ProviderID, ID: model.ModelID,
+					Name: model.ProviderLabel + " / " + model.ModelID, Default: model.Default,
+				})
+			}
+			slices.SortStableFunc(koder.Models, func(a, b ChatBackendModelOption) int {
+				if a.Default != b.Default {
+					if a.Default {
+						return -1
+					}
+					return 1
+				}
+				return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+			})
+		}
+	}
+	states := []ChatBackendState{koder}
 	codex := ChatBackendState{ID: domain.ChatBackendCodex, Label: "Codex", PermissionProfiles: permissions}
 	for _, toolID := range agent.CodexAdditionalToolIDs() {
 		spec := tools.Info(toolID)
@@ -540,7 +582,7 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 		if model.Hidden {
 			continue
 		}
-		option := CodexModelOption{
+		option := ChatBackendModelOption{
 			ID:                     model.ID,
 			Name:                   model.DisplayName,
 			Description:            model.Description,
@@ -558,6 +600,62 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 		codex.Detail = "Codex returned no usable models"
 	}
 	return append(states, codex)
+}
+
+func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord domain.Chat) error {
+	if chatRecord.EffectiveBackend() != domain.ChatBackendKoder {
+		return nil
+	}
+	providerID := strings.TrimSpace(chatRecord.ProviderID)
+	modelID := strings.TrimSpace(chatRecord.ModelID)
+	if providerID == "" || modelID == "" {
+		return &ModelUnavailableError{ProviderID: providerID, ModelID: modelID}
+	}
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	// Tests and embedded callers may intentionally supply a turn runner without
+	// configuring provider discovery. There is no catalog against which to
+	// declare a historical model removed in that mode.
+	if len(cfg.Providers) == 0 {
+		return nil
+	}
+	options, err := c.discoverModelOptions(ctx, cfg, providerID, modelID)
+	if err != nil {
+		// Discovery itself failing means the provider may be temporarily down;
+		// preserve the provider's real error instead of mislabelling the model as removed.
+		return nil
+	}
+	for _, option := range options {
+		if option.ProviderID == providerID && option.ModelID == modelID && option.SupportsChat && (option.Detected || option.BackingDetected) {
+			return nil
+		}
+	}
+	return &ModelUnavailableError{ProviderID: providerID, ModelID: modelID}
+}
+
+func (c *Controller) prepareKoderCreateSpec(ctx context.Context, spec domain.ChatCreateSpec, template domain.Chat) (domain.ChatCreateSpec, error) {
+	spec = spec.Normalized()
+	if spec.Backend != domain.ChatBackendKoder {
+		return spec, nil
+	}
+	if spec.ProviderID == "" && template.EffectiveBackend() == domain.ChatBackendKoder {
+		spec.ProviderID = strings.TrimSpace(template.ProviderID)
+	}
+	if spec.ModelID == "" && template.EffectiveBackend() == domain.ChatBackendKoder {
+		spec.ModelID = strings.TrimSpace(template.ModelID)
+	}
+	if spec.ProviderID == "" || spec.ModelID == "" {
+		c.mu.RLock()
+		if spec.ProviderID == "" {
+			spec.ProviderID = strings.TrimSpace(c.cfg.Defaults.ProviderID)
+		}
+		if spec.ModelID == "" {
+			spec.ModelID = strings.TrimSpace(c.cfg.Defaults.ModelID)
+		}
+		c.mu.RUnlock()
+	}
+	return spec, c.validateChatModelAvailable(ctx, domain.Chat{Backend: domain.ChatBackendKoder, ProviderID: spec.ProviderID, ModelID: spec.ModelID})
 }
 
 func (c *Controller) chatPermissionOptions() []ChatPermissionOption {
@@ -1098,8 +1196,11 @@ func (c *Controller) eventForSelectedExec(ctx context.Context, owner *sessionpkg
 
 // SendPromptWithKindSelection enqueues a prompt with the given delivery kind for the selected chat.
 func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection Selection, kind chat.QueueKind, text string, drafts []attachment.Draft) error {
-	_, _, _, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
+	_, _, chatRecord, rt, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
 	if err != nil {
+		return err
+	}
+	if err := c.validateChatModelAvailable(ctx, chatRecord); err != nil {
 		return err
 	}
 	return c.enqueuePrompt(rt, text, kind, drafts)
@@ -1425,6 +1526,10 @@ func (c *Controller) CreateChatForSelection(ctx context.Context, selection Selec
 		return domain.Chat{}, err
 	}
 	spec = spec.Normalized()
+	spec, err = c.prepareKoderCreateSpec(ctx, spec, parent)
+	if err != nil {
+		return domain.Chat{}, err
+	}
 	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
 		return domain.Chat{}, fmt.Errorf("codex backend is disabled")
 	}

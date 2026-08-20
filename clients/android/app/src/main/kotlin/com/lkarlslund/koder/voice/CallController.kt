@@ -39,6 +39,7 @@ class CallController(
 		val historyHasMore: Boolean = false,
 		val historyLoading: Boolean = false,
         val appUpdate: AppUpdate? = null,
+		val errorCode: String = "",
 		val microphoneMuted: Boolean = false,
 		val audioEndpointName: String = "",
 		val audioEndpoints: List<VoiceAudioEndpoint> = emptyList(),
@@ -217,6 +218,12 @@ class CallController(
 		}
 	}
 
+	fun resumeAfterRecovery() {
+		if (!running) return
+		snapshot = snapshot.copy(errorCode = "")
+		maybeListen(force = true)
+	}
+
 	fun loadOlderHistory() {
 		if (!running || snapshot.historyLoading || !snapshot.historyHasMore) return
 		val beforeId = snapshot.history.firstOrNull()?.id.orEmpty()
@@ -383,7 +390,7 @@ class CallController(
             "ready" -> {
                 snapshot = snapshot.copy(appUpdate = frame.appUpdate)
                 serverReady = true
-                maybeListen()
+				if (snapshot.stage != Stage.ERROR) maybeListen()
             }
 			"state" -> if (!pausedByUser && !telecomHeld) when (frame.state) {
                 "recording" -> update(Stage.RECORDING, recordingStatus(interruptedPlayback))
@@ -449,7 +456,8 @@ class CallController(
 				outputSequence = 0
                 playback.stop()
 				snapshot = snapshot.copy(historyLoading = false)
-                update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
+				snapshot = snapshot.copy(errorCode = frame.errorCode)
+				update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
             }
         }
         publish()

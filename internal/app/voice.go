@@ -174,7 +174,7 @@ func (c *Controller) VoiceChatBackends(ctx context.Context) []voice.ChatBackendO
 	for _, state := range states {
 		option := voice.ChatBackendOption{ID: string(state.ID), Label: state.Label, Available: state.Available, Detail: state.Detail}
 		for _, model := range state.Models {
-			option.Models = append(option.Models, voice.ChatModelOption{ID: model.ID, Name: model.Name, Description: model.Description, Default: model.Default})
+			option.Models = append(option.Models, voice.ChatModelOption{ProviderID: model.ProviderID, ID: model.ID, Name: model.Name, Description: model.Description, Default: model.Default})
 		}
 		for _, profile := range state.PermissionProfiles {
 			option.PermissionProfiles = append(option.PermissionProfiles, voice.ChatPermissionOption{ID: profile.ID, Label: profile.Label, Description: profile.Description})
@@ -207,7 +207,7 @@ func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]
 			ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID),
 			Title: chatRecord.Title, Role: string(chatRecord.EffectiveWorkflowRole()),
 			Backend: string(chatRecord.EffectiveBackend()), WorkflowRole: string(chatRecord.EffectiveWorkflowRole()),
-			InteractionMode: string(chatRecord.EffectiveInteractionMode()), ModelID: chatRecord.ModelID,
+			InteractionMode: string(chatRecord.EffectiveInteractionMode()), ProviderID: chatRecord.ProviderID, ModelID: chatRecord.ModelID,
 			PermissionProfile: chatRecord.PermissionProfile,
 			LastMessage:       chatRecord.LastMessage, UpdatedAt: chatRecord.UpdatedAt,
 			Archived: chatRecord.Archived, Busy: status.Busy,
@@ -258,6 +258,17 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID str
 	}
 	spec = spec.Normalized()
 	spec.InteractionMode = domain.InteractionModeVoice
+	template := domain.Chat{}
+	for _, candidate := range snapshot.Chats {
+		if candidate.ParentChatID == nil {
+			template = candidate
+			break
+		}
+	}
+	spec, err = c.prepareKoderCreateSpec(ctx, spec, template)
+	if err != nil {
+		return voice.Chat{}, err
+	}
 	spec.Title = truncateVoiceText(spec.Title, 80)
 	if spec.Title == "" {
 		spec.Title = "Voice conversation"
@@ -275,7 +286,7 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID str
 		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
 		Role: string(chatRecord.EffectiveWorkflowRole()), Backend: string(chatRecord.EffectiveBackend()),
 		WorkflowRole: string(chatRecord.EffectiveWorkflowRole()), InteractionMode: string(chatRecord.EffectiveInteractionMode()),
-		ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
+		ProviderID: chatRecord.ProviderID, ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
 	}, nil
 }
 
@@ -284,6 +295,11 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID str
 func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, spec domain.ChatCreateSpec) (voice.Session, voice.Chat, error) {
 	spec = spec.Normalized()
 	spec.InteractionMode = domain.InteractionModeVoice
+	var err error
+	spec, err = c.prepareKoderCreateSpec(ctx, spec, domain.Chat{})
+	if err != nil {
+		return voice.Session{}, voice.Chat{}, err
+	}
 	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
 		return voice.Session{}, voice.Chat{}, fmt.Errorf("codex backend is disabled")
 	}
@@ -315,7 +331,7 @@ func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, spec domain.C
 		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
 		Role: string(chatRecord.EffectiveWorkflowRole()), Backend: string(chatRecord.EffectiveBackend()),
 		WorkflowRole: string(chatRecord.EffectiveWorkflowRole()), InteractionMode: string(chatRecord.EffectiveInteractionMode()),
-		ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
+		ProviderID: chatRecord.ProviderID, ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
 	}
 	return sessionSummary, chatSummary, nil
 }
@@ -434,15 +450,25 @@ func (c *Controller) UpdateClientChat(ctx context.Context, sessionID, chatID str
 	if !c.sessionInWorkspace(snapshot.Session) {
 		return voice.Chat{}, fmt.Errorf("session %s does not belong to this workspace", snapshot.Session.ID)
 	}
-	request := chattool.UpdateRequest{Archived: update.Archived}
-	if update.Title != nil {
-		request.Title = strings.TrimSpace(*update.Title)
-		if request.Title == "" {
-			return voice.Chat{}, fmt.Errorf("chat title is required")
+	if update.ProviderID != nil || update.ModelID != nil {
+		if update.ProviderID == nil || update.ModelID == nil {
+			return voice.Chat{}, fmt.Errorf("provider and model must be changed together")
+		}
+		if err := c.SetModelForSelection(ctx, Selection{SessionID: snapshot.Session.ID, ChatID: id.ID(strings.TrimSpace(chatID))}, *update.ProviderID, *update.ModelID); err != nil {
+			return voice.Chat{}, err
 		}
 	}
-	if _, _, err := owner.UpdateChat(ctx, id.ID(strings.TrimSpace(chatID)), request); err != nil {
-		return voice.Chat{}, err
+	if update.Title != nil || update.Archived != nil {
+		request := chattool.UpdateRequest{Archived: update.Archived}
+		if update.Title != nil {
+			request.Title = strings.TrimSpace(*update.Title)
+			if request.Title == "" {
+				return voice.Chat{}, fmt.Errorf("chat title is required")
+			}
+		}
+		if _, _, err := owner.UpdateChat(ctx, id.ID(strings.TrimSpace(chatID)), request); err != nil {
+			return voice.Chat{}, err
+		}
 	}
 	chats, err := c.ListSessionChats(ctx, sessionID)
 	if err != nil {
@@ -816,6 +842,9 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	}
 	if !isVoiceInteraction(chatRecord) {
 		return voice.Message{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
+	}
+	if err := c.validateChatModelAvailable(ctx, chatRecord); err != nil {
+		return voice.Message{}, err
 	}
 	if err := runtime.EnsureTimeline(ctx); err != nil {
 		return voice.Message{}, err

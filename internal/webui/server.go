@@ -711,6 +711,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
 		if err != nil {
 			resp.Error = err.Error()
+			resp.ErrorCode = clientErrorCode(err)
 		}
 		size, writeErr := writeJSON(ctx, conn, &writeMu, resp)
 		if writeErr != nil {
@@ -831,6 +832,7 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
 	if err != nil {
 		resp.Error = err.Error()
+		resp.ErrorCode = clientErrorCode(err)
 	}
 	writeHTTPRPCResponse(w, resp)
 }
@@ -2081,10 +2083,19 @@ type httpRPCRequest struct {
 }
 
 type rpcResponse struct {
-	ID     any    `json:"id"`
-	OK     bool   `json:"ok"`
-	Result any    `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
+	ID        any    `json:"id"`
+	OK        bool   `json:"ok"`
+	Result    any    `json:"result,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+func clientErrorCode(err error) string {
+	var coded interface{ ClientErrorCode() string }
+	if errors.As(err, &coded) {
+		return coded.ClientErrorCode()
+	}
+	return ""
 }
 
 const (
