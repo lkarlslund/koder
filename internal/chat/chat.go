@@ -194,6 +194,12 @@ type TurnDriver interface {
 	RunTurn(context.Context, *Chat, DriverTurn, chan<- domain.Event) error
 }
 
+// TurnApprovalDriver resolves an approval while the original backend turn is
+// still alive. handled=false lets native tool approval keep its existing path.
+type TurnApprovalDriver interface {
+	ResolveTurnApproval(context.Context, *Chat, string, bool, *accesssettings.PermissionOverride) (handled bool, err error)
+}
+
 // TurnDriverResolver selects a driver from persisted chat metadata. Returning
 // nil means that the configured backend is currently unavailable.
 type TurnDriverResolver interface {
@@ -2206,6 +2212,7 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		break
 	}
 	chatRecord := r.chat
+	r.state.RefreshApprovals(chatRecord)
 	revision := r.state.TimelineRevision(item.ID)
 	r.mu.Unlock()
 	if item.ID == "" {
@@ -2670,6 +2677,9 @@ func (r *Chat) handleCompact(instructions string, reply chan<- error) {
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionOverride) {
+	if r.handleDriverApproval(toolCallID, true, rule) {
+		return
+	}
 	if service := r.deps.Tools; service != nil {
 		r.handleApproveWithTurnLoop(service, toolCallID, rule)
 		return
@@ -2680,6 +2690,9 @@ func (r *Chat) handleApprove(toolCallID string, rule *accesssettings.PermissionO
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
+	if r.handleDriverApproval(toolCallID, false, nil) {
+		return
+	}
 	if service := r.deps.Tools; service != nil {
 		r.handleDenyWithTurnLoop(service, toolCallID)
 		return
@@ -2687,6 +2700,37 @@ func (r *Chat) handleDeny(toolCallID string) {
 	err := fmt.Errorf("tool approval service is not configured")
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+}
+
+func (r *Chat) handleDriverApproval(toolCallID string, approved bool, rule *accesssettings.PermissionOverride) bool {
+	driver, ok := r.turnDriver().(TurnApprovalDriver)
+	if !ok {
+		return false
+	}
+	if err := r.EnsureTimeline(context.Background()); err != nil {
+		return true
+	}
+	r.mu.Lock()
+	resolvedID := r.resolveApprovalToolCallIDLocked(toolCallID)
+	r.mu.Unlock()
+	handled, err := driver.ResolveTurnApproval(context.Background(), r, resolvedID, approved, rule)
+	if !handled {
+		return false
+	}
+	if err != nil {
+		evt := domain.Event{Kind: domain.EventKindError, Err: err}
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+		return true
+	}
+	r.mu.Lock()
+	r.removeApprovalLocked(resolvedID)
+	r.active = true
+	r.status = StatusRunningTools
+	r.statusText = "Continuing approved Codex work"
+	r.mu.Unlock()
+	evt := domain.Event{Kind: domain.EventKindApprovalReply, ToolCallID: resolvedID, Text: map[bool]string{true: "approved", false: "denied"}[approved]}
+	r.broadcast(r.snapshotUpdateFlags(&evt, true, false, true, true, true))
+	return true
 }
 
 func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *accesssettings.PermissionOverride) {
@@ -3003,7 +3047,9 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 		r.status = StatusWaitingApproval
 		r.statusText = strings.TrimSpace(evt.Text)
 		r.active = false
-		r.cancel = nil
+		if evt.Meta["approval_driver"] != "external" {
+			r.cancel = nil
+		}
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindUserInputAsk:

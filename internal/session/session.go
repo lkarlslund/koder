@@ -889,6 +889,12 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 	if archivingVisibleChat && nextChatID == "" {
 		return chattool.Status{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
 	}
+	config := s.configSnapshot()
+	if config.BeforeChatUpdate != nil {
+		if err := config.BeforeChatUpdate(ctx, target, update); err != nil {
+			return chattool.Status{}, "", err
+		}
+	}
 	s.mu.Lock()
 	rt := s.runtimes[target.ID]
 	s.mu.Unlock()
@@ -927,7 +933,7 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 		snapshot.Chat = target
 		snapshot.StatusText = statusText
 	}
-	onChatArchived := s.config.OnChatArchived
+	onChatArchived := config.OnChatArchived
 	s.mu.Unlock()
 	status.ID = target.ID
 	status.Title = target.Title
@@ -973,6 +979,11 @@ func (s *Session) DeleteChat(ctx context.Context, chatID id.ID) error {
 	}
 	runtime := s.runtimes[chatID]
 	s.mu.RUnlock()
+	if beforeDelete := s.configSnapshot().BeforeChatDelete; beforeDelete != nil {
+		if err := beforeDelete(ctx, target); err != nil {
+			return err
+		}
+	}
 	if runtime != nil {
 		if err := runtime.DrainAndClose(ctx); err != nil {
 			return fmt.Errorf("close chat %s: %w", chatID, err)

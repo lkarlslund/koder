@@ -27,11 +27,12 @@ type Config struct {
 }
 
 type Message struct {
-	ID     json.RawMessage `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *RPCError       `json:"error,omitempty"`
+	ID           json.RawMessage `json:"id,omitempty"`
+	Method       string          `json:"method,omitempty"`
+	Params       json.RawMessage `json:"params,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        *RPCError       `json:"error,omitempty"`
+	TransportErr error           `json:"-"`
 }
 
 type RPCError struct {
@@ -348,6 +349,7 @@ func (c *Client) waitLoop(cmd *exec.Cmd) {
 	for _, ch := range pending {
 		ch <- response{err: err}
 	}
+	c.broadcast(Message{TransportErr: err})
 	if done != nil {
 		close(done)
 	}

@@ -43,6 +43,29 @@ func TestClientInitializesCallsAndReceivesNotifications(t *testing.T) {
 	}
 }
 
+func TestClientReportsProcessExitToActiveSubscribers(t *testing.T) {
+	client := New(Config{Executable: os.Args[0], Args: []string{"-test.run=TestCodexAppHelperProcess"}, Env: []string{"KODER_CODEX_HELPER=1"}})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe := client.Subscribe(4)
+	defer unsubscribe()
+	if err := client.Notify("test/crash", nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.TransportErr == nil {
+			t.Fatalf("event = %#v", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("process exit did not wake subscriber")
+	}
+}
+
 func TestCodexAppHelperProcess(t *testing.T) {
 	if os.Getenv("KODER_CODEX_HELPER") != "1" {
 		return
@@ -61,6 +84,8 @@ func TestCodexAppHelperProcess(t *testing.T) {
 		case "test/call":
 			_ = enc.Encode(map[string]any{"method": "test/event", "params": map[string]string{"state": "working"}})
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]string{"value": "ok"}})
+		case "test/crash":
+			os.Exit(3)
 		default:
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "error": RPCError{Code: -32601, Message: fmt.Sprintf("unknown method %s", msg.Method)}})
 		}

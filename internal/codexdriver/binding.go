@@ -47,3 +47,7 @@ func (s bindingStore) put(ctx context.Context, value Binding) error {
 	value.UpdatedAt = now
 	return s.records.Put(ctx, value)
 }
+
+func (s bindingStore) delete(ctx context.Context, chatID id.ID) error {
+	return s.records.Delete(ctx, string(chatID))
+}

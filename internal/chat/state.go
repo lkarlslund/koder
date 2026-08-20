@@ -637,6 +637,13 @@ func (s *ChatState) Approvals() []Approval {
 	return slices.Clone(s.approvals)
 }
 
+func (s *ChatState) RefreshApprovals(chat domain.Chat) {
+	if s == nil {
+		return
+	}
+	s.approvals = deriveApprovals(chat, s.SnapshotTimeline())
+}
+
 func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []Approval {
 	var approvals []Approval
 	for _, item := range timeline {

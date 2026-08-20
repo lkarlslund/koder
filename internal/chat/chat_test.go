@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3009,6 +3010,60 @@ func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for approval removal; approvals=%#v", rt.Snapshot().Approvals)
+		}
+	}
+}
+
+type externalApprovalDriver struct{ calls atomic.Int32 }
+
+func (d *externalApprovalDriver) RunTurn(context.Context, *Chat, DriverTurn, chan<- domain.Event) error {
+	return nil
+}
+func (d *externalApprovalDriver) ResolveTurnApproval(_ context.Context, _ *Chat, toolCallID string, approved bool, _ *accesssettings.PermissionOverride) (bool, error) {
+	if toolCallID == "external-call" && approved {
+		d.calls.Add(1)
+		return true, nil
+	}
+	return false, nil
+}
+
+type fixedTurnDriverResolver struct{ driver TurnDriver }
+
+func (r fixedTurnDriverResolver) DriverForChat(domain.Chat) TurnDriver { return r.driver }
+
+func TestRuntimeRoutesApprovalToActiveTurnDriver(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	chatRecord.Backend = domain.ChatBackendCodex
+	if err := updateChat(context.Background(), st, chatRecord); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "external-call", Tool: domain.ToolKindExecCommand, Args: map[string]string{"command": "make test"}, Status: domain.ToolStatusAwaitingApproval,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	driver := &externalApprovalDriver{}
+	rt, err := Load(context.Background(), session, chatRecord, Deps{Store: st, Drivers: fixedTurnDriverResolver{driver: driver}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsubscribe := rt.Subscribe()
+	defer unsubscribe()
+	rt.ApproveTool("external-call")
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindApprovalReply {
+				if driver.calls.Load() != 1 || len(rt.Snapshot().Approvals) != 0 {
+					t.Fatalf("external approval was not resolved: calls=%d approvals=%#v", driver.calls.Load(), rt.Snapshot().Approvals)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for external approval reply")
 		}
 	}
 }

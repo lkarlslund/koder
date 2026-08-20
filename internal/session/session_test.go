@@ -58,13 +58,26 @@ func TestUpdateChatCallsArchiveLifecycleHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	var archived id.ID
-	owner.UpdateConfig(RegistryConfig{OnChatArchived: func(_ context.Context, chatID id.ID) { archived = chatID }})
+	var lifecycleChat id.ID
+	owner.UpdateConfig(RegistryConfig{
+		OnChatArchived: func(_ context.Context, chatID id.ID) { archived = chatID },
+		BeforeChatUpdate: func(_ context.Context, before domain.Chat, update chattool.UpdateRequest) error {
+			lifecycleChat = before.ID
+			if update.Archived == nil || !*update.Archived {
+				t.Fatal("archive lifecycle did not receive update")
+			}
+			return nil
+		},
+	})
 	value := true
 	if _, _, err := owner.UpdateChat(ctx, child.Snapshot().Chat.ID, chattool.UpdateRequest{Archived: &value}); err != nil {
 		t.Fatal(err)
 	}
 	if archived != child.Snapshot().Chat.ID {
 		t.Fatalf("archive hook got %q, want %q", archived, child.Snapshot().Chat.ID)
+	}
+	if lifecycleChat != child.Snapshot().Chat.ID {
+		t.Fatalf("backend lifecycle hook got %q, want %q", lifecycleChat, child.Snapshot().Chat.ID)
 	}
 }
 

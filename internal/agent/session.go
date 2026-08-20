@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
@@ -32,6 +33,12 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 			return fmt.Errorf("codex backend is disabled")
 		}
 		return nil
+	}
+	if e != nil && e.codex != nil {
+		cfg.BeforeChatUpdate = func(ctx context.Context, before domain.Chat, update chattool.UpdateRequest) error {
+			return e.codex.UpdateChat(ctx, before, update.Title, update.Archived)
+		}
+		cfg.BeforeChatDelete = e.codex.DeleteChat
 	}
 	return cfg
 }

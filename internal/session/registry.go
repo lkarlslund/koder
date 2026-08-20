@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools/chattool"
 )
 
 type RegistryConfig struct {
@@ -24,6 +25,8 @@ type RegistryConfig struct {
 	MaxChildChats     int
 	OnChatArchived    func(context.Context, id.ID)
 	BackendAvailable  func(domain.ChatBackend) error
+	BeforeChatUpdate  func(context.Context, domain.Chat, chattool.UpdateRequest) error
+	BeforeChatDelete  func(context.Context, domain.Chat) error
 }
 
 type Registry struct {
@@ -300,8 +303,25 @@ func (r *Registry) Delete(ctx context.Context, sessionID id.ID) error {
 	if sessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
-	r.mu.Lock()
+	r.mu.RLock()
 	owner := r.sessions[sessionID]
+	config := cloneRegistryConfig(r.config)
+	r.mu.RUnlock()
+	if owner == nil {
+		loaded, err := r.Load(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		owner = loaded
+	}
+	if config.BeforeChatDelete != nil {
+		for _, chatRecord := range owner.Snapshot().Chats {
+			if err := config.BeforeChatDelete(ctx, chatRecord); err != nil {
+				return err
+			}
+		}
+	}
+	r.mu.Lock()
 	delete(r.sessions, sessionID)
 	r.mu.Unlock()
 	if owner != nil {
