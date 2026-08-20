@@ -22,6 +22,8 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/codexapp"
+	"github.com/lkarlslund/koder/internal/codexdriver"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -61,6 +63,7 @@ type Engine struct {
 	modelRuntime  *modelruntime.Runtime
 	toolsRuntime  *toolruntime.Runtime
 	browser       *browser.Manager
+	codex         *codexdriver.Manager
 	envMu         sync.Mutex
 	envPrompts    map[id.ID]string
 	registry      *sessionpkg.Registry
@@ -111,6 +114,16 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		retryPause:    modelruntime.DefaultRetryPause,
 	}
 	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
+	e.codex = codexdriver.New(codexapp.New(codexapp.Config{
+		Executable: cfg.Codex.Executable,
+		CodexHome:  cfg.Codex.Home,
+	}), st, func(_ domain.Session, chatRecord domain.Chat) string {
+		parts := []string{
+			strings.TrimSpace(chatrole.SystemPrompt(chatRecord.EffectiveWorkflowRole())),
+			strings.TrimSpace(chatinteraction.SystemPrompt(chatRecord.EffectiveInteractionMode())),
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	})
 	e.modelRuntime = modelruntime.New(modelruntime.Config{
 		Config:   cfg,
 		Store:    st,

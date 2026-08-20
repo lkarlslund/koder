@@ -68,6 +68,17 @@ func TestNormalizeChatDimensions(t *testing.T) {
 	}
 }
 
+func TestChatCreateSpecNormalizesIndependentDimensions(t *testing.T) {
+	legacyVoice := (ChatCreateSpec{WorkflowRole: WorkflowRoleVoice}).Normalized()
+	if legacyVoice.Backend != ChatBackendKoder || legacyVoice.WorkflowRole != WorkflowRoleOrchestrator || legacyVoice.InteractionMode != InteractionModeVoice {
+		t.Fatalf("legacy voice spec = %#v", legacyVoice)
+	}
+	codexVoice := (ChatCreateSpec{Backend: ChatBackendCodex, WorkflowRole: WorkflowRoleExecution, InteractionMode: InteractionModeVoice}).Normalized()
+	if codexVoice.Backend != ChatBackendCodex || codexVoice.WorkflowRole != WorkflowRoleExecution || codexVoice.InteractionMode != InteractionModeVoice {
+		t.Fatalf("codex voice spec = %#v", codexVoice)
+	}
+}
+
 func TestUsageContextTokens(t *testing.T) {
 	tests := []struct {
 		name string

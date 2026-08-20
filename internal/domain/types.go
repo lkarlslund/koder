@@ -388,6 +388,42 @@ const (
 	InteractionModeVoice InteractionMode = "voice"
 )
 
+// ChatCreateSpec is the shared creation contract used by the web UI, voice
+// clients, and orchestration tools. Backend, workflow role, and interaction
+// mode are deliberately independent dimensions.
+type ChatCreateSpec struct {
+	Title             string          `json:"title,omitempty"`
+	Backend           ChatBackend     `json:"backend,omitempty"`
+	WorkflowRole      WorkflowRole    `json:"workflow_role,omitempty"`
+	InteractionMode   InteractionMode `json:"interaction_mode,omitempty"`
+	ModelID           string          `json:"model_id,omitempty"`
+	PermissionProfile string          `json:"permission_profile,omitempty"`
+	MilestoneKey      string          `json:"milestone_key,omitempty"`
+	TaskRef           string          `json:"task_ref,omitempty"`
+	ToolStates        ToolStates      `json:"tool_states,omitempty"`
+}
+
+func (s ChatCreateSpec) Normalized() ChatCreateSpec {
+	s.Title = strings.TrimSpace(s.Title)
+	s.ModelID = strings.TrimSpace(s.ModelID)
+	s.PermissionProfile = strings.TrimSpace(s.PermissionProfile)
+	s.MilestoneKey = strings.TrimSpace(s.MilestoneKey)
+	s.TaskRef = strings.TrimSpace(s.TaskRef)
+	if s.Backend == "" {
+		s.Backend = ChatBackendKoder
+	}
+	if s.WorkflowRole == "" || s.WorkflowRole == WorkflowRoleVoice {
+		if s.WorkflowRole == WorkflowRoleVoice {
+			s.InteractionMode = InteractionModeVoice
+		}
+		s.WorkflowRole = WorkflowRoleOrchestrator
+	}
+	if s.InteractionMode == "" {
+		s.InteractionMode = InteractionModeText
+	}
+	return s
+}
+
 func (m InteractionMode) String() string { return string(m) }
 
 type Chat struct {

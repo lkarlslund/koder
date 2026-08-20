@@ -86,6 +86,15 @@ type Browser struct {
 	MaxTabsGlobal    int           `toml:"max_tabs_global"`
 }
 
+// Codex configures the process-wide Codex app-server turn backend. Authentication
+// and model configuration belong to the OS account running Koder unless Home is
+// explicitly set to a dedicated CODEX_HOME directory.
+type Codex struct {
+	Enabled    bool   `toml:"enabled"`
+	Executable string `toml:"executable"`
+	Home       string `toml:"home"`
+}
+
 type Provider struct {
 	TemplateID              string            `toml:"template_id"`
 	Kind                    string            `toml:"kind"`
@@ -159,6 +168,7 @@ type Config struct {
 	Voice            Voice                   `toml:"voice"`
 	Thinking         Thinking                `toml:"thinking"`
 	Browser          Browser                 `toml:"browser"`
+	Codex            Codex                   `toml:"codex"`
 	path             string
 	configDir        string
 	stateDir         string
@@ -267,6 +277,9 @@ func LoadWithOptions(opts LoadOptions) (Config, error) {
 	if !strings.Contains(string(data), "[browser]") {
 		cfg.Browser = Default().Browser
 	}
+	if !strings.Contains(string(data), "[codex]") {
+		cfg.Codex = Default().Codex
+	}
 	cfg.configDir = paths.configDir
 	cfg.stateDir = paths.stateDir
 	cfg.cacheDir = paths.cacheDir
@@ -298,6 +311,7 @@ func Default() Config {
 			MaxTabsPerChat:   defaultBrowserTabsPerChat,
 			MaxTabsGlobal:    defaultBrowserTabsGlobal,
 		},
+		Codex:      Codex{Enabled: true, Executable: "codex"},
 		Providers:  map[string]Provider{},
 		Models:     []ModelConfig{},
 		MCPServers: map[string]MCPServer{},
@@ -356,6 +370,10 @@ func Default() Config {
 
 func (c *Config) applyDefaults() {
 	def := Default()
+	c.Codex.Executable = strings.TrimSpace(c.Codex.Executable)
+	if c.Codex.Executable == "" {
+		c.Codex.Executable = def.Codex.Executable
+	}
 	if c.MaxToolLoopSteps <= 0 {
 		c.MaxToolLoopSteps = def.MaxToolLoopSteps
 	}

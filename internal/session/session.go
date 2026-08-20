@@ -519,6 +519,15 @@ func (s *Session) NewRootChatWithDimensions(ctx context.Context, title string, r
 	return s.newChatWithDimensions(ctx, nil, title, role, backend, interactionMode)
 }
 
+// NewChatWithSpec creates a chat from the shared surface-independent contract.
+func (s *Session) NewChatWithSpec(ctx context.Context, parentChatID *id.ID, spec domain.ChatCreateSpec) (*chatpkg.Chat, error) {
+	spec = spec.Normalized()
+	if spec.MilestoneKey != "" && spec.TaskRef != "" {
+		return nil, fmt.Errorf("chat scope may select a milestone or a task, not both")
+	}
+	return s.newChatWithSpec(ctx, parentChatID, spec)
+}
+
 func (s *Session) newChat(ctx context.Context, parentChatID *id.ID, title string, role chatrole.Role) (*chatpkg.Chat, error) {
 	interactionMode := domain.InteractionModeText
 	if role == chatrole.Voice {
@@ -529,9 +538,19 @@ func (s *Session) newChat(ctx context.Context, parentChatID *id.ID, title string
 }
 
 func (s *Session) newChatWithDimensions(ctx context.Context, parentChatID *id.ID, title string, role chatrole.Role, backend domain.ChatBackend, interactionMode domain.InteractionMode) (*chatpkg.Chat, error) {
+	return s.newChatWithSpec(ctx, parentChatID, domain.ChatCreateSpec{
+		Title: title, WorkflowRole: role, Backend: backend, InteractionMode: interactionMode,
+	})
+}
+
+func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec domain.ChatCreateSpec) (*chatpkg.Chat, error) {
+	spec = spec.Normalized()
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
+	role := chatrole.Role(spec.WorkflowRole)
+	backend := spec.Backend
+	interactionMode := spec.InteractionMode
 	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
 		return nil, fmt.Errorf("profile %q is not registered", role)
 	}
@@ -547,7 +566,7 @@ func (s *Session) newChatWithDimensions(ctx context.Context, parentChatID *id.ID
 	if interactionMode != domain.InteractionModeText && interactionMode != domain.InteractionModeVoice {
 		return nil, fmt.Errorf("interaction mode %q is not supported", interactionMode)
 	}
-	title = strings.TrimSpace(title)
+	title := strings.TrimSpace(spec.Title)
 	if title == "" {
 		title = "Chat"
 	}
@@ -584,21 +603,35 @@ func (s *Session) newChatWithDimensions(ctx context.Context, parentChatID *id.ID
 		}
 	}
 	now := time.Now().UTC()
+	modelID := spec.ModelID
+	if modelID == "" && template.EffectiveBackend() == backend {
+		modelID = strings.TrimSpace(template.ModelID)
+	}
+	permissionProfile := spec.PermissionProfile
+	if permissionProfile == "" {
+		permissionProfile = strings.TrimSpace(template.PermissionProfile)
+	}
+	toolStates := cloneToolStateMap(template.ToolStates)
+	for kind, enabled := range spec.ToolStates {
+		toolStates[kind] = enabled
+	}
 	chatRecord := domain.Chat{
-		ID:                id.New(),
-		SessionID:         session.ID,
-		ParentChatID:      parentChatID,
-		Title:             title,
-		WorkflowRole:      role,
-		Backend:           backend,
-		InteractionMode:   interactionMode,
-		ProviderID:        strings.TrimSpace(template.ProviderID),
-		ModelID:           strings.TrimSpace(template.ModelID),
-		PermissionProfile: strings.TrimSpace(template.PermissionProfile),
-		ToolStates:        cloneToolStateMap(template.ToolStates),
-		Position:          position,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                 id.New(),
+		SessionID:          session.ID,
+		ParentChatID:       parentChatID,
+		Title:              title,
+		WorkflowRole:       role,
+		Backend:            backend,
+		InteractionMode:    interactionMode,
+		ProviderID:         strings.TrimSpace(template.ProviderID),
+		ModelID:            modelID,
+		PermissionProfile:  permissionProfile,
+		ToolStates:         toolStates,
+		ActiveMilestoneKey: spec.MilestoneKey,
+		AssignedTaskRef:    spec.TaskRef,
+		Position:           position,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	return s.createChat(ctx, session, chatRecord)
 }

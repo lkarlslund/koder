@@ -5,8 +5,17 @@ import (
 	"fmt"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/domain"
 )
+
+// CodexModels probes the supervised app-server and returns its live model list.
+func (e *Engine) CodexModels(ctx context.Context) ([]codexapp.Model, error) {
+	if e == nil || !e.cfg.Codex.Enabled || e.codex == nil {
+		return nil, fmt.Errorf("codex backend is disabled")
+	}
+	return e.codex.Models(ctx)
+}
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
 	if chatRecord.ID == "" {
@@ -35,6 +44,11 @@ func (e *Engine) DriverForChat(chatRecord domain.Chat) chatpkg.TurnDriver {
 	switch chatRecord.EffectiveBackend() {
 	case domain.ChatBackendKoder:
 		return chatpkg.NativeTurnDriver{Model: e}
+	case domain.ChatBackendCodex:
+		if e != nil && e.cfg.Codex.Enabled && e.codex != nil {
+			return e.codex
+		}
+		return nil
 	default:
 		return nil
 	}

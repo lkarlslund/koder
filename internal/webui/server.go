@@ -1014,11 +1014,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.stateForClient(ctx, clientID)
 	case "new_chat":
 		var in struct {
-			Title string              `json:"title"`
-			Role  domain.WorkflowRole `json:"role"`
+			domain.ChatCreateSpec
+			Role domain.WorkflowRole `json:"role"`
 		}
 		_ = decodeParams(params, &in)
-		chatRecord, err := s.controller.NewTypedChatForSelection(ctx, s.appSelection(clientID), in.Title, in.Role)
+		if in.WorkflowRole == "" {
+			in.WorkflowRole = in.Role
+		}
+		chatRecord, err := s.controller.CreateChatForSelection(ctx, s.appSelection(clientID), in.ChatCreateSpec)
 		if err != nil {
 			return nil, err
 		}
@@ -1026,6 +1029,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		selection.ChatID = chatRecord.ID
 		s.setClientSelection(clientID, selection)
 		return s.stateForClient(ctx, clientID)
+	case "chat_backends":
+		return s.controller.ChatBackends(ctx), nil
 	case "voice_chat_presence":
 		var in struct {
 			ChatID id.ID `json:"chat_id"`

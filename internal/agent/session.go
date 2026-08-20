@@ -189,7 +189,15 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 		browserErr = e.browser.Stop(ctx)
 	}
 	if e.registry == nil {
+		if e.codex != nil {
+			return errors.Join(browserErr, e.codex.Close())
+		}
 		return browserErr
 	}
-	return errors.Join(browserErr, e.registry.Shutdown(ctx, reason))
+	registryErr := e.registry.Shutdown(ctx, reason)
+	var codexErr error
+	if e.codex != nil {
+		codexErr = e.codex.Close()
+	}
+	return errors.Join(browserErr, registryErr, codexErr)
 }

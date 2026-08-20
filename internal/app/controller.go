@@ -16,7 +16,6 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -416,6 +415,24 @@ type SessionState struct {
 	QuickChats  []domain.Session `json:"quick_chats"`
 }
 
+type ChatBackendState struct {
+	ID        domain.ChatBackend `json:"id"`
+	Label     string             `json:"label"`
+	Available bool               `json:"available"`
+	Detail    string             `json:"detail,omitempty"`
+	Models    []CodexModelOption `json:"models,omitempty"`
+}
+
+type CodexModelOption struct {
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description,omitempty"`
+	DefaultReasoningEffort string   `json:"default_reasoning_effort,omitempty"`
+	ReasoningEfforts       []string `json:"reasoning_efforts,omitempty"`
+	InputModalities        []string `json:"input_modalities,omitempty"`
+	Default                bool     `json:"default,omitempty"`
+}
+
 // Controller owns process-wide configuration and session runtimes.
 type Controller struct {
 	cfg   config.Config
@@ -471,6 +488,48 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 		return nil
 	}
 	return c.phone
+}
+
+// ChatBackends reports runtime availability and models for chat creation.
+func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
+	states := []ChatBackendState{{ID: domain.ChatBackendKoder, Label: "Koder", Available: c != nil && c.agent != nil}}
+	codex := ChatBackendState{ID: domain.ChatBackendCodex, Label: "Codex"}
+	if c == nil || !c.cfg.Codex.Enabled {
+		codex.Detail = "Disabled in Koder configuration"
+		return append(states, codex)
+	}
+	if c.agent == nil {
+		codex.Detail = "Koder agent is unavailable"
+		return append(states, codex)
+	}
+	models, err := c.agent.CodexModels(ctx)
+	if err != nil {
+		codex.Detail = err.Error()
+		return append(states, codex)
+	}
+	codex.Available = true
+	for _, model := range models {
+		if model.Hidden {
+			continue
+		}
+		option := CodexModelOption{
+			ID:                     model.ID,
+			Name:                   model.DisplayName,
+			Description:            model.Description,
+			DefaultReasoningEffort: model.DefaultReasoningEffort,
+			InputModalities:        append([]string(nil), model.InputModalities...),
+			Default:                model.IsDefault,
+		}
+		for _, effort := range model.SupportedReasoningEffort {
+			option.ReasoningEfforts = append(option.ReasoningEfforts, effort.ReasoningEffort)
+		}
+		codex.Models = append(codex.Models, option)
+	}
+	if len(codex.Models) == 0 {
+		codex.Available = false
+		codex.Detail = "Codex returned no usable models"
+	}
+	return append(states, codex)
 }
 
 // StateDir returns the process state directory for server-owned durable data.
@@ -1308,19 +1367,30 @@ func (c *Controller) NewChatForSelection(ctx context.Context, selection Selectio
 // NewTypedChatForSelection creates a supported user-facing chat type in the
 // selected session without changing controller selection.
 func (c *Controller) NewTypedChatForSelection(ctx context.Context, selection Selection, title string, role domain.WorkflowRole) (domain.Chat, error) {
+	spec := domain.ChatCreateSpec{Title: title, WorkflowRole: role}
+	if role == domain.WorkflowRoleVoice {
+		spec.WorkflowRole = domain.WorkflowRoleOrchestrator
+		spec.InteractionMode = domain.InteractionModeVoice
+	}
+	return c.CreateChatForSelection(ctx, selection, spec)
+}
+
+// CreateChatForSelection applies the shared backend/role/interaction contract
+// without changing controller selection.
+func (c *Controller) CreateChatForSelection(ctx context.Context, selection Selection, spec domain.ChatCreateSpec) (domain.Chat, error) {
 	owner, session, parent, _, err := c.resolveSelectedRuntime(ctx, selection, true)
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	var rt *chat.Chat
-	switch role {
-	case "", domain.WorkflowRoleOrchestrator:
-		rt, err = owner.NewChat(ctx, parent.ID, title)
-	case domain.WorkflowRoleVoice:
-		rt, err = owner.NewRootChatWithDimensions(ctx, title, chatrole.Orchestrator, domain.ChatBackendKoder, domain.InteractionModeVoice)
-	default:
-		return domain.Chat{}, fmt.Errorf("chat type %q is not supported", role)
+	spec = spec.Normalized()
+	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
+		return domain.Chat{}, fmt.Errorf("codex backend is disabled")
 	}
+	var parentID *id.ID
+	if spec.InteractionMode != domain.InteractionModeVoice && spec.WorkflowRole != domain.WorkflowRoleStandalone {
+		parentID = &parent.ID
+	}
+	rt, err := owner.NewChatWithSpec(ctx, parentID, spec)
 	if err != nil {
 		return domain.Chat{}, err
 	}

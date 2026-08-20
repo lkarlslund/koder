@@ -97,6 +97,34 @@ func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
 	}
 }
 
+func TestNewChatWithSpecDoesNotInheritKoderModelIntoCodex(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := owner.Snapshot().Chats[0]
+	created, err := owner.NewChatWithSpec(ctx, &root.ID, domain.ChatCreateSpec{
+		Title: "Codex worker", Backend: domain.ChatBackendCodex, WorkflowRole: domain.WorkflowRoleExecution, TaskRef: "T008",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := created.Snapshot().Chat
+	if chatRecord.Backend != domain.ChatBackendCodex || chatRecord.ModelID != "" || chatRecord.AssignedTaskRef != "T008" {
+		t.Fatalf("created chat = %#v", chatRecord)
+	}
+}
+
 func TestVoiceChatCanCoordinateSiblingChats(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
