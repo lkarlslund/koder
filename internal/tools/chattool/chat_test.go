@@ -184,12 +184,12 @@ func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	}}}
 	result, err := (startTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatStart,
-		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_key": "alpha", "title": "Worker"},
+		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_key": "alpha", "title": "Worker", "backend": "codex", "model_id": "gpt-test", "permission_profile": "readonly", "disabled_tools": "session_start,chat_start"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneKey != "alpha" || control.lastStart.Title != "Worker" || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
+	if control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneKey != "alpha" || control.lastStart.Title != "Worker" || control.lastStart.Backend != domain.ChatBackendCodex || control.lastStart.ModelID != "gpt-test" || control.lastStart.PermissionProfile != "readonly" || control.lastStart.ToolStates[domain.ToolKindSessionStart] || control.lastStart.ToolStates[domain.ToolKindChatStart] || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
 		t.Fatalf("unexpected control call: %#v", control)
 	}
 	if !strings.Contains(result.Output, "Worker") || !strings.Contains(result.Output, "will report back automatically") || !strings.Contains(result.Output, "Do not poll") {

@@ -87,6 +87,12 @@ func (s *Session) UpdateConfig(cfg RegistryConfig) {
 	s.mu.Unlock()
 }
 
+func (s *Session) configSnapshot() RegistryConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneRegistryConfig(s.config)
+}
+
 // Load hydrates a live session owner from persisted state.
 func Load(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, planSrc *planning.Source, sessionID id.ID) (*Session, error) {
 	if st == nil {

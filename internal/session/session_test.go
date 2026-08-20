@@ -363,6 +363,37 @@ func TestStartChatRejectsDuplicateMilestoneChild(t *testing.T) {
 	}
 }
 
+func TestStartChatCanSelectCodexBackendIndependently(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.UpdateConfig(RegistryConfig{MaxChildChats: 2, BackendAvailable: func(domain.ChatBackend) error { return nil }})
+	parentID := owner.Snapshot().Chats[0].ID
+	_, err = owner.ChatToolControl(parentID).StartChat(ctx, sessionRecord.ID, parentID, chattool.StartRequest{
+		Profile: chatrole.Planning, Objective: "Plan milestone five", Backend: domain.ChatBackendCodex,
+		ModelID: "gpt-test", PermissionProfile: "readonly", ToolStates: domain.ToolStates{domain.ToolKindSessionStart: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chats := owner.Snapshot().Chats
+	child := chats[len(chats)-1]
+	if child.Backend != domain.ChatBackendCodex || child.WorkflowRole != chatrole.Planning || child.InteractionMode != domain.InteractionModeText || child.ModelID != "gpt-test" || child.PermissionProfile != "readonly" || child.ToolStates[domain.ToolKindSessionStart] {
+		t.Fatalf("codex child = %#v", child)
+	}
+}
+
 func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

@@ -23,6 +23,7 @@ type RegistryConfig struct {
 	AccessSettings    accesssettings.Settings
 	MaxChildChats     int
 	OnChatArchived    func(context.Context, id.ID)
+	BackendAvailable  func(domain.ChatBackend) error
 }
 
 type Registry struct {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -23,8 +24,8 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile. Execution chats must be scoped with milestone_key and should execute the milestone's full task list. If an existing child owns or is working on that milestone, use chat_send to steer it instead of starting another chat. After starting a child, go idle unless you have unrelated work; the child chat will automatically report back when it becomes idle, including task or milestone progress. Do not poll child chats.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as execution or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_key":{"type":"string","description":"Optional milestone key to scope what the child chat can see; required for execution chats"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Usage:       "Start a background child chat using a registered chat profile and either the Koder or Codex backend. Omit backend to use the current chat's backend. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chat_send instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile such as orchestrator, planning, or execution"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"backend":{"type":"string","enum":["koder","codex"],"description":"Optional turn backend; defaults to the current chat's backend"},"interaction_mode":{"type":"string","enum":["text","voice"],"description":"Optional interaction mode; defaults to text"},"model_id":{"type":"string","description":"Optional backend model id"},"permission_profile":{"type":"string","description":"Optional Koder permission profile"},"milestone_key":{"type":"string","description":"Optional milestone scope; mutually exclusive with task_ref"},"task_ref":{"type":"string","description":"Optional single task scope; mutually exclusive with milestone_key"},"disabled_tools":{"type":"string","description":"Optional comma-separated Koder tool ids to disable for this chat"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(sendTool{}, tools.ToolSpec{
@@ -104,10 +105,16 @@ type Status struct {
 }
 
 type StartRequest struct {
-	Profile      chatrole.Role
-	Objective    string
-	Title        string
-	MilestoneKey string
+	Profile           chatrole.Role
+	Objective         string
+	Title             string
+	Backend           domain.ChatBackend
+	InteractionMode   domain.InteractionMode
+	ModelID           string
+	PermissionProfile string
+	MilestoneKey      string
+	TaskRef           string
+	ToolStates        domain.ToolStates
 }
 
 type UpdateRequest struct {
@@ -205,6 +212,38 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	}
 	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
 		out["milestone_key"] = ref
+	}
+	if ref := strings.TrimSpace(args["task_ref"]); ref != "" {
+		if out["milestone_key"] != "" {
+			return nil, errors.New("milestone_key and task_ref are mutually exclusive")
+		}
+		out["task_ref"] = ref
+	}
+	if backend := domain.ChatBackend(strings.TrimSpace(args["backend"])); backend != "" {
+		if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
+			return nil, fmt.Errorf("unsupported backend %q", backend)
+		}
+		out["backend"] = string(backend)
+	}
+	if mode := domain.InteractionMode(strings.TrimSpace(args["interaction_mode"])); mode != "" {
+		if mode != domain.InteractionModeText && mode != domain.InteractionModeVoice {
+			return nil, fmt.Errorf("unsupported interaction mode %q", mode)
+		}
+		out["interaction_mode"] = string(mode)
+	}
+	for _, key := range []string{"model_id", "permission_profile"} {
+		if value := strings.TrimSpace(args[key]); value != "" {
+			out[key] = value
+		}
+	}
+	if disabled := strings.TrimSpace(args["disabled_tools"]); disabled != "" {
+		for _, raw := range strings.Split(disabled, ",") {
+			kind := domain.ToolKind(strings.TrimSpace(raw))
+			if kind == "" || !domain.IsBuiltinToolKind(kind) {
+				return nil, fmt.Errorf("unknown disabled tool %q", strings.TrimSpace(raw))
+			}
+		}
+		out["disabled_tools"] = disabled
 	}
 	return out, nil
 }
@@ -371,10 +410,16 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		return tools.Result{}, err
 	}
 	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, StartRequest{
-		Profile:      chatrole.Role(req.Args["profile"]),
-		Objective:    req.Args["objective"],
-		Title:        req.Args["title"],
-		MilestoneKey: req.Args["milestone_key"],
+		Profile:           chatrole.Role(req.Args["profile"]),
+		Objective:         req.Args["objective"],
+		Title:             req.Args["title"],
+		Backend:           domain.ChatBackend(req.Args["backend"]),
+		InteractionMode:   domain.InteractionMode(req.Args["interaction_mode"]),
+		ModelID:           req.Args["model_id"],
+		PermissionProfile: req.Args["permission_profile"],
+		MilestoneKey:      req.Args["milestone_key"],
+		TaskRef:           req.Args["task_ref"],
+		ToolStates:        disabledToolStates(req.Args["disabled_tools"]),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -384,6 +429,16 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		Output: childReportGuidance(tools.DisplayTextForStored(req.Tool, stored)),
 		Stored: stored,
 	}, nil
+}
+
+func disabledToolStates(value string) domain.ToolStates {
+	states := domain.ToolStates{}
+	for _, raw := range strings.Split(value, ",") {
+		if kind := domain.ToolKind(strings.TrimSpace(raw)); kind != "" && domain.IsBuiltinToolKind(kind) {
+			states[kind] = false
+		}
+	}
+	return states
 }
 
 func childReportGuidance(output string) string {

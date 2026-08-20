@@ -76,7 +76,12 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		return chattool.Status{}, err
 	}
 	milestoneKey := strings.TrimSpace(req.MilestoneKey)
+	taskRef := strings.TrimSpace(req.TaskRef)
+	if milestoneKey != "" && taskRef != "" {
+		return chattool.Status{}, fmt.Errorf("chat scope may select a milestone or a task, not both")
+	}
 	var milestone planning.Milestone
+	var scopedTask *planning.Task
 	if milestoneKey != "" {
 		var ok bool
 		milestone, ok = milestoneByKey(plan, milestoneKey)
@@ -87,15 +92,34 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s; use chat_send to steer that child chat instead of starting another one", milestoneKey, *milestone.OwnerChatID)
 		}
 	}
-	if role == chatrole.Execution && milestoneKey == "" {
-		return chattool.Status{}, fmt.Errorf("execution chat requires milestone_key")
+	if taskRef != "" {
+		tasks, taskErr := c.session.ListTasks(ctx, sessionID, "")
+		if taskErr != nil {
+			return chattool.Status{}, taskErr
+		}
+		for index := range tasks {
+			if planning.TaskKey(tasks[index]) == taskRef {
+				task := tasks[index]
+				scopedTask = &task
+				break
+			}
+		}
+		if scopedTask == nil {
+			return chattool.Status{}, fmt.Errorf("task %q not found", taskRef)
+		}
+		milestone, _ = milestoneByKey(plan, scopedTask.MilestoneKey)
 	}
-	if role == chatrole.Execution && milestone.Status != planning.MilestoneStatusReady {
-		return chattool.Status{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneKey, milestone.Status)
+	if role == chatrole.Execution && (milestoneKey != "" || taskRef != "") && milestone.Status != planning.MilestoneStatusReady {
+		return chattool.Status{}, fmt.Errorf("milestone %q is %s, expected ready", planning.MilestoneKey(milestone), milestone.Status)
 	}
-	if role == chatrole.Execution {
+	if role == chatrole.Execution && milestoneKey != "" {
 		if existing := directChildForMilestone(snapshot.Chats, parentChatID, milestoneKey); existing.ID != "" {
 			return chattool.Status{}, fmt.Errorf("milestone %q already has child chat %s; use chat_send to steer it instead of starting another one", milestoneKey, existing.ID)
+		}
+	}
+	if taskRef != "" {
+		if existing := directChildForTask(snapshot.Chats, parentChatID, taskRef); existing.ID != "" {
+			return chattool.Status{}, fmt.Errorf("task %q already has child chat %s; use chat_send to steer it instead of starting another one", taskRef, existing.ID)
 		}
 	}
 	if err := c.session.ensureCanStartChild(ctx, parentChatID, snapshot.Chats); err != nil {
@@ -104,7 +128,52 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	parentID := parentChat.ID
 	chatTitle := strings.TrimSpace(req.Title)
 	if chatTitle == "" {
-		chatTitle = defaultChildChatTitle(role, milestone, nil)
+		chatTitle = defaultChildChatTitle(role, milestone, scopedTask)
+	}
+	backend := req.Backend
+	if backend == "" {
+		backend = parentChat.EffectiveBackend()
+	}
+	if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
+		return chattool.Status{}, fmt.Errorf("chat backend %q is not supported", backend)
+	}
+	config := c.session.configSnapshot()
+	if available := config.BackendAvailable; available != nil {
+		if err := available(backend); err != nil {
+			return chattool.Status{}, err
+		}
+	}
+	interactionMode := req.InteractionMode
+	if interactionMode == "" {
+		interactionMode = domain.InteractionModeText
+	}
+	if interactionMode != domain.InteractionModeText && interactionMode != domain.InteractionModeVoice {
+		return chattool.Status{}, fmt.Errorf("interaction mode %q is not supported", interactionMode)
+	}
+	modelID := strings.TrimSpace(req.ModelID)
+	providerID := ""
+	if backend == parentChat.EffectiveBackend() {
+		providerID = strings.TrimSpace(parentChat.ProviderID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(parentChat.ModelID)
+		}
+	} else if backend == domain.ChatBackendKoder {
+		providerID = strings.TrimSpace(config.DefaultProvider)
+		if modelID == "" {
+			modelID = strings.TrimSpace(config.DefaultModel)
+		}
+	}
+	permissionProfile := strings.TrimSpace(req.PermissionProfile)
+	if permissionProfile == "" {
+		permissionProfile = strings.TrimSpace(parentChat.PermissionProfile)
+	}
+	toolStates := cloneToolStateMap(parentChat.ToolStates)
+	for kind, enabled := range req.ToolStates {
+		toolStates[kind] = enabled
+	}
+	taskBucketKey := milestoneKey
+	if scopedTask != nil {
+		taskBucketKey = scopedTask.MilestoneKey
 	}
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
@@ -113,14 +182,15 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		ParentChatID:          &parentID,
 		Title:                 chatTitle,
 		WorkflowRole:          role,
-		Backend:               domain.ChatBackendKoder,
-		InteractionMode:       domain.InteractionModeText,
-		ProviderID:            strings.TrimSpace(parentChat.ProviderID),
-		ModelID:               strings.TrimSpace(parentChat.ModelID),
-		PermissionProfile:     strings.TrimSpace(parentChat.PermissionProfile),
-		ToolStates:            cloneToolStateMap(parentChat.ToolStates),
+		Backend:               backend,
+		InteractionMode:       interactionMode,
+		ProviderID:            providerID,
+		ModelID:               modelID,
+		PermissionProfile:     permissionProfile,
+		ToolStates:            toolStates,
 		ActiveMilestoneKey:    milestoneKey,
-		AssignedTaskBucketKey: milestoneKey,
+		AssignedTaskRef:       taskRef,
+		AssignedTaskBucketKey: taskBucketKey,
 		Position:              len(snapshot.Chats),
 		CreatedAt:             now,
 		UpdatedAt:             now,
@@ -128,7 +198,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	if _, err := c.session.AddPreparedChat(ctx, chatRecord); err != nil {
 		return chattool.Status{}, err
 	}
-	if status := roleMilestoneStatus(role); status != 0 {
+	if status := roleMilestoneStatus(role); status != 0 && milestoneKey != "" && scopedTask == nil {
 		nextPlan, err := updateMilestoneStatus(plan, milestoneKey, status, chatRecord.ID)
 		if err != nil {
 			return chattool.Status{}, err
@@ -139,7 +209,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		}
 		milestone, _ = milestoneByKey(plan, milestoneKey)
 	}
-	return c.session.startPreparedChat(ctx, chatRecord.ID, milestone, nil, role, objective)
+	return c.session.startPreparedChat(ctx, chatRecord.ID, milestone, scopedTask, role, objective)
 }
 
 func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, chatID id.ID, update chattool.UpdateRequest) (chattool.Status, error) {
@@ -548,6 +618,22 @@ func directChildForMilestone(chats []domain.Chat, parentChatID id.ID, milestoneK
 			continue
 		}
 		if strings.TrimSpace(chatRecord.ActiveMilestoneKey) == milestoneKey {
+			return chatRecord
+		}
+	}
+	return domain.Chat{}
+}
+
+func directChildForTask(chats []domain.Chat, parentChatID id.ID, taskRef string) domain.Chat {
+	taskRef = strings.TrimSpace(taskRef)
+	if taskRef == "" {
+		return domain.Chat{}
+	}
+	for _, chatRecord := range chats {
+		if chatRecord.Archived || chatRecord.ParentChatID == nil || *chatRecord.ParentChatID != parentChatID {
+			continue
+		}
+		if strings.TrimSpace(chatRecord.AssignedTaskRef) == taskRef {
 			return chatRecord
 		}
 	}
