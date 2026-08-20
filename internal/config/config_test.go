@@ -11,6 +11,26 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
+func TestPromptProgressObservationInvalidatesWhenEndpointChanges(t *testing.T) {
+	checkedAt := time.Now().Add(-time.Minute).UTC()
+	provider := WithPromptProgressObservation(Provider{Kind: "openai-compatible", BaseURL: "http://one.example/v1", PromptProgressMode: "auto"}, true, checkedAt)
+	if !PromptProgressObservationValid(provider) || !provider.PromptProgressSupported || !provider.PromptProgressCheckedAt.Equal(checkedAt) {
+		t.Fatalf("expected valid prompt progress observation, got %#v", provider)
+	}
+
+	provider.BaseURL = "http://two.example/v1"
+	if PromptProgressObservationValid(provider) {
+		t.Fatal("observation remained valid after endpoint changed")
+	}
+	cfg := Default()
+	cfg.Providers = map[string]Provider{"test": provider}
+	cfg.applyDefaults()
+	invalidated := cfg.Providers["test"]
+	if invalidated.PromptProgressProbed || invalidated.PromptProgressSupported || !invalidated.PromptProgressCheckedAt.IsZero() || invalidated.PromptProgressTarget != "" {
+		t.Fatalf("stale observation was not cleared: %#v", invalidated)
+	}
+}
+
 func TestLoadWritesDefaultConfig(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)

@@ -101,6 +101,8 @@ type Provider struct {
 	PromptProgressMode      string            `toml:"prompt_progress_mode"`
 	PromptProgressProbed    bool              `toml:"prompt_progress_probed"`
 	PromptProgressSupported bool              `toml:"prompt_progress_supported"`
+	PromptProgressCheckedAt time.Time         `toml:"prompt_progress_checked_at,omitempty"`
+	PromptProgressTarget    string            `toml:"prompt_progress_target,omitempty"`
 }
 
 // ModelConfig stores settings for one provider/model pair.
@@ -484,6 +486,12 @@ func (c *Config) applyDefaults() {
 			provider.Timeout = fallbackProvider.Timeout
 		}
 		provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
+		if provider.PromptProgressProbed && !PromptProgressObservationValid(provider) {
+			provider.PromptProgressProbed = false
+			provider.PromptProgressSupported = false
+			provider.PromptProgressCheckedAt = time.Time{}
+			provider.PromptProgressTarget = ""
+		}
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
 		}
@@ -765,6 +773,33 @@ func NormalizePromptProgressMode(value string) string {
 	default:
 		return "auto"
 	}
+}
+
+// PromptProgressObservationTarget identifies the endpoint whose learned
+// prompt-progress capability is cached. Credentials and cosmetic labels do not
+// affect the capability and are intentionally excluded.
+func PromptProgressObservationTarget(provider Provider) string {
+	kind := strings.ToLower(strings.TrimSpace(provider.Kind))
+	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"))
+	return kind + "|" + baseURL
+}
+
+func PromptProgressObservationValid(provider Provider) bool {
+	return provider.PromptProgressProbed &&
+		!provider.PromptProgressCheckedAt.IsZero() &&
+		provider.PromptProgressTarget == PromptProgressObservationTarget(provider)
+}
+
+func WithPromptProgressObservation(provider Provider, supported bool, checkedAt time.Time) Provider {
+	if checkedAt.IsZero() {
+		checkedAt = time.Now()
+	}
+	provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
+	provider.PromptProgressProbed = true
+	provider.PromptProgressSupported = supported
+	provider.PromptProgressCheckedAt = checkedAt
+	provider.PromptProgressTarget = PromptProgressObservationTarget(provider)
+	return provider
 }
 
 func NormalizeCompactionKeepToolCalls(value int) int {

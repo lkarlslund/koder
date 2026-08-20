@@ -201,14 +201,14 @@ func PromptProgressEnabled(cfg config.Provider) bool {
 	case "enabled":
 		return true
 	case "auto":
-		return cfg.PromptProgressProbed && cfg.PromptProgressSupported
+		return config.PromptProgressObservationValid(cfg) && cfg.PromptProgressSupported
 	default:
 		return false
 	}
 }
 
 func PromptProgressProbePending(cfg config.Provider) bool {
-	return config.NormalizePromptProgressMode(cfg.PromptProgressMode) == "auto" && !cfg.PromptProgressProbed
+	return config.NormalizePromptProgressMode(cfg.PromptProgressMode) == "auto" && !config.PromptProgressObservationValid(cfg)
 }
 
 func PromptProgressRequested(cfg config.Provider) bool {

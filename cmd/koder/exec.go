@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
@@ -405,12 +406,10 @@ func (r *execRunner) setPromptProgressSupport(providerID string, supported bool)
 	if !ok {
 		return
 	}
-	if providerCfg.PromptProgressProbed && providerCfg.PromptProgressSupported == supported {
+	if config.PromptProgressObservationValid(providerCfg) && providerCfg.PromptProgressSupported == supported {
 		return
 	}
-	providerCfg.PromptProgressMode = config.NormalizePromptProgressMode(providerCfg.PromptProgressMode)
-	providerCfg.PromptProgressProbed = true
-	providerCfg.PromptProgressSupported = supported
+	providerCfg = config.WithPromptProgressObservation(providerCfg, supported, time.Now())
 	r.cfg.Providers[providerID] = providerCfg
 	if strings.TrimSpace(r.cfg.Path()) == "" {
 		return

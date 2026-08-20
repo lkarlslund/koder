@@ -5202,6 +5202,7 @@
             if (this.providerDraft) {
               this.providerDraft.prompt_progress_probed = !!result.prompt_progress_probed;
               this.providerDraft.prompt_progress_supported = !!result.prompt_progress_supported;
+			  this.providerDraft.prompt_progress_checked_at = result.prompt_progress_checked_at || '';
             }
             const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
             const progress = result.prompt_progress_probed ? (' Prompt progress ' + (result.prompt_progress_supported ? 'supported.' : 'not supported.')) : '';
@@ -5691,8 +5692,9 @@
           const mode = String(item.prompt_progress_mode || 'auto').trim().toLowerCase() || 'auto';
           if (mode === 'disabled') return {label: 'Disabled', detail: 'Prompt progress is disabled for this provider.'};
           if (!item.prompt_progress_probed) return {label: 'Unknown', detail: 'Koder will try prompt progress on the next test, save, or model request.'};
-          if (item.prompt_progress_supported) return {label: 'Supported', detail: 'This provider accepts return_progress and can stream prompt preprocessing progress.'};
-          return {label: 'Unsupported', detail: 'This provider rejected return_progress; Koder will omit it.'};
+		  const observed = item.prompt_progress_checked_at ? ' Observed ' + new Date(item.prompt_progress_checked_at).toLocaleString() + '.' : '';
+          if (item.prompt_progress_supported) return {label: 'Supported', detail: 'This provider accepts return_progress and can stream prompt preprocessing progress.' + observed};
+          return {label: 'Unsupported', detail: 'This provider rejected return_progress; Koder will omit it.' + observed};
         },
         promptProgressBadge(item) {
           const state = this.promptProgressState(item).label.toLowerCase();

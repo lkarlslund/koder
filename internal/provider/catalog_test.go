@@ -89,6 +89,9 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	if !result.PromptProgressProbed || result.PromptProgressSupported {
 		t.Fatalf("expected rejected prompt progress probe, got %#v", result)
 	}
+	if result.PromptProgressCheckedAt.IsZero() || result.PromptProgressTarget == "" {
+		t.Fatalf("expected timestamped prompt progress observation, got %#v", result)
+	}
 }
 
 func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) {
@@ -158,6 +161,9 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 	}
 	if !result.PromptProgressProbed || !result.PromptProgressSupported {
 		t.Fatalf("expected supported prompt progress probe, got %#v", result)
+	}
+	if result.PromptProgressCheckedAt.IsZero() || result.PromptProgressTarget == "" {
+		t.Fatalf("expected timestamped prompt progress observation, got %#v", result)
 	}
 }
 

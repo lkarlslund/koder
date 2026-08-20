@@ -68,6 +68,7 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		SelectedModel:           result.SelectedModel,
 		PromptProgressProbed:    result.PromptProgressProbed,
 		PromptProgressSupported: result.PromptProgressSupported,
+		PromptProgressCheckedAt: timePointer(result.PromptProgressCheckedAt),
 	}, nil
 }
 
@@ -132,8 +133,11 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	catalogDraft.Model = probe.SelectedModel
 	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
 	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
+	catalogDraft.PromptProgressCheckedAt = probe.PromptProgressCheckedAt
+	catalogDraft.PromptProgressTarget = probe.PromptProgressTarget
 	draft.PromptProgressProbed = probe.PromptProgressProbed
 	draft.PromptProgressSupported = probe.PromptProgressSupported
+	draft.PromptProgressCheckedAt = timePointer(probe.PromptProgressCheckedAt)
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {
@@ -1417,6 +1421,7 @@ func (c *Controller) providerStateLocked() ProviderState {
 			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
 			PromptProgressProbed:    cfg.PromptProgressProbed,
 			PromptProgressSupported: cfg.PromptProgressSupported,
+			PromptProgressCheckedAt: timePointer(cfg.PromptProgressCheckedAt),
 			Health:                  c.providerRuntimeHealth(id, cfg.Disabled),
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
@@ -1459,28 +1464,27 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
 		PromptProgressProbed:    draft.PromptProgressProbed,
 		PromptProgressSupported: draft.PromptProgressSupported,
+		PromptProgressCheckedAt: timePointer(draft.PromptProgressCheckedAt),
 	}
 }
 
 func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 	return provider.ConnectDraft{
-		OriginalProviderID:      strings.TrimSpace(draft.OriginalProviderID),
-		ProviderID:              strings.TrimSpace(draft.ProviderID),
-		TemplateID:              strings.TrimSpace(draft.TemplateID),
-		Kind:                    strings.TrimSpace(draft.Kind),
-		AuthMethod:              strings.TrimSpace(draft.AuthMethod),
-		Name:                    strings.TrimSpace(draft.Name),
-		BaseURL:                 strings.TrimSpace(draft.BaseURL),
-		APIKey:                  strings.TrimSpace(draft.APIKey),
-		APIKeyEnv:               strings.TrimSpace(draft.APIKeyEnv),
-		Model:                   strings.TrimSpace(draft.Model),
-		Stream:                  draft.Stream,
-		Timeout:                 parseDurationOrZero(draft.Timeout),
-		Disabled:                draft.Disabled,
-		Headers:                 cloneHeaderMap(draft.Headers),
-		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
-		PromptProgressProbed:    draft.PromptProgressProbed,
-		PromptProgressSupported: draft.PromptProgressSupported,
+		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
+		ProviderID:         strings.TrimSpace(draft.ProviderID),
+		TemplateID:         strings.TrimSpace(draft.TemplateID),
+		Kind:               strings.TrimSpace(draft.Kind),
+		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
+		Name:               strings.TrimSpace(draft.Name),
+		BaseURL:            strings.TrimSpace(draft.BaseURL),
+		APIKey:             strings.TrimSpace(draft.APIKey),
+		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
+		Model:              strings.TrimSpace(draft.Model),
+		Stream:             draft.Stream,
+		Timeout:            parseDurationOrZero(draft.Timeout),
+		Disabled:           draft.Disabled,
+		Headers:            cloneHeaderMap(draft.Headers),
+		PromptProgressMode: config.NormalizePromptProgressMode(draft.PromptProgressMode),
 	}
 }
 
@@ -1527,8 +1531,6 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.Stream = draft.Stream
 	next.Disabled = draft.Disabled
 	next.PromptProgressMode = config.NormalizePromptProgressMode(draft.PromptProgressMode)
-	next.PromptProgressProbed = draft.PromptProgressProbed
-	next.PromptProgressSupported = draft.PromptProgressSupported
 }
 
 func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {
@@ -2157,6 +2159,14 @@ func durationString(value time.Duration) string {
 		return ""
 	}
 	return value.String()
+}
+
+func timePointer(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
 }
 
 func parseDurationOrZero(value string) time.Duration {

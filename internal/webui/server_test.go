@@ -3555,9 +3555,10 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 				DefaultProvider string `json:"default_provider"`
 				DefaultModel    string `json:"default_model"`
 				Providers       []struct {
-					ID                      string `json:"id"`
-					PromptProgressProbed    bool   `json:"prompt_progress_probed"`
-					PromptProgressSupported bool   `json:"prompt_progress_supported"`
+					ID                      string     `json:"id"`
+					PromptProgressProbed    bool       `json:"prompt_progress_probed"`
+					PromptProgressSupported bool       `json:"prompt_progress_supported"`
+					PromptProgressCheckedAt *time.Time `json:"prompt_progress_checked_at"`
 				} `json:"providers"`
 				Drafts map[string]struct {
 					Headers map[string]string `json:"headers"`
@@ -3590,7 +3591,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	for _, item := range saveResp.Result.Providers.Providers {
 		if item.ID == "local" {
 			foundLocal = true
-			if !item.PromptProgressProbed || item.PromptProgressSupported {
+			if !item.PromptProgressProbed || item.PromptProgressSupported || item.PromptProgressCheckedAt == nil {
 				t.Fatalf("expected rejected prompt progress status on local provider, got %#v", item)
 			}
 		}

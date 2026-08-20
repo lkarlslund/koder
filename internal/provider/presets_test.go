@@ -3,6 +3,7 @@ package provider
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
@@ -101,11 +102,8 @@ func TestDefaultOverlaySkipsModelSpecificOptions(t *testing.T) {
 }
 
 func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
-	got := requestExtraBody(t, config.Provider{
-		PromptProgressMode:      "auto",
-		PromptProgressProbed:    true,
-		PromptProgressSupported: true,
-	}, config.ModelConfig{ModelID: "model-a", ModelPreset: ModelPresetDefault})
+	providerCfg := config.WithPromptProgressObservation(config.Provider{PromptProgressMode: "auto"}, true, time.Now())
+	got := requestExtraBody(t, providerCfg, config.ModelConfig{ModelID: "model-a", ModelPreset: ModelPresetDefault})
 	want := map[string]any{
 		"return_progress": true,
 	}

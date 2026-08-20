@@ -584,12 +584,10 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 	if !ok {
 		return
 	}
-	if providerCfg.PromptProgressProbed && providerCfg.PromptProgressSupported == supported {
+	if config.PromptProgressObservationValid(providerCfg) && providerCfg.PromptProgressSupported == supported {
 		return
 	}
-	providerCfg.PromptProgressMode = config.NormalizePromptProgressMode(providerCfg.PromptProgressMode)
-	providerCfg.PromptProgressProbed = true
-	providerCfg.PromptProgressSupported = supported
+	providerCfg = config.WithPromptProgressObservation(providerCfg, supported, time.Now())
 	providers := make(map[string]config.Provider, len(cfg.Providers))
 	for key, value := range cfg.Providers {
 		providers[key] = value

@@ -90,6 +90,15 @@ func TestPreferencesSerializeBrowserRuntimeSeparately(t *testing.T) {
 	}
 }
 
+func TestProviderDraftCannotOverwritePromptProgressObservation(t *testing.T) {
+	checkedAt := time.Now().UTC()
+	next := config.WithPromptProgressObservation(config.Provider{Kind: "openai-compatible", BaseURL: "http://provider.test/v1", PromptProgressMode: "auto"}, true, checkedAt)
+	applyProviderDraftPreferences(&next, ProviderDraft{PromptProgressMode: "auto", PromptProgressProbed: false, PromptProgressSupported: false})
+	if !config.PromptProgressObservationValid(next) || !next.PromptProgressSupported || !next.PromptProgressCheckedAt.Equal(checkedAt) {
+		t.Fatalf("editable provider draft overwrote runtime observation: %#v", next)
+	}
+}
+
 func testGetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {
 	return testChatCollection(st).Get(ctx, chatID)
 }

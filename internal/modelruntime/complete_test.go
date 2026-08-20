@@ -341,4 +341,7 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 	if !updated.PromptProgressProbed || updated.PromptProgressSupported {
 		t.Fatalf("expected prompt progress to be persisted unsupported, got %#v", updated)
 	}
+	if !config.PromptProgressObservationValid(updated) || updated.PromptProgressCheckedAt.IsZero() {
+		t.Fatalf("expected timestamped prompt progress observation, got %#v", updated)
+	}
 }

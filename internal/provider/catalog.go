@@ -49,6 +49,8 @@ type ConnectDraft struct {
 	PromptProgressMode      string
 	PromptProgressProbed    bool
 	PromptProgressSupported bool
+	PromptProgressCheckedAt time.Time
+	PromptProgressTarget    string
 }
 
 type ProbeResult struct {
@@ -56,6 +58,8 @@ type ProbeResult struct {
 	SelectedModel           string
 	PromptProgressProbed    bool
 	PromptProgressSupported bool
+	PromptProgressCheckedAt time.Time
+	PromptProgressTarget    string
 }
 
 var catalog = []Descriptor{
@@ -140,6 +144,8 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		PromptProgressMode:      config.NormalizePromptProgressMode(existing.PromptProgressMode),
 		PromptProgressProbed:    existing.PromptProgressProbed,
 		PromptProgressSupported: existing.PromptProgressSupported,
+		PromptProgressCheckedAt: existing.PromptProgressCheckedAt,
+		PromptProgressTarget:    existing.PromptProgressTarget,
 	}, nil
 }
 
@@ -159,6 +165,8 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		PromptProgressMode:      config.NormalizePromptProgressMode(d.PromptProgressMode),
 		PromptProgressProbed:    d.PromptProgressProbed,
 		PromptProgressSupported: d.PromptProgressSupported,
+		PromptProgressCheckedAt: d.PromptProgressCheckedAt,
+		PromptProgressTarget:    d.PromptProgressTarget,
 	}
 	return cfg
 }
@@ -180,7 +188,12 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 		return ProbeResult{}, err
 	}
 	probed, supported := probePromptProgress(ctx, draft, selected, recorder)
-	return ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported}, nil
+	result := ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported}
+	if probed {
+		result.PromptProgressCheckedAt = time.Now()
+		result.PromptProgressTarget = config.PromptProgressObservationTarget(draft.ToConfig())
+	}
+	return result, nil
 }
 
 func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string, recorder *debugsrv.Recorder) (bool, bool) {

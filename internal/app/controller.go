@@ -201,6 +201,7 @@ type ProviderConfigItem struct {
 	PromptProgressMode      string        `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool          `json:"prompt_progress_probed"`
 	PromptProgressSupported bool          `json:"prompt_progress_supported"`
+	PromptProgressCheckedAt *time.Time    `json:"prompt_progress_checked_at,omitempty"`
 	Health                  RuntimeHealth `json:"health"`
 }
 
@@ -223,17 +224,19 @@ type ProviderDraft struct {
 	PromptProgressMode      string            `json:"prompt_progress_mode"`
 	PromptProgressProbed    bool              `json:"prompt_progress_probed"`
 	PromptProgressSupported bool              `json:"prompt_progress_supported"`
+	PromptProgressCheckedAt *time.Time        `json:"prompt_progress_checked_at,omitempty"`
 }
 
 // ProviderProbeResult reports a provider test outcome.
 type ProviderProbeResult struct {
-	ModelCount              int      `json:"model_count"`
-	Models                  []string `json:"models"`
-	Capabilities            []string `json:"capabilities"`
-	MaxContextWindow        int      `json:"max_context_window,omitempty"`
-	SelectedModel           string   `json:"selected_model"`
-	PromptProgressProbed    bool     `json:"prompt_progress_probed"`
-	PromptProgressSupported bool     `json:"prompt_progress_supported"`
+	ModelCount              int        `json:"model_count"`
+	Models                  []string   `json:"models"`
+	Capabilities            []string   `json:"capabilities"`
+	MaxContextWindow        int        `json:"max_context_window,omitempty"`
+	SelectedModel           string     `json:"selected_model"`
+	PromptProgressProbed    bool       `json:"prompt_progress_probed"`
+	PromptProgressSupported bool       `json:"prompt_progress_supported"`
+	PromptProgressCheckedAt *time.Time `json:"prompt_progress_checked_at,omitempty"`
 }
 
 type ModelConfigPreference struct {
