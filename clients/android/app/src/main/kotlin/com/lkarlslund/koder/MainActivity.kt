@@ -1610,8 +1610,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}.toTypedArray()
 		val current = models.indexOfFirst { it.providerId == chat.providerId && it.id == chat.modelId }.coerceAtLeast(0)
 		AlertDialog.Builder(this)
-			.setTitle("Choose a model")
-			.setMessage("The previous model may no longer be available. The system default is listed first.")
+			.setTitle("Choose a model · system default first")
 			.setSingleChoiceItems(labels, current) { dialog, which ->
 				val model = models[which]
 				val ownerSessionId = chat.sessionId.ifBlank { selectedKoderSession?.id.orEmpty() }
@@ -2282,9 +2281,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		updateConversationStatus(CallController.Stage.CONNECTING, initialDetail)
 		updateConversationMode(CallController.Stage.CONNECTING)
 		if (startConnection) {
-			val available = session.backend != "koder" || readinessHome?.chatBackends.orEmpty()
-				.firstOrNull { it.id == "koder" }?.models.orEmpty()
-				.any { it.providerId == session.providerId && it.id == session.modelId }
+			val catalog = readinessHome?.chatBackends.orEmpty().firstOrNull { it.id == "koder" }?.models.orEmpty()
+			val available = session.backend != "koder" || catalog.isEmpty() ||
+				catalog.any { it.providerId == session.providerId && it.id == session.modelId }
 			if (available) requestCallStart() else {
 				startAfterModelRecovery = true
 				updateConversationStatus(CallController.Stage.ERROR, "This conversation's model is no longer available")

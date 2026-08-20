@@ -555,6 +555,36 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
+	fun openingVoiceChatWithRemovedModelOffersSystemDefaultBeforeConnecting() {
+		val server = MockWebServer()
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse = when (request.target) {
+				"/voice/v1/sessions" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","sessions":[{"id":"session-old","title":"Old project","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[],"chat_backends":[{"id":"koder","label":"Koder","available":true,"models":[{"provider_id":"local","id":"current-model","name":"Local / current-model","default":true}]}]}""",
+				).build()
+				"/voice/v1/sessions/session-old/chats" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","chats":[{"id":"voice-old","session_id":"session-old","title":"Old conversation","role":"voice","backend":"koder","interaction_mode":"voice","provider_id":"removed","model_id":"gone"}],"voice_sessions":[]}""",
+				).build()
+				else -> MockResponse.Builder().code(404).build()
+			}
+		}
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use {
+				waitForDisplayedText("Old project")
+				onView(withContentDescription("Open Old project. 1 chat · 1 voice")).perform(click())
+				waitForDisplayedText("Old conversation")
+				onView(withContentDescription("Open voice conversation Old conversation")).perform(click())
+				waitForDisplayedText("Choose a model · system default first")
+				onView(withText("Local / current-model — system default")).inRoot(isDialog()).check(matches(isDisplayed()))
+			}
+		} finally {
+			server.close()
+		}
+	}
+
+	@Test
 	fun sessionCardsShowCountsAndTenRows() {
 		val sessions = (1..10).joinToString(",") { index ->
 			buildString {

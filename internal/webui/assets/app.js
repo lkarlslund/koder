@@ -4328,7 +4328,7 @@
 		  const modelID = String(chat.ModelID || chat.model_id || '');
 		  this.rpc('chat_backends', {}).then(backends => {
 			const backend = (backends || []).find(item => item.id === 'koder');
-			if (backend && !(backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) {
+			if (backend && (backend.models || []).length && !(backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) {
 			  this.showToast(`The model ${provider} / ${modelID} is no longer available. Choose another model.`);
 			  this.openModelDialog();
 			}
