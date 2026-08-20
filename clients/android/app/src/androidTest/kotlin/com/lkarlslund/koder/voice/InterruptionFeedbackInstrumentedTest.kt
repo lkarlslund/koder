@@ -9,8 +9,18 @@ import org.junit.runner.RunWith
 class InterruptionFeedbackInstrumentedTest {
 	@Test
 	fun audibleAndHapticAcknowledgementIsAvailableOnDevice() {
-		AndroidInterruptionFeedback(InstrumentationRegistry.getInstrumentation().targetContext).use {
+		val cues = mutableListOf<VoiceHapticCue>()
+		AndroidInterruptionFeedback(InstrumentationRegistry.getInstrumentation().targetContext, object : VoiceHaptics {
+			override fun play(cue: VoiceHapticCue) { cues += cue }
+		}).use {
 			it.acknowledge()
 		}
+		org.junit.Assert.assertEquals(listOf(VoiceHapticCue.INTERRUPTION), cues)
+	}
+
+	@Test
+	fun everySubtleCueCanBeSubmittedToTheDeviceVibrator() {
+		val haptics = AndroidVoiceHaptics(InstrumentationRegistry.getInstrumentation().targetContext)
+		VoiceHapticCue.entries.forEach(haptics::play)
 	}
 }

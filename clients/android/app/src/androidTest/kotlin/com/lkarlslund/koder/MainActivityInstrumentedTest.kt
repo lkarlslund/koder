@@ -39,6 +39,8 @@ import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.VoiceCallService
 import com.lkarlslund.koder.voice.VoiceResultNotifier
+import com.lkarlslund.koder.voice.VoiceHapticCue
+import com.lkarlslund.koder.voice.VoiceHaptics
 import com.lkarlslund.koder.voice.audioRouteChipText
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -189,10 +191,13 @@ class MainActivityInstrumentedTest {
 		val secureSettings = SecureSettings(context)
 		secureSettings.savePhoneActionPolicy("device_status", PhoneActionPolicy.ASK)
 		var provider: AndroidPhoneToolProvider? = null
+		val hapticCues = mutableListOf<VoiceHapticCue>()
 		ActivityScenario.launch(MainActivity::class.java).use { scenario ->
 			val asked = CountDownLatch(1)
 			scenario.onActivity { activity ->
-				provider = AndroidPhoneToolProvider(activity, secureSettings)
+				provider = AndroidPhoneToolProvider(activity, secureSettings, haptics = object : VoiceHaptics {
+					override fun play(cue: VoiceHapticCue) { hapticCues += cue }
+				})
 				assertEquals(PhoneActionPolicy.ASK, provider?.actionPolicies()?.get("device_status"))
 				provider?.execute("device_status", emptyMap()) { result ->
 					assertTrue(result.isSuccess)
@@ -200,6 +205,7 @@ class MainActivityInstrumentedTest {
 				}
 			}
 			assertEquals(1L, asked.count)
+			assertEquals(listOf(VoiceHapticCue.CONFIRMATION_REQUIRED), hapticCues)
 			onView(withText("Allow")).inRoot(isDialog()).perform(click())
 			assertTrue(asked.await(5, TimeUnit.SECONDS))
 

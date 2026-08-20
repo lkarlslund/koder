@@ -19,7 +19,8 @@ class CallController(
 	detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
 	audioPlayback: StreamingAudioPlayback? = null,
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
-	private val interruptionFeedback: InterruptionFeedback = AndroidInterruptionFeedback(context),
+	private val haptics: VoiceHaptics = AndroidVoiceHaptics(context),
+	private val interruptionFeedback: InterruptionFeedback = AndroidInterruptionFeedback(context, haptics),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
 	private val phoneIdentity: PhoneIdentity? = null,
 	private val onBuiltInAudioRouteSelected: (BuiltInAudioRoute) -> Unit = {},
@@ -542,12 +543,14 @@ class CallController(
     }
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {
+        val previousStage = snapshot.stage
         if (stage == Stage.WORKING) {
             workingSound.start()
         } else {
             workingSound.stop()
         }
-	        snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial, microphoneMuted = microphoneMuted)
+        snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial, microphoneMuted = microphoneMuted)
+        voiceHapticCueForTransition(previousStage, stage)?.let(haptics::play)
         publish()
     }
 

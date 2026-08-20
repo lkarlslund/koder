@@ -32,6 +32,9 @@ import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.lkarlslund.koder.SecureSettings
+import com.lkarlslund.koder.voice.AndroidVoiceHaptics
+import com.lkarlslund.koder.voice.VoiceHapticCue
+import com.lkarlslund.koder.voice.VoiceHaptics
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -59,6 +62,7 @@ class AndroidPhoneToolProvider(
         Thread(runnable, "koder-phone-tools").apply { isDaemon = true }
     },
     private val intentLauncher: ((Intent) -> Unit)? = null,
+	private val haptics: VoiceHaptics = AndroidVoiceHaptics(activity),
 ) : PhoneToolProvider {
     override fun enabledActions(): Set<String> = actionPolicies().keys
 
@@ -83,8 +87,9 @@ class AndroidPhoneToolProvider(
 				callback(result)
 			}
 		}
-		if (settings.load().phoneActionPolicies[action] == PhoneActionPolicy.ASK) {
+        if (settings.load().phoneActionPolicies[action] == PhoneActionPolicy.ASK) {
             activity.runOnUiThread {
+				haptics.play(VoiceHapticCue.CONFIRMATION_REQUIRED)
                 AlertDialog.Builder(activity)
                     .setTitle("Allow Koder to ${humanAction(action)}?")
                     .setMessage(confirmMessage(action, arguments))

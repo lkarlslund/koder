@@ -85,6 +85,9 @@ import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.VoiceProtocol
 import com.lkarlslund.koder.voice.VoiceResultNotifier
 import com.lkarlslund.koder.voice.VoiceReadinessCheck
+import com.lkarlslund.koder.voice.AndroidVoiceHaptics
+import com.lkarlslund.koder.voice.VoiceHapticCue
+import com.lkarlslund.koder.voice.VoiceHaptics
 import com.lkarlslund.koder.voice.VoiceStateOrbView
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -120,6 +123,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private lateinit var phoneIdentity: PhoneIdentity
 	private lateinit var bindingClient: PhoneBindingClient
 	private lateinit var sessionClient: VoiceSessionClient
+	private lateinit var voiceHaptics: VoiceHaptics
 	private var readinessCheck: VoiceReadinessCheck? = null
 	private var readinessHome: VoiceHome? = null
 	private var readinessReturnToSettings = false
@@ -190,7 +194,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 	private val readinessPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
 		if (screen != Screen.READINESS) return@registerForActivityResult
-		if (granted) startReadinessCheck() else showReadiness(readinessHome ?: return@registerForActivityResult, "Microphone permission is required to test voice.")
+		if (granted) startReadinessCheck() else {
+			voiceHaptics.play(VoiceHapticCue.FAILURE)
+			showReadiness(readinessHome ?: return@registerForActivityResult, "Microphone permission is required to test voice.")
+		}
 	}
     private val phonePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val capability = pendingPhoneCapability ?: return@registerForActivityResult
@@ -222,6 +229,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		phoneIdentity = PhoneIdentity.from(this)
 		bindingClient = PhoneBindingClient(phoneIdentity)
 		sessionClient = VoiceSessionClient(identity = phoneIdentity)
+		voiceHaptics = AndroidVoiceHaptics(this)
 		controller = CallController(
 			this,
 			this,
@@ -613,13 +621,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			override fun onComplete(transcript: String) = runOnUiThread {
 				if (screen != Screen.READINESS) return@runOnUiThread
 				secureSettings.markReadinessComplete(settings.server)
+				voiceHaptics.play(VoiceHapticCue.SUCCESS)
 				readinessCheck?.close()
 				readinessCheck = null
 				showReadinessSuccess(home, transcript)
 			}
 
 			override fun onFailure(message: String) = runOnUiThread {
-				if (screen == Screen.READINESS) showReadiness(home, message, readinessReturnToSettings)
+				if (screen == Screen.READINESS) {
+					voiceHaptics.play(VoiceHapticCue.FAILURE)
+					showReadiness(home, message, readinessReturnToSettings)
+				}
 			}
 		})
 		readinessCheck?.start(settings.server, settings.token, settings.speechLanguages, settings.vadSensitivityPercent, settings.vadSilenceMilliseconds)
@@ -652,6 +664,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
     private fun showConnectionError(failure: Throwable) {
+		voiceHaptics.play(VoiceHapticCue.FAILURE)
         screen = Screen.LOADING
         val content = column()
         content.addView(title("Couldn’t connect to Koder"), matchWrap())
