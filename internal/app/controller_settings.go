@@ -1177,19 +1177,20 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
 			MaxChildChats:    c.cfg.MaxChildChats,
 		},
-		UI:            browserPreferencesFromConfig(c.cfg.UI),
-		Compaction:    compactionPreferencesFromConfig(c.cfg),
-		Thinking:      thinkingPreferencesFromConfig(c.cfg),
-		Prompts:       prompts,
-		Providers:     c.providerStateLocked(),
-		Models:        models,
-		ModelConfigs:  modelConfigPreferencesFromConfig(c.cfg.Models, models),
-		ModelOverlays: modeloverlay.Load(c.cfg.ManagedAssetsDir()),
-		MCPServers:    mcpPreferencesFromConfig(c.cfg.MCPServers),
-		MCPRuntime:    mcpRuntimeState(c.agent),
-		Access:        accessPreferencesFromConfig(c.cfg.Access),
-		ToolDefaults:  toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
-		Browser:       nativeBrowserPreferencesFromConfig(c.cfg.Browser, c.agent),
+		UI:             browserPreferencesFromConfig(c.cfg.UI),
+		Compaction:     compactionPreferencesFromConfig(c.cfg),
+		Thinking:       thinkingPreferencesFromConfig(c.cfg),
+		Prompts:        prompts,
+		Providers:      c.providerStateLocked(),
+		Models:         models,
+		ModelConfigs:   modelConfigPreferencesFromConfig(c.cfg.Models, models),
+		ModelOverlays:  modeloverlay.Load(c.cfg.ManagedAssetsDir()),
+		MCPServers:     mcpPreferencesFromConfig(c.cfg.MCPServers),
+		MCPRuntime:     mcpRuntimeState(c.agent),
+		Access:         accessPreferencesFromConfig(c.cfg.Access),
+		ToolDefaults:   toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
+		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
+		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
 	}
 	for idx := range state.ModelConfigs {
 		state.ModelConfigs[idx] = decorateModelConfigPreference(c.cfg, state.ModelOverlays, state.ModelConfigs[idx])
@@ -1198,12 +1199,15 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 	return state, nil
 }
 
-func nativeBrowserPreferencesFromConfig(cfg config.Browser, engine *agent.Engine) NativeBrowserPreferences {
-	status := browserapi.Status{State: "unavailable"}
+func nativeBrowserPreferencesFromConfig(cfg config.Browser) NativeBrowserPreferences {
+	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal}
+}
+
+func nativeBrowserRuntimeState(engine *agent.Engine) browserapi.Status {
 	if engine != nil {
-		status = engine.BrowserStatus(browserapi.Chat{})
+		return engine.BrowserStatus(browserapi.Chat{})
 	}
-	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, Status: status}
+	return browserapi.Status{State: "unavailable"}
 }
 
 func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPreferences) error {

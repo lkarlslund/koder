@@ -264,31 +264,31 @@ type ModelConfigPreference struct {
 
 // PreferencesState is the complete settings payload exposed to browser clients.
 type PreferencesState struct {
-	General       GeneralPreferences       `json:"general"`
-	UI            BrowserPreferences       `json:"ui"`
-	Compaction    CompactionPreferences    `json:"compaction"`
-	Thinking      ThinkingPreferences      `json:"thinking"`
-	Prompts       []PromptPreference       `json:"prompts"`
-	Providers     ProviderState            `json:"providers"`
-	Models        []ModelOption            `json:"models"`
-	ModelConfigs  []ModelConfigPreference  `json:"model_configs"`
-	ModelOverlays modeloverlay.Catalog     `json:"model_overlays"`
-	MCPServers    []MCPServerPreference    `json:"mcp_servers"`
-	MCPRuntime    []MCPRuntimeState        `json:"mcp_runtime"`
-	Access        AccessPreferences        `json:"access"`
-	ToolDefaults  []ToolDefaultPreference  `json:"tool_defaults"`
-	Browser       NativeBrowserPreferences `json:"browser"`
-	RestartKeys   []string                 `json:"restart_keys,omitempty"`
+	General        GeneralPreferences       `json:"general"`
+	UI             BrowserPreferences       `json:"ui"`
+	Compaction     CompactionPreferences    `json:"compaction"`
+	Thinking       ThinkingPreferences      `json:"thinking"`
+	Prompts        []PromptPreference       `json:"prompts"`
+	Providers      ProviderState            `json:"providers"`
+	Models         []ModelOption            `json:"models"`
+	ModelConfigs   []ModelConfigPreference  `json:"model_configs"`
+	ModelOverlays  modeloverlay.Catalog     `json:"model_overlays"`
+	MCPServers     []MCPServerPreference    `json:"mcp_servers"`
+	MCPRuntime     []MCPRuntimeState        `json:"mcp_runtime"`
+	Access         AccessPreferences        `json:"access"`
+	ToolDefaults   []ToolDefaultPreference  `json:"tool_defaults"`
+	Browser        NativeBrowserPreferences `json:"browser"`
+	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
+	RestartKeys    []string                 `json:"restart_keys,omitempty"`
 }
 
 type NativeBrowserPreferences struct {
-	Enabled          bool              `json:"enabled"`
-	Executable       string            `json:"executable"`
-	Headed           bool              `json:"headed"`
-	OperationTimeout int               `json:"operation_timeout_seconds"`
-	MaxTabsPerChat   int               `json:"max_tabs_per_chat"`
-	MaxTabsGlobal    int               `json:"max_tabs_global"`
-	Status           browserapi.Status `json:"status"`
+	Enabled          bool   `json:"enabled"`
+	Executable       string `json:"executable"`
+	Headed           bool   `json:"headed"`
+	OperationTimeout int    `json:"operation_timeout_seconds"`
+	MaxTabsPerChat   int    `json:"max_tabs_per_chat"`
+	MaxTabsGlobal    int    `json:"max_tabs_global"`
 }
 
 // GeneralPreferences contains global non-provider settings.

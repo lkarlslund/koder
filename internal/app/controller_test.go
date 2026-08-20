@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
@@ -59,6 +61,32 @@ func TestMCPRuntimeStateReflectsManagerSnapshots(t *testing.T) {
 	}
 	if states[1].ID != "zeta" || states[1].Status != "error" || states[1].LastError != "connection refused" {
 		t.Fatalf("unexpected failed MCP runtime state: %#v", states[1])
+	}
+}
+
+func TestPreferencesSerializeBrowserRuntimeSeparately(t *testing.T) {
+	state := PreferencesState{
+		Browser:        NativeBrowserPreferences{Enabled: true, OperationTimeout: 30, MaxTabsPerChat: 8, MaxTabsGlobal: 32},
+		BrowserRuntime: browserapi.Status{State: "ready"},
+	}
+	payload, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &root); err != nil {
+		t.Fatal(err)
+	}
+	var browser map[string]any
+	if err := json.Unmarshal(root["browser"], &browser); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := browser["status"]; exists {
+		t.Fatalf("browser runtime leaked into editable preferences: %s", payload)
+	}
+	var runtime browserapi.Status
+	if err := json.Unmarshal(root["browser_runtime"], &runtime); err != nil || runtime.State != "ready" {
+		t.Fatalf("missing separate browser runtime state: runtime=%#v err=%v payload=%s", runtime, err, payload)
 	}
 }
 

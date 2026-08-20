@@ -5252,10 +5252,10 @@
         setSettingsState(state) {
           this.settings = state || {};
           if (!this.settings.ui) this.settings.ui = {};
-          if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
+		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
 		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32};
-		  this.browserStatus = this.settings.browser.status || this.browserStatus;
-		  delete this.settings.browser.status;
+		  this.browserStatus = this.settings.browser_runtime || this.browserStatus;
+		  delete this.settings.browser_runtime;
           this.applyTTSSettings(this.settings.ui.tts);
           this.providerState = this.settings.providers || this.providerState;
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
