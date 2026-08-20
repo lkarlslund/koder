@@ -17,6 +17,10 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.lifecycle.Lifecycle
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.longClick
@@ -474,16 +478,23 @@ class MainActivityInstrumentedTest {
 				assertTrue(labels.contains("Trip planning"))
 				onView(withContentDescription("Show transcript")).perform(click())
 				onView(withContentDescription("Send message")).check(matches(isDisplayed()))
-				scenario.onActivity { activity ->
-					val button = activity.findViewById<View>(android.R.id.content).findByDescription("Send message") as ImageButton
+					scenario.onActivity { activity ->
+						val button = activity.findViewById<View>(android.R.id.content).findByDescription("Send message") as ImageButton
 					val expectedSize = (48 * activity.resources.displayMetrics.density).toInt()
 					assertEquals(expectedSize, button.width)
 					assertEquals(expectedSize, button.height)
 					assertEquals(null, button.background)
 					val composer = button.parent as ViewGroup
-					assertEquals(composer.width - composer.paddingRight, button.right)
-				}
-				onView(withContentDescription("Hide transcript")).perform(click())
+						assertEquals(composer.width - composer.paddingRight, button.right)
+					}
+					onView(withContentDescription("Text message to Koder")).perform(click())
+					scenario.onActivity { activity ->
+						val input = activity.findViewById<View>(android.R.id.content).findByDescription("Text message to Koder")
+						WindowInsetsControllerCompat(activity.window, input).show(WindowInsetsCompat.Type.ime())
+					}
+					waitForComposerAboveKeyboard(scenario)
+					closeSoftKeyboard()
+					onView(withContentDescription("Hide transcript")).perform(click())
 				scenario.onActivity { activity ->
 					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is connecting")
 					assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
@@ -944,6 +955,30 @@ class MainActivityInstrumentedTest {
 			Thread.sleep(100)
 		}
 		error("Timed out waiting for displayed content description $wanted")
+	}
+
+	private fun waitForComposerAboveKeyboard(scenario: ActivityScenario<MainActivity>) {
+		var last = "IME did not become visible"
+		repeat(50) {
+			var passed = false
+			scenario.onActivity { activity ->
+				val root = activity.findViewById<View>(android.R.id.content)
+				val input = root.findByDescription("Text message to Koder")
+				val composer = input.parent as View
+				val insets = ViewCompat.getRootWindowInsets(root)
+				val imeBottom = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+				val visible = insets?.isVisible(WindowInsetsCompat.Type.ime()) == true && imeBottom > 0
+				val rootLocation = IntArray(2).also(root::getLocationOnScreen)
+				val composerLocation = IntArray(2).also(composer::getLocationOnScreen)
+				val keyboardTop = rootLocation[1] + root.height - imeBottom
+				val composerBottom = composerLocation[1] + composer.height
+				passed = visible && composerBottom <= keyboardTop
+				last = "visible=$visible composerBottom=$composerBottom keyboardTop=$keyboardTop imeBottom=$imeBottom"
+			}
+			if (passed) return
+			Thread.sleep(100)
+		}
+		error("Composer remained behind keyboard: $last")
 	}
 
 	private fun waitForVoiceNotification(manager: NotificationManager, predicate: (Notification) -> Boolean): Notification {

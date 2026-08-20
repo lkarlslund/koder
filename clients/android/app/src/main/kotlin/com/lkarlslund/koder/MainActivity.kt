@@ -3316,8 +3316,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			Screen.CHAT -> pendingSession?.title?.ifBlank { "Voice conversation" } ?: "Voice conversation"
 		})
         ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(baseHorizontal + bars.left, baseVertical + bars.top, baseHorizontal + bars.right, baseVertical + bars.bottom)
+			val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+			val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+			view.setPadding(
+				baseHorizontal + bars.left,
+				baseVertical + bars.top,
+				baseHorizontal + bars.right,
+				baseVertical + maxOf(bars.bottom, ime.bottom),
+			)
             insets
         }
         setContentView(content)
