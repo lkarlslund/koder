@@ -89,7 +89,7 @@ func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatRecord := created.Snapshot().Chat
-	if chatRecord.ParentChatID != nil || chatRecord.WorkflowRole != chatrole.Voice {
+	if chatRecord.ParentChatID != nil || chatRecord.WorkflowRole != chatrole.Orchestrator || chatRecord.InteractionMode != domain.InteractionModeVoice {
 		t.Fatalf("unexpected root voice chat: %#v", chatRecord)
 	}
 	if chatRecord.ProviderID != original.ProviderID || chatRecord.ModelID != original.ModelID || chatRecord.PermissionProfile != original.PermissionProfile {

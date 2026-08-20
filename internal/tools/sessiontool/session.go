@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -70,7 +69,7 @@ func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.T
 	return voiceDefinition(runtime, spec)
 }
 func voiceDefinition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if runtime.ChatRole != chatrole.Voice {
+	if !runtime.VoiceInteraction() {
 		return tools.ToolSpec{}, false
 	}
 	if _, err := control(runtime); err != nil {

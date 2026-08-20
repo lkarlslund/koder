@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
+	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -143,6 +144,7 @@ type Runtime struct {
 	SessionID             id.ID
 	ChatID                id.ID
 	ChatRole              chatrole.Role
+	InteractionMode       chatinteraction.Mode
 	ActiveMilestoneKey    string
 	AssignedTaskBucketKey string
 	AssignedTaskRef       string
@@ -159,6 +161,13 @@ type Runtime struct {
 	OfferedFiles          *offeredfile.Manager
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
+}
+
+// VoiceInteraction reports whether tools are being offered to a voice
+// conversation. The legacy role fallback keeps stored/test callers compatible
+// while voice migrates to an orthogonal interaction mode.
+func (r Runtime) VoiceInteraction() bool {
+	return r.InteractionMode == chatinteraction.Voice || (r.InteractionMode == "" && r.ChatRole == chatrole.Voice)
 }
 
 type Options struct {
@@ -278,6 +287,9 @@ func Call(ctx context.Context, options Options) (Result, error) {
 	runtime = normalizeRuntime(runtime)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
+	}
+	if !chatinteraction.AllowsTool(runtime.InteractionMode, req.Tool) {
+		return Result{}, DeniedError{Tool: req.Tool, Reason: fmt.Sprintf("%s is not available in %s interaction mode", req.Tool, runtime.InteractionMode)}
 	}
 	if err := checkToolEnabled(runtime, req.Tool); err != nil {
 		return Result{}, err
@@ -434,6 +446,9 @@ func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 		return provider.ToolDefinition{}, false
 	}
 	if !chatrole.AllowsTool(runtime.ChatRole, kind) {
+		return provider.ToolDefinition{}, false
+	}
+	if !chatinteraction.AllowsTool(runtime.InteractionMode, kind) {
 		return provider.ToolDefinition{}, false
 	}
 	if enabled, ok := runtime.AllowedTools[kind]; ok && !enabled {

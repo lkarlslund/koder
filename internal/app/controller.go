@@ -1317,7 +1317,7 @@ func (c *Controller) NewTypedChatForSelection(ctx context.Context, selection Sel
 	case "", domain.WorkflowRoleOrchestrator:
 		rt, err = owner.NewChat(ctx, parent.ID, title)
 	case domain.WorkflowRoleVoice:
-		rt, err = owner.NewRootChat(ctx, title, chatrole.Voice)
+		rt, err = owner.NewRootChatWithDimensions(ctx, title, chatrole.Orchestrator, domain.ChatBackendKoder, domain.InteractionModeVoice)
 	default:
 		return domain.Chat{}, fmt.Errorf("chat type %q is not supported", role)
 	}

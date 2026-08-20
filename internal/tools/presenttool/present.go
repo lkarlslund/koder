@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -65,7 +64,7 @@ func (tool) Preview(req tools.Request) string {
 }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return spec, runtime.ChatRole == chatrole.Voice
+	return spec, runtime.VoiceInteraction()
 }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

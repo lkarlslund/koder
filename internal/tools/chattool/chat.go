@@ -395,7 +395,7 @@ func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	status, err := updateChat(ctx, runtime, req, UpdateRequest{
 		Message: req.Args["message"],
 		Steer:   req.Args["steer"] == "true",
-		Wait:    req.Args["wait"] == "true" || runtime.ChatRole == chatrole.Voice,
+		Wait:    req.Args["wait"] == "true" || runtime.VoiceInteraction(),
 	})
 	if err != nil {
 		return tools.Result{}, err

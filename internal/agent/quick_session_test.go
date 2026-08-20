@@ -68,7 +68,7 @@ func TestCreateQuickVoiceSessionOwnsOneVoiceChatAndScratchWorkspace(t *testing.T
 	if snapshot.Session.Kind != domain.SessionKindQuick || !snapshot.Session.ProjectRootManaged {
 		t.Fatalf("unexpected quick voice session: %#v", snapshot.Session)
 	}
-	if len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Voice {
+	if len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Orchestrator || snapshot.Chats[0].InteractionMode != domain.InteractionModeVoice {
 		t.Fatalf("unexpected quick voice chat: %#v", snapshot.Chats)
 	}
 	if info, err := os.Stat(snapshot.Session.ProjectRoot); err != nil || !info.IsDir() {
@@ -86,14 +86,14 @@ func TestCreateVoiceSessionOwnsOneVoiceChat(t *testing.T) {
 	if snapshot.Session.Kind != domain.SessionKindVoice || snapshot.Session.ProjectRoot != "" || snapshot.Session.ProjectRootManaged {
 		t.Fatalf("unexpected voice session: %#v", snapshot.Session)
 	}
-	if snapshot.Session.Title != "Morning voice" || len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Voice {
+	if snapshot.Session.Title != "Morning voice" || len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Orchestrator || snapshot.Chats[0].InteractionMode != domain.InteractionModeVoice {
 		t.Fatalf("unexpected voice chat: %#v %#v", snapshot.Session, snapshot.Chats)
 	}
 	second, err := owner.NewRootChat(context.Background(), "second", chatrole.Voice)
 	if err != nil {
 		t.Fatalf("create another voice chat: %v", err)
 	}
-	if second.Snapshot().Chat.WorkflowRole != chatrole.Voice || len(owner.Snapshot().Chats) != 2 {
+	if second.Snapshot().Chat.WorkflowRole != chatrole.Orchestrator || second.Snapshot().Chat.InteractionMode != domain.InteractionModeVoice || len(owner.Snapshot().Chats) != 2 {
 		t.Fatalf("unexpected second voice chat: %#v", owner.Snapshot().Chats)
 	}
 }

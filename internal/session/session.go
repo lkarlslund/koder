@@ -513,12 +513,39 @@ func (s *Session) NewRootChat(ctx context.Context, title string, role chatrole.R
 	return s.newChat(ctx, nil, title, role)
 }
 
+// NewRootChatWithDimensions creates a top-level chat whose backend, workflow
+// role, and interaction mode are selected independently.
+func (s *Session) NewRootChatWithDimensions(ctx context.Context, title string, role chatrole.Role, backend domain.ChatBackend, interactionMode domain.InteractionMode) (*chatpkg.Chat, error) {
+	return s.newChatWithDimensions(ctx, nil, title, role, backend, interactionMode)
+}
+
 func (s *Session) newChat(ctx context.Context, parentChatID *id.ID, title string, role chatrole.Role) (*chatpkg.Chat, error) {
+	interactionMode := domain.InteractionModeText
+	if role == chatrole.Voice {
+		role = chatrole.Orchestrator
+		interactionMode = domain.InteractionModeVoice
+	}
+	return s.newChatWithDimensions(ctx, parentChatID, title, role, domain.ChatBackendKoder, interactionMode)
+}
+
+func (s *Session) newChatWithDimensions(ctx context.Context, parentChatID *id.ID, title string, role chatrole.Role, backend domain.ChatBackend, interactionMode domain.InteractionMode) (*chatpkg.Chat, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session is required")
 	}
 	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
 		return nil, fmt.Errorf("profile %q is not registered", role)
+	}
+	if backend == "" {
+		backend = domain.ChatBackendKoder
+	}
+	if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
+		return nil, fmt.Errorf("chat backend %q is not supported", backend)
+	}
+	if interactionMode == "" {
+		interactionMode = domain.InteractionModeText
+	}
+	if interactionMode != domain.InteractionModeText && interactionMode != domain.InteractionModeVoice {
+		return nil, fmt.Errorf("interaction mode %q is not supported", interactionMode)
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -563,6 +590,8 @@ func (s *Session) newChat(ctx context.Context, parentChatID *id.ID, title string
 		ParentChatID:      parentChatID,
 		Title:             title,
 		WorkflowRole:      role,
+		Backend:           backend,
+		InteractionMode:   interactionMode,
 		ProviderID:        strings.TrimSpace(template.ProviderID),
 		ModelID:           strings.TrimSpace(template.ModelID),
 		PermissionProfile: strings.TrimSpace(template.PermissionProfile),

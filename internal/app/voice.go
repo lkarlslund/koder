@@ -158,7 +158,7 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 				continue
 			}
 			summary.ChatCount++
-			if chatRecord.WorkflowRole == chatrole.Voice {
+			if isVoiceInteraction(chatRecord) {
 				summary.VoiceChats++
 			}
 		}
@@ -185,7 +185,7 @@ func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]
 		}
 		out = append(out, voice.Chat{
 			ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID),
-			Title: chatRecord.Title, Role: string(chatRecord.WorkflowRole),
+			Title: chatRecord.Title, Role: voiceChatRoleLabel(chatRecord),
 			LastMessage: chatRecord.LastMessage, UpdatedAt: chatRecord.UpdatedAt,
 			Archived: chatRecord.Archived, Busy: status.Busy,
 			Status: string(status.State), StatusText: status.StatusText,
@@ -237,7 +237,7 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, ti
 	if title == "" {
 		title = "Voice conversation"
 	}
-	runtime, err := owner.NewRootChat(ctx, title, chatrole.Voice)
+	runtime, err := owner.NewRootChatWithDimensions(ctx, title, chatrole.Orchestrator, domain.ChatBackendKoder, domain.InteractionModeVoice)
 	if err != nil {
 		return voice.Chat{}, err
 	}
@@ -245,7 +245,7 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, ti
 	c.broadcast("chats_delta", map[string]any{"session_id": snapshot.Session.ID, "chats": owner.Snapshot().Chats})
 	return voice.Chat{
 		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
-		Role: string(chatRecord.WorkflowRole), UpdatedAt: chatRecord.UpdatedAt,
+		Role: voiceChatRoleLabel(chatRecord), UpdatedAt: chatRecord.UpdatedAt,
 	}, nil
 }
 
@@ -449,7 +449,7 @@ func clientSessionSummary(session domain.Session, chats []domain.Chat) voice.Ses
 			continue
 		}
 		summary.ChatCount++
-		if item.WorkflowRole == chatrole.Voice {
+		if isVoiceInteraction(item) {
 			summary.VoiceChats++
 		}
 	}
@@ -628,7 +628,7 @@ func (c *Controller) voiceChatHistory(ctx context.Context, sessionID, chatID, be
 	if err != nil {
 		return voice.TranscriptPage{}, err
 	}
-	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+	if !isVoiceInteraction(chatRecord) {
 		return voice.TranscriptPage{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if limit <= 0 || limit > 20 {
@@ -677,7 +677,7 @@ func (c *Controller) searchVoiceChatHistory(ctx context.Context, sessionID, chat
 	if err != nil {
 		return nil, err
 	}
-	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+	if !isVoiceInteraction(chatRecord) {
 		return nil, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	timeline, err := runtime.FullTimeline(ctx)
@@ -777,7 +777,7 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	if err != nil {
 		return voice.Message{}, err
 	}
-	if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+	if !isVoiceInteraction(chatRecord) {
 		return voice.Message{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if err := runtime.EnsureTimeline(ctx); err != nil {
@@ -1236,6 +1236,19 @@ func voiceSessionTitle(session domain.Session) string {
 	return "Untitled session"
 }
 
+func isVoiceInteraction(chatRecord domain.Chat) bool {
+	return chatRecord.EffectiveInteractionMode() == domain.InteractionModeVoice
+}
+
+// Keep the native voice protocol compatible while Android migrates from the
+// old composite role field to an explicit interaction-mode field.
+func voiceChatRoleLabel(chatRecord domain.Chat) string {
+	if isVoiceInteraction(chatRecord) {
+		return string(chatrole.Voice)
+	}
+	return string(chatRecord.EffectiveWorkflowRole())
+}
+
 func voiceSessionSummary(session domain.Session) voice.Session {
 	return voice.Session{
 		ID: string(session.ID), Title: voiceSessionTitle(session), LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
@@ -1249,7 +1262,7 @@ func applyVoiceRuntimeSummary(summary *voice.Session, snapshot sessionpkg.Sessio
 		return
 	}
 	for _, chatRecord := range snapshot.Chats {
-		if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+		if !isVoiceInteraction(chatRecord) {
 			continue
 		}
 		if summary.LastMessage == "" {

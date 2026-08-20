@@ -430,11 +430,11 @@ func (c Chat) EffectiveBackend() ChatBackend {
 // EffectiveInteractionMode preserves compatibility with legacy voice-role
 // records while new records store voice independently from workflow role.
 func (c Chat) EffectiveInteractionMode() InteractionMode {
-	if c.InteractionMode != "" {
-		return c.InteractionMode
-	}
 	if c.WorkflowRole == WorkflowRoleVoice {
 		return InteractionModeVoice
+	}
+	if c.InteractionMode != "" {
+		return c.InteractionMode
 	}
 	return InteractionModeText
 }

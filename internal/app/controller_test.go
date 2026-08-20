@@ -2451,7 +2451,7 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if voiceSession.Kind != domain.SessionKindVoice || voiceSession.ProjectRoot != "" || chatRecord.WorkflowRole != chatrole.Voice {
+	if voiceSession.Kind != domain.SessionKindVoice || voiceSession.ProjectRoot != "" || chatRecord.WorkflowRole != chatrole.Orchestrator || chatRecord.InteractionMode != domain.InteractionModeVoice {
 		t.Fatalf("unexpected voice chat: %#v %#v", voiceSession, chatRecord)
 	}
 	state, err := ctrl.Sessions(ctx)
@@ -2644,7 +2644,7 @@ func TestNewTypedChatForSelectionCreatesTopLevelVoiceChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if voiceChat.WorkflowRole != domain.WorkflowRoleVoice || voiceChat.ParentChatID != nil {
+	if voiceChat.WorkflowRole != domain.WorkflowRoleOrchestrator || voiceChat.InteractionMode != domain.InteractionModeVoice || voiceChat.ParentChatID != nil {
 		t.Fatalf("voice chat = %#v", voiceChat)
 	}
 	if _, err := ctrl.NewTypedChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, "Future", domain.WorkflowRole("codex")); err == nil {

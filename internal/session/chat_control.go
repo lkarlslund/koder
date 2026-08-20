@@ -113,6 +113,8 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		ParentChatID:          &parentID,
 		Title:                 chatTitle,
 		WorkflowRole:          role,
+		Backend:               domain.ChatBackendKoder,
+		InteractionMode:       domain.InteractionModeText,
 		ProviderID:            strings.TrimSpace(parentChat.ProviderID),
 		ModelID:               strings.TrimSpace(parentChat.ModelID),
 		PermissionProfile:     strings.TrimSpace(parentChat.PermissionProfile),
@@ -156,7 +158,7 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 	if !ownerOK {
 		return chattool.Status{}, fmt.Errorf("owner chat %s not found", ownerChatID)
 	}
-	if owner.WorkflowRole != chatrole.Voice {
+	if owner.EffectiveInteractionMode() != domain.InteractionModeVoice {
 		if err := ensureChatOperationOwner(ownerChatID, target); err != nil {
 			return chattool.Status{}, err
 		}

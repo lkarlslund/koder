@@ -13,7 +13,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -70,7 +69,7 @@ func (tool) Preview(req tools.Request) string {
 }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if runtime.ChatRole != chatrole.Voice {
+	if !runtime.VoiceInteraction() {
 		return tools.ToolSpec{}, false
 	}
 	control, err := service(runtime)
@@ -160,7 +159,7 @@ func (t photoTool) Preview(req tools.Request) string {
 	return strings.ReplaceAll(t.kind.String(), "_", " ")
 }
 func (t photoTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if runtime.ChatRole != chatrole.Voice {
+	if !runtime.VoiceInteraction() {
 		return tools.ToolSpec{}, false
 	}
 	control, err := service(runtime)
