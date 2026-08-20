@@ -182,6 +182,10 @@ func (h *Handler) runTextTurn(turn *cachedTurn, text string, pacing voice.Respon
 func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, pacing voice.ResponsePacing) {
 	turn.appendState("processing", nil)
 	message, err := h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing}, func(session voice.Session) error {
+		if strings.TrimSpace(session.ID) == "" && strings.TrimSpace(session.Title) == "" {
+			turn.appendState("working", nil)
+			return nil
+		}
 		copy := session
 		turn.appendState("working", &copy)
 		return nil

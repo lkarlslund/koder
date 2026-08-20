@@ -10,6 +10,18 @@ interface WorkingSound : AutoCloseable {
 	fun stop()
 }
 
+const val PROCESSING_SOUND_DELAY_MILLIS = 2_000L
+
+enum class WorkingSoundAction { KEEP, START, START_DELAYED, STOP }
+
+fun workingSoundAction(previous: CallController.Stage, next: CallController.Stage): WorkingSoundAction = when {
+	next == CallController.Stage.PROCESSING && previous !in setOf(CallController.Stage.PROCESSING, CallController.Stage.WORKING) ->
+		WorkingSoundAction.START_DELAYED
+	next == CallController.Stage.WORKING && previous != CallController.Stage.WORKING -> WorkingSoundAction.START
+	next in setOf(CallController.Stage.PROCESSING, CallController.Stage.WORKING) -> WorkingSoundAction.KEEP
+	else -> WorkingSoundAction.STOP
+}
+
 class AndroidWorkingSound : WorkingSound {
 	private val handler = Handler(Looper.getMainLooper())
 	private var active = false
@@ -30,7 +42,7 @@ class AndroidWorkingSound : WorkingSound {
 	override fun start() {
 		if (active) return
 		active = true
-		handler.postDelayed(pulse, INITIAL_DELAY_MILLIS)
+		handler.post(pulse)
 	}
 
 	override fun stop() {
@@ -48,7 +60,6 @@ class AndroidWorkingSound : WorkingSound {
 	private companion object {
 		const val VOLUME_PERCENT = 65
 		const val PULSE_MILLIS = 120
-		const val INITIAL_DELAY_MILLIS = 550L
 		const val REPEAT_MILLIS = 2_100L
 	}
 }

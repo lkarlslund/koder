@@ -37,15 +37,16 @@ func (f fakeUpdateSource) Manifest() (androidupdate.Manifest, bool, error) {
 func (f fakeUpdateSource) OpenAPK() (fs.File, error) { return os.Open(f.path) }
 
 type fakeBackend struct {
-	delegated   bool
-	transcript  string
-	languages   []string
-	spoken      string
-	artifact    voice.ArtifactFile
-	voiceChats  []voice.Session
-	history     []voice.TranscriptEntry
-	pacing      voice.ResponsePacing
-	searchQuery string
+	delegated      bool
+	transcript     string
+	languages      []string
+	spoken         string
+	artifact       voice.ArtifactFile
+	voiceChats     []voice.Session
+	history        []voice.TranscriptEntry
+	pacing         voice.ResponsePacing
+	searchQuery    string
+	genericWorking bool
 }
 
 type handoffBackend struct {
@@ -188,6 +189,9 @@ func (f *fakeBackend) EnsureVoiceSession(_ context.Context, requestedID string) 
 func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
 	f.pacing = options.ResponsePacing
 	target := voice.Session{ID: "session-1", Title: "Laptop repair"}
+	if f.genericWorking {
+		target = voice.Session{}
+	}
 	if onWorking != nil {
 		if err := onWorking(target); err != nil {
 			return voice.Message{}, err
@@ -202,6 +206,24 @@ func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, o
 		spoken += "."
 	}
 	return voice.Message{SpokenText: spoken, Parts: []voice.Part{{MIMEType: "text/plain", Data: spoken}}, Delegation: &result}, nil
+}
+
+func TestRunVoiceTurnKeepsGenericToolWorkTargetless(t *testing.T) {
+	backend := &fakeBackend{genericWorking: true}
+	handler := NewHandler(backend, "")
+	turn := newCachedTurn("call-1", "utterance-1", textTurnFingerprint("check it"), "voice-1")
+	handler.runVoiceTurn(t.Context(), turn, "check it", voice.ResponsePacingNormal)
+
+	var working *serverFrame
+	for _, event := range turn.snapshot().events {
+		if event.frame != nil && event.frame.State == "working" {
+			working = event.frame
+			break
+		}
+	}
+	if working == nil || working.WorkingOn != nil {
+		t.Fatalf("generic working frame = %#v, want working state without a fabricated session", working)
+	}
 }
 
 func (f *fakeBackend) TranscribeVoice(_ context.Context, format voice.AudioFormat, pcm []byte, hints voice.TranscriptionHints) (string, error) {

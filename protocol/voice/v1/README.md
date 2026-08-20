@@ -135,9 +135,13 @@ conversation's actual last-activity time.
 turns, and `history_has_more` indicates whether the client can request an older
 page. A history cursor is the first visible transcript entry ID; pages remain
 chronological and do not normally split a user's utterance from its answer.
-`working` is emitted only immediately before work is delegated into another
-chat. Its `working_on` field contains that ordinary session's bounded summary.
-Clients may play a local waiting cue until a later state arrives; `speaking` is
+`processing` means the voice chat's model loop is thinking or preparing its
+answer. `working` is emitted when that loop starts running tools and remains the
+effective state across subsequent tool/model iterations until a later state
+arrives. Its optional `working_on` field identifies an ordinary session when
+the current tool delegates there; a later `working` frame may refine the target
+without interrupting the busy state. Clients may delay their local waiting cue
+for brief processing, but start it immediately for `working`. `speaking` is
 always sent before streamed TTS audio so that cue can stop first. Working states
 are ephemeral and are never persisted as transcript turns.
 `voice_session_id` and `active_session_id` identify the current choices.

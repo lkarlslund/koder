@@ -58,6 +58,9 @@ class CallController(
 	private var connectedServer = ""
 	private var connectedToken = ""
     private val main = Handler(Looper.getMainLooper())
+	private val delayedProcessingSound = Runnable {
+		if (snapshot.stage == Stage.PROCESSING) workingSound.start()
+	}
 	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback { message ->
 		onMain { update(Stage.ERROR, message) }
 	}
@@ -317,7 +320,7 @@ class CallController(
         serverReady = false
         microphone.stop()
         playback.stop()
-		workingSound.stop()
+		stopWorkingSound()
 		interruptedPlayback = false
 		pausedByUser = false
 		telecomHeld = false
@@ -544,15 +547,28 @@ class CallController(
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {
         val previousStage = snapshot.stage
-        if (stage == Stage.WORKING) {
-            workingSound.start()
-        } else {
-            workingSound.stop()
+		when (workingSoundAction(previousStage, stage)) {
+			WorkingSoundAction.KEEP -> Unit
+			WorkingSoundAction.START -> {
+				main.removeCallbacks(delayedProcessingSound)
+				workingSound.start()
+			}
+			WorkingSoundAction.START_DELAYED -> {
+				workingSound.stop()
+				main.removeCallbacks(delayedProcessingSound)
+				main.postDelayed(delayedProcessingSound, PROCESSING_SOUND_DELAY_MILLIS)
+			}
+			WorkingSoundAction.STOP -> stopWorkingSound()
         }
         snapshot = snapshot.copy(stage = stage, detail = detail, partialTranscript = partial, microphoneMuted = microphoneMuted)
         voiceHapticCueForTransition(previousStage, stage)?.let(haptics::play)
         publish()
     }
+
+	private fun stopWorkingSound() {
+		main.removeCallbacks(delayedProcessingSound)
+		workingSound.stop()
+	}
 
 	private fun publish() {
 		listener.onSnapshot(snapshot)
@@ -561,4 +577,5 @@ class CallController(
     private fun onMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post(action)
     }
+
 }

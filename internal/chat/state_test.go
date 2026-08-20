@@ -162,6 +162,26 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 	}
 }
 
+func TestChatStateSnapshotTimelineDetachesMutableAssistantToolState(t *testing.T) {
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, []domain.TimelineItem{{
+		ID: "assistant-1", ChatID: "chat-7", Seq: 1,
+		Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+			ToolCallID: "call-1", Tool: domain.ToolKindFileRead,
+			Args: map[string]string{"path": "main.go"}, Status: domain.ToolStatusRunning,
+		}}},
+	}}, nil)
+
+	snapshot := state.SnapshotTimeline()
+	assistant := snapshot[0].Content.(domain.AssistantMessage)
+	assistant.Tools[0].Args["path"] = "changed.go"
+	assistant.Tools[0].Status = domain.ToolStatusDone
+
+	stored := state.SnapshotTimeline()[0].Content.(domain.AssistantMessage).Tools[0]
+	if stored.Args["path"] != "main.go" || stored.Status != domain.ToolStatusRunning {
+		t.Fatalf("snapshot mutation leaked into chat state: %#v", stored)
+	}
+}
+
 func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 	now := time.Now().UTC()
 	state := NewTimelineState(

@@ -490,6 +490,7 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	})
 	started := false
 	workingSent := false
+	workingTargetID := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -502,13 +503,17 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 			if voiceTurnStarted(snapshot.Status, snapshot.Active) {
 				started = true
 			}
-			if !workingSent && snapshot.Status == chat.StatusRunningTools && onWorking != nil {
-				if target, found := voiceWorkingTarget(runtime.SnapshotTimeline(), initialSeq); found {
+			if snapshot.Status == chat.StatusRunningTools && onWorking != nil {
+				target, found := voiceWorkingTarget(runtime.SnapshotTimeline(), initialSeq)
+				if found {
 					target = c.describeVoiceTarget(ctx, target)
+				}
+				if !workingSent || (found && target.ID != workingTargetID) {
 					if err := onWorking(target); err != nil {
 						return voice.Message{}, err
 					}
 					workingSent = true
+					workingTargetID = target.ID
 				}
 			}
 			if snapshot.Status == chat.StatusWaitingApproval {

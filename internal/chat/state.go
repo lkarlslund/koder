@@ -388,9 +388,73 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 		if record == nil {
 			continue
 		}
-		out = append(out, record.Item)
+		out = append(out, snapshotTimelineItem(record.Item))
 	}
 	return out
+}
+
+func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		content.Attachments = slices.Clone(content.Attachments)
+		content.References = slices.Clone(content.References)
+		item.Content = content
+	case domain.AssistantMessage:
+		content.Reasoning.Summary = slices.Clone(content.Reasoning.Summary)
+		content.Reasoning.Raw = slices.Clone(content.Reasoning.Raw)
+		content.Provider.Raw = slices.Clone(content.Provider.Raw)
+		content.Usage = clonePointer(content.Usage)
+		content.Performance = clonePointer(content.Performance)
+		content.Error = clonePointer(content.Error)
+		content.Tools = slices.Clone(content.Tools)
+		for index := range content.Tools {
+			tool := &content.Tools[index]
+			tool.Args = cloneStringMap(tool.Args)
+			tool.Result = cloneToolResult(tool.Result)
+			tool.Error = clonePointer(tool.Error)
+			tool.Approval = clonePointer(tool.Approval)
+		}
+		item.Content = content
+	case domain.ToolExecution:
+		content.Args = cloneStringMap(content.Args)
+		content.Result = cloneToolResult(content.Result)
+		content.Error = clonePointer(content.Error)
+		item.Content = content
+	case domain.Compaction:
+		content.Usage = clonePointer(content.Usage)
+		item.Content = content
+	case domain.LintMessage:
+		content.Files = slices.Clone(content.Files)
+		item.Content = content
+	}
+	return item
+}
+
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneStringMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	copy := make(map[string]string, len(value))
+	for key, entry := range value {
+		copy[key] = entry
+	}
+	return copy
+}
+
+func cloneToolResult(value *domain.ToolResult) *domain.ToolResult {
+	copy := clonePointer(value)
+	if copy != nil {
+		copy.Meta = cloneStringMap(copy.Meta)
+	}
+	return copy
 }
 
 // DirtyTimeline returns timeline values whose latest in-memory revision has

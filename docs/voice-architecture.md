@@ -63,6 +63,12 @@ promoted in the Web UI.
 Delegation waits for the target chat's sealed response. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
+Android labels the initial model phase as **Thinking** and begins its local busy
+cue only if that phase lasts more than two seconds. Koder switches the wire
+state to `working` as soon as the voice chat runs any tool, keeps that state
+across multi-tool model iterations, and optionally adds the delegated session
+summary so Android can show where the work is happening. Android carries an
+already-playing cue across that transition and stops it before speech playback.
 The Voice role returns one or two short, plain conversational sentences after
 tool work. Its final response explicitly overrides the shared document-format
 guidance: Markdown, headings, lists, tables, code, link syntax, and raw URLs do

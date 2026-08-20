@@ -2693,7 +2693,11 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "What's happening where I am?", voice.TurnOptions{}, nil)
+	var workingStates []voice.Session
+	message, err := ctrl.RunVoiceTurn(ctx, string(voiceSession.ID), "What's happening where I am?", voice.TurnOptions{}, func(session voice.Session) error {
+		workingStates = append(workingStates, session)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2705,6 +2709,9 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 	actionsMu.Unlock()
 	if !slices.Equal(gotActions, []phonedevice.Action{phonedevice.GetLocation}) {
 		t.Fatalf("phone actions = %v, want only get_location", gotActions)
+	}
+	if len(workingStates) != 2 || workingStates[0].ID != "" || workingStates[1].ID == "" {
+		t.Fatalf("working states = %#v, want generic tool work followed by delegated target", workingStates)
 	}
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
