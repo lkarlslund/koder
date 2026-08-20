@@ -2587,6 +2587,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `providerOfferingBadges`) {
 		t.Fatalf("expected grouped provider actions with visible health and capability details")
 	}
+	if strings.Contains(fullPage, `testConfiguredProvider`) ||
+		!strings.Contains(fullPage, `normalizeRuntimeHealth`) ||
+		!strings.Contains(fullPage, `modelHealthSummary(item)`) ||
+		!strings.Contains(document, `Runtime health`) {
+		t.Fatalf("expected provider and model health to render server-owned runtime state")
+	}
 	if !strings.Contains(fullPage, `preferences_state`) || !strings.Contains(fullPage, `save_preferences`) || !strings.Contains(fullPage, `reset_prompt`) {
 		t.Fatalf("expected preferences dialog RPC actions")
 	}

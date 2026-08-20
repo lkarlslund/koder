@@ -105,31 +105,42 @@ type ChatSidebarStatus struct {
 
 // ModelOption is a selectable provider/model pair exposed to web clients.
 type ModelOption struct {
-	ProviderID        string `json:"provider_id"`
-	ProviderLabel     string `json:"provider_label"`
-	ModelID           string `json:"model_id"`
-	SourceProviderID  string `json:"source_provider_id,omitempty"`
-	SourceModelID     string `json:"source_model_id,omitempty"`
-	OwnedBy           string `json:"owned_by,omitempty"`
-	ContextWindow     int    `json:"context_window,omitempty"`
-	MaxContextWindow  int    `json:"max_context_window,omitempty"`
-	MaxOutputTokens   int    `json:"max_output_tokens,omitempty"`
-	MetadataSource    string `json:"metadata_source,omitempty"`
-	SupportsChat      bool   `json:"supports_chat"`
-	SupportsTTS       bool   `json:"supports_tts"`
-	SupportsTools     bool   `json:"supports_tools"`
-	SupportsImages    bool   `json:"supports_images"`
-	SupportsPDFs      bool   `json:"supports_pdfs"`
-	SupportsJSON      bool   `json:"supports_json"`
-	SupportsReasoning bool   `json:"supports_reasoning"`
-	CapabilitiesKnown bool   `json:"capabilities_known"`
-	CapabilitySource  string `json:"capability_source,omitempty"`
-	Detected          bool   `json:"detected"`
-	Custom            bool   `json:"custom"`
-	BackingDetected   bool   `json:"backing_detected"`
-	Editable          bool   `json:"editable"`
-	Current           bool   `json:"current"`
-	Default           bool   `json:"default"`
+	ProviderID        string        `json:"provider_id"`
+	ProviderLabel     string        `json:"provider_label"`
+	ModelID           string        `json:"model_id"`
+	SourceProviderID  string        `json:"source_provider_id,omitempty"`
+	SourceModelID     string        `json:"source_model_id,omitempty"`
+	OwnedBy           string        `json:"owned_by,omitempty"`
+	ContextWindow     int           `json:"context_window,omitempty"`
+	MaxContextWindow  int           `json:"max_context_window,omitempty"`
+	MaxOutputTokens   int           `json:"max_output_tokens,omitempty"`
+	MetadataSource    string        `json:"metadata_source,omitempty"`
+	SupportsChat      bool          `json:"supports_chat"`
+	SupportsTTS       bool          `json:"supports_tts"`
+	SupportsTools     bool          `json:"supports_tools"`
+	SupportsImages    bool          `json:"supports_images"`
+	SupportsPDFs      bool          `json:"supports_pdfs"`
+	SupportsJSON      bool          `json:"supports_json"`
+	SupportsReasoning bool          `json:"supports_reasoning"`
+	CapabilitiesKnown bool          `json:"capabilities_known"`
+	CapabilitySource  string        `json:"capability_source,omitempty"`
+	Detected          bool          `json:"detected"`
+	Custom            bool          `json:"custom"`
+	BackingDetected   bool          `json:"backing_detected"`
+	Editable          bool          `json:"editable"`
+	Current           bool          `json:"current"`
+	Default           bool          `json:"default"`
+	Health            RuntimeHealth `json:"health"`
+}
+
+// RuntimeHealth is ephemeral process state observed while contacting a
+// provider or model. It is never persisted as configuration.
+type RuntimeHealth struct {
+	Status     string     `json:"status"`
+	Detail     string     `json:"detail,omitempty"`
+	CheckedAt  *time.Time `json:"checked_at,omitempty"`
+	LatencyMS  int64      `json:"latency_ms,omitempty"`
+	ModelCount int        `json:"model_count,omitempty"`
 }
 
 // ModelInfo describes the active model capabilities shown by web clients.
@@ -187,16 +198,17 @@ type ProviderCatalogItem struct {
 
 // ProviderConfigItem is one configured provider row.
 type ProviderConfigItem struct {
-	ID                      string `json:"id"`
-	Name                    string `json:"name"`
-	TemplateID              string `json:"template_id"`
-	Kind                    string `json:"kind"`
-	BaseURL                 string `json:"base_url"`
-	Disabled                bool   `json:"disabled"`
-	Default                 bool   `json:"default"`
-	PromptProgressMode      string `json:"prompt_progress_mode"`
-	PromptProgressProbed    bool   `json:"prompt_progress_probed"`
-	PromptProgressSupported bool   `json:"prompt_progress_supported"`
+	ID                      string        `json:"id"`
+	Name                    string        `json:"name"`
+	TemplateID              string        `json:"template_id"`
+	Kind                    string        `json:"kind"`
+	BaseURL                 string        `json:"base_url"`
+	Disabled                bool          `json:"disabled"`
+	Default                 bool          `json:"default"`
+	PromptProgressMode      string        `json:"prompt_progress_mode"`
+	PromptProgressProbed    bool          `json:"prompt_progress_probed"`
+	PromptProgressSupported bool          `json:"prompt_progress_supported"`
+	Health                  RuntimeHealth `json:"health"`
 }
 
 // ProviderDraft is the JSON-friendly provider edit shape used by web clients.
@@ -407,6 +419,9 @@ type Controller struct {
 	restartNeeded               bool
 	restartBuild                RestartBuildInfo
 	clearedStartupRunningTools  bool
+	healthMu                    sync.RWMutex
+	providerHealth              map[string]RuntimeHealth
+	modelHealth                 map[string]RuntimeHealth
 
 	subMu   sync.Mutex
 	nextSub int
@@ -426,6 +441,8 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		workspaceSnapshot:           workspacepkg.Snapshot,
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 		phone:                       phone,
+		providerHealth:              map[string]RuntimeHealth{},
+		modelHealth:                 map[string]RuntimeHealth{},
 	}
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)

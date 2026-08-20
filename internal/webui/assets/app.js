@@ -1038,7 +1038,7 @@
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTab: 'sessions', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
-        providerState: {catalog: [], providers: [], drafts: {}}, providerHealth: {}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
@@ -4561,27 +4561,9 @@
           this.rpc('list_models', {})
             .then(result => {
               this.modelOptions = result.models || [];
-              this.markModelProvidersHealthy(this.modelOptions);
             })
             .catch(err => { this.showToast(err.message); })
             .finally(() => { this.modelLoading = false; });
-        },
-        markModelProvidersHealthy(models) {
-          const counts = {};
-          for (const model of models || []) {
-            const providerID = String(model.provider_id || '').trim();
-            if (!providerID) continue;
-            counts[providerID] = (counts[providerID] || 0) + 1;
-          }
-          const checked = new Date().toLocaleTimeString();
-          for (const [providerID, count] of Object.entries(counts)) {
-            this.setProviderHealth(providerID, {
-              status: 'healthy',
-              detail: 'Model list loaded: ' + count + ' model' + (count === 1 ? '' : 's') + '.',
-              checked_at: checked,
-              model_count: count
-            });
-          }
         },
         closeModelDialog() { this.showModels = false; this.modelPickerTarget = null; this.modelSettingsDraft = null; this.modelSettingsStatus = ''; this.reportClientStateSoon(); },
         filteredModels() {
@@ -5092,71 +5074,75 @@
         openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },
         providerRows() { return this.providerState.providers || []; },
+		normalizeRuntimeHealth(health) {
+		  const state = health && typeof health === 'object' ? health : {};
+		  return Object.assign({status: 'unknown', detail: 'Runtime health has not been observed yet.', checked_at: '', latency_ms: 0, model_count: 0}, state);
+		},
         providerHealthState(id) {
-          return this.providerHealth[String(id || '')] || {status: 'unknown', detail: 'Provider has not been tested in this browser session.', checked_at: ''};
+		  const provider = this.providerRows().find(item => item.id === String(id || ''));
+		  return this.normalizeRuntimeHealth(provider?.health);
+		},
+		modelHealthState(model) {
+		  return this.normalizeRuntimeHealth(model?.health);
+		},
+		runtimeHealthBadge(state) {
+		  state = this.normalizeRuntimeHealth(state);
+		  return {healthy: 'healthy', unhealthy: 'unhealthy', disabled: 'disabled'}[state.status] || 'unknown';
+		},
+		runtimeHealthClass(state) {
+		  state = this.normalizeRuntimeHealth(state);
+		  return {healthy: 'text-success', unhealthy: 'text-danger', disabled: 'text-secondary'}[state.status] || 'text-secondary';
+		},
+		runtimeHealthBadgeClass(state) {
+		  state = this.normalizeRuntimeHealth(state);
+		  return {healthy: 'text-bg-success', unhealthy: 'text-bg-danger', disabled: 'text-bg-secondary'}[state.status] || 'text-bg-secondary';
+		},
+		runtimeHealthIcon(state) {
+		  state = this.normalizeRuntimeHealth(state);
+		  return {healthy: 'bi-check-circle-fill', unhealthy: 'bi-exclamation-triangle-fill', disabled: 'bi-pause-circle'}[state.status] || 'bi-question-circle';
+		},
+		runtimeHealthTitle(state) {
+		  state = this.normalizeRuntimeHealth(state);
+		  const checked = state.checked_at ? new Date(state.checked_at).toLocaleString() : '';
+		  return (state.detail || 'No runtime health detail.') + (checked ? '\nObserved ' + checked : '') + (state.latency_ms ? '\nLatency ' + state.latency_ms + ' ms' : '');
         },
         providerHealthBadge(id) {
-          const state = this.providerHealthState(id);
-          if (state.status === 'healthy') return 'healthy';
-          if (state.status === 'failing') return 'failing';
-          if (state.status === 'checking') return 'checking';
-          return 'health unknown';
+		  return this.runtimeHealthBadge(this.providerHealthState(id));
         },
         providerHealthTitle(id) {
-          const state = this.providerHealthState(id);
-          return (state.detail || 'Provider has not been tested.') + (state.checked_at ? '\nChecked ' + state.checked_at : '');
+		  return this.runtimeHealthTitle(this.providerHealthState(id));
         },
 		providerHealthSummary(id) {
 		  const state = this.providerHealthState(id);
-		  if (state.status === 'checking') return 'Checking connection and models…';
 		  if (state.status === 'healthy') {
 			const count = Number(state.model_count || 0);
-			const context = Number(state.max_context_window || 0);
-			return 'Healthy · ' + count + ' model' + (count === 1 ? '' : 's') + (context > 0 ? ' · up to ' + this.formatTokens(context) + ' context' : '');
+			return 'Healthy · ' + count + ' model' + (count === 1 ? '' : 's') + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
 		  }
-		  if (state.status === 'failing') return 'Unavailable · ' + (state.detail || 'Provider test failed');
-		  return 'Health not checked';
+		  if (state.status === 'unhealthy') return 'Unhealthy · ' + (state.detail || 'Provider request failed');
+		  if (state.status === 'disabled') return 'Disabled';
+		  return 'Health unknown';
 		},
 		providerHealthClass(id) {
-		  return {healthy: 'text-success', failing: 'text-danger', checking: 'text-primary'}[this.providerHealthState(id).status] || 'text-secondary';
+		  return this.runtimeHealthClass(this.providerHealthState(id));
 		},
 		providerHealthIcon(id) {
-		  return {healthy: 'bi-check-circle-fill', failing: 'bi-exclamation-triangle-fill', checking: 'bi-arrow-repeat'}[this.providerHealthState(id).status] || 'bi-question-circle';
+		  return this.runtimeHealthIcon(this.providerHealthState(id));
 		},
 		providerOfferingBadges(id) {
-		  const state = this.providerHealthState(id);
-		  return state.status === 'healthy' && Array.isArray(state.capabilities) ? state.capabilities : [];
+		  const models = [...(this.settings?.models || []), ...(this.modelOptions || [])].filter(model => (model.source_provider_id || model.provider_id) === id);
+		  return Array.from(new Set(models.flatMap(model => this.modelCapabilityBadges(model))));
 		},
-        providerHealthBusy(id) {
-          return this.providerHealthState(id).status === 'checking';
-        },
-        setProviderHealth(id, state) {
-          id = String(id || '').trim();
-          if (!id) return;
-          this.providerHealth = Object.assign({}, this.providerHealth, {[id]: Object.assign({status: 'unknown', detail: '', checked_at: ''}, state || {})});
-        },
-        testConfiguredProvider(id) {
-          id = String(id || '').trim();
-          const draft = (this.providerState.drafts || {})[id];
-          if (!id || !draft || this.providerHealthBusy(id)) return;
-          this.setProviderHealth(id, {status: 'checking', detail: 'Testing provider...', checked_at: ''});
-          this.rpc('test_provider', draft).then(result => {
-            const count = result.model_count || 0;
-            const sample = (result.models || []).slice(0, 4).join(', ');
-            const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
-            this.setProviderHealth(id, {
-              status: 'healthy',
-              detail: 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected,
-              checked_at: new Date().toLocaleTimeString(),
-              model_count: count,
-              models: result.models || [],
-			  capabilities: result.capabilities || [],
-			  max_context_window: result.max_context_window || 0
-            });
-          }).catch(err => {
-            this.setProviderHealth(id, {status: 'failing', detail: err.message || 'Provider test failed', checked_at: new Date().toLocaleTimeString()});
-          });
-        },
+		modelHealthBadge(model) { return this.runtimeHealthBadge(this.modelHealthState(model)); },
+		modelHealthTitle(model) { return this.runtimeHealthTitle(this.modelHealthState(model)); },
+		modelHealthClass(model) { return this.runtimeHealthClass(this.modelHealthState(model)); },
+		modelHealthIcon(model) { return this.runtimeHealthIcon(this.modelHealthState(model)); },
+		modelHealthSummary(model) {
+		  const state = this.modelHealthState(model);
+		  if (state.status === 'healthy') return 'Healthy' + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
+		  if (state.status === 'unhealthy') return 'Unhealthy · ' + (state.detail || 'Model unavailable');
+		  if (state.status === 'disabled') return 'Disabled';
+		  return 'Health unknown';
+		},
         setProviderDraft(draft) {
           this.providerDraft = Object.assign({headers: {}}, draft || {});
           this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
@@ -5666,7 +5652,6 @@
 		  if (kind === 'models') badges.push(...this.modelCapabilityBadges(item));
           if (kind === 'models' && item.backing_detected === false) badges.push('source missing');
           if (kind === 'models') badges.push(...this.modelUsageBadges(item.provider_id, item.model_id).filter(label => label !== 'default'));
-          if (kind === 'models') badges.push(this.providerHealthBadge(item.provider_id));
           if (item.disabled) badges.push('disabled');
           return badges.filter(Boolean);
         },

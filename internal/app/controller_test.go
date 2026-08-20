@@ -604,6 +604,9 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	if !custom.Custom || !custom.Editable || !custom.BackingDetected || custom.SourceModelID != "z-model" {
 		t.Fatalf("expected custom option with detected backing model, got %#v", custom)
 	}
+	if custom.Health.Status != "healthy" || custom.Health.CheckedAt == nil || custom.Health.CheckedAt.IsZero() {
+		t.Fatalf("expected custom model runtime health from backing model, got %#v", custom.Health)
+	}
 	if custom.ContextWindow != 65536 {
 		t.Fatalf("expected custom context window 65536, got %#v", custom)
 	}
@@ -618,6 +621,10 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	}
 	if !custom.SupportsTools || !custom.SupportsImages || !custom.SupportsPDFs || !custom.SupportsJSON || !custom.SupportsReasoning || !custom.CapabilitiesKnown {
 		t.Fatalf("expected custom model to inherit source capabilities, got %#v", custom)
+	}
+	providerState := ctrl.Providers()
+	if len(providerState.Providers) != 1 || providerState.Providers[0].Health.Status != "healthy" || providerState.Providers[0].Health.ModelCount != 2 || providerState.Providers[0].Health.CheckedAt == nil || providerState.Providers[0].Health.CheckedAt.IsZero() {
+		t.Fatalf("expected provider runtime health after discovery, got %#v", providerState.Providers)
 	}
 }
 
@@ -912,6 +919,10 @@ func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.
 	_, err := ctrl.ModelOptionsForSelection(context.Background(), Selection{})
 	if err == nil || !strings.Contains(err.Error(), "failed to load models from test") {
 		t.Fatalf("expected provider failure, got %v", err)
+	}
+	providerState := ctrl.Providers()
+	if len(providerState.Providers) != 1 || providerState.Providers[0].Health.Status != "unhealthy" || providerState.Providers[0].Health.CheckedAt == nil || providerState.Providers[0].Health.CheckedAt.IsZero() || !strings.Contains(providerState.Providers[0].Health.Detail, "list models") {
+		t.Fatalf("expected provider runtime failure, got %#v", providerState.Providers)
 	}
 }
 

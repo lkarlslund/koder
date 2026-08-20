@@ -48,10 +48,13 @@ func (c *Controller) NewProviderDraft(templateID string) (ProviderDraft, error) 
 
 // TestProvider probes a provider draft by listing models.
 func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (ProviderProbeResult, error) {
+	started := time.Now()
 	result, err := provider.Probe(ctx, providerDraftToCatalog(draft), nil)
 	if err != nil {
+		c.recordProviderProbe(draft.ProviderID, nil, started, err)
 		return ProviderProbeResult{}, err
 	}
+	c.recordProviderProbe(draft.ProviderID, result.Models, started, nil)
 	models := make([]string, 0, len(result.Models))
 	for _, item := range result.Models {
 		models = append(models, item.ID)
@@ -118,10 +121,13 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if err := provider.ValidateDraft(catalogDraft); err != nil {
 		return ProviderState{}, err
 	}
+	started := time.Now()
 	probe, err := provider.Probe(ctx, catalogDraft, nil)
 	if err != nil {
+		c.recordProviderProbe(catalogDraft.ProviderID, nil, started, err)
 		return ProviderState{}, err
 	}
+	c.recordProviderProbe(catalogDraft.ProviderID, probe.Models, started, nil)
 	catalogDraft.Model = probe.SelectedModel
 	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
 	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
@@ -188,6 +194,29 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return state, nil
+}
+
+func (c *Controller) recordProviderProbe(providerID string, models []domain.Model, started time.Time, probeErr error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return
+	}
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	if probeErr != nil {
+		c.providerHealth[providerID] = runtimeHealthFailure(probeErr, started)
+		return
+	}
+	latency := time.Since(started).Milliseconds()
+	checkedAt := time.Now()
+	c.providerHealth[providerID] = RuntimeHealth{Status: "healthy", Detail: fmt.Sprintf("Discovered %d model(s)", len(models)), CheckedAt: &checkedAt, LatencyMS: latency, ModelCount: len(models)}
+	for _, model := range models {
+		modelID := strings.TrimSpace(model.ID)
+		if modelID == "" {
+			continue
+		}
+		c.modelHealth[providerID+"\x00"+modelID] = RuntimeHealth{Status: "healthy", Detail: "Advertised by provider", CheckedAt: &checkedAt, LatencyMS: latency}
+	}
 }
 
 // DeleteProvider removes a configured provider.
@@ -358,7 +387,7 @@ func (c *Controller) ModelOptionsForSelection(ctx context.Context, selection Sel
 		currentProvider = strings.TrimSpace(chatRecord.ProviderID)
 		currentModel = strings.TrimSpace(chatRecord.ModelID)
 	}
-	options, err := modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+	options, err := c.discoverModelOptions(ctx, cfg, currentProvider, currentModel)
 	if err != nil {
 		return nil, err
 	}
@@ -482,12 +511,28 @@ func wavFromPCM16(pcm []byte, sampleRate int, channels int) []byte {
 }
 
 func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
-	return modelOptionsForConfig(ctx, c.cfg, "", "")
+	return c.discoverModelOptions(ctx, c.cfg, "", "")
 }
 
 func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
+	options, _, _, err := discoverModelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+	return options, err
+}
+
+func (c *Controller) discoverModelOptions(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
+	options, providers, models, err := discoverModelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+	c.healthMu.Lock()
+	c.providerHealth = providers
+	c.modelHealth = models
+	c.healthMu.Unlock()
+	return options, err
+}
+
+func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, map[string]RuntimeHealth, map[string]RuntimeHealth, error) {
 	seen := map[string]struct{}{}
 	detected := map[string]domain.Model{}
+	providerHealth := make(map[string]RuntimeHealth, len(cfg.Providers))
+	modelHealth := map[string]RuntimeHealth{}
 	options := make([]ModelOption, 0, len(cfg.Providers))
 	capabilities := provider.NewCapabilityStore(cfg.StateDir())
 	add := func(providerID string, providerCfg config.Provider, model domain.Model) {
@@ -527,12 +572,14 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			Editable:          false,
 			Current:           providerID == currentProvider && modelID == currentModel,
 			Default:           providerID == cfg.Defaults.ProviderID && modelID == cfg.Defaults.ModelID,
+			Health:            modelHealth[key],
 		})
 	}
 
 	ids := make([]string, 0, len(cfg.Providers))
 	for id, providerCfg := range cfg.Providers {
 		if providerCfg.Disabled {
+			providerHealth[id] = RuntimeHealth{Status: "disabled", Detail: "Provider is disabled"}
 			continue
 		}
 		ids = append(ids, id)
@@ -545,19 +592,28 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		if !ok {
 			continue
 		}
+		started := time.Now()
 		client, err := provider.New(providerID, providerCfg, nil)
 		if err != nil {
 			failures = append(failures, providerID)
+			providerHealth[providerID] = runtimeHealthFailure(err, started)
 			continue
 		}
 		models, err := client.ListModels(ctx)
 		if err != nil {
 			failures = append(failures, providerID)
+			providerHealth[providerID] = runtimeHealthFailure(err, started)
 			continue
 		}
+		checkedAt := time.Now()
+		providerHealth[providerID] = RuntimeHealth{Status: "healthy", Detail: fmt.Sprintf("Discovered %d model(s)", len(models)), CheckedAt: &checkedAt, LatencyMS: time.Since(started).Milliseconds(), ModelCount: len(models)}
 		for _, model := range models {
 			if enriched, err := capabilities.EnrichModel(providerID, providerCfg, model); err == nil {
 				model = enriched
+			}
+			modelID := strings.TrimSpace(model.ID)
+			if modelID != "" {
+				modelHealth[providerID+"\x00"+modelID] = RuntimeHealth{Status: "healthy", Detail: "Advertised by provider", CheckedAt: &checkedAt, LatencyMS: time.Since(started).Milliseconds()}
 			}
 			add(providerID, providerCfg, model)
 		}
@@ -584,6 +640,12 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		}
 		sourceKey := sourceProviderID + "\x00" + model.SourceModelID
 		source, sourceDetected := detected[sourceKey]
+		health := modelHealth[sourceKey]
+		if !sourceDetected {
+			checkedAt := time.Now()
+			health = RuntimeHealth{Status: "unhealthy", Detail: "Backing model is not available", CheckedAt: &checkedAt}
+		}
+		modelHealth[key] = health
 		options = append(options, ModelOption{
 			ProviderID:        model.ProviderID,
 			ProviderLabel:     providerEntryLabel(model.ProviderID, providerCfg),
@@ -606,6 +668,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 			Editable:          true,
 			Current:           model.ProviderID == currentProvider && model.ModelID == currentModel,
 			Default:           model.ProviderID == cfg.Defaults.ProviderID && model.ModelID == cfg.Defaults.ModelID,
+			Health:            health,
 		})
 		seen[key] = struct{}{}
 	}
@@ -622,9 +685,14 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		return strings.Compare(a.ModelID, b.ModelID)
 	})
 	if len(options) == 0 && len(failures) > 0 {
-		return nil, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
+		return nil, providerHealth, modelHealth, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
 	}
-	return options, nil
+	return options, providerHealth, modelHealth, nil
+}
+
+func runtimeHealthFailure(err error, started time.Time) RuntimeHealth {
+	checkedAt := time.Now()
+	return RuntimeHealth{Status: "unhealthy", Detail: err.Error(), CheckedAt: &checkedAt, LatencyMS: time.Since(started).Milliseconds()}
 }
 
 // SetDefaultModel persists the model used for new sessions.
@@ -1372,6 +1440,7 @@ func (c *Controller) providerStateLocked() ProviderState {
 			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
 			PromptProgressProbed:    cfg.PromptProgressProbed,
 			PromptProgressSupported: cfg.PromptProgressSupported,
+			Health:                  c.providerRuntimeHealth(id, cfg.Disabled),
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
 			drafts[id] = providerDraftFromCatalog(draft)
@@ -1385,6 +1454,19 @@ func (c *Controller) providerStateLocked() ProviderState {
 		Providers:       providers,
 		Drafts:          drafts,
 	}
+}
+
+func (c *Controller) providerRuntimeHealth(providerID string, disabled bool) RuntimeHealth {
+	if disabled {
+		return RuntimeHealth{Status: "disabled", Detail: "Provider is disabled"}
+	}
+	c.healthMu.RLock()
+	health, ok := c.providerHealth[providerID]
+	c.healthMu.RUnlock()
+	if !ok {
+		return RuntimeHealth{Status: "unknown", Detail: "Awaiting provider discovery"}
+	}
+	return health
 }
 
 func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
