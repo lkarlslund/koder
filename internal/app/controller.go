@@ -217,6 +217,8 @@ type ProviderDraft struct {
 type ProviderProbeResult struct {
 	ModelCount              int      `json:"model_count"`
 	Models                  []string `json:"models"`
+	Capabilities            []string `json:"capabilities"`
+	MaxContextWindow        int      `json:"max_context_window,omitempty"`
 	SelectedModel           string   `json:"selected_model"`
 	PromptProgressProbed    bool     `json:"prompt_progress_probed"`
 	PromptProgressSupported bool     `json:"prompt_progress_supported"`

@@ -5104,6 +5104,27 @@
           const state = this.providerHealthState(id);
           return (state.detail || 'Provider has not been tested.') + (state.checked_at ? '\nChecked ' + state.checked_at : '');
         },
+		providerHealthSummary(id) {
+		  const state = this.providerHealthState(id);
+		  if (state.status === 'checking') return 'Checking connection and models…';
+		  if (state.status === 'healthy') {
+			const count = Number(state.model_count || 0);
+			const context = Number(state.max_context_window || 0);
+			return 'Healthy · ' + count + ' model' + (count === 1 ? '' : 's') + (context > 0 ? ' · up to ' + this.formatTokens(context) + ' context' : '');
+		  }
+		  if (state.status === 'failing') return 'Unavailable · ' + (state.detail || 'Provider test failed');
+		  return 'Health not checked';
+		},
+		providerHealthClass(id) {
+		  return {healthy: 'text-success', failing: 'text-danger', checking: 'text-primary'}[this.providerHealthState(id).status] || 'text-secondary';
+		},
+		providerHealthIcon(id) {
+		  return {healthy: 'bi-check-circle-fill', failing: 'bi-exclamation-triangle-fill', checking: 'bi-arrow-repeat'}[this.providerHealthState(id).status] || 'bi-question-circle';
+		},
+		providerOfferingBadges(id) {
+		  const state = this.providerHealthState(id);
+		  return state.status === 'healthy' && Array.isArray(state.capabilities) ? state.capabilities : [];
+		},
         providerHealthBusy(id) {
           return this.providerHealthState(id).status === 'checking';
         },
@@ -5126,7 +5147,9 @@
               detail: 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected,
               checked_at: new Date().toLocaleTimeString(),
               model_count: count,
-              models: result.models || []
+              models: result.models || [],
+			  capabilities: result.capabilities || [],
+			  max_context_window: result.max_context_window || 0
             });
           }).catch(err => {
             this.setProviderHealth(id, {status: 'failing', detail: err.message || 'Provider test failed', checked_at: new Date().toLocaleTimeString()});
@@ -5629,7 +5652,7 @@
           const badges = [];
           if (kind === 'providers' && item.default) badges.push('default');
           if (kind === 'providers') badges.push(this.promptProgressBadge(item));
-          if (kind === 'providers') badges.push(this.providerHealthBadge(item.id));
+		  if (kind === 'providers') badges.push(...this.providerOfferingBadges(item.id));
           if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
           if (kind === 'models') badges.push('custom');
           if (kind === 'models' && item.backing_detected === false) badges.push('source missing');

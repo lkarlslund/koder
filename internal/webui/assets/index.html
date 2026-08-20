@@ -1301,22 +1301,28 @@
                     <div class="settings-empty">No providers configured</div>
                   </template>
                   <template x-for="item in settingsListRows('providers')" :key="item.id">
-                    <div class="settings-item-row" :title="providerHealthTitle(item.id)">
+                    <div class="settings-item-row settings-provider-row">
                       <button type="button" class="settings-item-main" @click="editSettingsItem('providers', item.id)">
                         <span class="settings-item-title" x-text="settingsItemTitle('providers', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('providers', item)"></span>
+						<span class="settings-provider-health" :class="providerHealthClass(item.id)" :title="providerHealthTitle(item.id)">
+						  <i class="bi" :class="providerHealthIcon(item.id)"></i>
+						  <span x-text="providerHealthSummary(item.id)"></span>
+						</span>
                         <span class="settings-item-badges">
                           <template x-for="badge in settingsItemBadges('providers', item)" :key="badge">
                             <span class="badge text-bg-secondary" x-text="badge"></span>
                           </template>
                         </span>
                       </button>
-                      <button type="button" class="btn btn-sm btn-outline-primary" title="Test provider health" @click="testConfiguredProvider(item.id)" :disabled="providerHealthBusy(item.id)">
-                        <span class="spinner-border spinner-border-sm" x-show="providerHealthBusy(item.id)"></span>
-                        <i class="bi bi-heart-pulse" x-show="!providerHealthBusy(item.id)"></i>
-                      </button>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit provider" @click="editSettingsItem('providers', item.id)"><i class="bi bi-pencil"></i></button>
-                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete provider" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash"></i></button>
+					  <div class="settings-item-actions" role="group" :aria-label="'Actions for ' + (item.name || item.id)">
+						<button type="button" class="btn btn-sm btn-outline-primary" title="Test provider health" @click="testConfiguredProvider(item.id)" :disabled="providerHealthBusy(item.id)">
+						  <span class="spinner-border spinner-border-sm" x-show="providerHealthBusy(item.id)"></span>
+						  <i class="bi bi-heart-pulse" x-show="!providerHealthBusy(item.id)"></i>
+						</button>
+						<button type="button" class="btn btn-sm btn-outline-secondary" title="Edit provider" @click="editSettingsItem('providers', item.id)"><i class="bi bi-pencil"></i></button>
+						<button type="button" class="btn btn-sm btn-outline-danger" title="Delete provider" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash"></i></button>
+					  </div>
                     </div>
                   </template>
                 </div>

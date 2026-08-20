@@ -909,6 +909,29 @@ func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.
 	}
 }
 
+func TestProviderProbeSummaryReportsAggregateOfferings(t *testing.T) {
+	models := []domain.Model{
+		{ID: "chat", ContextWindow: 65536, SupportsChat: true, SupportsTools: true, SupportsImages: true, SupportsJSON: true, CapabilitiesKnown: true},
+		{ID: "speech", MaxContextWindow: 131072, SupportsTTS: true, SupportsPDFs: true, SupportsReasoning: true, CapabilitiesKnown: true},
+	}
+	want := []string{"Chat", "Tools", "Vision", "PDF", "JSON", "Reasoning", "TTS"}
+	if got := providerProbeCapabilities(models); !slices.Equal(got, want) {
+		t.Fatalf("provider capabilities = %v, want %v", got, want)
+	}
+	if got := providerProbeMaxContextWindow(models); got != 131072 {
+		t.Fatalf("provider max context = %d, want 131072", got)
+	}
+}
+
+func TestProviderProbeSummaryTreatsMissingMetadataAsChatCapable(t *testing.T) {
+	if got := providerProbeCapabilities([]domain.Model{{ID: "compatible-model"}}); !slices.Equal(got, []string{"Chat"}) {
+		t.Fatalf("provider capabilities = %v, want Chat fallback", got)
+	}
+	if got := providerProbeCapabilities([]domain.Model{{ID: "tts", SupportsTTS: true, CapabilitiesKnown: true}}); !slices.Equal(got, []string{"TTS"}) {
+		t.Fatalf("provider capabilities = %v, want TTS-only", got)
+	}
+}
+
 func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)

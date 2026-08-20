@@ -2582,6 +2582,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `delete_provider`) {
 		t.Fatalf("expected provider dialog delete action")
 	}
+	if !strings.Contains(document, `settings-item-actions`) ||
+		!strings.Contains(document, `providerHealthSummary(item.id)`) ||
+		!strings.Contains(fullPage, `providerOfferingBadges`) {
+		t.Fatalf("expected grouped provider actions with visible health and capability details")
+	}
 	if !strings.Contains(fullPage, `preferences_state`) || !strings.Contains(fullPage, `save_preferences`) || !strings.Contains(fullPage, `reset_prompt`) {
 		t.Fatalf("expected preferences dialog RPC actions")
 	}
@@ -3643,7 +3648,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected provider path: %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"alpha"},{"id":"beta"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"alpha","context_length":131072,"architecture":{"input_modalities":["text","image"]},"supported_parameters":["tools","structured_outputs","reasoning"]},{"id":"beta"}]}`))
 	}))
 	defer providerServer.Close()
 
@@ -3667,9 +3672,11 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ModelCount int      `json:"model_count"`
-			Models     []string `json:"models"`
-			Selected   string   `json:"selected_model"`
+			ModelCount       int      `json:"model_count"`
+			Models           []string `json:"models"`
+			Capabilities     []string `json:"capabilities"`
+			MaxContextWindow int      `json:"max_context_window"`
+			Selected         string   `json:"selected_model"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -3681,6 +3688,9 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	}
 	if resp.Result.ModelCount != 2 || strings.Join(resp.Result.Models, ",") != "alpha,beta" {
 		t.Fatalf("unexpected probe result: %#v", resp.Result)
+	}
+	if strings.Join(resp.Result.Capabilities, ",") != "Chat,Tools,Vision,JSON,Reasoning" || resp.Result.MaxContextWindow != 131072 {
+		t.Fatalf("unexpected provider offerings: %#v", resp.Result)
 	}
 	if resp.Result.Selected != "alpha" {
 		t.Fatalf("expected selected model alpha, got %q", resp.Result.Selected)

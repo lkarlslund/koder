@@ -59,10 +59,57 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 	return ProviderProbeResult{
 		ModelCount:              len(result.Models),
 		Models:                  models,
+		Capabilities:            providerProbeCapabilities(result.Models),
+		MaxContextWindow:        providerProbeMaxContextWindow(result.Models),
 		SelectedModel:           result.SelectedModel,
 		PromptProgressProbed:    result.PromptProgressProbed,
 		PromptProgressSupported: result.PromptProgressSupported,
 	}, nil
+}
+
+func providerProbeCapabilities(models []domain.Model) []string {
+	var chat, tts, tools, images, pdfs, jsonOutput, reasoning, hasUnknown bool
+	for _, model := range models {
+		chat = chat || model.SupportsChat
+		tts = tts || model.SupportsTTS
+		tools = tools || model.SupportsTools
+		images = images || model.SupportsImages
+		pdfs = pdfs || model.SupportsPDFs
+		jsonOutput = jsonOutput || model.SupportsJSON
+		reasoning = reasoning || model.SupportsReasoning
+		hasUnknown = hasUnknown || !model.CapabilitiesKnown
+	}
+	// OpenAI-compatible model listings often omit capability metadata. Such a
+	// provider is still chat-capable when its connection probe succeeds unless
+	// every advertised model explicitly identifies another role (for example,
+	// a TTS-only endpoint).
+	chat = chat || hasUnknown
+	capabilities := make([]string, 0, 7)
+	for _, item := range []struct {
+		label   string
+		enabled bool
+	}{
+		{label: "Chat", enabled: chat},
+		{label: "Tools", enabled: tools},
+		{label: "Vision", enabled: images},
+		{label: "PDF", enabled: pdfs},
+		{label: "JSON", enabled: jsonOutput},
+		{label: "Reasoning", enabled: reasoning},
+		{label: "TTS", enabled: tts},
+	} {
+		if item.enabled {
+			capabilities = append(capabilities, item.label)
+		}
+	}
+	return capabilities
+}
+
+func providerProbeMaxContextWindow(models []domain.Model) int {
+	maximum := 0
+	for _, model := range models {
+		maximum = max(maximum, model.ContextWindow, model.MaxContextWindow)
+	}
+	return maximum
 }
 
 // SaveProvider validates and persists a provider draft.
