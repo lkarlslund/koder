@@ -124,9 +124,13 @@ Examples:
 archived and deleted ones. The REST list includes every state so a
 native client can present management views and undo destructive actions.
 Session summaries carry `archived`, `pinned`, `favorite`, and `deleted` flags
-plus an RFC 3339 `updated_at` timestamp. Pinned chats are ordered first and each
-group is then ordered most recently used first. Organization changes do not
-change `updated_at`; it remains the conversation's actual last-activity time.
+plus an RFC 3339 `updated_at` timestamp. `last_message` is the latest completed
+spoken result, and monotonic `result_count` lets each client maintain its own
+read cursor without server-side device state. Ephemeral `busy` and `status`
+fields describe a currently loaded chat's live work and are never persisted.
+Pinned chats are ordered first and each group is then ordered most recently
+used first. Organization changes do not change `updated_at`; it remains the
+conversation's actual last-activity time.
 `call_state.history` contains only the newest five complete conversational
 turns, and `history_has_more` indicates whether the client can request an older
 page. A history cursor is the first visible transcript entry ID; pages remain

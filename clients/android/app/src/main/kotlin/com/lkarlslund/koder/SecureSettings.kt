@@ -135,6 +135,44 @@ class SecureSettings(context: Context) {
 		return saved
 	}
 
+	fun unreadVoiceResults(resultCounts: Map<String, Long>): Map<String, Long> {
+		val bounded = resultCounts
+			.filterKeys(String::isNotBlank)
+			.mapValues { (_, count) -> count.coerceAtLeast(0) }
+		val read = voiceReadCounts()
+		if (!preferences.getBoolean(VOICE_READ_STATE_INITIALIZED, false)) {
+			bounded.forEach { (sessionId, count) -> read[sessionId] = count }
+			storeVoiceReadCounts(read, initialized = true)
+			return bounded.mapValues { 0L }
+		}
+		return bounded.mapValues { (sessionId, count) -> (count - (read[sessionId] ?: 0L)).coerceAtLeast(0) }
+	}
+
+	fun markVoiceSessionRead(sessionId: String, resultCount: Long) {
+		if (sessionId.isBlank()) return
+		val read = voiceReadCounts()
+		read[sessionId] = maxOf(read[sessionId] ?: 0L, resultCount.coerceAtLeast(0))
+		storeVoiceReadCounts(read, initialized = true)
+	}
+
+	private fun voiceReadCounts(): MutableMap<String, Long> = runCatching {
+		val root = JSONObject(preferences.getString(VOICE_READ_COUNTS, "{}").orEmpty())
+		buildMap {
+			root.keys().forEach { sessionId ->
+				if (sessionId.isNotBlank()) put(sessionId, root.optLong(sessionId).coerceAtLeast(0))
+			}
+		}.toMutableMap()
+	}.getOrDefault(mutableMapOf())
+
+	private fun storeVoiceReadCounts(counts: Map<String, Long>, initialized: Boolean) {
+		val root = JSONObject()
+		counts.forEach { (sessionId, count) -> root.put(sessionId, count.coerceAtLeast(0)) }
+		preferences.edit()
+			.putString(VOICE_READ_COUNTS, root.toString())
+			.putBoolean(VOICE_READ_STATE_INITIALIZED, initialized)
+			.apply()
+	}
+
     private fun decrypt(ciphertext: String, iv: String): String {
         if (ciphertext.isBlank() || iv.isBlank()) return ""
         val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -175,6 +213,8 @@ class SecureSettings(context: Context) {
 		const val AUDIO_ROUTE = "audio_route"
 		const val RESPONSE_PACING = "response_pacing"
 		const val SAVED_RESPONSES = "saved_responses"
+		const val VOICE_READ_COUNTS = "voice_read_counts"
+		const val VOICE_READ_STATE_INITIALIZED = "voice_read_state_initialized"
         const val DEFAULT_SERVER = ""
     }
 }

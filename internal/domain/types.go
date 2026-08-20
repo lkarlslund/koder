@@ -333,6 +333,7 @@ type Session struct {
 	Pinned             bool
 	Favorite           bool
 	DeletedAt          time.Time
+	VoiceResultCount   uint64
 }
 
 type SessionKind uint8

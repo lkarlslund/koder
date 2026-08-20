@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -148,16 +149,30 @@ func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error
 	if err != nil {
 		return nil, err
 	}
+	live := make(map[id.ID]sessionpkg.SessionSnapshot)
+	for _, owner := range c.agent.LoadedSessions() {
+		snapshot := owner.Snapshot()
+		live[snapshot.Session.ID] = snapshot
+	}
 	out := make([]voice.Session, 0)
 	for _, session := range sessions {
 		if session.Kind != domain.SessionKindVoice {
 			continue
 		}
-		out = append(out, voice.Session{
-			ID: string(session.ID), Title: voiceSessionTitle(session),
-			LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
-			Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite, Deleted: !session.DeletedAt.IsZero(),
-		})
+		summary := voiceSessionSummary(session)
+		snapshot, loaded := live[session.ID]
+		if !loaded && summary.LastMessage == "" {
+			// Older voice sessions predate the session-level preview. Loading
+			// metadata is timeline-free and lets their persisted chat summary
+			// seed the preview without hydrating the full transcript.
+			owner, loadErr := c.agent.LoadSession(ctx, session.ID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			snapshot = owner.Snapshot()
+		}
+		applyVoiceRuntimeSummary(&summary, snapshot)
+		out = append(out, summary)
 	}
 	return out, nil
 }
@@ -445,7 +460,7 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 	if err != nil {
 		return voice.Message{}, err
 	}
-	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
+	owner, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(strings.TrimSpace(voiceSessionID))}, true)
 	if err != nil {
 		return voice.Message{}, err
 	}
@@ -510,6 +525,12 @@ func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text stri
 				spoken := pacedSpokenResponse(response, pacing)
 				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
 				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
+				if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
+					session.LastMessage = truncateVoiceText(spoken, 240)
+					session.VoiceResultCount++
+				}); err != nil {
+					return voice.Message{}, fmt.Errorf("store voice conversation preview: %w", err)
+				}
 				return voice.Message{SpokenText: spoken, TranscriptID: string(responseItem.ID), Parts: parts}, nil
 			}
 			if message := latestModelErrorAfter(timeline, initialSeq); message != "" {
@@ -834,6 +855,30 @@ func voiceSessionSummary(session domain.Session) voice.Session {
 	return voice.Session{
 		ID: string(session.ID), Title: voiceSessionTitle(session), LastMessage: session.LastMessage, UpdatedAt: session.UpdatedAt,
 		Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite, Deleted: !session.DeletedAt.IsZero(),
+		ResultCount: session.VoiceResultCount,
+	}
+}
+
+func applyVoiceRuntimeSummary(summary *voice.Session, snapshot sessionpkg.SessionSnapshot) {
+	if summary == nil || snapshot.Session.ID == "" {
+		return
+	}
+	for _, chatRecord := range snapshot.Chats {
+		if chatRecord.WorkflowRole != domain.WorkflowRoleVoice {
+			continue
+		}
+		if summary.LastMessage == "" {
+			summary.LastMessage = truncateVoiceText(chatRecord.LastMessage, 240)
+		}
+		runtime, ok := snapshot.Snapshots[chatRecord.ID]
+		if !ok {
+			continue
+		}
+		summary.Status = string(runtime.Status)
+		summary.Busy = runtime.Active || runtime.Status == chat.StatusWaitingLLM ||
+			runtime.Status == chat.StatusStreamingThoughts || runtime.Status == chat.StatusStreamingResponse ||
+			runtime.Status == chat.StatusRunningTools || runtime.Status == chat.StatusWaitingApproval ||
+			runtime.Status == chat.StatusWaitingInput
 	}
 }
 

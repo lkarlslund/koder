@@ -261,6 +261,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
 			latestCallSnapshot = snapshot
+			snapshot.voiceSessions.firstOrNull { it.id == snapshot.voiceSessionId }?.let {
+				secureSettings.markVoiceSessionRead(it.id, it.resultCount)
+			}
 			updateConversationStatus(snapshot.stage, snapshot.detail)
             transcript?.apply {
                 text = snapshot.partialTranscript
@@ -442,12 +445,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 setOnClickListener(::showHomeMenu)
             })
         }
-        root.addView(appBar, matchWrap())
-        root.addView(title("Conversations").apply {
-            textSize = 30f
-            setTypeface(typeface, Typeface.BOLD)
-        }, spaced(top = 24))
-        root.addView(body("Pick up where you left off, or begin something new."), spaced(top = 4, bottom = 18))
+		root.addView(appBar, spaced(bottom = 6))
 		val counts = mapOf(
 			ConversationFilter.ACTIVE to home.voiceSessions.count { !it.archived && !it.deleted },
 			ConversationFilter.FAVORITES to home.voiceSessions.count { it.favorite && !it.archived && !it.deleted },
@@ -482,7 +480,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					}
 				}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 			}
-		}, spaced(bottom = 12))
+		}, spaced(bottom = 6))
 
         updateButton = Button(this).apply {
             visibility = View.GONE
@@ -496,6 +494,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         root.addView(updateProgress, spaced(top = 6, bottom = 10))
 
+		val unreadBySession = secureSettings.unreadVoiceResults(home.voiceSessions.associate { it.id to it.resultCount })
 		val visibleSessions = home.voiceSessions.filter { session ->
 			when (conversationFilter) {
 				ConversationFilter.ACTIVE -> !session.archived && !session.deleted
@@ -508,7 +507,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (visibleSessions.isEmpty()) {
 			list.addView(emptyConversationCard(conversationFilter), spaced(top = 8, bottom = 12))
         } else {
-			visibleSessions.forEach { session -> list.addView(sessionCard(session), spaced(bottom = 10)) }
+			visibleSessions.forEach { session -> list.addView(sessionCard(session, unreadBySession[session.id] ?: 0), spaced(bottom = 4)) }
         }
         val sessionScroll = ScrollView(this).apply { addView(list, matchWrap()) }
         val refresh = SwipeRefreshLayout(this).apply {
@@ -525,7 +524,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
             setTextColor(themeColor(android.R.attr.colorBackground))
             setOnClickListener { showCreateVoiceSessionDialog() }
-        }, spaced(top = 12))
+		}, spaced(top = 8))
         showContent(root)
 
         lastAppUpdate = home.appUpdate
@@ -966,62 +965,79 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             .show()
     }
 
-    private fun sessionCard(session: VoiceSession) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(15), dp(16), dp(15))
+    private fun sessionCard(session: VoiceSession, unreadResults: Long = 0) = LinearLayout(this).apply {
+		orientation = LinearLayout.HORIZONTAL
+		gravity = Gravity.CENTER_VERTICAL
+		setPadding(dp(12), dp(4), dp(7), dp(4))
         background = cardBackground()
-        elevation = dp(2).toFloat()
+		elevation = dp(1).toFloat()
         isClickable = true
         isFocusable = true
-        contentDescription = "Open voice conversation ${session.title.ifBlank { "Untitled" }}"
+		val titleText = session.title.ifBlank { "Untitled conversation" }
+		val unreadLabel = when {
+			unreadResults > 99 -> "99+ new"
+			unreadResults > 0 -> "$unreadResults new"
+			else -> ""
+		}
+		val stateLabel = when (session.status) {
+			"waiting_approval", "waiting_input" -> "● Needs attention"
+			else -> if (session.busy) "● Working" else ""
+		}
+		val preview = session.lastMessage.replace(Regex("\\s+"), " ").trim()
+		val time = session.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty()
+		val detail = listOf(stateLabel, unreadLabel, time, preview).filter(String::isNotBlank).joinToString(" · ")
+		contentDescription = listOf(
+			if (session.archived || session.deleted) "Manage voice conversation $titleText" else "Open voice conversation $titleText",
+			detail,
+		).filter(String::isNotBlank).joinToString(". ")
         val selectable = TypedValue()
         if (theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
             foreground = getDrawable(selectable.resourceId)
         }
 
-        addView(LinearLayout(this@MainActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(this@MainActivity).apply {
+		addView(LinearLayout(this@MainActivity).apply {
+			orientation = LinearLayout.VERTICAL
+			gravity = Gravity.CENTER_VERTICAL
+			addView(TextView(this@MainActivity).apply {
 				val markers = buildString {
 					if (session.pinned) append("◆ ")
 					if (session.favorite) append("★ ")
 				}
-				text = markers + session.title.ifBlank { "Untitled conversation" }
-                textSize = 19f
-                setTypeface(typeface, Typeface.BOLD)
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(TextView(this@MainActivity).apply {
-				text = "⋮"
-				textSize = 26f
-				gravity = Gravity.CENTER
-				minWidth = dp(48)
-				minHeight = dp(48)
-				contentDescription = "Options for ${session.title}"
-				isClickable = true
-				setOnClickListener { anchor -> showVoiceSessionMenu(anchor, session) }
-            })
-        }, matchWrap())
-		if (session.archived || session.deleted) {
-			addView(helper(if (session.deleted) "Deleted · tap to restore or manage" else "Archived · tap to restore or manage").apply {
-				setTextColor(if (session.deleted) ACTION_RED else themeColor(android.R.attr.colorAccent))
-			}, spaced(top = 2))
-		}
-        session.updatedAt?.let { updated ->
-            addView(helper(lastUsedText(updated.toEpochMilli())).apply {
-                setTextColor(themeColor(android.R.attr.colorAccent))
-                alpha = 1f
-            }, spaced(top = 3))
-        }
-        if (session.lastMessage.isNotBlank()) {
-            addView(body(session.lastMessage).apply {
-                maxLines = 2
-                ellipsize = TextUtils.TruncateAt.END
-                alpha = 0.78f
-            }, spaced(top = 8))
-        }
+				text = markers + titleText
+				textSize = 16f
+				setTypeface(typeface, Typeface.BOLD)
+				maxLines = 1
+				ellipsize = TextUtils.TruncateAt.END
+			}, matchWrap())
+			addView(helper(detail.ifBlank {
+				when {
+					session.deleted -> "Deleted"
+					session.archived -> "Archived"
+					else -> "No messages yet"
+				}
+			}).apply {
+				textSize = 12f
+				maxLines = 1
+				ellipsize = TextUtils.TruncateAt.END
+				alpha = 1f
+				setTextColor(when {
+					session.status == "waiting_approval" || session.status == "waiting_input" -> ACTION_RED
+					session.busy -> ACTION_ORANGE
+					unreadResults > 0 -> ACTION_BLUE
+					else -> themeColor(android.R.attr.textColorSecondary)
+				})
+			}, matchWrap())
+		}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+		addView(TextView(this@MainActivity).apply {
+			text = "⋮"
+			textSize = 24f
+			gravity = Gravity.CENTER
+			minWidth = dp(40)
+			minHeight = dp(40)
+			contentDescription = "Options for ${session.title}"
+			isClickable = true
+			setOnClickListener { anchor -> showVoiceSessionMenu(anchor, session) }
+		})
 		setOnClickListener { view ->
 			if (session.archived || session.deleted) showVoiceSessionMenu(view, session) else openChat(session)
 		}
@@ -1158,10 +1174,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
     }
 
-    private fun lastUsedText(timestamp: Long): String {
+	private fun compactLastUsedText(timestamp: Long): String {
         val now = System.currentTimeMillis()
         val relative = if (abs(now - timestamp) < DateUtils.MINUTE_IN_MILLIS) {
-            "just now"
+			"now"
         } else {
             DateUtils.getRelativeTimeSpanString(
                 timestamp,
@@ -1170,7 +1186,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 DateUtils.FORMAT_ABBREV_RELATIVE,
             )
         }
-        return "Last used $relative"
+		return relative.toString()
     }
 
     private fun cardBackground() = GradientDrawable().apply {
@@ -1223,6 +1239,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         screen = Screen.CHAT
         clearCallViews()
         pendingSession = session
+		secureSettings.markVoiceSessionRead(session.id, session.resultCount)
 		if (startConnection) pendingCreateTitle = null
 		transcriptShown = false
 		transcriptOpened = false

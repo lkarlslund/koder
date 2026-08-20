@@ -513,7 +513,7 @@ func TestHandlerRenamesVoiceSession(t *testing.T) {
 func TestHandlerUpdatesVoiceSessionOrganizationAndSortsPinsFirst(t *testing.T) {
 	now := time.Now().UTC()
 	backend := &fakeBackend{voiceChats: []voice.Session{
-		{ID: "voice-1", Title: "Older", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "voice-1", Title: "Older", LastMessage: "Finished it.", UpdatedAt: now.Add(-time.Hour), ResultCount: 4, Busy: true, Status: "running_tools"},
 		{ID: "voice-2", Title: "Newer", UpdatedAt: now},
 	}}
 	server := httptest.NewServer(NewHandler(backend, "secret"))
@@ -534,6 +534,9 @@ func TestHandlerUpdatesVoiceSessionOrganizationAndSortsPinsFirst(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || body.VoiceSession == nil || !body.VoiceSession.Pinned || !body.VoiceSession.Favorite {
 		t.Fatalf("organization response status=%d body=%#v", response.StatusCode, body)
+	}
+	if body.VoiceSession.LastMessage != "Finished it." || body.VoiceSession.ResultCount != 4 || !body.VoiceSession.Busy || body.VoiceSession.Status != "running_tools" {
+		t.Fatalf("preview response = %#v", body.VoiceSession)
 	}
 	if body.VoiceSessions[0].ID != "voice-1" {
 		t.Fatalf("pinned session was not sorted first: %#v", body.VoiceSessions)

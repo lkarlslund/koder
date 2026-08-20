@@ -2537,6 +2537,13 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if working.ID != targetID || working.Title != "Laptop repair" {
 		t.Fatalf("working target = %#v", working)
 	}
+	voiceChats, err := ctrl.ListVoiceChats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(voiceChats) != 1 || voiceChats[0].LastMessage != message.SpokenText || voiceChats[0].ResultCount != 1 {
+		t.Fatalf("voice conversation preview = %#v", voiceChats)
+	}
 
 	_, _, _, runtime, err := ctrl.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: voiceSession.ID}, true)
 	if err != nil {
@@ -2573,6 +2580,21 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	}
 	if strings.Contains(chatrole.SpecFor(chatrole.Voice).SystemPrompt, "exact session_id") {
 		t.Fatalf("voice prompt contains tool mechanics: %s", chatrole.SpecFor(chatrole.Voice).SystemPrompt)
+	}
+}
+
+func TestApplyVoiceRuntimeSummaryUsesPersistedPreviewAndLiveWorkState(t *testing.T) {
+	chatID := id.ID("voice-chat")
+	summary := voice.Session{}
+	applyVoiceRuntimeSummary(&summary, sessionpkg.SessionSnapshot{
+		Session: domain.Session{ID: "voice-session"},
+		Chats:   []domain.Chat{{ID: chatID, WorkflowRole: domain.WorkflowRoleVoice, LastMessage: "The concise result."}},
+		Snapshots: map[id.ID]chat.Snapshot{
+			chatID: {Status: chat.StatusRunningTools, Active: true},
+		},
+	})
+	if summary.LastMessage != "The concise result." || !summary.Busy || summary.Status != string(chat.StatusRunningTools) {
+		t.Fatalf("runtime summary = %#v", summary)
 	}
 }
 

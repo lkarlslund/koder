@@ -18,6 +18,9 @@ data class VoiceSession(
 	val pinned: Boolean = false,
 	val favorite: Boolean = false,
 	val deleted: Boolean = false,
+	val resultCount: Long = 0,
+	val busy: Boolean = false,
+	val status: String = "",
 )
 
 data class VoicePart(
@@ -439,6 +442,9 @@ object VoiceProtocol {
 		pinned = optBoolean("pinned"),
 		favorite = optBoolean("favorite"),
 		deleted = optBoolean("deleted"),
+		resultCount = optLong("result_count").coerceAtLeast(0),
+		busy = optBoolean("busy"),
+		status = optString("status"),
 	)
 
 	private fun VoiceAudioFormat.toJSON(): JSONObject = JSONObject()

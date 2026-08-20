@@ -19,6 +19,9 @@ type Session struct {
 	Pinned      bool      `json:"pinned,omitempty"`
 	Favorite    bool      `json:"favorite,omitempty"`
 	Deleted     bool      `json:"deleted,omitempty"`
+	ResultCount uint64    `json:"result_count,omitempty"`
+	Busy        bool      `json:"busy,omitempty"`
+	Status      string    `json:"status,omitempty"`
 }
 
 // SessionUpdate changes user-managed voice conversation metadata.

@@ -83,6 +83,16 @@ class MainActivityInstrumentedTest {
 		assertEquals(1, SecureSettings(context).savedVoiceResponses("voice-1").size)
 	}
 
+	@Test
+	fun unreadResultCursorsBaselineExistingSessionsAndTrackNewResults() {
+		val secureSettings = SecureSettings(context)
+		assertEquals(0L, secureSettings.unreadVoiceResults(mapOf("voice-1" to 3))["voice-1"])
+		assertEquals(2L, secureSettings.unreadVoiceResults(mapOf("voice-1" to 5))["voice-1"])
+		secureSettings.markVoiceSessionRead("voice-1", 5)
+		assertEquals(0L, SecureSettings(context).unreadVoiceResults(mapOf("voice-1" to 5))["voice-1"])
+		assertEquals(1L, secureSettings.unreadVoiceResults(mapOf("voice-1" to 5, "voice-2" to 1))["voice-2"])
+	}
+
     @Test
 	fun setupDoesNotKeepTheScreenAwake() {
 		clearSettings()
@@ -128,7 +138,8 @@ class MainActivityInstrumentedTest {
 			val launch = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(bindingURI)
 			ActivityScenario.launch<MainActivity>(launch).use { scenario ->
 				val labels = waitForText(scenario, "Bound conversation")
-				assertTrue(labels.contains("Conversations"))
+					assertTrue(labels.contains("Koder Voice"))
+					assertTrue(labels.contains("Active 1"))
 				val saved = SecureSettings(context).load()
 				assertEquals(server.url("/").toString(), saved.server)
 				assertEquals("kdv1_private", saved.token)
@@ -177,7 +188,7 @@ class MainActivityInstrumentedTest {
             SecureSettings(context).save(server.url("/").toString(), "")
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 val labels = waitForText(scenario, "Personal")
-                assertTrue(labels.contains("Conversations"))
+				assertTrue(labels.contains("Active 1"))
                 assertTrue(labels.contains("Koder Voice"))
                 assertTrue(labels.any { it.startsWith("Personal") })
                 assertTrue(labels.any { it.contains("New conversation") })
@@ -351,6 +362,33 @@ class MainActivityInstrumentedTest {
 		}
 	}
 
+	@Test
+	fun compactConversationCardsShowPreviewBusyUnreadAndTenRows() {
+		SecureSettings(context).unreadVoiceResults(mapOf("voice-1" to 1))
+		val sessions = (1..10).joinToString(",") { index ->
+			buildString {
+				append("""{"id":"voice-$index","title":"Conversation $index","last_message":"${if (index == 2) "Still checking" else "Preview $index"}"""")
+				if (index == 1) append(",\"result_count\":3")
+				if (index == 2) append(",\"busy\":true,\"status\":\"running_tools\"")
+				append("}")
+			}
+		}
+		val server = MockWebServer()
+		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[$sessions]}""").build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Conversation 10")
+				onView(withText("2 new · Preview 1")).check(matches(isDisplayed()))
+				onView(withText("● Working · Still checking")).check(matches(isDisplayed()))
+				onView(withContentDescription("Open voice conversation Conversation 10. Preview 10")).check(matches(isDisplayed()))
+			}
+		} finally {
+			server.close()
+		}
+	}
+
     @Test
     fun pullingConversationListRefreshesAndShowsNewestFirst() {
         val server = MockWebServer()
@@ -380,7 +418,7 @@ class MainActivityInstrumentedTest {
                 onView(withContentDescription("Conversation list")).perform(swipeDown())
                 val labels = waitForText(scenario, "Newest")
                 assertTrue(labels.indexOf("Newest") < labels.indexOf("Older"))
-                assertEquals(2, labels.count { it.startsWith("Last used") })
+				assertEquals(2, labels.count { it.contains("ago") })
                 assertTrue(waitForText(scenario, "Update Koder").any { it.contains("next-dev") })
             }
         } finally {
