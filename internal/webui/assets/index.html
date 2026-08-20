@@ -1389,6 +1389,10 @@
                       <button type="button" class="settings-item-main" @click="editSettingsItem('mcp', item.id)">
                         <span class="settings-item-title" x-text="settingsItemTitle('mcp', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('mcp', item)"></span>
+						<span class="settings-provider-health" :class="mcpRuntimeClass(item)" :title="mcpRuntimeTitle(item)">
+						  <i class="bi" :class="mcpRuntimeIcon(item)"></i>
+						  <span x-text="mcpRuntimeSummary(item)"></span>
+						</span>
                         <span class="settings-item-badges">
                           <template x-for="badge in settingsItemBadges('mcp', item)" :key="badge">
                             <span class="badge text-bg-secondary" x-text="badge"></span>

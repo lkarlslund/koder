@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -1185,6 +1186,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		ModelConfigs:  modelConfigPreferencesFromConfig(c.cfg.Models, models),
 		ModelOverlays: modeloverlay.Load(c.cfg.ManagedAssetsDir()),
 		MCPServers:    mcpPreferencesFromConfig(c.cfg.MCPServers),
+		MCPRuntime:    mcpRuntimeState(c.agent),
 		Access:        accessPreferencesFromConfig(c.cfg.Access),
 		ToolDefaults:  toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
 		Browser:       nativeBrowserPreferencesFromConfig(c.cfg.Browser, c.agent),
@@ -1618,6 +1620,31 @@ func mcpPreferencesFromConfig(src map[string]config.MCPServer) []MCPServerPrefer
 			BearerTokenEnv:       strings.TrimSpace(server.BearerTokenEnv),
 		})
 	}
+	return out
+}
+
+func mcpRuntimeState(engine *agent.Engine) []MCPRuntimeState {
+	if engine == nil {
+		return nil
+	}
+	return mcpRuntimeStateFromServers(engine.ListMCPServers())
+}
+
+func mcpRuntimeStateFromServers(states []mcp.ServerState) []MCPRuntimeState {
+	out := make([]MCPRuntimeState, 0, len(states))
+	for _, state := range states {
+		out = append(out, MCPRuntimeState{
+			ID:                    state.ID,
+			Status:                string(state.Status),
+			LastError:             state.LastError,
+			SessionID:             state.SessionID,
+			ToolCount:             state.ToolCount,
+			ResourceCount:         state.ResourceCount,
+			ResourceTemplateCount: state.ResourceTemplateCount,
+			PromptCount:           state.PromptCount,
+		})
+	}
+	slices.SortFunc(out, func(a, b MCPRuntimeState) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 

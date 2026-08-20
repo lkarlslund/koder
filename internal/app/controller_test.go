@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -46,6 +47,19 @@ func testChatCollection(st *store.Store) store.Collection[domain.Chat] {
 			{Name: "session", Value: func(v domain.Chat) string { return v.SessionID }},
 		},
 	})
+}
+
+func TestMCPRuntimeStateReflectsManagerSnapshots(t *testing.T) {
+	states := mcpRuntimeStateFromServers([]mcp.ServerState{
+		{ID: "zeta", Status: mcp.ServerStatusError, LastError: "connection refused"},
+		{ID: "alpha", Status: mcp.ServerStatusConnected, SessionID: "session-1", ToolCount: 3, ResourceCount: 2, ResourceTemplateCount: 1, PromptCount: 4},
+	})
+	if len(states) != 2 || states[0].ID != "alpha" || states[0].Status != "connected" || states[0].ToolCount != 3 || states[0].ResourceTemplateCount != 1 {
+		t.Fatalf("unexpected connected MCP runtime state: %#v", states)
+	}
+	if states[1].ID != "zeta" || states[1].Status != "error" || states[1].LastError != "connection refused" {
+		t.Fatalf("unexpected failed MCP runtime state: %#v", states[1])
+	}
 }
 
 func testGetChat(ctx context.Context, st *store.Store, chatID id.ID) (domain.Chat, error) {

@@ -2598,6 +2598,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `settingsListRows('providers')`) ||
 		!strings.Contains(fullPage, `settingsListRows('mcp')`) ||
+		!strings.Contains(fullPage, `mcpRuntimeSummary(item)`) ||
 		!strings.Contains(fullPage, `showProviderEditor`) ||
 		!strings.Contains(fullPage, `showMCPEditor`) {
 		t.Fatalf("expected providers and MCP to use shared preferences list editors")

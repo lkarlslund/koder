@@ -274,6 +274,7 @@ type PreferencesState struct {
 	ModelConfigs  []ModelConfigPreference  `json:"model_configs"`
 	ModelOverlays modeloverlay.Catalog     `json:"model_overlays"`
 	MCPServers    []MCPServerPreference    `json:"mcp_servers"`
+	MCPRuntime    []MCPRuntimeState        `json:"mcp_runtime"`
 	Access        AccessPreferences        `json:"access"`
 	ToolDefaults  []ToolDefaultPreference  `json:"tool_defaults"`
 	Browser       NativeBrowserPreferences `json:"browser"`
@@ -355,6 +356,18 @@ type MCPServerPreference struct {
 	DisableStandaloneSSE bool              `json:"disable_standalone_sse"`
 	BearerToken          string            `json:"bearer_token"`
 	BearerTokenEnv       string            `json:"bearer_token_env"`
+}
+
+// MCPRuntimeState is read-only process state from the MCP manager.
+type MCPRuntimeState struct {
+	ID                    string `json:"id"`
+	Status                string `json:"status"`
+	LastError             string `json:"last_error,omitempty"`
+	SessionID             string `json:"session_id,omitempty"`
+	ToolCount             int    `json:"tool_count"`
+	ResourceCount         int    `json:"resource_count"`
+	ResourceTemplateCount int    `json:"resource_template_count"`
+	PromptCount           int    `json:"prompt_count"`
 }
 
 // AccessPreferences is the default sandbox access settings for new sessions.

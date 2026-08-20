@@ -5645,6 +5645,34 @@
           if (kind === 'mcp') return (item.id || '-') + (item.url ? ' / ' + item.url : '');
           return '';
         },
+		mcpRuntimeState(item) {
+		  const id = String(item?.id || '');
+		  return (this.settings?.mcp_runtime || []).find(state => state.id === id) || {id, status: item?.disabled ? 'disabled' : 'disconnected'};
+		},
+		mcpRuntimeClass(item) {
+		  return {connected: 'text-success', connecting: 'text-primary', error: 'text-danger', disabled: 'text-secondary'}[this.mcpRuntimeState(item).status] || 'text-secondary';
+		},
+		mcpRuntimeIcon(item) {
+		  return {connected: 'bi-plug-fill', connecting: 'bi-arrow-repeat', error: 'bi-exclamation-triangle-fill', disabled: 'bi-pause-circle'}[this.mcpRuntimeState(item).status] || 'bi-plug';
+		},
+		mcpRuntimeSummary(item) {
+		  const state = this.mcpRuntimeState(item);
+		  if (state.status === 'connected') {
+			const offered = Number(state.tool_count || 0) + ' tools · ' + Number(state.resource_count || 0) + ' resources · ' + Number(state.prompt_count || 0) + ' prompts';
+			return 'Connected · ' + offered;
+		  }
+		  if (state.status === 'connecting') return 'Connecting…';
+		  if (state.status === 'error') return 'Error · ' + (state.last_error || 'Connection failed');
+		  if (state.status === 'disabled') return 'Disabled';
+		  return 'Disconnected';
+		},
+		mcpRuntimeTitle(item) {
+		  const state = this.mcpRuntimeState(item);
+		  const lines = [this.mcpRuntimeSummary(item)];
+		  if (state.resource_template_count) lines.push(state.resource_template_count + ' resource templates');
+		  if (state.session_id) lines.push('Session ' + state.session_id);
+		  return lines.join('\n');
+		},
         settingsItemBadges(kind, item) {
           const badges = [];
           if (kind === 'providers' && item.default) badges.push('default');
