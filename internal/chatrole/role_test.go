@@ -20,7 +20,7 @@ func TestDefaultRegistryRoleSpecs(t *testing.T) {
 		{name: "execution", role: Execution, displayName: "Execute", prompt: "execution worker"},
 		{name: "standalone", role: Standalone, displayName: "Standalone", prompt: "standalone chat"},
 		{name: "compaction", role: Compaction, displayName: "Compact", prompt: "summarizes conversation history"},
-		{name: "voice", role: Voice, displayName: "Voice", prompt: "voice assistant"},
+		{name: "voice", role: Voice, displayName: "Voice", prompt: "voice orchestrator"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -58,9 +58,13 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"compaction rejects read", Compaction, testTool("file_read"), false},
 		{"compaction rejects chat send", Compaction, testTool("chat_send"), false},
 		{"voice allows chat status", Voice, testTool("chat_status"), true},
-		{"voice allows session delegation", Voice, testTool("session_delegate"), true},
+		{"voice rejects obsolete session delegation", Voice, testTool("session_delegate"), false},
 		{"voice allows presentation", Voice, testTool("present"), true},
-		{"voice rejects file read", Voice, testTool("file_read"), false},
+		{"voice allows file read", Voice, testTool("file_read"), true},
+		{"voice allows web search", Voice, testTool("web_search"), true},
+		{"voice allows chat list", Voice, testTool("chat_list"), true},
+		{"voice allows chat start", Voice, testTool("chat_start"), true},
+		{"voice rejects text-only input request", Voice, testTool("request_user_input"), false},
 		{"unknown rejects read", Role("unknown"), testTool("file_read"), false},
 	}
 	for _, tt := range tests {
@@ -69,6 +73,14 @@ func TestRoleAllowsTool(t *testing.T) {
 				t.Fatalf("AllowsTool(%q, %q) = %v, want %v", tt.role, tt.tool, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestChatStatusIsAvailableToEveryUserFacingRole(t *testing.T) {
+	for _, role := range []Role{General, Orchestrator, Planning, Execution, Standalone, Voice} {
+		if !AllowsTool(role, testTool("chat_status")) {
+			t.Errorf("chat_status is not available to %q", role)
+		}
 	}
 }
 

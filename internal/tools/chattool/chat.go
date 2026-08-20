@@ -171,7 +171,7 @@ func (renameTool) BypassesPermission() bool  { return true }
 
 func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	switch runtime.ChatRole {
-	case "", chatrole.General, chatrole.Orchestrator, chatrole.Planning:
+	case "", chatrole.General, chatrole.Orchestrator, chatrole.Planning, chatrole.Voice:
 		return spec, true
 	default:
 		return tools.ToolSpec{}, false
