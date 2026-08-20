@@ -153,10 +153,6 @@ func (s *Server) handlePlanningBoardState(w http.ResponseWriter, r *http.Request
 	writeFileBrowserJSON(w, r, resp)
 }
 
-func (s *Server) planningBoardState(ctx context.Context, sessionID id.ID) (planningBoardResponse, error) {
-	return s.planningBoardStateWithArchived(ctx, sessionID, false)
-}
-
 func (s *Server) planningBoardStateWithArchived(ctx context.Context, sessionID id.ID, includeArchived bool) (planningBoardResponse, error) {
 	session, err := s.controller.SessionByID(ctx, sessionID)
 	if err != nil {
