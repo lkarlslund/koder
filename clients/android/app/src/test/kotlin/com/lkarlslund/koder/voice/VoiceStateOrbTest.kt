@@ -1,10 +1,24 @@
 package com.lkarlslund.koder.voice
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceStateOrbTest {
+	@Test
+	fun everyOrbStateHasAConciseSpokenDescription() {
+		assertEquals(VoiceOrbMode.entries.size, VoiceOrbMode.entries.map(::voiceOrbDescription).distinct().size)
+		assertEquals("Koder is using tools", voiceOrbDescription(VoiceOrbMode.WORKING))
+	}
+
+	@Test
+	fun systemReducedMotionStopsAnimationWithoutLosingState() {
+		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.PROCESSING, systemAnimationsEnabled = false, shown = true))
+		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.LISTENING, systemAnimationsEnabled = true, shown = false))
+		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.IDLE, systemAnimationsEnabled = true, shown = true))
+		assertTrue(shouldAnimateVoiceOrb(VoiceOrbMode.AI_SPEAKING, systemAnimationsEnabled = true, shown = true))
+	}
 	@Test
 	fun stagesMapToDistinctOrbBehaviors() {
 		assertEquals(VoiceOrbMode.LISTENING, voiceOrbMode(CallController.Stage.LISTENING))

@@ -1,11 +1,13 @@
 package com.lkarlslund.koder.voice
 
 import android.content.Context
+import android.animation.ValueAnimator
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
 import kotlin.math.PI
@@ -25,6 +27,22 @@ fun voiceOrbMode(stage: CallController.Stage?): VoiceOrbMode = when (stage) {
 	else -> VoiceOrbMode.IDLE
 }
 
+fun voiceOrbDescription(mode: VoiceOrbMode): String = when (mode) {
+	VoiceOrbMode.IDLE -> "Voice conversation inactive"
+	VoiceOrbMode.LISTENING -> "Koder is listening"
+	VoiceOrbMode.USER_SPEAKING -> "You are speaking"
+	VoiceOrbMode.PROCESSING -> "Koder is thinking"
+	VoiceOrbMode.WORKING -> "Koder is using tools"
+	VoiceOrbMode.AI_SPEAKING -> "Koder is speaking"
+}
+
+fun shouldAnimateVoiceOrb(mode: VoiceOrbMode, systemAnimationsEnabled: Boolean, shown: Boolean): Boolean =
+	systemAnimationsEnabled && shown && mode != VoiceOrbMode.IDLE
+
+fun highContrastEnabled(context: Context): Boolean = runCatching {
+	Settings.Secure.getInt(context.contentResolver, "high_text_contrast_enabled", 0) == 1
+}.getOrDefault(false)
+
 class VoiceStateOrbView @JvmOverloads constructor(
 	context: Context,
 	attrs: AttributeSet? = null,
@@ -42,6 +60,9 @@ class VoiceStateOrbView @JvmOverloads constructor(
 
 	init {
 		setLayerType(LAYER_TYPE_SOFTWARE, null)
+		importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+		accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE
+		contentDescription = voiceOrbDescription(VoiceOrbMode.IDLE)
 	}
 
 	var mode: VoiceOrbMode = VoiceOrbMode.IDLE
@@ -49,14 +70,7 @@ class VoiceStateOrbView @JvmOverloads constructor(
 			if (field == value) return
 			field = value
 			startedAt = System.nanoTime()
-			contentDescription = when (value) {
-				VoiceOrbMode.IDLE -> "Voice conversation inactive"
-				VoiceOrbMode.LISTENING -> "Koder is listening"
-				VoiceOrbMode.USER_SPEAKING -> "You are speaking"
-				VoiceOrbMode.PROCESSING -> "Koder is thinking"
-				VoiceOrbMode.WORKING -> "Koder is using tools"
-				VoiceOrbMode.AI_SPEAKING -> "Koder is speaking"
-			}
+			contentDescription = voiceOrbDescription(value)
 			invalidate()
 		}
 
@@ -76,7 +90,8 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		canvas.drawCircle(cx, cy, radius, paint)
 		canvas.save()
 		canvas.clipPath(Path().apply { addCircle(cx, cy, radius, Path.Direction.CW) })
-		val seconds = (System.nanoTime() - startedAt) / 1_000_000_000f
+		val animationsEnabled = ValueAnimator.areAnimatorsEnabled()
+		val seconds = if (animationsEnabled) (System.nanoTime() - startedAt) / 1_000_000_000f else 0f
 		drawStars(canvas, cx, cy, radius, seconds)
 		when (mode) {
 			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, radius, seconds, Color.rgb(44, 232, 255))
@@ -94,7 +109,7 @@ class VoiceStateOrbView @JvmOverloads constructor(
 			else -> Color.rgb(75, 121, 255)
 		}
 		canvas.drawCircle(cx, cy, radius - paint.strokeWidth, paint)
-		postInvalidateOnAnimation()
+		if (shouldAnimateVoiceOrb(mode, animationsEnabled, isShown)) postInvalidateOnAnimation()
 	}
 
 	private fun drawStars(canvas: Canvas, cx: Float, cy: Float, radius: Float, seconds: Float) {
@@ -105,7 +120,8 @@ class VoiceStateOrbView @JvmOverloads constructor(
 			val angle = star.angle + if (warp) 0f else drift + index * 0.0007f
 			val x = cx + cos(angle) * radial * radius
 			val y = cy + sin(angle) * radial * radius
-			paint.color = Color.argb((110 + radial * 145).toInt(), 160, 205, 255)
+			val minimumAlpha = if (highContrastEnabled(context)) 175 else 110
+			paint.color = Color.argb((minimumAlpha + radial * (255 - minimumAlpha)).toInt(), 160, 205, 255)
 			paint.strokeWidth = star.size
 			if (warp) {
 				val tail = max(5f, radial * radius * 0.24f)

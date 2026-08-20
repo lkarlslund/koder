@@ -94,6 +94,7 @@ import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
+import com.lkarlslund.koder.voice.highContrastEnabled
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
@@ -121,6 +122,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private lateinit var sessionClient: VoiceSessionClient
 	private var readinessCheck: VoiceReadinessCheck? = null
 	private var readinessHome: VoiceHome? = null
+	private var readinessReturnToSettings = false
+	private var readinessStep = 0
 
     private var screen = Screen.LOADING
     private var settings = SecureSettings.Values("", "")
@@ -236,7 +239,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					loadHome()
 				} else if (screen == Screen.READINESS) {
 					readinessCheck?.close()
-					readinessHome?.let(::showHome) ?: loadHome()
+					if (readinessReturnToSettings) showSettings() else readinessHome?.let(::showHome) ?: loadHome()
                 } else if (screen == Screen.SETUP && settings.server.isNotBlank()) {
                     showSettings()
                 } else {
@@ -502,7 +505,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
 				result.fold(
 					onSuccess = { home ->
-						if (offerReadiness && !secureSettings.readinessComplete(settings.server)) showReadiness(home) else showHome(home)
+						if (offerReadiness && !secureSettings.readinessComplete(settings.server)) showReadiness(home, fromSettings = false, step = 0) else showHome(home)
 					},
 					onFailure = ::showConnectionError,
 				)
@@ -510,35 +513,60 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
     }
 
-	private fun showReadiness(home: VoiceHome, error: String = "") {
+	private fun showReadiness(home: VoiceHome, error: String = "", fromSettings: Boolean = readinessReturnToSettings, step: Int = readinessStep) {
 		screen = Screen.READINESS
 		readinessHome = home
+		readinessReturnToSettings = fromSettings
+		readinessStep = step.coerceIn(0, 3)
 		readinessCheck?.close()
 		readinessCheck = null
 		clearCallViews()
 		val content = column(Gravity.CENTER_HORIZONTAL)
 		content.addView(logo(), centeredSquare(82, bottom = 14))
-		content.addView(title("Voice readiness check").apply { gravity = Gravity.CENTER }, matchWrap())
-		content.addView(body("Let’s make sure Koder can hear you and speak back before your first conversation.").apply { gravity = Gravity.CENTER }, spaced(top = 8, bottom = 18))
-		content.addView(readinessRow("✓", "Server and authentication", "Connected to Koder"), matchWrap())
-		content.addView(readinessRow("○", "Microphone", "Waiting to test"), spaced(top = 7))
-		content.addView(readinessRow("○", "Voice detection", "On-device Silero VAD"), spaced(top = 7))
-		content.addView(readinessRow("○", "Speech recognition", "Remote streaming service"), spaced(top = 7))
-		content.addView(readinessRow("○", "Voice playback", "Current phone audio route"), spaced(top = 7, bottom = 16))
-		if (error.isNotBlank()) content.addView(errorText(error), spaced(bottom = 12))
+		content.addView(title("Voice adjustments").apply { gravity = Gravity.CENTER }, matchWrap())
+		content.addView(helper("Step ${readinessStep + 1} of 4").apply { gravity = Gravity.CENTER }, spaced(top = 5, bottom = 8))
+		content.addView(body(if (fromSettings) "Tune how Koder recognizes and answers you, then rerun the complete voice check." else "Let’s tune voice recognition and response style before your first conversation.").apply { gravity = Gravity.CENTER }, spaced(bottom = 22))
+		if (readinessStep < 3) {
+			addVoiceAdjustmentStep(content, readinessStep)
+		} else {
+			content.addView(title("4. Live voice check").apply { textSize = 24f }, spaced(bottom = 6))
+			content.addView(body("This does not create a conversation. Say a sentence; Koder will recognize it and speak a confirmation over the current audio route."), spaced(bottom = 14))
+			content.addView(readinessRow("✓", "Server and authentication", "Connected to Koder"), matchWrap())
+			content.addView(readinessRow("○", "Microphone", "Waiting to test"), spaced(top = 7))
+			content.addView(readinessRow("○", "Voice detection", "On-device Silero VAD"), spaced(top = 7))
+			content.addView(readinessRow("○", "Speech recognition", "Remote streaming service"), spaced(top = 7))
+			content.addView(readinessRow("○", "Voice playback", "Current phone audio route"), spaced(top = 7, bottom = 16))
+			if (error.isNotBlank()) content.addView(errorText(error), spaced(bottom = 12))
+			content.addView(Button(this).apply {
+				text = "Start voice check"
+				isAllCaps = false
+				contentDescription = "Start voice readiness check"
+				setOnClickListener {
+					if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startReadinessCheck()
+					else readinessPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+				}
+			}, matchWrap())
+		}
+		content.addView(LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			if (readinessStep > 0) addView(Button(this@MainActivity).apply {
+				text = "Previous"
+				contentDescription = "Previous voice adjustment step"
+				isAllCaps = false
+				setOnClickListener { showReadiness(home, fromSettings = fromSettings, step = readinessStep - 1) }
+			}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+			if (readinessStep < 3) addView(Button(this@MainActivity).apply {
+				text = "Continue"
+				contentDescription = "Continue voice adjustments"
+				isAllCaps = false
+				setOnClickListener { showReadiness(home, fromSettings = fromSettings, step = readinessStep + 1) }
+			}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (readinessStep > 0) marginStart = dp(8) })
+		}, spaced(top = 12))
 		content.addView(Button(this).apply {
-			text = "Start voice check"
+			text = if (fromSettings) "Back to settings" else "Do this later"
+			contentDescription = if (fromSettings) "Exit voice adjustments to settings" else "Skip voice adjustments for now"
 			isAllCaps = false
-			contentDescription = "Start voice readiness check"
-			setOnClickListener {
-				if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startReadinessCheck()
-				else readinessPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-			}
-		}, matchWrap())
-		content.addView(Button(this).apply {
-			text = "Do this later"
-			isAllCaps = false
-			setOnClickListener { showHome(home) }
+			setOnClickListener { if (fromSettings) showSettings() else showHome(home) }
 		}, spaced(top = 7))
 		showScrollable(content)
 	}
@@ -574,7 +602,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		readinessCheck = VoiceReadinessCheck(this, phoneIdentity, object : VoiceReadinessCheck.Listener {
 			override fun onProgress(step: VoiceReadinessCheck.Step, detail: String) = runOnUiThread {
 				if (screen != Screen.READINESS) return@runOnUiThread
-				rows[step]?.text = "✓  ${rows[step]?.contentDescription}\n$detail"
+				rows[step]?.apply {
+					val heading = tag?.toString().orEmpty()
+					text = "✓  $heading\n$detail"
+					contentDescription = "$heading. Complete. $detail"
+				}
 				result.text = detail
 			}
 
@@ -587,7 +619,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 
 			override fun onFailure(message: String) = runOnUiThread {
-				if (screen == Screen.READINESS) showReadiness(home, message)
+				if (screen == Screen.READINESS) showReadiness(home, message, readinessReturnToSettings)
 			}
 		})
 		readinessCheck?.start(settings.server, settings.token, settings.speechLanguages, settings.vadSensitivityPercent, settings.vadSilenceMilliseconds)
@@ -600,16 +632,17 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		content.addView(title("Voice is ready").apply { gravity = Gravity.CENTER }, matchWrap())
 		content.addView(body("Koder heard: “$heard”\n\nMicrophone, voice detection, speech recognition, and playback all worked.").apply { gravity = Gravity.CENTER }, spaced(top = 10, bottom = 20))
 		content.addView(Button(this).apply {
-			text = "Continue to conversations"
+			text = if (readinessReturnToSettings) "Back to settings" else "Continue to conversations"
 			isAllCaps = false
-			setOnClickListener { showHome(home) }
+			setOnClickListener { if (readinessReturnToSettings) showSettings() else showHome(home) }
 		}, matchWrap())
 		showContent(content)
 	}
 
 	private fun readinessRow(mark: String, heading: String, detail: String) = TextView(this).apply {
 		text = "$mark  $heading\n$detail"
-		contentDescription = heading
+		tag = heading
+		contentDescription = "$heading. $detail"
 		textSize = 16f
 		setPadding(dp(16), dp(12), dp(16), dp(12))
 		background = GradientDrawable().apply {
@@ -635,6 +668,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     private fun showHome(home: VoiceHome) {
+		readinessHome = home
 		if (pendingResultSessionId.isNotBlank()) {
 			home.voiceSessions.firstOrNull { it.id == pendingResultSessionId }?.let {
 				openChat(it)
@@ -690,6 +724,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					textSize = 13f
 					setTypeface(typeface, if (conversationFilter == filter) Typeface.BOLD else Typeface.NORMAL)
 					setPadding(dp(5), dp(9), dp(5), dp(9))
+					minHeight = dp(48)
 					contentDescription = "$label conversations, ${counts[filter]}"
 					isClickable = true
 					isFocusable = true
@@ -932,22 +967,48 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             text = "Edit connection"; isAllCaps = false; setOnClickListener { showSetup() }
         }, spaced(top = 8, bottom = 24))
 
-		content.addView(title("Speech recognition").apply { textSize = 24f }, matchWrap())
-		content.addView(body("Automatic can recognize any language. Select one language for the strongest recognition hint, or several to focus automatic detection on languages you actually speak."), spaced(top = 6, bottom = 12))
+		content.addView(title("Voice").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Adjust recognition languages, answer length, voice detection sensitivity, and end-of-speech timing. You can also rerun the microphone, STT, TTS, and playback check."), spaced(top = 6, bottom = 10))
+		content.addView(Button(this).apply {
+			text = "Voice adjustments & readiness"
+			isAllCaps = false
+			contentDescription = "Open voice adjustments and readiness check"
+			setOnClickListener {
+				val home = readinessHome
+				if (home == null) Toast.makeText(this@MainActivity, "Conversations are still loading", Toast.LENGTH_SHORT).show()
+				else showReadiness(home, fromSettings = true, step = 0)
+			}
+		}, spaced(bottom = 24))
+
+        content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Choose a policy for every phone tool. Off hides it from Koder. Ask requests confirmation on this phone each time. On lets the active voice conversation use it without an extra Koder prompt; Android's own protected screens still apply."), spaced(top = 6, bottom = 14))
+        PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
+        content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
+		showScrollable(content)
+    }
+
+	private fun addVoiceAdjustmentStep(content: LinearLayout, step: Int) {
+		if (step == 0) {
+		content.addView(title("1. Recognition languages").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Automatic can recognize any language. Select one language for the strongest hint, or several to focus detection on languages you actually speak."), spaced(top = 6, bottom = 12))
 		content.addView(speechAutomaticRow(), spaced(bottom = 8))
 		SpeechLanguages.all.forEach { language -> content.addView(speechLanguageRow(language), spaced(bottom = 8)) }
-		content.addView(helper("Language choices apply the next time a conversation connects. Multiple choices are recognition hints because compatible speech services accept only one hard language setting."), spaced(top = 3, bottom = 24))
+		content.addView(helper("Changes apply when the next conversation connects and to the live check below."), spaced(top = 3, bottom = 24))
+		return
+		}
 
-		content.addView(title("Response pacing").apply { textSize = 24f }, matchWrap())
-		content.addView(body("Choose how much Koder normally says aloud. This changes delivery for the call, not the conversation history."), spaced(top = 6, bottom = 10))
+		if (step == 1) {
+		content.addView(title("2. Spoken answer length").apply { textSize = 24f }, matchWrap())
+		content.addView(body("Choose how much Koder normally says aloud. This changes voice delivery, not the durable conversation history."), spaced(top = 6, bottom = 10))
 		content.addView(RadioGroup(this).apply {
 			orientation = RadioGroup.VERTICAL
 			VoiceResponsePacing.entries.forEach { pacing ->
 				addView(RadioButton(this@MainActivity).apply {
 					id = View.generateViewId()
 					text = "${pacing.title}\n${pacing.description}"
-					contentDescription = "Use ${pacing.title.lowercase()} response pacing"
+					contentDescription = "Use ${pacing.title.lowercase()} spoken answer length. ${pacing.description}"
 					isChecked = settings.responsePacing == pacing
+					minHeight = dp(48)
 					setOnClickListener {
 						settings = settings.copy(responsePacing = pacing)
 						secureSettings.saveResponsePacing(pacing)
@@ -955,52 +1016,50 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}, matchWrap())
 			}
 		}, spaced(bottom = 24))
+		return
+		}
 
-		content.addView(title("Voice detection").apply { textSize = 24f }, matchWrap())
-		val sensitivityValue = helper("Sensitivity · ${settings.vadSensitivityPercent}%")
+		content.addView(title("3. Voice detection").apply { textSize = 24f }, matchWrap())
+		val sensitivityValue = helper("Sensitivity · ${settings.vadSensitivityPercent}%").apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
 		content.addView(body("Increase this if your voice is missed. Reduce it when background noise starts conversations."), spaced(top = 6, bottom = 10))
 		content.addView(sensitivityValue, matchWrap())
 		content.addView(SeekBar(this).apply {
 			max = 40
 			progress = settings.vadSensitivityPercent - 35
-			contentDescription = "Voice detection sensitivity"
+			contentDescription = "Voice detection sensitivity, ${settings.vadSensitivityPercent} percent"
 			setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
 				override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-					if (!fromUser) return
 					val value = progress + 35
 					sensitivityValue.text = "Sensitivity · $value%"
+					seekBar?.contentDescription = "Voice detection sensitivity, $value percent"
+					if (!fromUser) return
 					settings = settings.copy(vadSensitivityPercent = value)
 					secureSettings.saveVadSensitivity(value)
 				}
 				override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
 				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
 			})
-		}, spaced(bottom = 12))
-		val pauseValue = helper("End-of-speech pause · ${settings.vadSilenceMilliseconds} ms")
+		}, spaced(height = dp(48), bottom = 12))
+		val pauseValue = helper("End-of-speech pause · ${settings.vadSilenceMilliseconds} ms").apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
 		content.addView(pauseValue, matchWrap())
 		content.addView(SeekBar(this).apply {
 			max = 18
 			progress = (settings.vadSilenceMilliseconds - 300) / 50
-			contentDescription = "End of speech pause"
+			contentDescription = "End of speech pause, ${settings.vadSilenceMilliseconds} milliseconds"
 			setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
 				override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-					if (!fromUser) return
 					val value = 300 + progress * 50
 					pauseValue.text = "End-of-speech pause · $value ms"
+					seekBar?.contentDescription = "End of speech pause, $value milliseconds"
+					if (!fromUser) return
 					settings = settings.copy(vadSilenceMilliseconds = value)
 					secureSettings.saveVadSilence(value)
 				}
 				override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
 				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
 			})
-		}, spaced(bottom = 24))
-
-        content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
-		content.addView(body("Choose a policy for every phone tool. Off hides it from Koder. Ask requests confirmation on this phone each time. On lets the active voice conversation use it without an extra Koder prompt; Android's own protected screens still apply."), spaced(top = 6, bottom = 14))
-        PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
-        content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
-        showScrollable(content)
-    }
+		}, spaced(height = dp(48), bottom = 24))
+	}
 
 	private fun speechAutomaticRow() = CheckBox(this).apply {
 		speechAutomaticCheck = this
@@ -1030,7 +1089,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun updateSpeechLanguages(languages: Set<String>, refresh: Boolean = false) {
 		secureSettings.saveSpeechLanguages(languages)
 		settings = settings.copy(speechLanguages = languages)
-		if (refresh) showSettings() else speechAutomaticCheck?.isChecked = languages.isEmpty()
+		if (refresh) {
+			if (screen == Screen.READINESS) readinessHome?.let { showReadiness(it, fromSettings = readinessReturnToSettings) }
+			else showSettings()
+		} else speechAutomaticCheck?.isChecked = languages.isEmpty()
 	}
 
     private fun phoneCapabilityRow(capability: PhoneCapability) = LinearLayout(this).apply {
@@ -1340,10 +1402,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			text = "⋮"
 			textSize = 24f
 			gravity = Gravity.CENTER
-			minWidth = dp(40)
-			minHeight = dp(40)
+			minWidth = dp(48)
+			minHeight = dp(48)
 			contentDescription = "Options for ${session.title}"
 			isClickable = true
+			isFocusable = true
+			ViewCompat.setTooltipText(this, contentDescription)
 			setOnClickListener { anchor -> showVoiceSessionMenu(anchor, session) }
 		})
 		setOnClickListener { view ->
@@ -1640,10 +1704,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			gravity = Gravity.CENTER
 			voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
 				mode = voiceOrbMode(CallController.Stage.CONNECTING)
-			}.also { addView(it, centeredSquare(252, bottom = 22)) }
+			}.also { addView(it, centeredSquare(if (resources.configuration.fontScale >= 1.3f) 196 else 252, bottom = 22)) }
 			voiceOrbDetail = body(initialDetail).apply {
 				gravity = Gravity.CENTER
 				textSize = 17f
+				accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
 			}.also { addView(it, matchWrap()) }
 		}
 		root.addView(activePanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -1716,6 +1781,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }
         typedMessage = EditText(this).apply {
             hint = "Message Koder"
+			contentDescription = "Text message to Koder"
             maxLines = 3
             minHeight = dp(48)
             background = null
@@ -2460,7 +2526,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
             elevation = dp(1).toFloat()
 			isLongClickable = true
-			contentDescription = if (!fromUser && entryId.isNotBlank()) "$who message. Long press for actions" else "$who message. Long press to copy"
+			contentDescription = if (!fromUser && entryId.isNotBlank()) "$who message: $text. Long press for actions" else "$who message: $text. Long press to copy"
 			setOnLongClickListener {
 				performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 				if (!fromUser && entryId.isNotBlank()) showResponseActions(this, entryId, text)
@@ -2677,6 +2743,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val baseHorizontal = dp(20)
         val baseVertical = dp(16)
         content.setBackgroundColor(themeColor(android.R.attr.colorBackground))
+		ViewCompat.setAccessibilityPaneTitle(content, when (screen) {
+			Screen.SETUP -> "Koder connection setup"
+			Screen.SETTINGS -> "Koder settings"
+			Screen.PERMISSIONS -> "Phone permission health"
+			Screen.READINESS -> "Voice adjustments"
+			Screen.LOADING -> "Koder loading"
+			Screen.HOME -> "Voice conversations"
+			Screen.CHAT -> pendingSession?.title?.ifBlank { "Voice conversation" } ?: "Voice conversation"
+		})
         ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             view.setPadding(baseHorizontal + bars.left, baseVertical + bars.top, baseHorizontal + bars.right, baseVertical + bars.bottom)
@@ -2694,6 +2769,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun title(text: String) = TextView(this).apply {
         this.text = text
         textSize = 26f
+		ViewCompat.setAccessibilityHeading(this, true)
     }
 
     private fun label(text: String) = TextView(this).apply {
@@ -2709,7 +2785,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun helper(text: String) = TextView(this).apply {
         this.text = text
         textSize = 14f
-        alpha = 0.72f
+		alpha = if (highContrastEnabled(this@MainActivity)) 1f else 0.72f
     }
 
     private fun errorText(text: String) = TextView(this).apply {

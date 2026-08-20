@@ -89,6 +89,33 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
+	fun homeActionsHaveTalkBackNamesAndMinimumTouchTargets() {
+		val server = MockWebServer()
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Accessible conversation"}]}""",
+		).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Accessible conversation")
+				scenario.onActivity { activity ->
+					val root = activity.findViewById<View>(android.R.id.content)
+					assertTrue(root.allViews().any { it.accessibilityPaneTitle?.toString() == "Voice conversations" })
+					val minimum = (48 * activity.resources.displayMetrics.density).toInt()
+					root.allViews().filter { it.visibility == View.VISIBLE && it.isClickable }.forEach { view ->
+						val spokenName = view.contentDescription?.toString().orEmpty().ifBlank { (view as? TextView)?.text?.toString().orEmpty() }
+						assertTrue("Clickable ${view.javaClass.simpleName} has no accessible name", spokenName.isNotBlank())
+						assertTrue("$spokenName touch target is ${view.width}x${view.height}", view.width >= minimum && view.height >= minimum)
+					}
+				}
+			}
+		} finally {
+			server.close()
+		}
+	}
+
+	@Test
 	fun savedResponsesPersistBySessionMessageAndKind() {
 		val first = SecureSettings(context)
 		assertTrue(first.toggleSavedVoiceResponse(SavedVoiceResponse("voice-1", "message-1", "Remember this", SavedVoiceResponseKind.BOOKMARK)))
@@ -259,10 +286,10 @@ class MainActivityInstrumentedTest {
 			val bindingURI = Uri.parse("koder://bind?server=${Uri.encode(server.url("/").toString())}&code=kdb1_invitation")
 			val launch = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(bindingURI)
 			ActivityScenario.launch<MainActivity>(launch).use { scenario ->
-				val readiness = waitForText(scenario, "Voice readiness check")
-				assertTrue(readiness.any { it.contains("Server and authentication") })
-				assertTrue(readiness.any { it.contains("Voice detection") })
-				onView(withText("Do this later")).perform(click())
+				val readiness = waitForText(scenario, "Voice adjustments")
+				assertTrue(readiness.contains("Step 1 of 4"))
+				assertTrue(readiness.contains("1. Recognition languages"))
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Skip voice adjustments for now").performClick() }
 				val labels = waitForText(scenario, "Bound conversation")
 					assertTrue(labels.contains("Koder Voice"))
 					assertTrue(labels.contains("Active 1"))
@@ -345,24 +372,34 @@ class MainActivityInstrumentedTest {
                 onView(withText("Settings")).perform(click())
                 val settingsLabels = waitForText(scenario, "Phone tools")
                 assertTrue(settingsLabels.contains("Device information"))
-				assertTrue(settingsLabels.contains("Speech recognition"))
-				assertTrue(settingsLabels.contains("Automatic (all languages)"))
-				assertTrue(settingsLabels.contains("Danish (da)"))
-				assertTrue(settingsLabels.contains("German (de)"))
-				assertTrue(settingsLabels.contains("Response pacing"))
-				assertTrue(settingsLabels.any { it.contains("Detailed") })
+				assertTrue(settingsLabels.contains("Voice adjustments & readiness"))
+				onView(withContentDescription("Open voice adjustments and readiness check")).perform(scrollTo(), click())
+				val adjustmentLabels = waitForText(scenario, "1. Recognition languages")
+				assertTrue(adjustmentLabels.contains("Voice adjustments"))
+				assertTrue(adjustmentLabels.contains("Automatic (all languages)"))
+				assertTrue(adjustmentLabels.contains("Danish (da)"))
+				assertTrue(adjustmentLabels.contains("German (de)"))
 				onView(withContentDescription("Recognize Danish")).perform(scrollTo(), click())
 				assertEquals(setOf("da"), SecureSettings(context).load().speechLanguages)
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
+				val pacingLabels = waitForText(scenario, "2. Spoken answer length")
+				assertTrue(pacingLabels.any { it.contains("Detailed") })
 				scenario.onActivity { activity ->
 					val root = activity.findViewById<View>(android.R.id.content)
 					val scroll = root.firstScrollView()
-					val target = root.findByDescription("Use detailed response pacing")
+					val target = root.findByDescription("Use detailed spoken answer length. A fuller spoken explanation when useful")
 					val bounds = android.graphics.Rect().also(target::getDrawingRect)
 					scroll.offsetDescendantRectToMyCoords(target, bounds)
 					scroll.scrollTo(0, bounds.top.coerceAtLeast(0))
 					target.performClick()
 				}
 				assertEquals(com.lkarlslund.koder.voice.VoiceResponsePacing.DETAILED, SecureSettings(context).load().responsePacing)
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
+				waitForText(scenario, "3. Voice detection")
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
+				waitForText(scenario, "4. Live voice check")
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Exit voice adjustments to settings").performClick() }
+				waitForText(scenario, "Phone tools")
 				var scrollBefore = 0
 				var scrollAfter = 0
 				scenario.onActivity { activity ->
@@ -645,6 +682,7 @@ class MainActivityInstrumentedTest {
 				waitForDisplayedText("Audio diagnostics")
 				onView(withText("16000 Hz · mono · pcm_s16le")).check(matches(isDisplayed()))
 				onView(withText("Close")).inRoot(isDialog()).perform(click())
+				Thread.sleep(350) // Let the native diagnostics dialog's dim layer disappear.
 				onView(withContentDescription("Search transcript")).perform(click())
 				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
 				onView(withText("Search")).perform(click())
@@ -655,11 +693,11 @@ class MainActivityInstrumentedTest {
 				assertTrue(labels.contains("Back to latest"))
 				onView(withText("Back to latest")).perform(click())
 				assertTrue(waitForText(scenario, "Newest answer").contains("Newest answer"))
-				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
+				onView(withContentDescription("Koder message: Newest answer. Long press for actions")).perform(longClick())
 				onView(withText("Bookmark")).perform(click())
 				waitForDisplayedText("★ Bookmarked")
 				Thread.sleep(350) // Let the native action dialog's dim layer disappear.
-				onView(withContentDescription("Koder message. Long press for actions")).perform(longClick())
+				onView(withContentDescription("Koder message: Newest answer. Long press for actions")).perform(longClick())
 				onView(withText("Follow up later")).perform(click())
 				// AlertDialog's dim layer outlives its item click briefly on API 36;
 				// wait for that native dismissal animation so it cannot reject the
@@ -850,6 +888,11 @@ class MainActivityInstrumentedTest {
             repeat(this@allText.childCount) { index -> addAll(this@allText.getChildAt(index).allText()) }
         }
     }
+
+	private fun View.allViews(): List<View> = buildList {
+		add(this@allViews)
+		if (this@allViews is ViewGroup) repeat(this@allViews.childCount) { index -> addAll(this@allViews.getChildAt(index).allViews()) }
+	}
 
     private fun View.findByDescription(description: String): View {
         if (contentDescription?.toString() == description) return this
