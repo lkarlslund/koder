@@ -163,6 +163,20 @@ func TestHubRoutesParallelVoiceChatsToTheirOwnPhones(t *testing.T) {
 	}
 }
 
+func TestHubRejectsOversizedPhoneArtifacts(t *testing.T) {
+	hub := &Hub{}
+	release, err := hub.Attach("call-1", []string{string(PhotoView)}, func(context.Context, string, Action, map[string]string) (Result, error) {
+		return Result{Artifacts: []Artifact{{MIMEType: "image/jpeg", Data: make([]byte, MaxArtifactBytes+1)}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := hub.Execute(context.Background(), PhotoView, nil); err == nil || !strings.Contains(err.Error(), "exceed") {
+		t.Fatalf("oversized artifact error = %v", err)
+	}
+}
+
 func TestHubVoiceTurnRequiresExplicitMapIntent(t *testing.T) {
 	hub := &Hub{}
 	var executed []Action

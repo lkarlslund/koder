@@ -3,6 +3,8 @@ package voiceapi
 import (
 	"strings"
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/voice"
 )
 
 func TestTurnRegistryAllowsParallelDevicesButOneUtterancePerCall(t *testing.T) {
@@ -26,4 +28,13 @@ func TestTurnRegistryAllowsParallelDevicesButOneUtterancePerCall(t *testing.T) {
 		t.Fatalf("same-call concurrent turn error = %v", err)
 	}
 	close(release)
+}
+
+func TestCachedTurnStreamsGenericRenderEvent(t *testing.T) {
+	turn := newCachedTurn("call", "utterance", "fingerprint", "voice")
+	turn.appendRender([]voice.Part{{MIMEType: "image/png", URI: "/artifact.png"}})
+	events := turn.snapshot().events
+	if len(events) != 1 || events[0].frame == nil || events[0].frame.Type != "render" || len(events[0].frame.Parts) != 1 {
+		t.Fatalf("render events = %#v", events)
+	}
 }

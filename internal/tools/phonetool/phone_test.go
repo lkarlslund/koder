@@ -2,10 +2,13 @@ package phonetool
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -13,6 +16,79 @@ import (
 type fakeControl struct {
 	action phonedevice.Action
 	args   map[string]string
+}
+
+type photoControl struct {
+	action phonedevice.Action
+	result phonedevice.Result
+}
+
+func (c *photoControl) Capabilities() []phonedevice.CatalogEntry {
+	entries := make([]phonedevice.CatalogEntry, 0, 4)
+	for _, action := range []phonedevice.Action{phonedevice.PhotosSearch, phonedevice.PhotosThumbs, phonedevice.PhotoView, phonedevice.PhotoTransfer} {
+		for _, entry := range phonedevice.Catalog() {
+			if entry.Action == action {
+				entries = append(entries, entry)
+			}
+		}
+	}
+	return entries
+}
+func (c *photoControl) Execute(_ context.Context, action phonedevice.Action, _ map[string]string) (phonedevice.Result, error) {
+	c.action = action
+	return c.result, nil
+}
+
+func TestPhotoCapabilitiesUseDedicatedTools(t *testing.T) {
+	control := &photoControl{}
+	runtime := tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)}
+	if _, enabled := tools.DefinitionFor(tools.Phone, runtime); enabled {
+		t.Fatal("generic phone tool should not duplicate dedicated photo tools")
+	}
+	for _, toolID := range []tools.ID{tools.PhonePhotosSearch, tools.PhonePhotosThumbs, tools.PhonePhotoView, tools.PhonePhotoTransfer} {
+		if definition, enabled := tools.DefinitionFor(toolID, runtime); !enabled || definition.Function.Name != toolID.String() {
+			t.Fatalf("photo definition %q = %#v enabled=%v", toolID, definition, enabled)
+		}
+	}
+}
+
+func TestPhotoThumbnailIsMaterializedWithoutPersistingBytes(t *testing.T) {
+	control := &photoControl{result: phonedevice.Result{Text: "one thumbnail", Artifacts: []phonedevice.Artifact{{
+		ID: "42", Name: "dog.jpg", MIMEType: "image/jpeg", Data: []byte("jpeg-data"),
+	}}}}
+	runtime := tools.Runtime{SessionID: id.ID("session-1"), ChatID: id.ID("chat-1"), ChatRole: chatrole.Voice, Services: RuntimeService(control)}
+	t.Cleanup(func() { _ = os.RemoveAll(runtime.SessionTmpDir()) })
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: tools.PhonePhotosThumbs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.action != phonedevice.PhotosThumbs || !strings.Contains(result.Output, "Phone artifact 42 copied to") {
+		t.Fatalf("result=%#v action=%q", result, control.action)
+	}
+	if strings.Contains(result.Output, "jpeg-data") {
+		t.Fatal("binary artifact leaked into model-facing output")
+	}
+	files := result.Stored.(map[string]any)["artifacts"].([]storedArtifact)
+	if got, err := os.ReadFile(files[0].Path); err != nil || string(got) != "jpeg-data" {
+		t.Fatalf("materialized thumbnail = %q err=%v", got, err)
+	}
+}
+
+func TestPhotoTransferWritesRequestedWorkspacePath(t *testing.T) {
+	workspace := t.TempDir()
+	control := &photoControl{result: phonedevice.Result{Artifacts: []phonedevice.Artifact{{
+		ID: "42", Name: "dog.jpg", MIMEType: "image/jpeg", Data: []byte("original-photo"),
+	}}}}
+	runtime := tools.Runtime{Workdir: workspace, SessionID: id.ID("session-1"), ChatID: id.ID("chat-1"), ChatRole: chatrole.Voice, Services: RuntimeService(control)}
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.PhonePhotoTransfer, Args: map[string]string{"photo_id": "42", "path": "reference/dog.jpg"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "reference", "dog.jpg")); err != nil || string(got) != "original-photo" {
+		t.Fatalf("transferred photo = %q err=%v result=%#v", got, err, result)
+	}
 }
 
 func (f *fakeControl) Capabilities() []phonedevice.CatalogEntry {

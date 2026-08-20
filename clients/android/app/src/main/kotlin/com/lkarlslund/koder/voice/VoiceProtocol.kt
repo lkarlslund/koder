@@ -42,6 +42,8 @@ data class VoicePart(
 	val title: String get() = metadata["title"].orEmpty()
 	val alt: String get() = metadata["alt"].orEmpty()
 	val isPresentation: Boolean get() = metadata["presentation"] == "true"
+	val isTranscriptOnly: Boolean get() = metadata["surface"] == "transcript"
+	val renderKey: String get() = metadata["render_key"].orEmpty().ifBlank { id }
 }
 
 enum class ConversationSurface { ACTIVE, PRESENTATION, TRANSCRIPT }
@@ -71,6 +73,7 @@ data class VoiceTranscriptEntry(
 	val role: String,
 	val text: String,
 	val createdAt: Instant? = null,
+	val parts: List<VoicePart> = emptyList(),
 )
 
 data class VoiceTranscriptSearchResult(
@@ -181,6 +184,7 @@ data class VoiceServerFrame(
 	val historyHasMore: Boolean = false,
 	val searchResults: List<VoiceTranscriptSearchResult> = emptyList(),
     val message: VoiceMessage? = null,
+	val parts: List<VoicePart> = emptyList(),
     val appUpdate: AppUpdate? = null,
     val error: String = "",
 )
@@ -381,6 +385,7 @@ object VoiceProtocol {
 				)
 			},
             message = root.optJSONObject("message")?.toVoiceMessage(),
+			parts = root.optJSONArray("parts").mapObjects { it.toVoicePart() },
             appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
             error = root.optString("error"),
         )
@@ -457,6 +462,7 @@ object VoiceProtocol {
 		createdAt = optString("created_at").takeIf(String::isNotBlank)?.let {
 			runCatching { Instant.parse(it) }.getOrNull()
 		},
+		parts = optJSONArray("parts").mapObjects { it.toVoicePart() },
 	)
 
 	private fun JSONObject.toVoiceSession(): VoiceSession = VoiceSession(
@@ -501,18 +507,7 @@ object VoiceProtocol {
     private fun JSONObject.toVoiceMessage(): VoiceMessage = VoiceMessage(
         spokenText = optString("spoken_text"),
 		transcriptId = optString("transcript_id"),
-        parts = optJSONArray("parts").mapObjects { item ->
-            VoicePart(
-				id = item.optString("id"),
-                mimeType = item.getString("mime_type"),
-				data = if (item.has("data")) item.get("data") else item.optString("text"),
-				uri = item.optString("uri", item.optString("url")),
-				metadata = mapOf(
-					"name" to item.optString("name"),
-					"alt" to item.optString("alt"),
-				).filterValues { it.isNotBlank() } + item.optJSONObject("metadata")?.toStringMap().orEmpty(),
-            )
-        },
+		parts = optJSONArray("parts").mapObjects { it.toVoicePart() },
         delegation = optJSONObject("delegation")?.let { item ->
             VoiceDelegation(
                 sessionId = item.optString("session_id"),
@@ -522,6 +517,15 @@ object VoiceProtocol {
             )
         },
     )
+
+	private fun JSONObject.toVoicePart() = VoicePart(
+		id = optString("id"),
+		mimeType = getString("mime_type"),
+		data = if (has("data")) get("data") else optString("text"),
+		uri = optString("uri", optString("url")),
+		metadata = mapOf("name" to optString("name"), "alt" to optString("alt"))
+			.filterValues { it.isNotBlank() } + optJSONObject("metadata")?.toStringMap().orEmpty(),
+	)
 
     private fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> {
         if (this == null) return emptyList()

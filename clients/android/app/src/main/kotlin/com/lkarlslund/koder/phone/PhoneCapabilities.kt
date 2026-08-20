@@ -1,6 +1,7 @@
 package com.lkarlslund.koder.phone
 
 import android.Manifest
+import android.os.Build
 
 data class PhoneCapability(
     val id: String,
@@ -10,6 +11,11 @@ data class PhoneCapability(
     val permissions: Array<String> = emptyArray(),
     val notificationAccess: Boolean = false,
 )
+
+fun PhoneCapability.permissionsForCurrentDevice(): Array<String> = if (id == "photos") {
+	if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+	else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+} else permissions
 
 object PhoneCapabilities {
     val all = listOf(
@@ -66,6 +72,11 @@ object PhoneCapabilities {
             setOf("read_clipboard", "write_clipboard"),
         ),
         PhoneCapability(
+			"photos", "Photos",
+			"Let Koder inspect and edit the newest photo in your media library when you ask.",
+			setOf("phone_photos_search", "phone_photos_thumbs", "phone_photo_view", "phone_photo_transfer"),
+		),
+		PhoneCapability(
             "assistant_actions", "Personal assistant actions",
             "Draft email, set alarms and timers, open safe links, control media, and share text.",
             setOf("compose_email", "set_alarm", "set_timer", "open_url", "media_control", "share_text"),

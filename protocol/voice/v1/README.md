@@ -314,6 +314,20 @@ kind must open a separate presentation surface without making the transcript
 visible. A user can close that surface independently or explicitly open the
 transcript.
 
+Koder may send a `render` frame before the final answer when a tool deliberately
+produces displayable output:
+
+```json
+{"type":"render","protocol":"voice.v1","utterance_id":"uuid","parts":[{"mime_type":"image/png","uri":"/voice/v1/artifacts/session/id/image"}]}
+```
+
+It uses the same generic `parts` contract as `message`. Clients display visual
+parts immediately while keeping the voice turn active. Parts with
+`metadata.surface = "transcript"` are recorded without interrupting the voice
+surface. `application/vnd.koder.tool-activity+json` contains generic `tool`,
+`title`, `status`, and `summary` fields. `metadata.render_key` lets clients
+suppress the duplicate when a durable part appears again in the final message.
+
 Structured visuals use `application/vnd.koder.presentation+json`. Its `data`
 is a versioned document rather than a task-specific screen:
 
@@ -337,6 +351,28 @@ Text styles are `body`, `heading`, `caption`, or `code`. List items use
 relative to Koder or absolute HTTP(S) links. Clients should render known blocks
 with native controls, show a useful placeholder for unknown blocks, and fall
 back to the generic MIME-part view when a document version is unsupported.
+
+Transcript entries may include the same `parts` array. An entry with role
+`activity` and empty text represents durable tool activity rather than spoken
+assistant text.
+
+### Phone photo tools
+
+When Android grants Photos access and enables the capability, a voice chat is
+offered four separate tools:
+
+- `phone_photos_search` returns bounded photo IDs, names, and capture times
+  without transferring pixels.
+- `phone_photos_thumbs` transfers up to 12 low-resolution candidates into
+  managed session-temporary storage for `view_image` inspection.
+- `phone_photo_view` transfers one selected photo at inspection resolution.
+- `phone_photo_transfer` copies one selected original to an explicit workspace
+  path under Koder's ordinary filesystem access and permission policy.
+
+The device sidecar carries artifacts as bounded base64 fields in
+`device_tool_result`. A result may contain at most 12 artifacts and 25 MiB of
+decoded bytes in total. Koder materializes bytes immediately and never stores
+them inline in chat history.
 
 `transcript_id`, when present, is the stable ID of the durable assistant
 timeline entry represented by this live message. Clients use it to attach

@@ -2,6 +2,7 @@ package com.lkarlslund.koder.phone
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 
 class PhoneDeviceProtocolTest {
@@ -21,6 +22,17 @@ class PhoneDeviceProtocolTest {
         val actual = JSONObject(PhoneDeviceProtocol.result("phone-request-fixture-1", PhoneToolResult("Found Steen", JSONObject().put("count", 1))))
         assertEquals(expected.toString(), actual.toString())
     }
+
+	@Test
+	fun resultCarriesBoundedPhoneArtifactsAsBase64() {
+		val actual = JSONObject(PhoneDeviceProtocol.result("photo-request", PhoneToolResult(
+			"one photo", artifacts = listOf(PhoneToolArtifact("42", "dog.jpg", "image/jpeg", byteArrayOf(1, 2, 3))),
+		)))
+		val artifact = actual.getJSONObject("result").getJSONArray("artifacts").getJSONObject(0)
+		assertEquals("42", artifact.getString("id"))
+		assertEquals("dog.jpg", artifact.getString("name"))
+		assertArrayEquals(byteArrayOf(1, 2, 3), java.util.Base64.getDecoder().decode(artifact.getString("data")))
+	}
 
     @Test
 	fun helloSortsEnabledActionsAndPublishesConfirmationPolicies() {

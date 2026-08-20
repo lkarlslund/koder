@@ -48,6 +48,7 @@ class CallController(
         fun onSnapshot(snapshot: Snapshot)
         fun onUserMessage(text: String)
         fun onAssistantMessage(message: VoiceMessage)
+		fun onRender(parts: List<VoicePart>) = Unit
 		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
 		fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) = Unit
 		fun onAudioLevel(level: Float, user: Boolean) = Unit
@@ -406,6 +407,7 @@ class CallController(
 				publish()
 			}
 			"history_search" -> listener.onHistorySearch(frame.searchResults, frame.error.takeIf(String::isNotBlank))
+			"render" -> if (frame.parts.isNotEmpty()) listener.onRender(frame.parts)
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {
 				diagnostics.startOutput(frame.utteranceId)

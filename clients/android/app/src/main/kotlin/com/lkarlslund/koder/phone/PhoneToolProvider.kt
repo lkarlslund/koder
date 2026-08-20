@@ -28,6 +28,8 @@ import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.provider.CallLog
 import android.provider.Telephony
+import android.provider.MediaStore
+import android.util.Size
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -45,8 +47,14 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
+import java.io.ByteArrayOutputStream
 
-data class PhoneToolResult(val text: String, val data: Any? = null)
+data class PhoneToolArtifact(val id: String, val name: String, val mimeType: String, val bytes: ByteArray)
+data class PhoneToolResult(
+	val text: String,
+	val data: Any? = null,
+	val artifacts: List<PhoneToolArtifact> = emptyList(),
+)
 
 interface PhoneToolProvider : AutoCloseable {
     fun enabledActions(): Set<String>
@@ -109,10 +117,11 @@ class AndroidPhoneToolProvider(
 
     private fun permissionAvailable(capability: PhoneCapability): Boolean {
         if (capability.notificationAccess && activity.packageName !in NotificationManagerCompat.getEnabledListenerPackages(activity)) return false
-        return if (capability.id == "location") {
-            capability.permissions.any { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
-        } else {
-            capability.permissions.all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
+		val permissions = capability.permissionsForCurrentDevice()
+		return if (capability.id == "location") {
+			permissions.any { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
+		} else {
+			permissions.all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
         }
     }
 
@@ -141,8 +150,132 @@ class AndroidPhoneToolProvider(
         "list_apps" -> listApps(args)
         "open_app" -> openApp(args)
         "share_text" -> shareText(args)
+		"phone_photos_search" -> queryPhotos(args, PhotoRendition.METADATA)
+		"phone_photos_thumbs" -> queryPhotos(args, PhotoRendition.THUMBNAIL)
+		"phone_photo_view" -> queryPhotos(args, PhotoRendition.PREVIEW)
+		"phone_photo_transfer" -> queryPhotos(args, PhotoRendition.ORIGINAL)
         else -> error("Unknown phone action: $action")
     }
+
+	private fun queryPhotos(args: Map<String, String>, rendition: PhotoRendition): PhoneToolResult {
+		val projection = arrayOf(
+			MediaStore.Images.Media._ID,
+			MediaStore.Images.Media.DISPLAY_NAME,
+			MediaStore.Images.Media.MIME_TYPE,
+			MediaStore.Images.Media.SIZE,
+			MediaStore.Images.Media.DATE_TAKEN,
+		)
+		val photoId = args["photo_id"].orEmpty().trim()
+		check(rendition in setOf(PhotoRendition.METADATA, PhotoRendition.THUMBNAIL) || photoId.isNotBlank()) {
+			"photo_id is required"
+		}
+		val clauses = mutableListOf<String>()
+		val values = mutableListOf<String>()
+		if (photoId.isNotBlank()) {
+			clauses += "${MediaStore.Images.Media._ID} = ?"
+			values += photoId
+		}
+		parseTime(args["start_time"])?.let { clauses += "${MediaStore.Images.Media.DATE_TAKEN} >= ?"; values += it.toEpochMilli().toString() }
+		parseTime(args["end_time"])?.let { clauses += "${MediaStore.Images.Media.DATE_TAKEN} < ?"; values += it.toEpochMilli().toString() }
+		args["query"]?.trim()?.takeIf(String::isNotBlank)?.let {
+			clauses += "${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+			values += "%$it%"
+		}
+		val order = "${MediaStore.Images.Media.DATE_TAKEN} DESC, ${MediaStore.Images.Media.DATE_ADDED} DESC"
+		val maximum = if (rendition == PhotoRendition.METADATA) 50 else 12
+		val requestedLimit = if (photoId.isNotBlank()) 1 else args["limit"]?.toIntOrNull()?.coerceIn(1, maximum) ?: 8
+		val artifacts = mutableListOf<PhoneToolArtifact>()
+		val rows = JSONArray()
+		val summaries = mutableListOf<String>()
+		var count = 0
+		activity.contentResolver.query(
+			MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+			projection,
+			clauses.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+			values.takeIf { it.isNotEmpty() }?.toTypedArray(),
+			order,
+		).useCursor { cursor ->
+			while (cursor.moveToNext() && count < requestedLimit) {
+				count++
+				val id = cursor.getLong(0)
+				val name = cursor.string(1).ifBlank { "photo-$id.jpg" }
+				val mimeType = cursor.string(2).ifBlank { "image/jpeg" }
+				val declaredSize = cursor.getLong(3)
+				val takenAt = cursor.getLong(4)
+				val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+				val bytes = when (rendition) {
+					PhotoRendition.METADATA -> null
+					PhotoRendition.ORIGINAL -> {
+					check(declaredSize in 1..MAX_PHONE_ARTIFACT_BYTES.toLong()) {
+						"Photo $id is too large to transfer (${declaredSize.coerceAtLeast(0)} bytes)"
+					}
+					activity.contentResolver.openInputStream(uri)?.use(::readBoundedArtifact)
+						?: error("Photo $id could not be opened")
+					}
+					PhotoRendition.THUMBNAIL, PhotoRendition.PREVIEW -> {
+					val edge = if (rendition == PhotoRendition.THUMBNAIL) 512 else 1600
+					val bitmap = loadPhotoThumbnail(uri, id, edge)
+					ByteArrayOutputStream().use { output ->
+						check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, output)) { "Could not encode phone photo" }
+						bitmap.recycle()
+						output.toByteArray()
+					}
+					}
+				}
+				if (bytes != null) {
+					val transferName = when (rendition) {
+						PhotoRendition.THUMBNAIL -> "photo-$id-thumbnail.jpg"
+						PhotoRendition.PREVIEW -> "photo-$id-preview.jpg"
+						else -> name
+					}
+					val transferMIME = if (rendition in setOf(PhotoRendition.THUMBNAIL, PhotoRendition.PREVIEW)) "image/jpeg" else mimeType
+					artifacts += PhoneToolArtifact(id.toString(), transferName, transferMIME, bytes)
+				}
+				rows.put(JSONObject().put("photo_id", id.toString()).put("name", name)
+					.put("taken_at", if (takenAt > 0) Instant.ofEpochMilli(takenAt).toString() else JSONObject.NULL)
+					.put("rendition", rendition.wireName).put("size", bytes?.size ?: declaredSize))
+				summaries += "photo_id=$id name=$name taken_at=${if (takenAt > 0) Instant.ofEpochMilli(takenAt) else "unknown"}"
+			}
+		}
+		check(count > 0) { "No matching photos were found on this phone" }
+		return PhoneToolResult(
+			text = if (rendition == PhotoRendition.METADATA) "Found $count phone photos:\n${summaries.joinToString("\n")}" else
+				"Copied ${artifacts.size} phone photo ${if (artifacts.size == 1) "image" else "thumbnails"}:\n${summaries.joinToString("\n")}",
+			data = JSONObject().put("photos", rows),
+			artifacts = artifacts,
+		)
+	}
+
+	@Suppress("DEPRECATION")
+	private fun loadPhotoThumbnail(uri: Uri, photoID: Long, edge: Int): android.graphics.Bitmap {
+		if (android.os.Build.VERSION.SDK_INT >= 29) {
+			return activity.contentResolver.loadThumbnail(uri, Size(edge, edge), null)
+		}
+		val source = MediaStore.Images.Thumbnails.getThumbnail(
+			activity.contentResolver, photoID, MediaStore.Images.Thumbnails.MINI_KIND, null,
+		) ?: error("Could not load phone photo thumbnail")
+		if (source.width <= edge && source.height <= edge) return source
+		val scale = minOf(edge.toFloat() / source.width, edge.toFloat() / source.height)
+		val resized = android.graphics.Bitmap.createScaledBitmap(
+			source, (source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), true,
+		)
+		if (resized !== source) source.recycle()
+		return resized
+	}
+
+	private fun readBoundedArtifact(input: java.io.InputStream): ByteArray {
+		val output = ByteArrayOutputStream()
+		val buffer = ByteArray(64 * 1024)
+		var total = 0
+		while (true) {
+			val read = input.read(buffer)
+			if (read < 0) break
+			total += read
+			check(total <= MAX_PHONE_ARTIFACT_BYTES) { "The latest photo exceeds $MAX_PHONE_ARTIFACT_BYTES bytes" }
+			output.write(buffer, 0, read)
+		}
+		return output.toByteArray()
+	}
 
     private fun deviceStatus(): PhoneToolResult {
         val battery = activity.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -542,6 +675,11 @@ class AndroidPhoneToolProvider(
         else -> "Koder requested this action during the active voice conversation."
     }
 
+}
+
+private const val MAX_PHONE_ARTIFACT_BYTES = 25 * 1024 * 1024
+private enum class PhotoRendition(val wireName: String) {
+	METADATA("metadata"), THUMBNAIL("thumbnail"), PREVIEW("preview"), ORIGINAL("original")
 }
 
 internal fun phoneLocationResult(location: Location, address: Address?): PhoneToolResult {

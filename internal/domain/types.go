@@ -88,6 +88,10 @@ const (
 	ToolKindSessionDelegate     ToolKind = "session_delegate"
 	ToolKindSessionStart        ToolKind = "session_start"
 	ToolKindPhone               ToolKind = "phone"
+	ToolKindPhonePhotosSearch   ToolKind = "phone_photos_search"
+	ToolKindPhonePhotosThumbs   ToolKind = "phone_photos_thumbs"
+	ToolKindPhonePhotoView      ToolKind = "phone_photo_view"
+	ToolKindPhonePhotoTransfer  ToolKind = "phone_photo_transfer"
 	ToolKindPresent             ToolKind = "present"
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
@@ -179,6 +183,10 @@ var builtinToolKinds = []ToolKind{
 	ToolKindSessionDelegate,
 	ToolKindSessionStart,
 	ToolKindPhone,
+	ToolKindPhonePhotosSearch,
+	ToolKindPhonePhotosThumbs,
+	ToolKindPhonePhotoView,
+	ToolKindPhonePhotoTransfer,
 	ToolKindPresent,
 	ToolKindSkill,
 	ToolKindWebFetch,

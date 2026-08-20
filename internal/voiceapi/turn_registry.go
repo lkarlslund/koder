@@ -85,6 +85,18 @@ func (t *cachedTurn) setMessage(message voice.Message) {
 	t.signalLocked()
 }
 
+func (t *cachedTurn) appendRender(parts []voice.Part) {
+	if len(parts) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	copy := append([]voice.Part(nil), parts...)
+	frame := serverFrame{Type: "render", UtteranceID: t.utteranceID, Parts: copy}
+	t.events = append(t.events, turnEvent{frame: &frame})
+	t.signalLocked()
+}
+
 func (t *cachedTurn) startAudio(format voice.AudioFormat) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -199,6 +211,10 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 		turn.appendState("working", &copy)
 		return nil
 	}
+	onRender := func(event voice.RenderEvent) error {
+		turn.appendRender(event.Parts)
+		return nil
+	}
 	var message voice.Message
 	var err error
 	if turn.sessionID != "" && turn.chatID != "" {
@@ -207,9 +223,9 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 			turn.finish(errors.New("session chat backend is unavailable"))
 			return
 		}
-		message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing}, onWorking)
+		message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
 	} else {
-		message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing}, onWorking)
+		message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
 	}
 	if err != nil {
 		turn.finish(err)

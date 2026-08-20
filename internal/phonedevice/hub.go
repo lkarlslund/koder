@@ -39,7 +39,22 @@ const (
 	ListApps            Action = "list_apps"
 	OpenApp             Action = "open_app"
 	ShareText           Action = "share_text"
+	PhotosSearch        Action = "phone_photos_search"
+	PhotosThumbs        Action = "phone_photos_thumbs"
+	PhotoView           Action = "phone_photo_view"
+	PhotoTransfer       Action = "phone_photo_transfer"
 )
+
+const MaxArtifactBytes = 25 << 20
+
+// Artifact is bounded binary content returned by a phone tool. JSON transports
+// encode Data as base64; callers must discard it after materializing the file.
+type Artifact struct {
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name"`
+	MIMEType string `json:"mime_type"`
+	Data     []byte `json:"data"`
+}
 
 // CatalogEntry is server-owned prompt and risk metadata. Android only
 // advertises IDs, preventing a connected client from injecting tool text.
@@ -78,6 +93,10 @@ var catalog = []CatalogEntry{
 	{ListApps, "Search launchable apps installed on the phone", "optional query, limit", false, false},
 	{OpenApp, "Open an installed app", "package_name", true, true},
 	{ShareText, "Open Android's share sheet with text", "text; optional title", true, true},
+	{PhotosSearch, "Search photo metadata by capture time or file name without transferring image bytes", "optional start_time, end_time, query, limit", false, false},
+	{PhotosThumbs, "Copy a bounded batch of low-resolution photo thumbnails for visual triage", "optional start_time, end_time, query, limit", false, false},
+	{PhotoView, "Copy one selected photo at inspection resolution into temporary session storage", "photo_id", false, false},
+	{PhotoTransfer, "Copy one selected original photo so Koder can place it at a requested project path and edit it", "photo_id", false, false},
 }
 
 var known = func() map[Action]CatalogEntry {
@@ -93,8 +112,9 @@ func Catalog() []CatalogEntry { return slices.Clone(catalog) }
 
 // Result is the bounded response returned by Android.
 type Result struct {
-	Text string `json:"text"`
-	Data any    `json:"data,omitempty"`
+	Text      string     `json:"text"`
+	Data      any        `json:"data,omitempty"`
+	Artifacts []Artifact `json:"artifacts,omitempty"`
 }
 
 // Executor sends an action to the active Android client.
@@ -438,7 +458,30 @@ func (h *Hub) execute(ctx context.Context, chatID string, action Action, args ma
 	if len(result.Text) > 64*1024 {
 		return Result{}, errors.New("phone result exceeded 64 KiB")
 	}
+	if err := validateArtifacts(result.Artifacts); err != nil {
+		return Result{}, err
+	}
 	return result, nil
+}
+
+func validateArtifacts(artifacts []Artifact) error {
+	if len(artifacts) > 12 {
+		return errors.New("phone result contains too many artifacts")
+	}
+	total := 0
+	for _, artifact := range artifacts {
+		if len(artifact.Data) == 0 {
+			return errors.New("phone artifact is empty")
+		}
+		total += len(artifact.Data)
+		if total > MaxArtifactBytes {
+			return fmt.Errorf("phone artifacts exceed %d bytes", MaxArtifactBytes)
+		}
+		if strings.TrimSpace(artifact.MIMEType) == "" {
+			return errors.New("phone artifact MIME type is required")
+		}
+	}
+	return nil
 }
 
 func (h *Hub) connectionForChatLocked(chatID string) (*connection, *voiceTurnPolicy) {

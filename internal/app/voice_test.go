@@ -233,6 +233,21 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 	}
 }
 
+func TestVoiceRenderPartsAddsTranscriptOnlyToolActivity(t *testing.T) {
+	timeline := []domain.TimelineItem{{Seq: 1, Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+		ToolCallID: "tool-1", Tool: domain.ToolKindPhonePhotosThumbs, Status: domain.ToolStatusDone,
+		Args: map[string]string{"limit": "4"}, Result: &domain.ToolResult{Text: "Copied four thumbnails"},
+	}}}}}
+	parts := voiceRenderParts(timeline, 0)
+	if len(parts) != 1 || parts[0].MIMEType != "application/vnd.koder.tool-activity+json" || parts[0].Metadata["surface"] != "transcript" {
+		t.Fatalf("render parts = %#v", parts)
+	}
+	entries := voiceTranscriptEntries(timeline)
+	if len(entries) != 1 || entries[0].Role != "activity" || len(entries[0].Parts) != 1 {
+		t.Fatalf("transcript entries = %#v", entries)
+	}
+}
+
 func TestVoiceTurnStartedIgnoresStaleErroredState(t *testing.T) {
 	if voiceTurnStarted(chat.StatusErrored, false) {
 		t.Fatal("stale errored status must not terminate a newly enqueued voice turn")

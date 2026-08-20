@@ -47,6 +47,19 @@ class VoiceProtocolTest {
 		)
 		assertEquals("assistant-42", frame.message?.transcriptId)
 	}
+
+	@Test
+	fun decodesLiveRenderAndDurableToolActivityParts() {
+		val render = VoiceProtocol.parse(
+			"""{"type":"render","protocol":"voice.v1","parts":[{"id":"image-1","mime_type":"image/png","uri":"/voice/v1/artifacts/session/s/a","metadata":{"render_key":"image-1"}}]}""",
+		)
+		assertEquals("image-1", render.parts.single().renderKey)
+		val history = VoiceProtocol.parse(
+			"""{"type":"history","protocol":"voice.v1","history":[{"id":"tool-item","role":"activity","text":"","parts":[{"id":"tool-1","mime_type":"application/vnd.koder.tool-activity+json","data":{"title":"View phone photo","status":"done"},"metadata":{"surface":"transcript","render_key":"tool:tool-1"}}]}]}""",
+		)
+		assertTrue(history.history.single().parts.single().isTranscriptOnly)
+		assertEquals("View phone photo", (history.history.single().parts.single().data as JSONObject).getString("title"))
+	}
 	@Test
 	fun decodesHistoryPageAndEncodesCursorRequest() {
 		val payload = checkNotNull(javaClass.getResourceAsStream("/history.json"))

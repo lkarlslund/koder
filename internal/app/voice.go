@@ -564,18 +564,23 @@ func voiceTranscriptEntries(items []domain.TimelineItem) []voice.TranscriptEntry
 	entries := make([]voice.TranscriptEntry, 0, len(items))
 	for _, item := range items {
 		var role, text string
+		var parts []voice.Part
 		switch content := item.Content.(type) {
 		case domain.UserMessage:
 			role, text = "user", content.Text
 		case domain.AssistantMessage:
 			role, text = "assistant", content.Text
+			parts = voiceRenderParts([]domain.TimelineItem{item}, item.Seq-1)
 		}
-		if text = strings.TrimSpace(text); text == "" {
+		text = strings.TrimSpace(text)
+		if text == "" && len(parts) == 0 {
 			continue
 		}
-		entries = append(entries, voice.TranscriptEntry{
-			ID: string(item.ID), Role: role, Text: text, CreatedAt: item.CreatedAt,
-		})
+		if text == "" {
+			role = "activity"
+		}
+		entry := voice.TranscriptEntry{ID: string(item.ID), Role: role, Text: text, CreatedAt: item.CreatedAt, Parts: parts}
+		entries = append(entries, entry)
 	}
 	return entries
 }
@@ -659,6 +664,7 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	started := false
 	workingSent := false
 	workingTargetID := ""
+	rendered := map[string]struct{}{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -668,6 +674,14 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 				return voice.Message{}, fmt.Errorf("voice chat closed before replying")
 			}
 			snapshot := update.Snapshot
+			if options.OnRender != nil {
+				parts := unseenRenderParts(voicePresentationParts(runtime.SnapshotTimeline(), initialSeq), rendered)
+				if len(parts) != 0 {
+					if err := options.OnRender(voice.RenderEvent{Parts: parts}); err != nil {
+						return voice.Message{}, err
+					}
+				}
+			}
 			if voiceTurnStarted(snapshot.Status, snapshot.Active) {
 				started = true
 			}
@@ -697,7 +711,7 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 			if responseItem, response := latestAssistantItemAfter(timeline, initialSeq); response != "" {
 				spoken := pacedSpokenResponse(response, pacing)
 				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
-				parts = append(parts, voicePresentationParts(timeline, initialSeq)...)
+				parts = append(parts, voiceRenderParts(timeline, initialSeq)...)
 				if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
 					session.LastMessage = truncateVoiceText(spoken, 240)
 					session.VoiceResultCount++
@@ -959,6 +973,7 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 		if strings.TrimSpace(title) != "" {
 			partMetadata["title"] = strings.TrimSpace(title)
 		}
+		partMetadata["render_key"] = metadata.ID
 		parts = append(parts, voice.Part{ID: metadata.ID, MIMEType: metadata.MIME, URI: uri, Metadata: partMetadata})
 	}
 	for _, item := range timeline {
@@ -976,12 +991,12 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 			switch result := call.Result.Data.(type) {
 			case tools.PresentationStoredResult:
 				parts = append(parts, voice.Part{MIMEType: result.MIMEType, Data: result.Content, Metadata: map[string]string{
-					"title": result.Title, "presentation": "true",
+					"title": result.Title, "presentation": "true", "render_key": string(call.ToolCallID),
 				}})
 			case *tools.PresentationStoredResult:
 				if result != nil {
 					parts = append(parts, voice.Part{MIMEType: result.MIMEType, Data: result.Content, Metadata: map[string]string{
-						"title": result.Title, "presentation": "true",
+						"title": result.Title, "presentation": "true", "render_key": string(call.ToolCallID),
 					}})
 				}
 			case tools.ShowMediaStoredResult:
@@ -1008,6 +1023,47 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 		}
 	}
 	return parts
+}
+
+func voiceRenderParts(timeline []domain.TimelineItem, sequence int64) []voice.Part {
+	parts := voicePresentationParts(timeline, sequence)
+	for _, item := range timeline {
+		if item.Seq <= sequence {
+			continue
+		}
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			summary := truncateVoiceText(strings.TrimSpace(tools.Preview(tools.Request{Tool: call.Tool, ToolCallID: string(call.ToolCallID), Args: call.Args})), 180)
+			parts = append(parts, voice.Part{
+				ID:       string(call.ToolCallID),
+				MIMEType: "application/vnd.koder.tool-activity+json",
+				Data: map[string]any{
+					"tool": call.Tool, "title": tools.Info(call.Tool).Title, "status": call.Status, "summary": summary,
+				},
+				Metadata: map[string]string{"surface": "transcript", "render_key": "tool:" + string(call.ToolCallID)},
+			})
+		}
+	}
+	return parts
+}
+
+func unseenRenderParts(parts []voice.Part, seen map[string]struct{}) []voice.Part {
+	out := make([]voice.Part, 0, len(parts))
+	for _, part := range parts {
+		key := strings.TrimSpace(part.Metadata["render_key"])
+		if key == "" {
+			key = part.MIMEType + "\x00" + part.URI
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, part)
+	}
+	return out
 }
 
 func voiceTurnStarted(status chat.Status, active bool) bool {

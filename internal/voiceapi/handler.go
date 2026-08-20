@@ -95,6 +95,7 @@ type serverFrame struct {
 	State         string                         `json:"state,omitempty"`
 	WorkingOn     *voice.Session                 `json:"working_on,omitempty"`
 	Message       *voice.Message                 `json:"message,omitempty"`
+	Parts         []voice.Part                   `json:"parts,omitempty"`
 	Error         string                         `json:"error,omitempty"`
 	ServerTime    time.Time                      `json:"server_time,omitempty"`
 	AppUpdate     *androidupdate.Manifest        `json:"app_update,omitempty"`

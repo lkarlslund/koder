@@ -3,6 +3,7 @@ package com.lkarlslund.koder.phone
 import com.lkarlslund.koder.voice.VOICE_PROTOCOL
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Base64
 
 data class PhoneToolRequest(val requestId: String, val action: String, val arguments: Map<String, String>)
 
@@ -33,7 +34,17 @@ object PhoneDeviceProtocol {
         .put("type", "device_tool_result")
         .put("protocol", VOICE_PROTOCOL)
         .put("request_id", requestId)
-        .put("result", JSONObject().put("text", result.text).also { body -> result.data?.let { body.put("data", it) } })
+		.put("result", JSONObject().put("text", result.text).also { body ->
+			result.data?.let { body.put("data", it) }
+			if (result.artifacts.isNotEmpty()) body.put("artifacts", JSONArray().also { artifacts ->
+				result.artifacts.forEach { artifact -> artifacts.put(JSONObject()
+					.put("id", artifact.id)
+					.put("name", artifact.name)
+					.put("mime_type", artifact.mimeType)
+					.put("data", Base64.getEncoder().encodeToString(artifact.bytes)))
+				}
+			})
+		})
         .toString()
 
     fun error(requestId: String, message: String) = JSONObject()

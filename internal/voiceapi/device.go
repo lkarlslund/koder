@@ -16,7 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/phonedevice"
 )
 
-const deviceReadLimit = 128 * 1024
+const deviceReadLimit = phonedevice.MaxArtifactBytes*4/3 + 512*1024
 const deviceActionTimeout = 2 * time.Minute
 
 type deviceFrame struct {

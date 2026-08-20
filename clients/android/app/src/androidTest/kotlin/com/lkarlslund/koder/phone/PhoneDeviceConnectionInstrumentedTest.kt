@@ -6,8 +6,11 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.os.Build
 import android.provider.CalendarContract
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lkarlslund.koder.MainActivity
@@ -31,6 +34,60 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PhoneDeviceConnectionInstrumentedTest {
+	@Test
+	fun photoToolsSearchThumbnailPreviewAndTransferOriginal() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		val context = instrumentation.targetContext
+		if (Build.VERSION.SDK_INT >= 33) {
+			instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_MEDIA_IMAGES)
+		} else {
+			instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_EXTERNAL_STORAGE)
+		}
+		val displayName = "koder-dog-${System.nanoTime()}.jpg"
+		val photo = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+			put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+			put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+			put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
+			put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/KoderTests")
+		}) ?: error("Could not create test photo")
+		context.contentResolver.openOutputStream(photo)?.use { output ->
+			val bitmap = Bitmap.createBitmap(32, 24, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(90, 60, 30)) }
+			check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output))
+			bitmap.recycle()
+		} ?: error("Could not write test photo")
+		val photoID = photo.lastPathSegment.orEmpty()
+		val settings = SecureSettings(context).also { secure ->
+			PhoneCapabilities.byID.getValue("photos").actions.forEach { secure.savePhoneActionPolicy(it, PhoneActionPolicy.ON) }
+		}
+		val completed = CountDownLatch(4)
+		val results = mutableMapOf<String, PhoneToolResult>()
+		var provider: AndroidPhoneToolProvider? = null
+		try {
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				scenario.onActivity { activity ->
+					provider = AndroidPhoneToolProvider(activity, settings)
+					listOf(
+						"phone_photos_search" to mapOf("query" to displayName, "limit" to "1"),
+						"phone_photos_thumbs" to mapOf("query" to displayName, "limit" to "1"),
+						"phone_photo_view" to mapOf("photo_id" to photoID),
+						"phone_photo_transfer" to mapOf("photo_id" to photoID),
+					).forEach { (action, arguments) -> provider?.execute(action, arguments) { result ->
+						results[action] = result.getOrThrow()
+						completed.countDown()
+					} }
+				}
+				assertTrue(completed.await(10, TimeUnit.SECONDS))
+			}
+			assertTrue(results.getValue("phone_photos_search").artifacts.isEmpty())
+			assertEquals(1, results.getValue("phone_photos_thumbs").artifacts.size)
+			assertEquals(photoID, results.getValue("phone_photo_view").artifacts.single().id)
+			assertTrue(results.getValue("phone_photo_transfer").artifacts.single().bytes.isNotEmpty())
+		} finally {
+			provider?.close()
+			context.contentResolver.delete(photo, null, null)
+		}
+	}
+
 	@Test
 	fun editCalendarEventOpensReviewedChangesAndCancellationWithoutWriting() {
 		val instrumentation = InstrumentationRegistry.getInstrumentation()

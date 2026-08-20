@@ -146,6 +146,13 @@ func ParseResponsePacing(value string) (ResponsePacing, error) {
 // TurnOptions contains per-connection behavior that must not pollute durable history.
 type TurnOptions struct {
 	ResponsePacing ResponsePacing
+	OnRender       func(RenderEvent) error
+}
+
+// RenderEvent is non-spoken content that a client may display while the model
+// continues working. Parts use the same generic MIME adapter as final messages.
+type RenderEvent struct {
+	Parts []Part `json:"parts"`
 }
 
 // Instruction returns a transient system instruction for the selected pacing.
@@ -196,6 +203,7 @@ type TranscriptEntry struct {
 	Role      string    `json:"role"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at,omitempty"`
+	Parts     []Part    `json:"parts,omitempty"`
 }
 
 // TranscriptPage is a newest-edge or cursor-bounded page of complete voice

@@ -54,6 +54,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
+import com.lkarlslund.koder.phone.permissionsForCurrentDevice
 import com.lkarlslund.koder.phone.PhoneActionPolicy
 import com.lkarlslund.koder.phone.actionTitle
 import com.lkarlslund.koder.phone.PhoneBindingClient
@@ -172,6 +173,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var latestButton: Button? = null
 	private var renderedHistorySession = ""
 	private val renderedHistoryIDs = linkedSetOf<String>()
+	private val renderedPartKeys = linkedSetOf<String>()
 	private var cachedConversationHistory = emptyList<VoiceTranscriptEntry>()
 	private var searchContextShown = false
 	private var savedResponses: List<SavedVoiceResponse> = emptyList()
@@ -409,15 +411,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
 			}
 			val (visualParts, transcriptParts) = parts.partition {
-				it.isPresentation || it.uri.isNotBlank() || it.mimeType !in DISPLAYABLE_TEXT_TYPES
+				!it.isTranscriptOnly && (it.isPresentation || it.uri.isNotBlank() || it.mimeType !in DISPLAYABLE_TEXT_TYPES)
 			}
 			if (visualParts.isNotEmpty()) {
 				presentationFeed?.removeAllViews()
-				visualParts.forEach(::addPresentationPart)
+				visualParts.filter(::rememberRenderPart).forEach(::addPresentationPart)
 				presentationShown = true
 				transcriptShown = false
 			}
-			transcriptParts.forEach { addPart(it, message.transcriptId) }
+			transcriptParts.filter(::rememberRenderPart).forEach { addPart(it, message.transcriptId) }
 			updateConversationMode(null)
 			focusPendingResult()
         }
@@ -427,6 +429,23 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		runOnUiThread {
 			prependHistory(entries)
 			focusPendingResult()
+		}
+	}
+
+	override fun onRender(parts: List<VoicePart>) {
+		runOnUiThread {
+			if (screen != Screen.CHAT) return@runOnUiThread
+			val fresh = parts.filter(::rememberRenderPart)
+			val visual = fresh.filterNot(VoicePart::isTranscriptOnly)
+			val transcriptOnly = fresh.filter(VoicePart::isTranscriptOnly)
+			transcriptOnly.forEach { addPart(it) }
+			if (visual.isNotEmpty()) {
+				presentationFeed?.removeAllViews()
+				visual.forEach(::addPresentationPart)
+				presentationShown = true
+				transcriptShown = false
+				updateConversationMode(latestCallSnapshot.stage)
+			}
 		}
 	}
 
@@ -864,10 +883,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			setOnClickListener { showSettings() }
 		}, spaced(bottom = 16))
 		PhoneCapabilities.all.forEach { capability ->
+			val androidPermissions = capability.permissionsForCurrentDevice()
 			val policies = capability.actions.associateWith { settings.phoneActionPolicies[it] ?: PhoneActionPolicy.OFF }
 			val enabled = policies.values.any { it != PhoneActionPolicy.OFF }
 			val granted = phoneCapabilityAvailable(capability)
-			val requiresAndroidAccess = capability.notificationAccess || capability.permissions.isNotEmpty()
+			val requiresAndroidAccess = capability.notificationAccess || androidPermissions.isNotEmpty()
 			val state = when {
 				enabled && granted -> "● Available to Koder"
 				enabled -> "● Enabled · Android access missing"
@@ -883,7 +903,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val lastUse = capability.actions.mapNotNull(uses::get).maxOrNull()?.takeIf { it > 0 }
 			val androidAccess = when {
 				capability.notificationAccess -> "Android access: notification listener"
-				capability.permissions.isNotEmpty() -> "Android access: ${capability.permissions.joinToString { it.substringAfterLast('.').lowercase().replace('_', ' ') }}"
+				androidPermissions.isNotEmpty() -> "Android access: ${androidPermissions.joinToString { it.substringAfterLast('.').lowercase().replace('_', ' ') }}"
 				else -> "Android access: none required"
 			}
 			content.addView(card().apply {
@@ -1154,15 +1174,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			applyPhoneActionPolicy(action, policy)
 			return
 		}
-        pendingPhoneCapability = capability
+		pendingPhoneCapability = capability
 		pendingPhoneAction = action
 		pendingPhonePolicy = policy
-        when {
+		val permissions = capability.permissionsForCurrentDevice()
+		when {
             capability.notificationAccess && !notificationAccessGranted() -> {
                 notificationAccessLauncher.launch(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
-            capability.permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED } ->
-                phonePermissionLauncher.launch(capability.permissions)
+			permissions.any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED } ->
+				phonePermissionLauncher.launch(permissions)
             else -> {
                 pendingPhoneCapability = null
 				applyPhoneActionPolicy(action, policy)
@@ -1186,9 +1207,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun phoneCapabilityAvailable(capability: PhoneCapability) =
         (!capability.notificationAccess || notificationAccessGranted()) &&
             if (capability.id == "location") {
-                capability.permissions.any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+				capability.permissionsForCurrentDevice().any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
             } else {
-                capability.permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+				capability.permissionsForCurrentDevice().all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
             }
 
     private fun notificationAccessGranted() = packageName in NotificationManagerCompat.getEnabledListenerPackages(this)
@@ -1795,6 +1816,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationShown = false
 		renderedHistorySession = ""
 		renderedHistoryIDs.clear()
+		renderedPartKeys.clear()
 		cachedConversationHistory = emptyList()
 		searchContextShown = false
 		savedResponses = secureSettings.savedVoiceResponses(session.id)
@@ -2146,18 +2168,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		targetFeed.gravity = Gravity.NO_GRAVITY
 		feedPlaceholder = null
 		renderedHistoryIDs.clear()
+		renderedPartKeys.clear()
 		var target: View? = null
 		result.context.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			val bubble = conversationBubble(
-				if (entry.role == "user") "You" else "Koder",
-				entry.text,
-				entry.createdAt,
-				entryId = entry.id,
-				highlighted = entry.id == result.match.id,
-			)
-			targetFeed.addView(bubble, bubbleLayout(entry.role == "user"))
-			if (entry.id == result.match.id) target = bubble
+			val first = appendTranscriptEntry(targetFeed, entry, entry.id == result.match.id)
+			if (entry.id == result.match.id) target = first
 		}
 		searchContextShown = true
 		transcriptShown = true
@@ -2184,12 +2200,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		feedPlaceholder = null
 		feed?.gravity = Gravity.NO_GRAVITY
 		renderedHistoryIDs.clear()
+		renderedPartKeys.clear()
 		history.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			feed?.addView(
-				conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt, entry.id),
-				bubbleLayout(entry.role == "user"),
-			)
+			feed?.let { appendTranscriptEntry(it, entry) }
 		}
 		latestButton?.visibility = View.GONE
 		scrollToBottom(force = true)
@@ -2220,11 +2234,40 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		removeFeedPlaceholder()
 		val previousHeight = feed.height
 		val previousY = scroll.scrollY
-		older.forEachIndexed { index, entry ->
+		var insertion = 0
+		older.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			feed.addView(conversationBubble(if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt, entry.id), index, bubbleLayout(entry.role == "user"))
+			val staged = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+			appendTranscriptEntry(staged, entry)
+			while (staged.childCount > 0) {
+				val child = staged.getChildAt(0)
+				staged.removeViewAt(0)
+				feed.addView(child, insertion++)
+			}
 		}
 		scroll.post { scroll.scrollTo(0, previousY + feed.height - previousHeight) }
+	}
+
+	private fun appendTranscriptEntry(target: LinearLayout, entry: VoiceTranscriptEntry, highlighted: Boolean = false): View? {
+		var first: View? = null
+		if (entry.text.isNotBlank()) {
+			val bubble = conversationBubble(
+				if (entry.role == "user") "You" else "Koder", entry.text, entry.createdAt, entry.id, highlighted,
+			)
+			target.addView(bubble, bubbleLayout(entry.role == "user"))
+			first = bubble
+		}
+		entry.parts.filter { it.mimeType !in DISPLAYABLE_TEXT_TYPES }.forEach { part ->
+			if (!rememberRenderPart(part)) return@forEach
+			val before = target.childCount
+			when {
+				part.mimeType == KODER_TOOL_ACTIVITY_MIME -> addToolActivity(part, target)
+				part.mimeType.startsWith("image/") -> addImage(part, target)
+				else -> addGenericPart(part, target)
+			}
+			if (first == null && target.childCount > before) first = target.getChildAt(before)
+		}
+		return first
 	}
 
     private fun leaveChat() {
@@ -2265,8 +2308,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		)
     }
 
-    private fun addPart(part: VoicePart, transcriptId: String = "") {
+	private fun addPart(part: VoicePart, transcriptId: String = "") {
         when {
+			part.mimeType == KODER_TOOL_ACTIVITY_MIME -> addToolActivity(part)
 			part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addBubble("Koder", part.text, entryId = transcriptId)
             part.mimeType.startsWith("image/") -> addImage(part)
             else -> addGenericPart(part)
@@ -2280,6 +2324,27 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			part.mimeType in DISPLAYABLE_TEXT_TYPES && part.text.isNotBlank() -> addInlinePresentation(part)
 			else -> addGenericPart(part, presentationFeed)
 		}
+	}
+
+	private fun rememberRenderPart(part: VoicePart): Boolean {
+		val key = part.renderKey
+		return key.isBlank() || renderedPartKeys.add(key)
+	}
+
+	private fun addToolActivity(part: VoicePart, target: LinearLayout? = feed) {
+		val target = target ?: return
+		if (target === feed) removeFeedPlaceholder()
+		val data = part.data as? org.json.JSONObject
+		val title = data?.optString("title")?.takeIf(String::isNotBlank) ?: "Koder tool"
+		val status = data?.optString("status").orEmpty().replace('_', ' ')
+		val summary = data?.optString("summary").orEmpty()
+		target.addView(card().apply {
+			contentDescription = "$title $status $summary"
+			addView(label(title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+			if (status.isNotBlank()) addView(helper(status.replaceFirstChar(Char::uppercase)), spaced(top = 3))
+			if (summary.isNotBlank()) addView(body(summary), spaced(top = 5))
+		}, spaced(top = 5, bottom = 5))
+		scrollToBottom()
 	}
 
 	private fun addStructuredPresentation(part: VoicePart) {
@@ -3017,6 +3082,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		private const val ACTION_RED = 0xffc2414b.toInt()
 		private const val ACTION_NEUTRAL = 0xff596273.toInt()
         private val DISPLAYABLE_TEXT_TYPES = setOf("text/plain", "text/markdown")
+		private const val KODER_TOOL_ACTIVITY_MIME = "application/vnd.koder.tool-activity+json"
         private val SERVER_TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.US)
             .withZone(ZoneOffset.UTC)
     }

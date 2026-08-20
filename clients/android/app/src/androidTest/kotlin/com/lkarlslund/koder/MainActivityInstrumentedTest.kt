@@ -704,7 +704,10 @@ class MainActivityInstrumentedTest {
 			override fun onMessage(webSocket: WebSocket, text: String) {
 				if (org.json.JSONObject(text).optString("type") != "hello") return
 				webSocket.send(
-					"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Here are the details.","parts":[{"mime_type":"text/plain","data":"Here are the details."},{"mime_type":"application/vnd.koder.presentation+json","data":{"version":1,"blocks":[{"kind":"text","text":"Today in Aarhus","style":"heading"},{"kind":"image","uri":"/map.png","title":"Aarhus map","alt":"Map preview"},{"kind":"key_value","items":[{"key":"Event","value":"DHL Stafet"}]},{"kind":"list","items":[{"title":"Road closures","detail":"From 16:00"}]},{"kind":"progress","label":"Route check","value":2,"max":5,"detail":"Two areas checked"},{"kind":"action","label":"Open event details","uri":"https://example.com/event"},{"kind":"file","name":"event.ics","uri":"/event.ics","mime_type":"text/calendar","detail":"Calendar entry"}]},"metadata":{"title":"What is happening nearby","presentation":"true"}}]}}""",
+					"""{"type":"render","protocol":"voice.v1","utterance_id":"visual-turn","parts":[{"mime_type":"application/vnd.koder.presentation+json","data":{"version":1,"blocks":[{"kind":"text","text":"Today in Aarhus","style":"heading"},{"kind":"image","uri":"/map.png","title":"Aarhus map","alt":"Map preview"},{"kind":"key_value","items":[{"key":"Event","value":"DHL Stafet"}]},{"kind":"list","items":[{"title":"Road closures","detail":"From 16:00"}]},{"kind":"progress","label":"Route check","value":2,"max":5,"detail":"Two areas checked"},{"kind":"action","label":"Open event details","uri":"https://example.com/event"},{"kind":"file","name":"event.ics","uri":"/event.ics","mime_type":"text/calendar","detail":"Calendar entry"}]},"metadata":{"title":"What is happening nearby","presentation":"true","render_key":"visual-card"}}]}""",
+				)
+				webSocket.send(
+					"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Here are the details.","parts":[{"mime_type":"text/plain","data":"Here are the details."},{"id":"tool-1","mime_type":"application/vnd.koder.tool-activity+json","data":{"tool":"phone_photos_thumbs","title":"View phone photo thumbnails","status":"done","summary":"View four candidates"},"metadata":{"surface":"transcript","render_key":"tool:tool-1"}}]}}""",
 				)
 			}
 		}).build()
@@ -747,6 +750,8 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Save fullscreen image")).check(matches(isDisplayed()))
 				onView(withContentDescription("Share fullscreen image")).check(matches(isDisplayed()))
 				onView(withContentDescription("Close fullscreen image")).perform(click())
+				onView(withContentDescription("Show transcript")).perform(click())
+				onView(withContentDescription("View phone photo thumbnails done View four candidates")).check(matches(isDisplayed()))
 			}
 		} finally {
 			voiceSocket?.close(1000, "test complete")

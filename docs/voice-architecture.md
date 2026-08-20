@@ -232,6 +232,24 @@ choice.
 Koder only exposes artifacts already surfaced by a delegated tool result.
 Artifact URLs share the voice bearer boundary and cannot read arbitrary paths.
 
+Tool output uses a generic rendering adapter rather than phone-specific UI
+types. Deliberate `show_media`/`present` output is sent as a live `render` frame
+as soon as the tool result is durable, so Android can show it while the model
+continues working. Generic tool-activity parts use the transcript surface and
+remain attached to history after reconnect; they do not interrupt the quiet
+voice surface. The final message repeats durable parts for older clients, with
+stable render keys for deduplication.
+
+Phone photos use four explicit tools rather than an overloaded latest-photo
+operation. Search transfers metadata only; thumbnail batches support visual
+triage; view loads one temporary inspection copy; transfer writes one chosen
+original to an explicit workspace path through Koder's normal filesystem
+boundary. Binary phone results are bounded to 12 artifacts and 25 MiB, are
+materialized in managed session temporary storage, and are never persisted as
+base64 in the transcript. A typical visual request searches yesterday's range,
+inspects thumbnails, views the selected ID, transfers the original only when
+editing is needed, and returns the edited result with `show_media`.
+
 ## Speech configuration
 
 The `[voice]` configuration selects remote OpenAI-compatible speech endpoints
