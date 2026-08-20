@@ -1439,17 +1439,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if err := s.controller.SetModelForSelection(ctx, s.appSelection(clientID), in.ProviderID, in.ModelID); err != nil {
-			return nil, err
-		}
-		state, err := s.controller.StateForSelection(ctx, s.appSelection(clientID))
+		modelInfo, contextWindow, err := s.controller.SetModelForSelectionResult(ctx, s.appSelection(clientID), in.ProviderID, in.ModelID)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{
 			"updated":        true,
-			"context_window": state.ContextWindow,
-			"model_info":     state.ModelInfo,
+			"context_window": contextWindow,
+			"model_info":     modelInfo,
 		}, nil
 	case "provider_state":
 		return s.controller.Providers(), nil

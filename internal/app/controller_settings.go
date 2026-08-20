@@ -893,6 +893,18 @@ func (c *Controller) SetModelForSelection(ctx context.Context, selection Selecti
 	return nil
 }
 
+// SetModelForSelectionResult returns metadata for the model accepted by the
+// mutation itself. RPC acknowledgements use this instead of re-reading a
+// concurrently broadcast session snapshot that may still describe the prior
+// model.
+func (c *Controller) SetModelForSelectionResult(ctx context.Context, selection Selection, providerID, modelID string) (ModelInfo, int, error) {
+	if err := c.SetModelForSelection(ctx, selection, providerID, modelID); err != nil {
+		return ModelInfo{}, 0, err
+	}
+	chatRecord := domain.Chat{ProviderID: strings.TrimSpace(providerID), ModelID: strings.TrimSpace(modelID)}
+	return c.modelInfoForChat(chatRecord), c.contextWindowForChat(chatRecord), nil
+}
+
 func (c *Controller) ensureModelSupportsImages(ctx context.Context, providerID, modelID string) error {
 	c.mu.RLock()
 	cfg := c.cfg
