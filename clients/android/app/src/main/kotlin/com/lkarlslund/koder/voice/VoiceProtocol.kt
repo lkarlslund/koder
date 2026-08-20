@@ -383,6 +383,10 @@ object VoiceProtocol {
         return URI(scheme, uri.userInfo, uri.host, uri.port, path, null, null).toString()
     }
 
+	fun readinessWebsocketUrl(server: String): String = URI(websocketUrl(server)).let { uri ->
+		URI(uri.scheme, uri.userInfo, uri.host, uri.port, uri.path.trimEnd('/') + "/readiness", null, null).toString()
+	}
+
     fun resourceUrl(server: String, resource: String): String {
         require(resource.isNotBlank()) { "Presentation URL is required" }
         val direct = URI(resource)

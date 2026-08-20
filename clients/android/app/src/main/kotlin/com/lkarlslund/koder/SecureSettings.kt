@@ -130,6 +130,12 @@ class SecureSettings(context: Context) {
 		preferences.edit().putString(RESPONSE_PACING, pacing.wireValue).apply()
 	}
 
+	fun readinessComplete(server: String): Boolean = preferences.getString(READINESS_SERVER, "") == server.trim()
+
+	fun markReadinessComplete(server: String) {
+		preferences.edit().putString(READINESS_SERVER, server.trim()).apply()
+	}
+
 	fun recordPhoneActionUse(action: String, usedAtMillis: Long = System.currentTimeMillis()) {
 		if (action.isBlank()) return
 		val uses = phoneActionUses().toMutableMap()
@@ -269,6 +275,7 @@ class SecureSettings(context: Context) {
 		const val SAVED_RESPONSES = "saved_responses"
 		const val VOICE_READ_COUNTS = "voice_read_counts"
 		const val VOICE_READ_STATE_INITIALIZED = "voice_read_state_initialized"
+		const val READINESS_SERVER = "readiness_server"
         const val DEFAULT_SERVER = ""
     }
 }

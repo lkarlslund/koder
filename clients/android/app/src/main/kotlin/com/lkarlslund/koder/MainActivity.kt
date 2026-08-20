@@ -84,6 +84,7 @@ import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.VoiceProtocol
 import com.lkarlslund.koder.voice.VoiceResultNotifier
+import com.lkarlslund.koder.voice.VoiceReadinessCheck
 import com.lkarlslund.koder.voice.VoiceStateOrbView
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -108,7 +109,7 @@ import kotlin.math.abs
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
-    private enum class Screen { SETUP, SETTINGS, PERMISSIONS, LOADING, HOME, CHAT }
+    private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, CHAT }
 	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
@@ -118,6 +119,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private lateinit var phoneIdentity: PhoneIdentity
 	private lateinit var bindingClient: PhoneBindingClient
 	private lateinit var sessionClient: VoiceSessionClient
+	private var readinessCheck: VoiceReadinessCheck? = null
+	private var readinessHome: VoiceHome? = null
 
     private var screen = Screen.LOADING
     private var settings = SecureSettings.Values("", "")
@@ -182,6 +185,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			updateConversationMode(CallController.Stage.ERROR)
         }
     }
+	private val readinessPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+		if (screen != Screen.READINESS) return@registerForActivityResult
+		if (granted) startReadinessCheck() else showReadiness(readinessHome ?: return@registerForActivityResult, "Microphone permission is required to test voice.")
+	}
     private val phonePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val capability = pendingPhoneCapability ?: return@registerForActivityResult
         pendingPhoneCapability = null
@@ -227,6 +234,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     loadHome()
 				} else if (screen == Screen.PERMISSIONS) {
 					loadHome()
+				} else if (screen == Screen.READINESS) {
+					readinessCheck?.close()
+					readinessHome?.let(::showHome) ?: loadHome()
                 } else if (screen == Screen.SETUP && settings.server.isNotBlank()) {
                     showSettings()
                 } else {
@@ -264,6 +274,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     override fun onDestroy() {
         requestGeneration++
+		readinessCheck?.close()
         sessionClient.close()
 		bindingClient.close()
         appUpdater.close()
@@ -282,7 +293,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					onSuccess = { binding ->
 						secureSettings.save(binding.server, binding.token)
 						settings = secureSettings.load()
-						loadHome("Phone connected · loading conversations…")
+						loadHome("Phone connected · loading conversations…", offerReadiness = true)
 					},
 					onFailure = { failure -> showSetup("Couldn’t bind this phone: ${failure.message ?: "unknown error"}") },
 				)
@@ -468,13 +479,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 }
 				settings = settings.copy(server = serverAddress, token = tokenField.text.toString())
                 secureSettings.save(settings.server, settings.token)
-                loadHome()
+				loadHome(offerReadiness = true)
             }
         }, matchWrap())
         showScrollable(content)
     }
 
-    private fun loadHome(message: String = "Connecting to Koder…") {
+    private fun loadHome(message: String = "Connecting to Koder…", offerReadiness: Boolean = false) {
         screen = Screen.LOADING
         clearCallViews()
         val generation = ++requestGeneration
@@ -489,10 +500,123 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         sessionClient.list(settings.server, settings.token) { result ->
             runOnUiThread {
                 if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
-                result.fold(::showHome, ::showConnectionError)
+				result.fold(
+					onSuccess = { home ->
+						if (offerReadiness && !secureSettings.readinessComplete(settings.server)) showReadiness(home) else showHome(home)
+					},
+					onFailure = ::showConnectionError,
+				)
             }
         }
     }
+
+	private fun showReadiness(home: VoiceHome, error: String = "") {
+		screen = Screen.READINESS
+		readinessHome = home
+		readinessCheck?.close()
+		readinessCheck = null
+		clearCallViews()
+		val content = column(Gravity.CENTER_HORIZONTAL)
+		content.addView(logo(), centeredSquare(82, bottom = 14))
+		content.addView(title("Voice readiness check").apply { gravity = Gravity.CENTER }, matchWrap())
+		content.addView(body("Let’s make sure Koder can hear you and speak back before your first conversation.").apply { gravity = Gravity.CENTER }, spaced(top = 8, bottom = 18))
+		content.addView(readinessRow("✓", "Server and authentication", "Connected to Koder"), matchWrap())
+		content.addView(readinessRow("○", "Microphone", "Waiting to test"), spaced(top = 7))
+		content.addView(readinessRow("○", "Voice detection", "On-device Silero VAD"), spaced(top = 7))
+		content.addView(readinessRow("○", "Speech recognition", "Remote streaming service"), spaced(top = 7))
+		content.addView(readinessRow("○", "Voice playback", "Current phone audio route"), spaced(top = 7, bottom = 16))
+		if (error.isNotBlank()) content.addView(errorText(error), spaced(bottom = 12))
+		content.addView(Button(this).apply {
+			text = "Start voice check"
+			isAllCaps = false
+			contentDescription = "Start voice readiness check"
+			setOnClickListener {
+				if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startReadinessCheck()
+				else readinessPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+			}
+		}, matchWrap())
+		content.addView(Button(this).apply {
+			text = "Do this later"
+			isAllCaps = false
+			setOnClickListener { showHome(home) }
+		}, spaced(top = 7))
+		showScrollable(content)
+	}
+
+	private fun startReadinessCheck() {
+		val home = readinessHome ?: return
+		readinessCheck?.close()
+		val rows = linkedMapOf<VoiceReadinessCheck.Step, TextView>()
+		val content = column(Gravity.CENTER_HORIZONTAL)
+		content.addView(logo(), centeredSquare(72, bottom = 12))
+		content.addView(title("Say a short sentence").apply { gravity = Gravity.CENTER }, matchWrap())
+		content.addView(body("Speak naturally, then pause. This checks the complete voice path without creating a conversation.").apply { gravity = Gravity.CENTER }, spaced(top = 8, bottom = 18))
+		VoiceReadinessCheck.Step.entries.forEach { step ->
+			val title = when (step) {
+				VoiceReadinessCheck.Step.SERVER -> "Server and authentication"
+				VoiceReadinessCheck.Step.MICROPHONE -> "Microphone"
+				VoiceReadinessCheck.Step.VAD -> "Voice detection"
+				VoiceReadinessCheck.Step.STT -> "Speech recognition"
+				VoiceReadinessCheck.Step.PLAYBACK -> "Voice playback"
+			}
+			val row = readinessRow("○", title, "Waiting")
+			rows[step] = row
+			content.addView(row, spaced(bottom = 7))
+		}
+		val result = body("Listening for you…").apply { gravity = Gravity.CENTER }
+		content.addView(result, spaced(top = 12, bottom = 12))
+		content.addView(Button(this).apply {
+			text = "Cancel"
+			isAllCaps = false
+			setOnClickListener { showReadiness(home) }
+		}, matchWrap())
+		showScrollable(content)
+		readinessCheck = VoiceReadinessCheck(this, phoneIdentity, object : VoiceReadinessCheck.Listener {
+			override fun onProgress(step: VoiceReadinessCheck.Step, detail: String) = runOnUiThread {
+				if (screen != Screen.READINESS) return@runOnUiThread
+				rows[step]?.text = "✓  ${rows[step]?.contentDescription}\n$detail"
+				result.text = detail
+			}
+
+			override fun onComplete(transcript: String) = runOnUiThread {
+				if (screen != Screen.READINESS) return@runOnUiThread
+				secureSettings.markReadinessComplete(settings.server)
+				readinessCheck?.close()
+				readinessCheck = null
+				showReadinessSuccess(home, transcript)
+			}
+
+			override fun onFailure(message: String) = runOnUiThread {
+				if (screen == Screen.READINESS) showReadiness(home, message)
+			}
+		})
+		readinessCheck?.start(settings.server, settings.token, settings.speechLanguages, settings.vadSensitivityPercent, settings.vadSilenceMilliseconds)
+	}
+
+	private fun showReadinessSuccess(home: VoiceHome, heard: String) {
+		screen = Screen.READINESS
+		val content = column(Gravity.CENTER_HORIZONTAL).apply { gravity = Gravity.CENTER }
+		content.addView(logo(), centeredSquare(88, bottom = 16))
+		content.addView(title("Voice is ready").apply { gravity = Gravity.CENTER }, matchWrap())
+		content.addView(body("Koder heard: “$heard”\n\nMicrophone, voice detection, speech recognition, and playback all worked.").apply { gravity = Gravity.CENTER }, spaced(top = 10, bottom = 20))
+		content.addView(Button(this).apply {
+			text = "Continue to conversations"
+			isAllCaps = false
+			setOnClickListener { showHome(home) }
+		}, matchWrap())
+		showContent(content)
+	}
+
+	private fun readinessRow(mark: String, heading: String, detail: String) = TextView(this).apply {
+		text = "$mark  $heading\n$detail"
+		contentDescription = heading
+		textSize = 16f
+		setPadding(dp(16), dp(12), dp(16), dp(12))
+		background = GradientDrawable().apply {
+			cornerRadius = dp(15).toFloat()
+			setColor(withAlpha(themeColor(android.R.attr.colorAccent), 20))
+		}
+	}
 
     private fun showConnectionError(failure: Throwable) {
         screen = Screen.LOADING

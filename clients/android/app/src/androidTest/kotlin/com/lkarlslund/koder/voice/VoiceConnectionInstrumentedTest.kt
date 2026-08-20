@@ -1,6 +1,8 @@
 package com.lkarlslund.koder.voice
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.lkarlslund.koder.phone.PhoneIdentity
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.Response
@@ -29,6 +31,84 @@ class VoiceConnectionInstrumentedTest {
     }
 
     @Test
+	fun readinessCheckExercisesVadStreamingAndPlaybackWithoutConversationFrames() {
+		val completed = CountDownLatch(1)
+		val receivedAudio = CountDownLatch(1)
+		val playbackBytes = mutableListOf<Byte>()
+		var heard = ""
+		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+			override fun onOpen(webSocket: WebSocket, response: Response) {
+				webSocket.send("""{"type":"readiness_ready","protocol":"voice.v1","state":"listening","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":30}}""")
+			}
+
+			override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+				if (VoiceProtocol.decodeAudio(bytes.toByteArray()).kind == VoiceAudioFrameKind.INPUT_PCM) receivedAudio.countDown()
+			}
+
+			override fun onMessage(webSocket: WebSocket, text: String) {
+				val frame = JSONObject(text)
+				if (frame.getString("type") != "audio_commit") return
+				val id = frame.getString("utterance_id")
+				webSocket.send("""{"type":"transcript","protocol":"voice.v1","utterance_id":"$id","transcript":"hello koder"}""")
+				webSocket.send("""{"type":"tts_start","protocol":"voice.v1","utterance_id":"$id","audio_format":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1}}""")
+				webSocket.send(ByteString.of(*VoiceProtocol.encodeAudio(VoiceAudioFrame(VoiceAudioFrameKind.OUTPUT_PCM, 0, 0, byteArrayOf(4, 0, 8, 0)))))
+				webSocket.send("""{"type":"tts_end","protocol":"voice.v1","utterance_id":"$id"}""")
+				webSocket.send("""{"type":"readiness_complete","protocol":"voice.v1","utterance_id":"$id","state":"complete","transcript":"hello koder"}""")
+			}
+
+			override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+				webSocket.close(code, reason)
+			}
+		}).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		val detector = object : VoiceActivityDetector {
+			override val sampleRate = 16_000
+			override val frameSamples = 512
+			private var index = 0
+			override fun evaluate(samples: ShortArray) = VadResult(if (index++ < 6) 0.9f else 0.0f)
+			override fun reset() { index = 0 }
+		}
+		val microphone = object : MicrophoneCapture {
+			@Volatile private var running = false
+			override fun start(format: VoiceAudioFormat, frameSamples: Int, listener: MicrophoneCapture.Listener) {
+				running = true
+				repeat(30) { if (running) listener.onFrame(ShortArray(frameSamples) { 100 }) }
+			}
+			override fun stop() { running = false }
+			override fun close() = stop()
+		}
+		val playback = object : StreamingAudioPlayback {
+			override fun start(format: VoiceAudioFormat) = Unit
+			override fun write(pcm: ByteArray) { playbackBytes += pcm.toList() }
+			override fun finish(onComplete: () -> Unit) = onComplete()
+			override fun stop() = Unit
+			override fun close() = Unit
+		}
+		val context = InstrumentationRegistry.getInstrumentation().targetContext
+		VoiceReadinessCheck(
+			context,
+			PhoneIdentity.from(context),
+			object : VoiceReadinessCheck.Listener {
+				override fun onProgress(step: VoiceReadinessCheck.Step, detail: String) = Unit
+				override fun onComplete(transcript: String) { heard = transcript; completed.countDown() }
+				override fun onFailure(message: String) = throw AssertionError(message)
+			},
+			microphone,
+			{ detector },
+			playback,
+		).use { check ->
+			check.start(server.url("/").toString(), "test-token", setOf("da", "en"), 50, 300)
+			assertTrue(receivedAudio.await(5, TimeUnit.SECONDS))
+			assertTrue(completed.await(5, TimeUnit.SECONDS))
+		}
+		assertEquals("hello koder", heard)
+		assertEquals(listOf<Byte>(4, 0, 8, 0), playbackBytes)
+		val request = server.takeRequest(5, TimeUnit.SECONDS)
+		assertEquals("/voice/v1/readiness", request?.target)
+		assertEquals("Bearer test-token", request?.headers?.get("Authorization"))
+	}
+
+	@Test
     fun websocketHandshakeAndUtteranceMatchGoProtocol() {
         val clientReady = CountDownLatch(1)
         val serverReceivedUtterance = CountDownLatch(1)

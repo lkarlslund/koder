@@ -70,13 +70,22 @@ class MainActivityInstrumentedTest {
         context.getSharedPreferences("koder_voice", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
-    @Test
+	@Test
 	fun builtInAudioRouteDefaultsToSpeakerAndRemembersEarpiece() {
 		clearSettings()
 		val secureSettings = SecureSettings(context)
 		assertEquals(BuiltInAudioRoute.SPEAKER, secureSettings.load().builtInAudioRoute)
 		secureSettings.saveBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)
 		assertEquals(BuiltInAudioRoute.EARPIECE, secureSettings.load().builtInAudioRoute)
+	}
+
+	@Test
+	fun readinessSuccessIsScopedToTheTestedServer() {
+		val secureSettings = SecureSettings(context)
+		assertFalse(secureSettings.readinessComplete("http://first:7979"))
+		secureSettings.markReadinessComplete("http://first:7979/")
+		assertTrue(secureSettings.readinessComplete("http://first:7979/"))
+		assertFalse(secureSettings.readinessComplete("http://second:7979/"))
 	}
 
 	@Test
@@ -250,6 +259,10 @@ class MainActivityInstrumentedTest {
 			val bindingURI = Uri.parse("koder://bind?server=${Uri.encode(server.url("/").toString())}&code=kdb1_invitation")
 			val launch = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(bindingURI)
 			ActivityScenario.launch<MainActivity>(launch).use { scenario ->
+				val readiness = waitForText(scenario, "Voice readiness check")
+				assertTrue(readiness.any { it.contains("Server and authentication") })
+				assertTrue(readiness.any { it.contains("Voice detection") })
+				onView(withText("Do this later")).perform(click())
 				val labels = waitForText(scenario, "Bound conversation")
 					assertTrue(labels.contains("Koder Voice"))
 					assertTrue(labels.contains("Active 1"))
