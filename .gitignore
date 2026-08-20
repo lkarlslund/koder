@@ -2,5 +2,6 @@ research/
 profiles/
 .env
 *.log
+.bin/
 internal/androidupdate/bundle/koder.apk
 internal/androidupdate/bundle/manifest.json
