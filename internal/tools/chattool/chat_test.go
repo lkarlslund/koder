@@ -142,11 +142,14 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 
 	control := &fakeChatControl{statuses: []Status{{
-		ID:         "chat-7",
-		Title:      "Worker",
-		Role:       chatrole.Execution,
-		State:      RunStateRunning,
-		StatusText: "Running",
+		ID:              "chat-7",
+		Title:           "Worker",
+		Role:            chatrole.Execution,
+		Backend:         domain.ChatBackendCodex,
+		InteractionMode: domain.InteractionModeVoice,
+		ModelID:         "gpt-test",
+		State:           RunStateRunning,
+		StatusText:      "Running",
 	}, {
 		ID:         "chat-8",
 		Title:      "Archived",
@@ -161,6 +164,9 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Worker") {
 		t.Fatalf("expected stored chat output, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "[backend:codex] [interaction:voice]") {
+		t.Fatalf("expected backend and interaction metadata, got %q", result.Output)
 	}
 	if strings.Contains(result.Output, "Archived") {
 		t.Fatalf("expected archived chat hidden by default, got %q", result.Output)

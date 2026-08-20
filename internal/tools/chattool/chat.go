@@ -91,6 +91,10 @@ type Status struct {
 	ParentChatID       id.ID
 	Title              string
 	Role               chatrole.Role
+	Backend            domain.ChatBackend
+	InteractionMode    domain.InteractionMode
+	ModelID            string
+	PermissionProfile  string
 	Archived           bool
 	ActiveMilestoneKey string
 	AssignedTaskRef    string
@@ -151,6 +155,10 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 			ID:                 status.ID,
 			Title:              status.Title,
 			Role:               string(status.Role),
+			Backend:            string(status.Backend),
+			InteractionMode:    string(status.InteractionMode),
+			ModelID:            status.ModelID,
+			PermissionProfile:  status.PermissionProfile,
 			State:              string(status.State),
 			Archived:           status.Archived,
 			QueuedInputs:       status.QueuedInputs,

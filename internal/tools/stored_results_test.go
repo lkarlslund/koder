@@ -200,11 +200,13 @@ func TestDisplayTextForPartIgnoresLegacyMetaJSON(t *testing.T) {
 func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
 	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindChatList, tools.StoredResultStatusOK, "", tools.ChatListStoredResult{
 		Items: []tools.ChatStoredItem{{
-			ID:           "chat-1",
-			Title:        "Queued child",
-			State:        "idle",
-			QueuedInputs: 1,
-			StatusText:   "Idle",
+			ID:              "chat-1",
+			Title:           "Queued child",
+			Backend:         "codex",
+			InteractionMode: "voice",
+			State:           "idle",
+			QueuedInputs:    1,
+			StatusText:      "Idle",
 		}},
 	}))
 	if !ok {
@@ -212,6 +214,9 @@ func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
 	}
 	if !strings.Contains(text, "{idle} {queued_inputs:1}") {
 		t.Fatalf("expected queued input count, got %q", text)
+	}
+	if !strings.Contains(text, "[backend:codex] [interaction:voice]") {
+		t.Fatalf("expected backend and interaction metadata, got %q", text)
 	}
 }
 

@@ -221,6 +221,10 @@ type ChatStoredItem struct {
 	ID                 id.ID  `json:"id"`
 	Title              string `json:"title"`
 	Role               string `json:"role,omitempty"`
+	Backend            string `json:"backend,omitempty"`
+	InteractionMode    string `json:"interaction_mode,omitempty"`
+	ModelID            string `json:"model_id,omitempty"`
+	PermissionProfile  string `json:"permission_profile,omitempty"`
 	State              string `json:"state,omitempty"`
 	Archived           bool   `json:"archived,omitempty"`
 	QueuedInputs       int    `json:"queued_inputs,omitempty"`
@@ -1265,6 +1269,12 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 		line := fmt.Sprintf("#%s %s", item.ID, strings.TrimSpace(item.Title))
 		if role := strings.TrimSpace(item.Role); role != "" {
 			line += " [" + role + "]"
+		}
+		if backend := strings.TrimSpace(item.Backend); backend != "" {
+			line += " [backend:" + backend + "]"
+		}
+		if mode := strings.TrimSpace(item.InteractionMode); mode != "" && mode != "text" {
+			line += " [interaction:" + mode + "]"
 		}
 		if state := strings.TrimSpace(item.State); state != "" {
 			line += " {" + state + "}"
