@@ -39,7 +39,7 @@ func CodexAdditionalToolIDs() []tools.ID {
 
 func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]codexdriver.DynamicTool, error) {
 	if e == nil || e.toolsRuntime == nil {
-		return nil, fmt.Errorf("Koder tool runtime is unavailable")
+		return nil, fmt.Errorf("koder tool runtime is unavailable")
 	}
 	runtime, err := e.toolsRuntime.ToolRuntime(ctx, rt)
 	if err != nil {
@@ -66,7 +66,7 @@ func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]
 
 func (e *Engine) codexToolCall(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
 	if e == nil || e.toolsRuntime == nil {
-		return domain.ToolResult{}, fmt.Errorf("Koder tool runtime is unavailable")
+		return domain.ToolResult{}, fmt.Errorf("koder tool runtime is unavailable")
 	}
 	runtime, err := e.toolsRuntime.ToolRuntime(ctx, rt)
 	if err != nil {

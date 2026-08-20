@@ -431,7 +431,7 @@ func (m *Manager) handleApprovalRequest(ctx context.Context, rt *chat.Chat, msg 
 		return err
 	}
 	if request.ItemID == "" {
-		return fmt.Errorf("Codex approval request omitted item id")
+		return fmt.Errorf("codex approval request omitted item id")
 	}
 	body := strings.TrimSpace(request.Reason)
 	if body == "" {

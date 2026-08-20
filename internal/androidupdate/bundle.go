@@ -89,7 +89,7 @@ func load(source fs.FS) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("open embedded Android APK: %w", err)
 	}
-	defer apk.Close()
+	defer func() { _ = apk.Close() }()
 	info, err := fs.Stat(source, apkPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("stat embedded Android APK: %w", err)
@@ -109,19 +109,19 @@ func load(source fs.FS) (Manifest, error) {
 
 func (m Manifest) validate() error {
 	if m.Channel != "local" && m.Channel != "release" {
-		return fmt.Errorf("Android update channel %q is invalid", m.Channel)
+		return fmt.Errorf("android update channel %q is invalid", m.Channel)
 	}
 	if strings.TrimSpace(m.ApplicationID) == "" || m.VersionCode <= 0 || strings.TrimSpace(m.VersionName) == "" {
-		return fmt.Errorf("Android update application identity is incomplete")
+		return fmt.Errorf("android update application identity is incomplete")
 	}
 	if !validSHA256(m.SourceFingerprint) || !validSHA256(m.SigningCertificateSHA256) || !validSHA256(m.APKSHA256) {
-		return fmt.Errorf("Android update digest metadata is invalid")
+		return fmt.Errorf("android update digest metadata is invalid")
 	}
 	if m.APKSize <= 0 {
-		return fmt.Errorf("Android update APK size must be positive")
+		return fmt.Errorf("android update APK size must be positive")
 	}
 	if m.MinimumVoiceProtocol != "voice.v1" {
-		return fmt.Errorf("Android update requires unsupported protocol %q", m.MinimumVoiceProtocol)
+		return fmt.Errorf("android update requires unsupported protocol %q", m.MinimumVoiceProtocol)
 	}
 	return nil
 }
