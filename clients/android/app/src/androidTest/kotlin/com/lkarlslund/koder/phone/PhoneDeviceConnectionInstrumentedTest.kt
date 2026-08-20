@@ -98,6 +98,8 @@ class PhoneDeviceConnectionInstrumentedTest {
             assertEquals(listOf("device_status", "search_contacts"), hello?.getJSONArray("capabilities")?.let { array ->
                 (0 until array.length()).map(array::getString)
             })
+			assertEquals("ask", hello?.getJSONObject("confirmation_policies")?.getString("device_status"))
+			assertEquals("ask", hello?.getJSONObject("confirmation_policies")?.getString("search_contacts"))
             assertEquals("Found Steen", response?.getJSONObject("result")?.getString("text"))
             assertEquals(1, response?.getJSONObject("result")?.getJSONObject("data")?.getInt("count"))
         } finally {

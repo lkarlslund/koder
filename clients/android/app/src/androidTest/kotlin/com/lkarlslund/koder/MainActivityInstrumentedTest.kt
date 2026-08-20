@@ -33,6 +33,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
+import com.lkarlslund.koder.phone.PhoneActionPolicy
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -117,7 +118,7 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("More options")).perform(click())
 				onView(withText("Permission health")).perform(click())
 				onView(withContentDescription("Permission health for Device information: ● Available to Koder")).check(matches(isDisplayed()))
-				val labels = waitForText(scenario, "Remote actions: device status")
+				val labels = waitForText(scenario, "Remote access: Device status (On)")
 				assertTrue(labels.any { it.startsWith("Last used ") })
 				assertTrue(labels.contains("Android access: none required"))
 				onView(withContentDescription("Manage phone tool permissions")).check(matches(isDisplayed()))
@@ -143,6 +144,39 @@ class MainActivityInstrumentedTest {
 			}
 			assertTrue(completed.await(5, TimeUnit.SECONDS))
 			assertTrue((secureSettings.phoneActionUses()["device_status"] ?: 0) > 0)
+			provider?.close()
+		}
+	}
+
+	@Test
+	fun askPolicyConfirmsOnPhoneWhileOnPolicyRunsDirectly() {
+		val secureSettings = SecureSettings(context)
+		secureSettings.savePhoneActionPolicy("device_status", PhoneActionPolicy.ASK)
+		var provider: AndroidPhoneToolProvider? = null
+		ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+			val asked = CountDownLatch(1)
+			scenario.onActivity { activity ->
+				provider = AndroidPhoneToolProvider(activity, secureSettings)
+				assertEquals(PhoneActionPolicy.ASK, provider?.actionPolicies()?.get("device_status"))
+				provider?.execute("device_status", emptyMap()) { result ->
+					assertTrue(result.isSuccess)
+					asked.countDown()
+				}
+			}
+			assertEquals(1L, asked.count)
+			onView(withText("Allow")).inRoot(isDialog()).perform(click())
+			assertTrue(asked.await(5, TimeUnit.SECONDS))
+
+			secureSettings.savePhoneActionPolicy("device_status", PhoneActionPolicy.ON)
+			val trusted = CountDownLatch(1)
+			scenario.onActivity {
+				assertEquals(PhoneActionPolicy.ON, provider?.actionPolicies()?.get("device_status"))
+				provider?.execute("device_status", emptyMap()) { result ->
+					assertTrue(result.isSuccess)
+					trusted.countDown()
+				}
+			}
+			assertTrue(trusted.await(5, TimeUnit.SECONDS))
 			provider?.close()
 		}
 	}
@@ -296,7 +330,7 @@ class MainActivityInstrumentedTest {
 				scenario.onActivity { activity ->
 					val root = activity.findViewById<View>(android.R.id.content)
 					val scroll = root.firstScrollView()
-					val target = root.findByDescription("Allow Device information")
+					val target = root.findByDescription("On Device status")
 					val bounds = android.graphics.Rect().also(target::getDrawingRect)
 					scroll.offsetDescendantRectToMyCoords(target, bounds)
 					scroll.scrollTo(0, bounds.top.coerceAtLeast(0))
@@ -306,6 +340,12 @@ class MainActivityInstrumentedTest {
 				}
 				assertTrue(scrollBefore > 0)
 				assertTrue("tool toggle reset scroll from $scrollBefore to $scrollAfter", kotlin.math.abs(scrollAfter - scrollBefore) <= 2)
+				scenario.onActivity { activity ->
+					activity.findViewById<View>(android.R.id.content).findByDescription("Ask Device status").performClick()
+				}
+				assertEquals(PhoneActionPolicy.ASK, SecureSettings(context).load().phoneActionPolicies["device_status"])
+				assertEquals(PhoneActionPolicy.OFF, SecureSettings(context).load().phoneActionPolicies["list_apps"])
+				assertEquals(PhoneActionPolicy.OFF, SecureSettings(context).load().phoneActionPolicies["open_app"])
 				assertTrue("device" in SecureSettings(context).load().enabledPhoneCapabilities)
                 assertTrue(settingsLabels.contains("Contacts"))
                 assertTrue(settingsLabels.contains("Notifications & email previews"))

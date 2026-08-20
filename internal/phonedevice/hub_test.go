@@ -33,6 +33,38 @@ func TestHubFiltersCapabilitiesAndExecutesEnabledAction(t *testing.T) {
 	}
 }
 
+func TestHubAppliesPhoneConfirmationPolicies(t *testing.T) {
+	hub := &Hub{}
+	release, err := hub.AttachWithPolicies("call-1",
+		[]string{"device_status", "search_contacts", "send_sms", "open_app"},
+		map[string]string{"device_status": "ask", "search_contacts": "on", "send_sms": "off", "open_app": "invalid"},
+		func(context.Context, string, Action, map[string]string) (Result, error) {
+			return Result{Text: "done"}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	capabilities := hub.Capabilities()
+	got := make(map[Action]bool, len(capabilities))
+	for _, capability := range capabilities {
+		got[capability.Action] = capability.Confirmation
+	}
+	if !got[DeviceStatus] {
+		t.Fatal("device_status did not honor ask policy")
+	}
+	if got[SearchContacts] {
+		t.Fatal("search_contacts did not honor on policy")
+	}
+	if _, exists := got[SendSMS]; exists {
+		t.Fatal("send_sms with off policy remained advertised")
+	}
+	if !got[OpenApp] {
+		t.Fatal("invalid open_app policy did not retain safe catalog default")
+	}
+}
+
 func TestHubOwnershipAndReplacementRelease(t *testing.T) {
 	hub := &Hub{}
 	firstRelease, err := hub.Attach("call-1", []string{"device_status"}, func(context.Context, string, Action, map[string]string) (Result, error) {

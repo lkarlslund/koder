@@ -40,7 +40,6 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -55,6 +54,8 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
+import com.lkarlslund.koder.phone.PhoneActionPolicy
+import com.lkarlslund.koder.phone.actionTitle
 import com.lkarlslund.koder.phone.PhoneBindingClient
 import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.presentation.ZoomableImageView
@@ -123,6 +124,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var pendingCreateTitle: String? = null
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
+	private var pendingPhoneAction = ""
+	private var pendingPhonePolicy = PhoneActionPolicy.OFF
     private var lastAppUpdate: AppUpdate? = null
 	private var conversationFilter = ConversationFilter.ACTIVE
 
@@ -139,7 +142,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var presentationFeed: LinearLayout? = null
 	private var presentationShown = false
 	private var speechAutomaticCheck: CheckBox? = null
-	private val phoneCapabilitySwitches = mutableMapOf<String, Switch>()
+	private val phoneActionGroups = mutableMapOf<String, RadioGroup>()
 	private var composerView: View? = null
 	private var pauseButton: ImageButton? = null
 	private var transcriptButton: ImageButton? = null
@@ -179,16 +182,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         val capability = pendingPhoneCapability ?: return@registerForActivityResult
         pendingPhoneCapability = null
         val granted = phoneCapabilityAvailable(capability)
-        if (granted) enablePhoneCapability(capability.id) else {
+        if (granted) applyPhoneActionPolicy(pendingPhoneAction, pendingPhonePolicy) else {
             Toast.makeText(this, "${capability.title} permission was not granted", Toast.LENGTH_LONG).show()
-			phoneCapabilitySwitches[capability.id]?.isChecked = false
+			selectPhoneActionPolicy(pendingPhoneAction, PhoneActionPolicy.OFF)
         }
     }
     private val notificationAccessLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val capability = pendingPhoneCapability ?: return@registerForActivityResult
         pendingPhoneCapability = null
-	        if (notificationAccessGranted()) enablePhoneCapability(capability.id)
-		else phoneCapabilitySwitches[capability.id]?.isChecked = false
+	        if (notificationAccessGranted()) applyPhoneActionPolicy(pendingPhoneAction, pendingPhonePolicy)
+		else selectPhoneActionPolicy(pendingPhoneAction, PhoneActionPolicy.OFF)
     }
 	private val imageSaveLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
 		val image = pendingImageSave
@@ -660,7 +663,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			setOnClickListener { showSettings() }
 		}, spaced(bottom = 16))
 		PhoneCapabilities.all.forEach { capability ->
-			val enabled = capability.id in settings.enabledPhoneCapabilities
+			val policies = capability.actions.associateWith { settings.phoneActionPolicies[it] ?: PhoneActionPolicy.OFF }
+			val enabled = policies.values.any { it != PhoneActionPolicy.OFF }
 			val granted = phoneCapabilityAvailable(capability)
 			val requiresAndroidAccess = capability.notificationAccess || capability.permissions.isNotEmpty()
 			val state = when {
@@ -687,7 +691,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				addView(body(state).apply { setTextColor(stateColor); setTypeface(typeface, Typeface.BOLD) }, spaced(top = 4))
 				addView(helper(capability.description), spaced(top = 6))
 				addView(helper(androidAccess), spaced(top = 5))
-				addView(helper("Remote actions: ${capability.actions.sorted().joinToString { it.replace('_', ' ') }}"), spaced(top = 3))
+				val remote = policies.filterValues { it != PhoneActionPolicy.OFF }
+					.entries.sortedBy { it.key }.joinToString { "${actionTitle(it.key)} (${it.value.label})" }
+				addView(helper("Remote access: ${remote.ifBlank { "none" }}"), spaced(top = 3))
 				addView(helper(lastUse?.let {
 					"Last used ${DateUtils.getRelativeTimeSpanString(it, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)}"
 				} ?: "Never used on this phone"), spaced(top = 3))
@@ -849,7 +855,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}, spaced(bottom = 24))
 
         content.addView(title("Phone tools").apply { textSize = 24f }, matchWrap())
-        content.addView(body("Choose what the active Koder voice conversation may ask this phone to do. Disabled groups disappear from Koder's available tools. Actions that change something or contact a person are confirmed here first."), spaced(top = 6, bottom = 14))
+		content.addView(body("Choose a policy for every phone tool. Off hides it from Koder. Ask requests confirmation on this phone each time. On lets the active voice conversation use it without an extra Koder prompt; Android's own protected screens still apply."), spaced(top = 6, bottom = 14))
         PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
         content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
         showScrollable(content)
@@ -887,27 +893,42 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
     private fun phoneCapabilityRow(capability: PhoneCapability) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
+        orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(13), dp(12), dp(13))
         background = cardBackground()
-        addView(LinearLayout(this@MainActivity).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(body(capability.title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
-            addView(helper(capability.description), spaced(top = 3))
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
-        addView(Switch(this@MainActivity).apply {
-			phoneCapabilitySwitches[capability.id] = this
-            contentDescription = "Allow ${capability.title}"
-            isChecked = capability.id in settings.enabledPhoneCapabilities && phoneCapabilityAvailable(capability)
-            setOnCheckedChangeListener { _, checked ->
-                if (checked) requestPhoneCapability(capability) else disablePhoneCapability(capability.id)
-            }
-        })
+		addView(body(capability.title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+		addView(helper(capability.description), spaced(top = 3, bottom = 8))
+		capability.actions.sorted().forEach { action ->
+			addView(helper(actionTitle(action)).apply { setTypeface(typeface, Typeface.BOLD) }, spaced(top = 7))
+			addView(RadioGroup(this@MainActivity).apply {
+				orientation = RadioGroup.HORIZONTAL
+				gravity = Gravity.END
+				phoneActionGroups[action] = this
+				PhoneActionPolicy.entries.forEach { policy ->
+					addView(RadioButton(this@MainActivity).apply {
+						id = View.generateViewId()
+						tag = policy
+						text = policy.label
+						contentDescription = "${policy.label} ${actionTitle(action)}"
+					})
+				}
+				selectPhoneActionPolicy(action, settings.phoneActionPolicies[action] ?: PhoneActionPolicy.OFF)
+				setOnCheckedChangeListener { group, checkedID ->
+					val policy = group.findViewById<RadioButton>(checkedID)?.tag as? PhoneActionPolicy ?: return@setOnCheckedChangeListener
+					requestPhoneActionPolicy(capability, action, policy)
+				}
+			}, matchWrap())
+		}
     }
 
-    private fun requestPhoneCapability(capability: PhoneCapability) {
+	private fun requestPhoneActionPolicy(capability: PhoneCapability, action: String, policy: PhoneActionPolicy) {
+		if (policy == PhoneActionPolicy.OFF) {
+			applyPhoneActionPolicy(action, policy)
+			return
+		}
         pendingPhoneCapability = capability
+		pendingPhoneAction = action
+		pendingPhonePolicy = policy
         when {
             capability.notificationAccess && !notificationAccessGranted() -> {
                 notificationAccessLauncher.launch(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -916,23 +937,23 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 phonePermissionLauncher.launch(capability.permissions)
             else -> {
                 pendingPhoneCapability = null
-                enablePhoneCapability(capability.id)
+				applyPhoneActionPolicy(action, policy)
             }
         }
     }
 
-    private fun enablePhoneCapability(id: String) {
-        val enabled = settings.enabledPhoneCapabilities + id
-        secureSettings.savePhoneCapabilities(enabled)
-        settings = settings.copy(enabledPhoneCapabilities = enabled)
-		phoneCapabilitySwitches[id]?.isChecked = true
-    }
+	private fun applyPhoneActionPolicy(action: String, policy: PhoneActionPolicy) {
+		secureSettings.savePhoneActionPolicy(action, policy)
+		settings = secureSettings.load()
+		selectPhoneActionPolicy(action, policy)
+	}
 
-    private fun disablePhoneCapability(id: String) {
-        val enabled = settings.enabledPhoneCapabilities - id
-        secureSettings.savePhoneCapabilities(enabled)
-        settings = settings.copy(enabledPhoneCapabilities = enabled)
-    }
+	private fun selectPhoneActionPolicy(action: String, policy: PhoneActionPolicy) {
+		val group = phoneActionGroups[action] ?: return
+		val button = (0 until group.childCount).map(group::getChildAt)
+			.filterIsInstance<RadioButton>().firstOrNull { it.tag == policy } ?: return
+		if (group.checkedRadioButtonId != button.id) group.check(button.id)
+	}
 
     private fun phoneCapabilityAvailable(capability: PhoneCapability) =
         (!capability.notificationAccess || notificationAccessGranted()) &&
@@ -2447,7 +2468,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationPanel = null
 		presentationFeed = null
 		speechAutomaticCheck = null
-		phoneCapabilitySwitches.clear()
+		phoneActionGroups.clear()
 		composerView = null
 		pauseButton = null
 		transcriptButton = null

@@ -46,6 +46,7 @@ data class PhoneToolResult(val text: String, val data: Any? = null)
 
 interface PhoneToolProvider : AutoCloseable {
     fun enabledActions(): Set<String>
+	fun actionPolicies(): Map<String, PhoneActionPolicy> = enabledActions().associateWith { PhoneActionPolicy.ASK }
     fun execute(action: String, arguments: Map<String, String>, callback: (Result<PhoneToolResult>) -> Unit)
     override fun close() = Unit
 }
@@ -57,11 +58,16 @@ class AndroidPhoneToolProvider(
         Thread(runnable, "koder-phone-tools").apply { isDaemon = true }
     },
 ) : PhoneToolProvider {
-    override fun enabledActions(): Set<String> = settings.load().enabledPhoneCapabilities
-        .mapNotNull(PhoneCapabilities.byID::get)
-        .filter(::permissionAvailable)
-        .flatMap { it.actions }
-        .toSet()
+    override fun enabledActions(): Set<String> = actionPolicies().keys
+
+	override fun actionPolicies(): Map<String, PhoneActionPolicy> {
+		val values = settings.load()
+		return values.phoneActionPolicies.filter { (action, policy) ->
+			policy != PhoneActionPolicy.OFF && PhoneCapabilities.all.any { capability ->
+				action in capability.actions && permissionAvailable(capability)
+			}
+		}
+	}
 
     override fun execute(action: String, arguments: Map<String, String>, callback: (Result<PhoneToolResult>) -> Unit) {
         if (action !in enabledActions()) {
@@ -75,7 +81,7 @@ class AndroidPhoneToolProvider(
 				callback(result)
 			}
 		}
-        if (action in CONFIRM_ACTIONS) {
+		if (settings.load().phoneActionPolicies[action] == PhoneActionPolicy.ASK) {
             activity.runOnUiThread {
                 AlertDialog.Builder(activity)
                     .setTitle("Allow Koder to ${humanAction(action)}?")
@@ -402,12 +408,6 @@ class AndroidPhoneToolProvider(
         else -> "Koder requested this action during the active voice conversation."
     }
 
-    private companion object {
-        val CONFIRM_ACTIONS = setOf(
-            "place_call", "send_sms", "compose_email", "create_contact", "create_calendar_event", "open_map",
-            "set_alarm", "set_timer", "write_clipboard", "open_url", "media_control", "open_app", "share_text",
-        )
-    }
 }
 
 internal fun phoneLocationResult(location: Location, address: Address?): PhoneToolResult {

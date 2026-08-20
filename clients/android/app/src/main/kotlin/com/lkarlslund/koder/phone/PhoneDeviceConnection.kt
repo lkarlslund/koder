@@ -30,7 +30,7 @@ class PhoneDeviceConnection(
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (!owns(webSocket, currentGeneration)) return webSocket.close(1000, "superseded").let { }
-                webSocket.send(PhoneDeviceProtocol.hello(provider.enabledActions()))
+                webSocket.send(PhoneDeviceProtocol.hello(provider.actionPolicies()))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {

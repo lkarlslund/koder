@@ -7,10 +7,13 @@ import org.json.JSONObject
 data class PhoneToolRequest(val requestId: String, val action: String, val arguments: Map<String, String>)
 
 object PhoneDeviceProtocol {
-    fun hello(actions: Set<String>) = JSONObject()
+    fun hello(policies: Map<String, PhoneActionPolicy>) = JSONObject()
         .put("type", "device_hello")
         .put("protocol", VOICE_PROTOCOL)
-        .put("capabilities", JSONArray(actions.sorted()))
+		.put("capabilities", JSONArray(policies.keys.sorted()))
+		.put("confirmation_policies", JSONObject().also { body ->
+			policies.toSortedMap().forEach { (action, policy) -> body.put(action, policy.wireValue) }
+		})
         .toString()
 
     fun parseRequest(text: String): PhoneToolRequest {

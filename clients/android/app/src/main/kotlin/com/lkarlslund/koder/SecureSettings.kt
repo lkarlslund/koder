@@ -8,6 +8,8 @@ import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
+import com.lkarlslund.koder.phone.PhoneActionPolicy
+import com.lkarlslund.koder.phone.PhoneCapabilities
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -21,6 +23,7 @@ class SecureSettings(context: Context) {
         val server: String,
         val token: String,
         val enabledPhoneCapabilities: Set<String> = emptySet(),
+		val phoneActionPolicies: Map<String, PhoneActionPolicy> = emptyMap(),
 		val speechLanguages: Set<String> = emptySet(),
 		val vadSensitivityPercent: Int = 50,
 		val vadSilenceMilliseconds: Int = 600,
@@ -47,10 +50,25 @@ class SecureSettings(context: Context) {
 		val languages = preferences.getStringSet(SPEECH_LANGUAGES, emptySet()).orEmpty()
 			.map(String::lowercase)
 			.filterTo(linkedSetOf()) { it in com.lkarlslund.koder.voice.SpeechLanguages.codes }
+		val legacyCapabilities = preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet()
+		val storedPolicies = runCatching {
+			val root = JSONObject(preferences.getString(PHONE_ACTION_POLICIES, "{}").orEmpty())
+			buildMap {
+				root.keys().forEach { action ->
+					PhoneActionPolicy.fromStorage(root.optString(action))?.let { put(action, it) }
+				}
+			}
+		}.getOrDefault(emptyMap())
+		val policies = if (preferences.contains(PHONE_ACTION_POLICIES)) storedPolicies else buildMap {
+			legacyCapabilities.mapNotNull(PhoneCapabilities.byID::get).flatMap { it.actions }.forEach { action ->
+				put(action, PhoneActionPolicy.legacyDefault(action))
+			}
+		}
 		return Values(
 			server,
 			token,
-			preferences.getStringSet(PHONE_CAPABILITIES, emptySet()).orEmpty().toSet(),
+			legacyCapabilities,
+			policies,
 			languages,
 			preferences.getInt(VAD_SENSITIVITY, 50).coerceIn(35, 75),
 			preferences.getInt(VAD_SILENCE, 600).coerceIn(300, 1_200),
@@ -75,6 +93,22 @@ class SecureSettings(context: Context) {
     fun savePhoneCapabilities(enabled: Set<String>) {
         preferences.edit().putStringSet(PHONE_CAPABILITIES, enabled.toSet()).apply()
     }
+
+	fun savePhoneActionPolicy(action: String, policy: PhoneActionPolicy) {
+		if (action !in PhoneCapabilities.knownActions) return
+		val policies = load().phoneActionPolicies.toMutableMap()
+		PhoneCapabilities.knownActions.forEach { policies.putIfAbsent(it, PhoneActionPolicy.OFF) }
+		policies[action] = policy
+		val root = JSONObject()
+		policies.forEach { (name, value) -> root.put(name, value.wireValue) }
+		val enabledCapabilities = PhoneCapabilities.all.filter { capability ->
+			capability.actions.any { policies[it] != null && policies[it] != PhoneActionPolicy.OFF }
+		}.mapTo(linkedSetOf()) { it.id }
+		preferences.edit()
+			.putString(PHONE_ACTION_POLICIES, root.toString())
+			.putStringSet(PHONE_CAPABILITIES, enabledCapabilities)
+			.apply()
+	}
 
 	fun saveSpeechLanguages(languages: Set<String>) {
 		preferences.edit().putStringSet(SPEECH_LANGUAGES, languages.toSet()).apply()
@@ -224,7 +258,8 @@ class SecureSettings(context: Context) {
         const val SERVER = "server"
         const val TOKEN = "token_encrypted"
         const val TOKEN_IV = "token_iv"
-        const val PHONE_CAPABILITIES = "phone_capabilities"
+		const val PHONE_CAPABILITIES = "phone_capabilities"
+		const val PHONE_ACTION_POLICIES = "phone_action_policies"
 		const val SPEECH_LANGUAGES = "speech_languages"
 		const val VAD_SENSITIVITY = "vad_sensitivity"
 		const val VAD_SILENCE = "vad_silence"

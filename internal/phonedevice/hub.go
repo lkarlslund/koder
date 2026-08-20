@@ -98,10 +98,11 @@ type Control interface {
 }
 
 type connection struct {
-	callID     string
-	actions    map[Action]bool
-	execute    Executor
-	generation uint64
+	callID               string
+	actions              map[Action]bool
+	confirmationPolicies map[Action]string
+	execute              Executor
+	generation           uint64
 }
 
 // Hub owns at most one Android tool provider, matching the one-active-call
@@ -171,6 +172,12 @@ func explicitlyRequestsMap(text string) bool {
 
 // Attach installs or replaces the provider for callID.
 func (h *Hub) Attach(callID string, advertised []string, execute Executor) (func(), error) {
+	return h.AttachWithPolicies(callID, advertised, nil, execute)
+}
+
+// AttachWithPolicies installs a provider and its per-action local confirmation
+// policy. Unknown policy values retain the server catalog's safe default.
+func (h *Hub) AttachWithPolicies(callID string, advertised []string, policies map[string]string, execute Executor) (func(), error) {
 	if h == nil || execute == nil {
 		return nil, errors.New("phone device provider is unavailable")
 	}
@@ -179,10 +186,15 @@ func (h *Hub) Attach(callID string, advertised []string, execute Executor) (func
 		return nil, errors.New("phone device call id is required")
 	}
 	actions := make(map[Action]bool, len(advertised))
+	confirmationPolicies := make(map[Action]string, len(policies))
 	for _, raw := range advertised {
 		action := Action(strings.TrimSpace(raw))
-		if _, ok := known[action]; ok {
+		policy := strings.ToLower(strings.TrimSpace(policies[string(action)]))
+		if _, ok := known[action]; ok && policy != "off" {
 			actions[action] = true
+			if policy == "ask" || policy == "on" {
+				confirmationPolicies[action] = policy
+			}
 		}
 	}
 	h.mu.Lock()
@@ -192,7 +204,7 @@ func (h *Hub) Attach(callID string, advertised []string, execute Executor) (func
 	}
 	h.generation++
 	generation := h.generation
-	h.active = &connection{callID: callID, actions: actions, execute: execute, generation: generation}
+	h.active = &connection{callID: callID, actions: actions, confirmationPolicies: confirmationPolicies, execute: execute, generation: generation}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -234,6 +246,12 @@ func (h *Hub) Capabilities() []CatalogEntry {
 			continue
 		}
 		if h.active.actions[entry.Action] {
+			switch h.active.confirmationPolicies[entry.Action] {
+			case "ask":
+				entry.Confirmation = true
+			case "on":
+				entry.Confirmation = false
+			}
 			out = append(out, entry)
 		}
 	}

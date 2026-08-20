@@ -742,11 +742,18 @@ func TestPhoneDeviceSidecarRequiresAndServesActiveCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = deviceConn.Close(websocket.StatusNormalClosure, "") }()
-	writeJSON(t, ctx, deviceConn, deviceFrame{Type: "device_hello", Protocol: protocolVersion, Capabilities: []string{"search_contacts", "invented_action"}})
+	writeJSON(t, ctx, deviceConn, deviceFrame{
+		Type: "device_hello", Protocol: protocolVersion,
+		Capabilities:         []string{"search_contacts", "device_status", "invented_action"},
+		ConfirmationPolicies: map[string]string{"search_contacts": "on", "device_status": "off"},
+	})
 	var ready deviceFrame
 	readJSON(t, ctx, deviceConn, &ready)
 	if ready.Type != "device_ready" || len(ready.Capabilities) != 1 || ready.Capabilities[0] != "search_contacts" {
 		t.Fatalf("device ready = %#v", ready)
+	}
+	if capabilities := hub.Capabilities(); len(capabilities) != 1 || capabilities[0].Action != phonedevice.SearchContacts || capabilities[0].Confirmation {
+		t.Fatalf("device confirmation policies were not applied: %#v", capabilities)
 	}
 
 	type outcome struct {

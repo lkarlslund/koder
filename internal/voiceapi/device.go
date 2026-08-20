@@ -20,14 +20,15 @@ const deviceReadLimit = 128 * 1024
 const deviceActionTimeout = 2 * time.Minute
 
 type deviceFrame struct {
-	Type         string              `json:"type"`
-	Protocol     string              `json:"protocol"`
-	Capabilities []string            `json:"capabilities,omitempty"`
-	RequestID    string              `json:"request_id,omitempty"`
-	Action       phonedevice.Action  `json:"action,omitempty"`
-	Arguments    map[string]string   `json:"arguments,omitempty"`
-	Result       *phonedevice.Result `json:"result,omitempty"`
-	Error        string              `json:"error,omitempty"`
+	Type                 string              `json:"type"`
+	Protocol             string              `json:"protocol"`
+	Capabilities         []string            `json:"capabilities,omitempty"`
+	ConfirmationPolicies map[string]string   `json:"confirmation_policies,omitempty"`
+	RequestID            string              `json:"request_id,omitempty"`
+	Action               phonedevice.Action  `json:"action,omitempty"`
+	Arguments            map[string]string   `json:"arguments,omitempty"`
+	Result               *phonedevice.Result `json:"result,omitempty"`
+	Error                string              `json:"error,omitempty"`
 }
 
 type deviceResponse struct {
@@ -75,7 +76,7 @@ func (h *Handler) servePhoneDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	peer := newDevicePeer(conn)
-	release, err := h.Devices.Attach(callID, hello.Capabilities, peer.execute)
+	release, err := h.Devices.AttachWithPolicies(callID, hello.Capabilities, hello.ConfirmationPolicies, peer.execute)
 	if err != nil {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 		return

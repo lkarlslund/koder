@@ -23,10 +23,12 @@ class PhoneDeviceProtocolTest {
     }
 
     @Test
-    fun helloSortsOnlyEnabledActions() {
-        val hello = JSONObject(PhoneDeviceProtocol.hello(setOf("search_contacts", "device_status")))
+	fun helloSortsEnabledActionsAndPublishesConfirmationPolicies() {
+		val hello = JSONObject(PhoneDeviceProtocol.hello(mapOf("search_contacts" to PhoneActionPolicy.ASK, "device_status" to PhoneActionPolicy.ON)))
         assertEquals("device_hello", hello.getString("type"))
         assertEquals("voice.v1", hello.getString("protocol"))
-        assertEquals("device_status", hello.getJSONArray("capabilities").getString(0))
-    }
+		assertEquals("device_status", hello.getJSONArray("capabilities").getString(0))
+		assertEquals("on", hello.getJSONObject("confirmation_policies").getString("device_status"))
+		assertEquals("ask", hello.getJSONObject("confirmation_policies").getString("search_contacts"))
+	}
 }
