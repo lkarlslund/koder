@@ -638,6 +638,7 @@ type Model struct {
 	MaxOutputTokens   int
 	MetadataSource    string
 	SupportsChat      bool
+	SupportsSTT       bool
 	SupportsTTS       bool
 	SupportsImages    bool
 	ImagesKnown       bool

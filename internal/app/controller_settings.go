@@ -73,9 +73,10 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 }
 
 func providerProbeCapabilities(models []domain.Model) []string {
-	var chat, tts, tools, images, pdfs, jsonOutput, reasoning, hasUnknown bool
+	var chat, stt, tts, tools, images, pdfs, jsonOutput, reasoning, hasUnknown bool
 	for _, model := range models {
 		chat = chat || model.SupportsChat
+		stt = stt || model.SupportsSTT
 		tts = tts || model.SupportsTTS
 		tools = tools || model.SupportsTools
 		images = images || model.SupportsImages
@@ -89,12 +90,13 @@ func providerProbeCapabilities(models []domain.Model) []string {
 	// every advertised model explicitly identifies another role (for example,
 	// a TTS-only endpoint).
 	chat = chat || hasUnknown
-	capabilities := make([]string, 0, 7)
+	capabilities := make([]string, 0, 8)
 	for _, item := range []struct {
 		label   string
 		enabled bool
 	}{
 		{label: "Chat", enabled: chat},
+		{label: "STT", enabled: stt},
 		{label: "Tools", enabled: tools},
 		{label: "Vision", enabled: images},
 		{label: "PDF", enabled: pdfs},
@@ -549,6 +551,7 @@ func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, curre
 			MaxOutputTokens:   model.MaxOutputTokens,
 			MetadataSource:    strings.TrimSpace(model.MetadataSource),
 			SupportsChat:      model.SupportsChat,
+			SupportsSTT:       model.SupportsSTT,
 			SupportsTTS:       model.SupportsTTS,
 			SupportsTools:     model.SupportsTools,
 			SupportsImages:    model.SupportsImages,
@@ -636,6 +639,7 @@ func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, curre
 			OwnedBy:           strings.TrimSpace(source.OwnedBy),
 			ContextWindow:     model.ContextWindow,
 			SupportsChat:      source.SupportsChat || !source.CapabilitiesKnown,
+			SupportsSTT:       source.SupportsSTT,
 			SupportsTTS:       source.SupportsTTS,
 			SupportsTools:     source.SupportsTools,
 			SupportsImages:    source.SupportsImages,

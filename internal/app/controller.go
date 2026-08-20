@@ -116,6 +116,7 @@ type ModelOption struct {
 	MaxOutputTokens   int           `json:"max_output_tokens,omitempty"`
 	MetadataSource    string        `json:"metadata_source,omitempty"`
 	SupportsChat      bool          `json:"supports_chat"`
+	SupportsSTT       bool          `json:"supports_stt"`
 	SupportsTTS       bool          `json:"supports_tts"`
 	SupportsTools     bool          `json:"supports_tools"`
 	SupportsImages    bool          `json:"supports_images"`
@@ -148,6 +149,7 @@ type ModelInfo struct {
 	MaxOutputTokens   int    `json:"max_output_tokens,omitempty"`
 	MetadataSource    string `json:"metadata_source,omitempty"`
 	SupportsChat      bool   `json:"supports_chat"`
+	SupportsSTT       bool   `json:"supports_stt"`
 	SupportsTTS       bool   `json:"supports_tts"`
 	SupportsTools     bool   `json:"supports_tools"`
 	SupportsImages    bool   `json:"supports_images"`
@@ -2428,6 +2430,7 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 		return info
 	}
 	info.SupportsChat = enriched.SupportsChat
+	info.SupportsSTT = enriched.SupportsSTT
 	info.MaxContextWindow = enriched.MaxContextWindow
 	info.MaxOutputTokens = enriched.MaxOutputTokens
 	info.MetadataSource = strings.TrimSpace(enriched.MetadataSource)

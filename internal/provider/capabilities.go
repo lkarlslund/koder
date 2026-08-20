@@ -31,6 +31,7 @@ type capabilityEntry struct {
 	MaxOutputTokens   int       `json:"max_output_tokens,omitempty"`
 	MetadataSource    string    `json:"metadata_source,omitempty"`
 	SupportsChat      bool      `json:"supports_chat"`
+	SupportsSTT       bool      `json:"supports_stt"`
 	SupportsTTS       bool      `json:"supports_tts"`
 	SupportsImages    bool      `json:"supports_images"`
 	ImagesKnown       bool      `json:"images_known,omitempty"`
@@ -111,6 +112,7 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 					BaseURL:           strings.TrimSpace(cfg.BaseURL),
 					ModelID:           model.ID,
 					SupportsChat:      supportsChat,
+					SupportsSTT:       current.SupportsSTT,
 					SupportsTTS:       true,
 					SupportsImages:    current.SupportsImages,
 					SupportsPDFs:      current.SupportsPDFs,
@@ -175,6 +177,7 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 				BaseURL:           strings.TrimSpace(cfg.BaseURL),
 				ModelID:           modelID,
 				SupportsChat:      current.SupportsChat,
+				SupportsSTT:       current.SupportsSTT,
 				SupportsTTS:       current.SupportsTTS,
 				SupportsImages:    supported,
 				ImagesKnown:       true,
@@ -208,7 +211,9 @@ func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, mod
 }
 
 func inferCapabilities(providerID string, cfg config.Provider, model domain.Model) domain.Model {
-	model.SupportsChat = true
+	if !model.CapabilitiesKnown {
+		model.SupportsChat = true
+	}
 	if model.CapabilitiesKnown && strings.TrimSpace(model.CapabilitySource) == "" {
 		model.CapabilitySource = "model-metadata"
 	}
@@ -248,9 +253,10 @@ func applyEntry(model domain.Model, entry capabilityEntry) domain.Model {
 		model.MetadataSource = entry.MetadataSource
 	}
 	model.SupportsChat = entry.SupportsChat
-	if !entry.SupportsChat && !entry.SupportsTTS {
+	if !entry.SupportsChat && !entry.SupportsSTT && !entry.SupportsTTS {
 		model.SupportsChat = true
 	}
+	model.SupportsSTT = entry.SupportsSTT
 	model.SupportsTTS = entry.SupportsTTS
 	model.SupportsImages = entry.SupportsImages
 	model.ImagesKnown = entry.ImagesKnown
@@ -274,6 +280,7 @@ func capabilityEntryFromModel(providerID string, cfg config.Provider, model doma
 		MaxOutputTokens:   model.MaxOutputTokens,
 		MetadataSource:    model.MetadataSource,
 		SupportsChat:      model.SupportsChat,
+		SupportsSTT:       model.SupportsSTT,
 		SupportsTTS:       model.SupportsTTS,
 		SupportsImages:    model.SupportsImages,
 		ImagesKnown:       model.ImagesKnown,

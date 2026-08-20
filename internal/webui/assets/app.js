@@ -3115,6 +3115,7 @@
           const lines = [
             'Context: ' + this.formatTokens(contextWindow) + ' tokens',
             'Chat: ' + (info.supports_chat === false || info.SupportsChat === false ? 'no' : 'yes'),
+            'STT: ' + this.capabilityLabel(info.supports_stt || info.SupportsSTT, known),
             'TTS: ' + this.capabilityLabel(info.supports_tts || info.SupportsTTS, known),
             'Tools: ' + (info.supports_tools === false || info.SupportsTools === false ? 'no' : 'yes'),
             'Images: ' + this.capabilityLabel(info.supports_images || info.SupportsImages, known),
@@ -5767,6 +5768,7 @@
 		  if (model?.supports_pdfs) badges.push('PDF');
 		  if (model?.supports_json) badges.push('JSON');
 		  if (model?.supports_reasoning) badges.push('Reasoning');
+		  if (model?.supports_stt) badges.push('STT');
 		  if (model?.supports_tts) badges.push('TTS');
 		  return badges;
 		},

@@ -316,6 +316,8 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 type modelResponseItem struct {
 	ID                  string   `json:"id"`
 	OwnedBy             string   `json:"owned_by"`
+	Family              string   `json:"family"`
+	Task                string   `json:"task"`
 	ContextLength       int      `json:"context_length"`
 	ContextWindow       int      `json:"context_window"`
 	MaxContextLength    int      `json:"max_context_length"`
@@ -609,6 +611,18 @@ func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
 	if model == nil {
 		return
 	}
+	switch strings.ToLower(strings.TrimSpace(item.Task)) {
+	case "asr", "stt", "speech-to-text", "transcription":
+		model.SupportsChat = false
+		model.SupportsSTT = true
+		model.CapabilitiesKnown = true
+		model.CapabilitySource = "openai-models-task"
+	case "tts", "text-to-speech", "speech-synthesis":
+		model.SupportsChat = false
+		model.SupportsTTS = true
+		model.CapabilitiesKnown = true
+		model.CapabilitySource = "openai-models-task"
+	}
 	for _, modality := range item.Architecture.InputModalities {
 		model.ImagesKnown = true
 		switch strings.ToLower(strings.TrimSpace(modality)) {
@@ -635,7 +649,9 @@ func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
 	}
 	if len(item.Capabilities) > 0 || len(item.SupportedParameters) > 0 || len(item.Architecture.InputModalities) > 0 {
 		model.CapabilitiesKnown = true
-		model.CapabilitySource = "openai-models"
+		if strings.TrimSpace(model.CapabilitySource) == "" {
+			model.CapabilitySource = "openai-models"
+		}
 	}
 }
 

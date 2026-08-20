@@ -980,9 +980,9 @@ func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.
 func TestProviderProbeSummaryReportsAggregateOfferings(t *testing.T) {
 	models := []domain.Model{
 		{ID: "chat", ContextWindow: 65536, SupportsChat: true, SupportsTools: true, SupportsImages: true, SupportsJSON: true, CapabilitiesKnown: true},
-		{ID: "speech", MaxContextWindow: 131072, SupportsTTS: true, SupportsPDFs: true, SupportsReasoning: true, CapabilitiesKnown: true},
+		{ID: "speech", MaxContextWindow: 131072, SupportsSTT: true, SupportsTTS: true, SupportsPDFs: true, SupportsReasoning: true, CapabilitiesKnown: true},
 	}
-	want := []string{"Chat", "Tools", "Vision", "PDF", "JSON", "Reasoning", "TTS"}
+	want := []string{"Chat", "STT", "Tools", "Vision", "PDF", "JSON", "Reasoning", "TTS"}
 	if got := providerProbeCapabilities(models); !slices.Equal(got, want) {
 		t.Fatalf("provider capabilities = %v, want %v", got, want)
 	}

@@ -44,6 +44,31 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestListModelsMapsAdvertisedSpeechTasks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"koder-stt","task":"asr"},{"id":"koder-tts","task":"tts"}]}`))
+	}))
+	defer server.Close()
+
+	client, err := New("speech", config.Provider{BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := client.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models = %#v, want two speech models", models)
+	}
+	if !models[0].SupportsSTT || models[0].SupportsTTS || models[0].SupportsChat || !models[0].CapabilitiesKnown || models[0].CapabilitySource != "openai-models-task" {
+		t.Fatalf("STT model capabilities = %#v", models[0])
+	}
+	if !models[1].SupportsTTS || models[1].SupportsSTT || models[1].SupportsChat || !models[1].CapabilitiesKnown || models[1].CapabilitySource != "openai-models-task" {
+		t.Fatalf("TTS model capabilities = %#v", models[1])
+	}
+}
+
 func TestSerializePromptEnvelopeUsesSingleLeadingSystemMessage(t *testing.T) {
 	env := PromptEnvelope{
 		Instructions: []InstructionBlock{
