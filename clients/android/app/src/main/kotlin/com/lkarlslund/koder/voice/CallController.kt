@@ -19,6 +19,7 @@ class CallController(
 	detector: VoiceActivityDetector = SileroVad.fromAssets(context.applicationContext),
 	audioPlayback: StreamingAudioPlayback? = null,
 	private val workingSound: WorkingSound = AndroidWorkingSound(),
+	private val connectionSound: ConnectionSound = AndroidConnectionSound(),
 	private val haptics: VoiceHaptics = AndroidVoiceHaptics(context),
 	private val interruptionFeedback: InterruptionFeedback = AndroidInterruptionFeedback(context, haptics),
 	private val phoneTools: PhoneToolProvider = AndroidPhoneToolProvider(context as Activity),
@@ -78,22 +79,39 @@ class CallController(
 	private val endpoint = VadEndpointPipeline(detector)
 	private val diagnostics = AudioDiagnosticsTracker()
 	private val connection = VoiceConnection(object : VoiceConnection.Listener {
-        override fun onConnected() = onMain { update(Stage.CONNECTING, "Loading conversation…") }
+		override fun onConnected() = onMain {
+			if (utteranceId.isNotBlank()) update(Stage.RECORDING, "Reconnected · sending buffered speech…")
+			else update(Stage.CONNECTING, "Loading conversation…")
+		}
 		override fun onCallIdentity(callId: String) {
 			phoneDevice.connect(connectedServer, connectedToken, callId)
 		}
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
         override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
 		override fun onRoundTripMillis(milliseconds: Long) = diagnostics.recordRoundTrip(milliseconds)
-        override fun onDisconnected(reason: String) = onMain {
-            microphone.stop()
+		override fun onDisconnected(reason: String) = onMain {
+			serverReady = false
 			phoneDevice.close()
 			acceptingOutput = false
 			playback.stop()
 			diagnostics.recordReconnect()
-	            if (running) {
-					if (pausedByUser || telecomHeld) update(Stage.HELD, "Conversation paused")
-					else update(Stage.CONNECTING, reconnectStatus(reason))
+			if (running) {
+					when (disconnectCaptureAction(captureActive && utteranceId.isNotBlank(), pausedByUser || telecomHeld)) {
+						DisconnectCaptureAction.BUFFER_ACTIVE_SPEECH -> {
+							connectionSound.stop()
+							update(Stage.RECORDING, "Connection lost · buffering your speech locally…")
+						}
+						DisconnectCaptureAction.STOP_LISTENING -> {
+							stopMicrophone()
+							if (pausedByUser || telecomHeld) {
+								connectionSound.stop()
+								update(Stage.HELD, "Conversation paused")
+							} else {
+								connectionSound.disconnected()
+								update(Stage.CONNECTING, "Disconnected · not listening · reconnecting…")
+			}
+		}
+					}
 				}
         }
 	}, identity = phoneIdentity)
@@ -102,7 +120,7 @@ class CallController(
         override fun onCallHeld(held: Boolean) = onMain {
 			telecomHeld = held
             if (held) {
-                microphone.stop()
+				stopMicrophone()
 				acceptingOutput = false
                 playback.stop()
                 update(Stage.HELD, "Conversation on hold")
@@ -134,11 +152,12 @@ class CallController(
 
 	@Volatile private var snapshot = Snapshot()
     @Volatile private var running = false
-    private var serverReady = false
+	@Volatile private var serverReady = false
     private var telecomReady = false
     private var audioEndpoint = "phone audio"
     private var audioConfig: VoiceAudioConfig? = null
-    private var utteranceId = ""
+	private var utteranceId = ""
+	@Volatile private var captureActive = false
     private var inputSequence = 0L
     private var outputSequence = 0L
 	private var outputUtteranceId = ""
@@ -173,6 +192,7 @@ class CallController(
 		interruptedPlayback = false
 		pausedByUser = false
 		telecomHeld = false
+		connectionSound.stop()
 		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
 		endpoint.configure(EndpointConfig(
 			sampleRate = endpointSampleRate,
@@ -197,7 +217,7 @@ class CallController(
 	    fun submit(text: String) {
         val normalized = text.trim()
         if (!running || normalized.isEmpty()) return
-        microphone.stop()
+		stopMicrophone()
         listener.onUserMessage(normalized)
         update(Stage.PROCESSING, processingStatusText(), "")
         try {
@@ -323,7 +343,7 @@ class CallController(
     fun loadBytes(url: String, callback: (ByteArray?, String?) -> Unit) = connection.loadBytes(url, callback)
 
     private fun cancelCapture() {
-        microphone.stop()
+		stopMicrophone()
         endpoint.reset()
 		interruptedPlayback = false
         val pending = utteranceId
@@ -335,9 +355,10 @@ class CallController(
         if (!running) return
         running = false
         serverReady = false
-        microphone.stop()
+		stopMicrophone()
         playback.stop()
 		stopWorkingSound()
+		connectionSound.stop()
 		interruptedPlayback = false
 		pausedByUser = false
 		telecomHeld = false
@@ -357,6 +378,7 @@ class CallController(
         microphone.close()
         playback.close()
 		workingSound.close()
+		connectionSound.close()
 		interruptionFeedback.close()
         endpoint.close()
         connection.close()
@@ -388,9 +410,11 @@ class CallController(
         }
         frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {
-            "ready" -> {
-                snapshot = snapshot.copy(appUpdate = frame.appUpdate)
-                serverReady = true
+			"ready" -> {
+				snapshot = snapshot.copy(appUpdate = frame.appUpdate)
+				val becameReady = !serverReady
+				serverReady = true
+				if (becameReady) connectionSound.ready()
 				if (snapshot.stage != Stage.ERROR) maybeListen()
             }
 			"state" -> if (!pausedByUser && !telecomHeld) when (frame.state) {
@@ -490,6 +514,11 @@ class CallController(
 				update(Stage.MUTED, "Microphone muted")
 				return
 			}
+			if (captureActive) {
+				if (utteranceId.isNotBlank()) update(Stage.RECORDING, recordingStatus(interruptedPlayback))
+				else update(Stage.LISTENING, "Listening · $audioEndpoint", "")
+				return
+			}
         if (!force && snapshot.stage in setOf(Stage.RECORDING, Stage.TRANSCRIBING, Stage.PROCESSING, Stage.WORKING, Stage.SPEAKING, Stage.HELD)) return
         resumeListening()
     }
@@ -508,11 +537,15 @@ class CallController(
         utteranceId = ""
         inputSequence = 0
 		if (showListeningState) update(Stage.LISTENING, "Listening · $audioEndpoint", "")
-        try {
-            microphone.start(format, endpointFrameSamples, object : MicrophoneCapture.Listener {
-                override fun onFrame(samples: ShortArray) = processMicrophoneFrame(format, samples)
-                override fun onCaptureError(message: String) = onMain { update(Stage.ERROR, message) }
-            })
+		try {
+			microphone.start(format, endpointFrameSamples, object : MicrophoneCapture.Listener {
+				override fun onFrame(samples: ShortArray) = processMicrophoneFrame(format, samples)
+				override fun onCaptureError(message: String) = onMain {
+					captureActive = false
+					update(Stage.ERROR, message)
+				}
+			})
+			captureActive = true
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Could not start microphone")
         }
@@ -536,19 +569,30 @@ class CallController(
 							playback.stop()
 							interruptionFeedback.acknowledge()
 						}
-						utteranceId = connection.startAudio(format, speechLanguages)
+						utteranceId = connection.startAudio(
+							format,
+							speechLanguages,
+							audioConfig?.maxUtteranceSeconds ?: MAX_BUFFERED_UTTERANCE_SECONDS,
+						)
                         inputSequence = 0
                         event.frames.forEach(::sendPCM)
-						onMain { update(Stage.RECORDING, recordingStatus(wasInterruption)) }
+						onMain {
+							val detail = if (serverReady) recordingStatus(wasInterruption) else "Connection lost · buffering your speech locally…"
+							update(Stage.RECORDING, detail)
+						}
                     }
                     is UtteranceEvent.Continued -> sendPCM(event.frame)
                     is UtteranceEvent.Committed -> {
                         val completedId = utteranceId
                         utteranceId = ""
-                        microphone.stop()
-                        connection.commitAudio(completedId)
+						stopMicrophone()
+						connection.commitAudio(completedId)
+						if (!serverReady) connectionSound.disconnected()
 						interruptedPlayback = false
-                        onMain { update(Stage.TRANSCRIBING, "Recognizing speech…", "") }
+						onMain {
+							if (serverReady) update(Stage.TRANSCRIBING, "Recognizing speech…", "")
+							else update(Stage.CONNECTING, "Disconnected · speech saved locally · reconnecting…", "")
+						}
                     }
                 }
             }
@@ -556,17 +600,22 @@ class CallController(
             val failedId = utteranceId
             utteranceId = ""
 			interruptedPlayback = false
-            microphone.stop()
+			stopMicrophone()
             connection.cancelAudio(failedId)
             onMain { update(Stage.ERROR, error.message ?: "Voice capture failed") }
         }
     }
 
-    private fun sendPCM(samples: ShortArray) {
+	private fun sendPCM(samples: ShortArray) {
         val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         samples.forEach(pcm::putShort)
         connection.sendAudio(inputSequence++, pcm.array())
-    }
+	}
+
+	private fun stopMicrophone() {
+		captureActive = false
+		microphone.stop()
+	}
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {
         val previousStage = snapshot.stage

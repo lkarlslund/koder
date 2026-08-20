@@ -9,6 +9,11 @@ import org.junit.Test
 
 class VoiceProtocolTest {
 	@Test
+	fun outgoingSpeechBufferIsBoundedByRawAudioDuration() {
+		assertEquals(3_840_000, maxBufferedAudioBytes(VoiceAudioFormat("pcm_s16le", 16_000, 1)))
+	}
+
+	@Test
 	fun readinessWebsocketURLUsesDiagnosticEndpointWithoutLeakingServerPathDetails() {
 		assertEquals("ws://phone.test:7979/voice/v1/readiness", VoiceProtocol.readinessWebsocketUrl("http://phone.test:7979"))
 		assertEquals("wss://phone.test/koder/voice/v1/readiness", VoiceProtocol.readinessWebsocketUrl("https://phone.test/koder"))

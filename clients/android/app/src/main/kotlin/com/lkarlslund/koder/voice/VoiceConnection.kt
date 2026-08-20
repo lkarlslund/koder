@@ -40,8 +40,10 @@ class VoiceConnection(
 		override val id: String,
 		val format: VoiceAudioFormat,
 		val languages: List<String>,
+		val maxBufferedPCMBytes: Int,
 	) : PendingTurn(id) {
 		val frames = mutableListOf<ByteString>()
+		var bufferedPCMBytes = 0
 		var committed = false
 		var sessionId = ""
 	}
@@ -213,11 +215,18 @@ class VoiceConnection(
         return id
     }
 
-	fun startAudio(format: VoiceAudioFormat, languages: Collection<String> = emptyList()): String {
+	fun startAudio(
+		format: VoiceAudioFormat,
+		languages: Collection<String> = emptyList(),
+		maxUtteranceSeconds: Int = MAX_BUFFERED_UTTERANCE_SECONDS,
+	): String {
 		val id = UUID.randomUUID().toString()
 		synchronized(this) {
 			check(desired) { "Voice conversation is not active" }
-			val pending = PendingAudio(id, format, languages.map(String::lowercase).distinct().sorted())
+			val pending = PendingAudio(
+				id, format, languages.map(String::lowercase).distinct().sorted(),
+				maxBufferedAudioBytes(format, maxUtteranceSeconds),
+			)
 			pendingTurn = pending
 			socket?.send(VoiceProtocol.audioStart(id, format, pending.languages))
 		}
@@ -233,7 +242,11 @@ class VoiceConnection(
 			val pending = pendingTurn as? PendingAudio ?: error("No audio utterance is active")
 			check(!pending.committed) { "Audio utterance is already committed" }
 			check(sequence == pending.frames.size.toLong()) { "Audio sequence $sequence is out of order" }
+			check(pending.bufferedPCMBytes + pcm.size <= pending.maxBufferedPCMBytes) {
+				"Buffered speech exceeds the negotiated utterance duration"
+			}
 			pending.frames += encoded
+			pending.bufferedPCMBytes += pcm.size
 			socket?.send(encoded)
 		}
 	}
@@ -391,4 +404,13 @@ class VoiceConnection(
     private companion object {
         const val MAX_PART_BYTES = 10L * 1024 * 1024
     }
+}
+
+internal const val MAX_BUFFERED_UTTERANCE_SECONDS = 120
+
+internal fun maxBufferedAudioBytes(format: VoiceAudioFormat, seconds: Int = MAX_BUFFERED_UTTERANCE_SECONDS): Int {
+	require(seconds > 0) { "Buffered audio duration must be positive" }
+	val bytes = format.sampleRate.toLong() * format.channels.toLong() * 2L * seconds
+	require(bytes in 1..Int.MAX_VALUE) { "Audio format is not bufferable" }
+	return bytes.toInt()
 }

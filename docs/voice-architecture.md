@@ -54,6 +54,37 @@ chat. Voice interaction supplies short, conversational behavior and the normal
 chat loop supplies history, model execution, tool calls, and the final answer.
 There is no separate stateless router or summarizer model call.
 
+## Mobile audio transport
+
+`voice.v1` currently carries sequence-numbered PCM16 frames: roughly 256
+kbit/s upstream at 16 kHz mono and 384 kbit/s downstream at 24 kHz mono,
+before WebSocket/TLS overhead. That is acceptable on a LAN but unnecessarily
+expensive on constrained mobile links.
+
+The intended compressed transport is negotiated Opus with PCM fallback, not
+generic WebSocket compression. Twenty-millisecond mono Opus frames around
+16–20 kbit/s for speech upstream and 28–40 kbit/s downstream provide about an
+order-of-magnitude reduction with low codec delay. Codec negotiation must keep
+the speech-service PCM format separate from the phone transport format. It
+also has to preserve Koder's single-binary builds and Android 9 compatibility:
+Android guarantees Opus encoding only from Android 10, and a Koder-side native
+libopus dependency cannot silently become a host installation requirement.
+For those reasons Opus requires a separately tested protocol capability and
+portable codec packaging rather than changing the existing frame flag in
+place. TCP/WebSocket still has head-of-line blocking; Opus FEC does not solve
+that, so a future loss-tolerant transport would be a separate WebRTC or QUIC
+decision.
+
+Android retains every captured frame for the current bounded utterance before
+attempting network transmission. If the link drops during speech, microphone
+capture and VAD continue, the UI says that speech is buffered locally, and the
+replacement socket replays `audio_start`, all contiguous frames, and
+`audio_commit` before newly queued traffic. The buffer is capped by the
+server-advertised maximum utterance duration. If no utterance is underway, the
+microphone stops on disconnect: a distinct periodic offline cue means Koder is
+not listening. The first successful `ready` after initial connection or a
+reconnect stops that cue, plays a short acknowledgement, and resumes capture.
+
 Tool mechanics live in each normal tool definition, not in the role prompt.
 The workflow role receives its normal catalog and uses `chat_list`,
 `chat_send`, and `chat_start` to coordinate work inside its selected session.
@@ -203,8 +234,9 @@ handler.
 
 Server address and bearer token are encrypted at rest with an Android Keystore
 key. Reconnect uses a stable call ID for the logical call and exponential
-backoff. An in-flight utterance is not automatically replayed, preventing
-duplicate delegated work.
+backoff. Text and committed audio turns are replayed with their original
+utterance ID and resume cursors, allowing Koder to deduplicate work and output;
+an unfinished audio utterance resumes from the phone's bounded local buffer.
 
 Speech-language preference belongs to the phone rather than the durable voice
 chat or server. Android can leave detection automatic, select one language for

@@ -327,6 +327,78 @@ class VoiceConnectionInstrumentedTest {
 		assertTrue(target.contains("resume_output_sequence=1"))
 	}
 
+	@Test
+	fun reconnectBuffersSpeechCapturedWhileSocketIsDownAndReplaysItInOrder() {
+		val firstReady = CountDownLatch(1)
+		val firstFrame = CountDownLatch(1)
+		val disconnected = CountDownLatch(1)
+		val replayCommitted = CountDownLatch(1)
+		val replay = CopyOnWriteArrayList<String>()
+
+		server.enqueue(
+			MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+				override fun onOpen(webSocket: WebSocket, response: Response) {
+					webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+				}
+
+				override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+					if (VoiceProtocol.decodeAudio(bytes.toByteArray()).sequence != 0L) return
+					firstFrame.countDown()
+					webSocket.cancel()
+				}
+			}).build(),
+		)
+		server.enqueue(
+			MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+				override fun onOpen(webSocket: WebSocket, response: Response) {
+					webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+				}
+
+				override fun onMessage(webSocket: WebSocket, text: String) {
+					when (JSONObject(text).getString("type")) {
+						"audio_start" -> replay += "start"
+						"audio_commit" -> {
+							replay += "commit"
+							replayCommitted.countDown()
+						}
+					}
+				}
+
+				override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+					replay += "pcm:${VoiceProtocol.decodeAudio(bytes.toByteArray()).sequence}"
+				}
+
+				override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+					webSocket.close(code, reason)
+				}
+			}).build(),
+		)
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+
+		VoiceConnection(object : VoiceConnection.Listener {
+			override fun onConnected() = Unit
+			override fun onFrame(frame: VoiceServerFrame) {
+				if (frame.type == "ready") firstReady.countDown()
+			}
+			override fun onDisconnected(reason: String) {
+				disconnected.countDown()
+			}
+		}).use { connection ->
+			connection.connect(server.url("/").toString(), "")
+			assertTrue("initial socket was not ready", firstReady.await(5, TimeUnit.SECONDS))
+			val format = VoiceAudioFormat("pcm_s16le", 16_000, 1)
+			val utterance = connection.startAudio(format)
+			connection.sendAudio(0, byteArrayOf(1, 0, 2, 0))
+			assertTrue("first speech frame did not reach server", firstFrame.await(5, TimeUnit.SECONDS))
+			assertTrue("client did not observe the link drop", disconnected.await(5, TimeUnit.SECONDS))
+			connection.sendAudio(1, byteArrayOf(3, 0, 4, 0))
+			connection.commitAudio(utterance)
+			assertTrue("buffered speech was not committed after reconnect", replayCommitted.await(8, TimeUnit.SECONDS))
+		}
+
+		assertEquals(listOf("start", "pcm:0", "pcm:1", "commit"), replay.toList())
+	}
+
 	private fun outputAudio(sequence: Long): ByteArray = VoiceProtocol.encodeAudio(
 		VoiceAudioFrame(VoiceAudioFrameKind.OUTPUT_PCM, 0, sequence, byteArrayOf((sequence + 1).toByte(), 0)),
 	)
