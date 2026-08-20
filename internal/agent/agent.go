@@ -52,6 +52,7 @@ type Engine struct {
 	files         *attachment.Manager
 	offeredFiles  *offeredfile.Manager
 	caps          *provider.CapabilityStore
+	health        *provider.HealthTracker
 	agents        *agents.Manager
 	mcp           *mcp.Manager
 	settings      *settings.Store
@@ -93,6 +94,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	}
 	execRuntime := execruntime.NewManager()
 	settingsStore := settings.New(cfg)
+	healthTracker := provider.NewHealthTracker()
 	e := &Engine{
 		cfg:           cfg,
 		store:         st,
@@ -100,6 +102,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		files:         attachment.NewManager(cfg.StateDir()),
 		offeredFiles:  offeredfile.NewManager(st),
 		caps:          provider.NewCapabilityStore(cfg.StateDir()),
+		health:        healthTracker,
 		agents:        agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:           mcpManager,
 		settings:      settingsStore,
@@ -113,6 +116,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Debug:    debug,
 		Files:    e.files,
 		Caps:     e.caps,
+		Health:   healthTracker,
 		Agents:   e.agents,
 		Settings: settingsStore,
 		MCP:      e.mcp,
@@ -140,6 +144,15 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
 	return e
+}
+
+// ProviderHealthTracker returns the process-local provider runtime health
+// shared by chats, voice, discovery, and settings.
+func (e *Engine) ProviderHealthTracker() *provider.HealthTracker {
+	if e == nil {
+		return nil
+	}
+	return e.health
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
@@ -274,7 +287,7 @@ func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return provider.New(model.SourceProviderID, model.Provider, e.debug)
+	return provider.New(model.SourceProviderID, model.Provider, e.debug, e.health)
 }
 
 func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions string, out chan<- domain.Event) error {
@@ -1713,7 +1726,7 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 	}
 	next.ProviderID = compaction.ProviderID
 	next.ModelID = compaction.ModelID
-	compactionClient, err := provider.New(compaction.Model.ProviderID, compaction.Provider, e.debug)
+	compactionClient, err := provider.New(compaction.Model.ProviderID, compaction.Provider, e.debug, e.health)
 	if err != nil {
 		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", compaction.Model.ProviderID, err)
 	}

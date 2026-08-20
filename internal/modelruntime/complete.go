@@ -230,7 +230,7 @@ func (r *Runtime) startCavemanThinking(ctx context.Context, chat domain.Chat, ch
 	}
 	chatProviderID, chatModelID := chatModel.Model.ProviderID, chatModel.Model.ModelID
 	if providerID != chatProviderID || modelID != chatModelID || client == nil {
-		client, err = provider.New(providerID, thinking.Provider, r.debug)
+		client, err = provider.New(providerID, thinking.Provider, r.debug, r.health)
 		if err != nil {
 			return cavemanJob{}, err
 		}

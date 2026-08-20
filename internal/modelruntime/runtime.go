@@ -30,6 +30,7 @@ type Config struct {
 	Debug    *debugsrv.Recorder
 	Files    *attachment.Manager
 	Caps     *provider.CapabilityStore
+	Health   *provider.HealthTracker
 	Agents   *agents.Manager
 	Settings *settings.Store
 	Tools    *toolruntime.Runtime
@@ -43,6 +44,7 @@ type Runtime struct {
 	debug         *debugsrv.Recorder
 	files         *attachment.Manager
 	caps          *provider.CapabilityStore
+	health        *provider.HealthTracker
 	agents        *agents.Manager
 	settings      *settings.Store
 	modelOverlays modeloverlay.Catalog
@@ -89,6 +91,7 @@ func New(cfg Config) *Runtime {
 		debug:         cfg.Debug,
 		files:         files,
 		caps:          caps,
+		health:        cfg.Health,
 		agents:        agentManager,
 		settings:      settingsStore,
 		modelOverlays: modeloverlay.Load(cfg.Config.ManagedAssetsDir()),

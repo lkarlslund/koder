@@ -415,6 +415,7 @@ type Client struct {
 	provider string
 	backend  string
 	recorder *debugsrv.Recorder
+	health   *HealthTracker
 }
 
 type ChatResponse struct {
@@ -428,7 +429,7 @@ type ChatResponse struct {
 	Performance        domain.ModelPerformance
 }
 
-func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, error) {
+func New(id string, cfg config.Provider, recorder *debugsrv.Recorder, healthTrackers ...*HealthTracker) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, errors.New("provider base url is empty")
 	}
@@ -448,6 +449,10 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 			providerID: id,
 		}
 	}
+	var health *HealthTracker
+	if len(healthTrackers) > 0 {
+		health = healthTrackers[0]
+	}
 	return &Client{
 		http: &http.Client{
 			Timeout:   0,
@@ -460,7 +465,14 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 		provider: id,
 		backend:  strings.ToLower(strings.Join([]string{id, cfg.TemplateID, cfg.Name, cfg.BaseURL}, " ")),
 		recorder: recorder,
+		health:   health,
 	}, nil
+}
+
+func (c *Client) observe(modelID, operation string, started time.Time, operationErr error) {
+	if c != nil && c.health != nil {
+		c.health.Observe(c.provider, modelID, operation, started, operationErr)
+	}
 }
 
 func defaultTransportWithHeaderTimeout(timeout time.Duration) http.RoundTripper {
@@ -473,12 +485,23 @@ func defaultTransportWithHeaderTimeout(timeout time.Duration) http.RoundTripper 
 	return clone
 }
 
-func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
+func (c *Client) ListModels(ctx context.Context) (models []domain.Model, err error) {
+	started := time.Now()
+	defer func() {
+		if c == nil || c.health == nil {
+			return
+		}
+		modelIDs := make([]string, 0, len(models))
+		for _, model := range models {
+			modelIDs = append(modelIDs, model.ID)
+		}
+		c.health.ObserveModels(c.provider, modelIDs, started, err)
+	}()
 	items, err := c.listModelItems(ctx)
 	if err != nil {
 		return nil, err
 	}
-	models := make([]domain.Model, 0, len(items))
+	models = make([]domain.Model, 0, len(items))
 	for _, item := range items {
 		models = append(models, modelFromResponseItem(item))
 	}
@@ -536,7 +559,9 @@ func modelResponseItemByID(items []modelResponseItem, modelID string) (modelResp
 	return modelResponseItem{}, false
 }
 
-func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (int, error) {
+func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (window int, err error) {
+	started := time.Now()
+	defer func() { c.observe(modelID, "detect_context_window", started, err) }()
 	req, err := c.newRequest(ctx, http.MethodGet, c.apiPath("/models"), nil)
 	if err != nil {
 		return 0, err
@@ -659,7 +684,9 @@ func parsePositiveInt(value string) int {
 	return n
 }
 
-func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, error) {
+func (c *Client) Props(ctx context.Context, modelID string) (props propsResponse, err error) {
+	started := time.Now()
+	defer func() { c.observe(modelID, "model_properties", started, err) }()
 	path := "/props"
 	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
 		path += "?model=" + url.QueryEscape(trimmed)
@@ -729,7 +756,9 @@ func (c *Client) propsRequest(ctx context.Context, baseURL, path string) (propsR
 	return payload, nil
 }
 
-func (c *Client) Health(ctx context.Context) error {
+func (c *Client) Health(ctx context.Context) (err error) {
+	started := time.Now()
+	defer func() { c.observe("", "health", started, err) }()
 	healthURL := strings.TrimSuffix(c.baseURL, "/v1")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL+"/health", nil)
 	if err != nil {
@@ -747,8 +776,9 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatResponse, error) {
+func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (response ChatResponse, err error) {
 	start := time.Now()
+	defer func() { c.observe(input.Model, "chat", start, err) }()
 	ctx = context.WithValue(ctx, requestDebugContextKey{}, requestDebugContext{SessionID: input.SessionID, ChatID: input.ChatID})
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
@@ -858,7 +888,9 @@ func (c *Client) ProbeChatSupport(ctx context.Context, modelID string) (bool, er
 	return true, err
 }
 
-func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, error) {
+func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (supported bool, err error) {
+	started := time.Now()
+	defer func() { c.observe(modelID, "probe_tts", started, err) }()
 	payload := map[string]any{
 		"model": modelID,
 		"input": "OK",
@@ -896,7 +928,9 @@ func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (bool, err
 	}
 }
 
-func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechResponse, error) {
+func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (response SpeechResponse, err error) {
+	started := time.Now()
+	defer func() { c.observe(input.Model, "tts", started, err) }()
 	req, err := c.speechRequest(ctx, input)
 	if err != nil {
 		return SpeechResponse{}, err
@@ -920,7 +954,9 @@ func (c *Client) CreateSpeech(ctx context.Context, input SpeechRequest) (SpeechR
 }
 
 // StreamSpeech sends provider audio chunks as they arrive.
-func (c *Client) StreamSpeech(ctx context.Context, input SpeechRequest, consume func([]byte) error) (SpeechResponse, error) {
+func (c *Client) StreamSpeech(ctx context.Context, input SpeechRequest, consume func([]byte) error) (response SpeechResponse, err error) {
+	started := time.Now()
+	defer func() { c.observe(input.Model, "tts_stream", started, err) }()
 	if consume == nil {
 		return SpeechResponse{}, fmt.Errorf("tts stream consumer is required")
 	}
@@ -1034,7 +1070,9 @@ func speechContentType(resp *http.Response) string {
 }
 
 // TranscribeSpeech sends one bounded audio utterance to an OpenAI-compatible STT endpoint.
-func (c *Client) TranscribeSpeech(ctx context.Context, input TranscriptionRequest) (TranscriptionResponse, error) {
+func (c *Client) TranscribeSpeech(ctx context.Context, input TranscriptionRequest) (response TranscriptionResponse, err error) {
+	started := time.Now()
+	defer func() { c.observe(input.Model, "stt", started, err) }()
 	input.Model = strings.TrimSpace(input.Model)
 	if input.Model == "" {
 		return TranscriptionResponse{}, fmt.Errorf("stt model id is required")
@@ -1141,10 +1179,11 @@ func isImageSupportProbeUnsupported(err error) bool {
 	return matches >= 2
 }
 
-func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (ChatResponse, error) {
+func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (response ChatResponse, err error) {
 	input.Stream = true
 	ctx = context.WithValue(ctx, requestDebugContextKey{}, requestDebugContext{SessionID: input.SessionID, ChatID: input.ChatID})
 	start := time.Now()
+	defer func() { c.observe(input.Model, "chat_stream", start, err) }()
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)

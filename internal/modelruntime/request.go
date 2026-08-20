@@ -21,7 +21,7 @@ func (r *Runtime) ClientForChat(chat domain.Chat) (*provider.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return provider.New(model.SourceProviderID, model.Provider, r.debug)
+	return provider.New(model.SourceProviderID, model.Provider, r.debug, r.health)
 }
 
 func (r *Runtime) ProviderStreamingEnabled(chat domain.Chat) bool {

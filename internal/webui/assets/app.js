@@ -5104,7 +5104,8 @@
 		runtimeHealthTitle(state) {
 		  state = this.normalizeRuntimeHealth(state);
 		  const checked = state.checked_at ? new Date(state.checked_at).toLocaleString() : '';
-		  return (state.detail || 'No runtime health detail.') + (checked ? '\nObserved ' + checked : '') + (state.latency_ms ? '\nLatency ' + state.latency_ms + ' ms' : '');
+		  const operation = String(state.operation || '').replaceAll('_', ' ');
+		  return (state.detail || 'No runtime health detail.') + (operation ? '\nOperation ' + operation : '') + (checked ? '\nObserved ' + checked : '') + (state.latency_ms ? '\nLatency ' + state.latency_ms + ' ms' : '');
         },
         providerHealthBadge(id) {
 		  return this.runtimeHealthBadge(this.providerHealthState(id));
@@ -5116,7 +5117,8 @@
 		  const state = this.providerHealthState(id);
 		  if (state.status === 'healthy') {
 			const count = Number(state.model_count || 0);
-			return 'Healthy · ' + count + ' model' + (count === 1 ? '' : 's') + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
+			const operation = String(state.operation || '').replaceAll('_', ' ');
+			return 'Healthy' + (count ? ' · ' + count + ' model' + (count === 1 ? '' : 's') : '') + (operation ? ' · ' + operation : '') + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
 		  }
 		  if (state.status === 'unhealthy') return 'Unhealthy · ' + (state.detail || 'Provider request failed');
 		  if (state.status === 'disabled') return 'Disabled';
@@ -5138,7 +5140,8 @@
 		modelHealthIcon(model) { return this.runtimeHealthIcon(this.modelHealthState(model)); },
 		modelHealthSummary(model) {
 		  const state = this.modelHealthState(model);
-		  if (state.status === 'healthy') return 'Healthy' + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
+		  const operation = String(state.operation || '').replaceAll('_', ' ');
+		  if (state.status === 'healthy') return 'Healthy' + (operation ? ' · ' + operation : '') + (state.latency_ms ? ' · ' + state.latency_ms + ' ms' : '');
 		  if (state.status === 'unhealthy') return 'Unhealthy · ' + (state.detail || 'Model unavailable');
 		  if (state.status === 'disabled') return 'Disabled';
 		  return 'Health unknown';

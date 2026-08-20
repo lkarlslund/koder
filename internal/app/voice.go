@@ -61,7 +61,7 @@ func (c *Controller) TranscribeVoice(ctx context.Context, format voice.AudioForm
 	if !ok || providerCfg.Disabled {
 		return "", fmt.Errorf("voice STT provider %q is not configured", providerID)
 	}
-	client, err := provider.New(providerID, providerCfg, nil)
+	client, err := provider.New(providerID, providerCfg, nil, c.providerHealth)
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func (c *Controller) StreamVoiceSpeech(ctx context.Context, text string, consume
 	if !ok || providerCfg.Disabled {
 		return fmt.Errorf("voice TTS provider %q is not configured", providerID)
 	}
-	client, err := provider.New(providerID, providerCfg, nil)
+	client, err := provider.New(providerID, providerCfg, nil, c.providerHealth)
 	if err != nil {
 		return err
 	}

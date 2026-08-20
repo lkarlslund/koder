@@ -133,15 +133,8 @@ type ModelOption struct {
 	Health            RuntimeHealth `json:"health"`
 }
 
-// RuntimeHealth is ephemeral process state observed while contacting a
-// provider or model. It is never persisted as configuration.
-type RuntimeHealth struct {
-	Status     string     `json:"status"`
-	Detail     string     `json:"detail,omitempty"`
-	CheckedAt  *time.Time `json:"checked_at,omitempty"`
-	LatencyMS  int64      `json:"latency_ms,omitempty"`
-	ModelCount int        `json:"model_count,omitempty"`
-}
+// RuntimeHealth is provider-owned ephemeral process state.
+type RuntimeHealth = provider.RuntimeHealth
 
 // ModelInfo describes the active model capabilities shown by web clients.
 type ModelInfo struct {
@@ -419,9 +412,7 @@ type Controller struct {
 	restartNeeded               bool
 	restartBuild                RestartBuildInfo
 	clearedStartupRunningTools  bool
-	healthMu                    sync.RWMutex
-	providerHealth              map[string]RuntimeHealth
-	modelHealth                 map[string]RuntimeHealth
+	providerHealth              *provider.HealthTracker
 
 	subMu   sync.Mutex
 	nextSub int
@@ -433,6 +424,10 @@ type Controller struct {
 // New constructs a browser app controller.
 func New(cfg config.Config, engine *agent.Engine) *Controller {
 	phone := &phonedevice.Hub{}
+	health := provider.NewHealthTracker()
+	if engine != nil && engine.ProviderHealthTracker() != nil {
+		health = engine.ProviderHealthTracker()
+	}
 	controller := &Controller{
 		cfg:                         cfg,
 		agent:                       engine,
@@ -441,8 +436,7 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		workspaceSnapshot:           workspacepkg.Snapshot,
 		workspaceRefreshMinInterval: defaultWorkspaceRefreshMinInterval,
 		phone:                       phone,
-		providerHealth:              map[string]RuntimeHealth{},
-		modelHealth:                 map[string]RuntimeHealth{},
+		providerHealth:              health,
 	}
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)
