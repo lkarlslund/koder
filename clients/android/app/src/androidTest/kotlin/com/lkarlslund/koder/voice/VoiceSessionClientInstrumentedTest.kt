@@ -19,6 +19,7 @@ class VoiceSessionClientInstrumentedTest {
         server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""").build())
         server.enqueue(MockResponse.Builder().code(201).body("""{"protocol":"voice.v1","voice_session":{"id":"voice-2","title":"Work"},"voice_sessions":[]}""").build())
 		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_session":{"id":"voice-1","title":"Family"},"voice_sessions":[]}""").build())
+		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","session":{"id":"voice-1","title":"Family","favorite":true},"sessions":[]}""").build())
 		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","chats":[{"id":"chat-1","session_id":"session-1","title":"Archived chat","role":"voice","archived":true}]}""").build())
 		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","chats":[]}""").build())
 		server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[]}""").build())
@@ -58,6 +59,14 @@ class VoiceSessionClientInstrumentedTest {
 				assertEquals("PATCH", renameRequest?.method)
 				assertEquals("/voice/v1/sessions/voice-1", renameRequest?.target)
 				assertTrue(renameRequest?.body?.utf8().orEmpty().contains("\"title\":\"Family\""))
+
+				val starred = CountDownLatch(1)
+				client.update(server.url("/").toString(), "secret", "voice-1", favorite = true) { starred.countDown() }
+				assertTrue(starred.await(5, TimeUnit.SECONDS))
+				val starRequest = server.takeRequest(5, TimeUnit.SECONDS)
+				assertEquals("PATCH", starRequest?.method)
+				assertEquals("/voice/v1/sessions/voice-1", starRequest?.target)
+				assertTrue(starRequest?.body?.utf8().orEmpty().contains("\"favorite\":true"))
 
 				val chatUpdated = CountDownLatch(1)
 				client.updateChat(server.url("/").toString(), "secret", "session-1", "chat-1", title = "Archived chat", archived = true) { chatUpdated.countDown() }

@@ -1421,7 +1421,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val time = session.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty()
 		addView(LinearLayout(this@MainActivity).apply {
 			orientation = LinearLayout.VERTICAL
-			addView(label(titleText).apply {
+			addView(label(if (session.favorite) "★  $titleText" else titleText).apply {
 				setTypeface(typeface, Typeface.BOLD)
 				maxLines = 1
 				ellipsize = TextUtils.TruncateAt.END
@@ -1446,15 +1446,18 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun showKoderSessionMenu(anchor: View, session: VoiceSession) {
 		PopupMenu(this, anchor).apply {
+			menu.add(if (session.favorite) "Remove star" else "Add star")
 			menu.add("Rename")
 			menu.add(if (session.archived) "Restore from archive" else "Archive")
-			menu.add("Delete permanently")
+			menu.add("Delete")
 			setOnMenuItemClickListener { item ->
 				when (item.title.toString()) {
+					"Add star" -> updateKoderSession(session, favorite = true)
+					"Remove star" -> updateKoderSession(session, favorite = false)
 					"Rename" -> showRenameKoderSessionDialog(session)
-					"Archive" -> updateKoderSession(session, archived = true)
+					"Archive" -> showArchiveKoderSessionDialog(session)
 					"Restore from archive" -> updateKoderSession(session, archived = false)
-					"Delete permanently" -> showDeleteKoderSessionDialog(session)
+					"Delete" -> showDeleteKoderSessionDialog(session)
 				}
 				true
 			}
@@ -1462,10 +1465,19 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun updateKoderSession(session: VoiceSession, title: String? = null, archived: Boolean? = null) {
-		sessionClient.update(settings.server, settings.token, session.id, title = title, archived = archived) { result ->
+	private fun updateKoderSession(session: VoiceSession, title: String? = null, archived: Boolean? = null, favorite: Boolean? = null) {
+		sessionClient.update(settings.server, settings.token, session.id, title = title, archived = archived, favorite = favorite) { result ->
 			runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = ::showManagementError) }
 		}
+	}
+
+	private fun showArchiveKoderSessionDialog(session: VoiceSession) {
+		AlertDialog.Builder(this)
+			.setTitle("Archive session?")
+			.setMessage("${session.title.ifBlank { "This session" }} will move to Archived. You can restore it later.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Archive") { _, _ -> updateKoderSession(session, archived = true) }
+			.show()
 	}
 
 	private fun showRenameKoderSessionDialog(session: VoiceSession) {
@@ -1480,8 +1492,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun showDeleteKoderSessionDialog(session: VoiceSession) {
 		AlertDialog.Builder(this)
-			.setTitle("Delete session permanently?")
-			.setMessage("${session.title.ifBlank { "This session" }} and all of its chats and history will be permanently removed. This cannot be undone.")
+			.setTitle("Delete session?")
+			.setMessage("${session.title.ifBlank { "This session" }} and all of its chats and history will be removed. This cannot be undone.")
 			.setNegativeButton("Cancel", null)
 			.setPositiveButton("Delete") { _, _ ->
 				sessionClient.delete(settings.server, settings.token, session.id) { result ->
@@ -1605,14 +1617,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			menu.add("Rename")
 			if (chat.backend == "koder") menu.add("Change model")
 			menu.add(if (chat.archived) "Restore from archive" else "Archive")
-			if (chat.archived) menu.add("Delete permanently")
+			if (chat.archived) menu.add("Delete")
 			setOnMenuItemClickListener { item ->
 				when (item.title.toString()) {
 					"Rename" -> showRenameKoderChatDialog(chat)
 					"Change model" -> showChatModelDialog(chat)
-					"Archive" -> updateKoderChat(chat, archived = true)
+					"Archive" -> showArchiveKoderChatDialog(chat)
 					"Restore from archive" -> updateKoderChat(chat, archived = false)
-					"Delete permanently" -> showDeleteKoderChatDialog(chat)
+					"Delete" -> showDeleteKoderChatDialog(chat)
 				}
 				true
 			}
@@ -1684,11 +1696,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			.show()
 	}
 
+	private fun showArchiveKoderChatDialog(chat: VoiceSession) {
+		AlertDialog.Builder(this)
+			.setTitle("Archive chat?")
+			.setMessage("${chat.title.ifBlank { "This chat" }} will move to Archived. You can restore it later.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Archive") { _, _ -> updateKoderChat(chat, archived = true) }
+			.show()
+	}
+
 	private fun showDeleteKoderChatDialog(chat: VoiceSession) {
 		val session = selectedKoderSession ?: return
 		AlertDialog.Builder(this)
-			.setTitle("Delete chat permanently?")
-			.setMessage("${chat.title.ifBlank { "This chat" }} and its history will be permanently removed. This cannot be undone.")
+			.setTitle("Delete chat?")
+			.setMessage("${chat.title.ifBlank { "This chat" }} and its history will be removed. This cannot be undone.")
 			.setNegativeButton("Cancel", null)
 			.setPositiveButton("Delete") { _, _ ->
 				sessionClient.deleteChat(settings.server, settings.token, session.id, chat.id) { result ->
@@ -1810,10 +1831,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					"Unpin" -> updateVoiceSession(session, pinned = false)
 					"Add star" -> updateVoiceSession(session, favorite = true)
 					"Remove star" -> updateVoiceSession(session, favorite = false)
-					"Archive" -> updateVoiceSession(session, archived = true) { home ->
-						showHome(home)
-						showOrganizationUndo("Conversation archived", session) { updateVoiceSession(session, archived = false) }
-					}
+					"Archive" -> showArchiveVoiceSessionDialog(session)
 					"Restore from archive" -> updateVoiceSession(session, archived = false)
 					"Undo delete" -> updateVoiceSession(session, deleted = false)
 					"Rename" -> showRenameVoiceSessionDialog(session)
@@ -1823,6 +1841,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			show()
 		}
+	}
+
+	private fun showArchiveVoiceSessionDialog(session: VoiceSession) {
+		AlertDialog.Builder(this)
+			.setTitle("Archive conversation?")
+			.setMessage("${session.title.ifBlank { "This conversation" }} will move to Archived. You can restore it later.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Archive") { _, _ ->
+				updateVoiceSession(session, archived = true) { home ->
+					showHome(home)
+					showOrganizationUndo("Conversation archived", session) { updateVoiceSession(session, archived = false) }
+				}
+			}
+			.show()
 	}
 
 	private fun showDeleteVoiceSessionDialog(session: VoiceSession) {
