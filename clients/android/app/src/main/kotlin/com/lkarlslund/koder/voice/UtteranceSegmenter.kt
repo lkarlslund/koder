@@ -34,6 +34,13 @@ data class EndpointConfig(
     ).toInt()
 }
 
+/** Requires stronger, sustained near-end speech while far-end audio is playing. */
+fun bargeInEndpointConfig(listening: EndpointConfig): EndpointConfig = listening.copy(
+	startThreshold = (listening.startThreshold + 0.20f).coerceAtMost(0.90f),
+	endThreshold = (listening.endThreshold + 0.15f).coerceAtMost(listening.startThreshold),
+	minimumSpeechMilliseconds = maxOf(listening.minimumSpeechMilliseconds, 320),
+)
+
 enum class CommitReason {
     SILENCE,
     MAXIMUM_DURATION,

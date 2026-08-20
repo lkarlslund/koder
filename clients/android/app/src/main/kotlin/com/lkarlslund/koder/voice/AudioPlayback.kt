@@ -6,6 +6,7 @@ import android.media.AudioTrack
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
+import kotlin.math.min
 
 interface StreamingAudioPlayback : AutoCloseable {
     fun start(format: VoiceAudioFormat)
@@ -22,6 +23,8 @@ class AndroidStreamingAudioPlayback(
     }
     private val generation = AtomicLong()
     @Volatile private var track: AudioTrack? = null
+	@Volatile private var sampleRate = 0
+	@Volatile private var bytesWritten = 0L
 
     @Synchronized
     override fun start(format: VoiceAudioFormat) {
@@ -51,6 +54,8 @@ class AndroidStreamingAudioPlayback(
             .build()
         check(audioTrack.state == AudioTrack.STATE_INITIALIZED) { "Audio playback initialization failed" }
         track = audioTrack
+		sampleRate = format.sampleRate
+		bytesWritten = 0
         val currentGeneration = generation.incrementAndGet()
         executor.execute {
             if (generation.get() == currentGeneration && track === audioTrack) audioTrack.play()
@@ -72,6 +77,7 @@ class AndroidStreamingAudioPlayback(
                     return@execute
                 }
                 offset += written
+				bytesWritten += written
             }
         }
     }
@@ -81,18 +87,43 @@ class AndroidStreamingAudioPlayback(
 		val currentGeneration = generation.get()
 		executor.execute {
 			if (audioTrack != null && generation.get() == currentGeneration && track === audioTrack) {
-				try {
-					audioTrack.stop()
-				} catch (_: IllegalStateException) {
-					// The route may have stopped playback after the final queued write.
-				} finally {
-					synchronized(this) {
-						if (generation.get() == currentGeneration && track === audioTrack) track = null
+				awaitPlaybackDrain(audioTrack, bytesWritten / PCM16_MONO_FRAME_BYTES, sampleRate) {
+					generation.get() == currentGeneration && track === audioTrack
+				}
+				if (generation.get() == currentGeneration && track === audioTrack) {
+					try {
+						audioTrack.stop()
+					} catch (_: IllegalStateException) {
+						// The route may have stopped playback after the final queued write.
+					} finally {
+						synchronized(this) {
+							if (generation.get() == currentGeneration && track === audioTrack) track = null
+						}
+						audioTrack.release()
 					}
-					audioTrack.release()
 				}
 			}
 			onComplete()
+		}
+	}
+
+	private fun awaitPlaybackDrain(audioTrack: AudioTrack, targetFrames: Long, rate: Int, current: () -> Boolean) {
+		if (targetFrames <= 0 || rate <= 0 || audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) return
+		val startedAt = System.nanoTime()
+		val initialHead = audioTrack.playbackHeadPosition.toLong() and UINT32_MASK
+		val remaining = (targetFrames - initialHead).coerceAtLeast(0)
+		val timeoutNanos = ((remaining * NANOS_PER_SECOND) / rate + DRAIN_GRACE_NANOS).coerceAtMost(MAX_DRAIN_NANOS)
+		while (audioTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
+			if (!current()) return
+			val played = audioTrack.playbackHeadPosition.toLong() and UINT32_MASK
+			if (played >= targetFrames || System.nanoTime() - startedAt >= timeoutNanos) return
+			val remainingMillis = ((targetFrames - played).coerceAtLeast(1) * 1_000L / rate).coerceAtLeast(1)
+			try {
+				Thread.sleep(min(10L, remainingMillis))
+			} catch (_: InterruptedException) {
+				Thread.currentThread().interrupt()
+				return
+			}
 		}
 	}
 
@@ -115,4 +146,12 @@ class AndroidStreamingAudioPlayback(
     }
 
     override fun close() = stop()
+
+	private companion object {
+		const val PCM16_MONO_FRAME_BYTES = 2
+		const val UINT32_MASK = 0xffff_ffffL
+		const val NANOS_PER_SECOND = 1_000_000_000L
+		const val DRAIN_GRACE_NANOS = 500_000_000L
+		const val MAX_DRAIN_NANOS = 60_000_000_000L
+	}
 }

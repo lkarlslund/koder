@@ -6,6 +6,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UtteranceSegmenterTest {
+	@Test
+	fun bargeInRequiresStrongerSustainedSpeechThanOrdinaryListening() {
+		val listening = EndpointConfig(startThreshold = 0.5f, endThreshold = 0.35f, minimumSpeechMilliseconds = 160)
+		val bargeIn = bargeInEndpointConfig(listening)
+
+		assertEquals(0.7f, bargeIn.startThreshold)
+		assertEquals(0.5f, bargeIn.endThreshold)
+		assertEquals(320, bargeIn.minimumSpeechMilliseconds)
+		assertEquals(listening.endSilenceMilliseconds, bargeIn.endSilenceMilliseconds)
+	}
+
     private val config = EndpointConfig(
         sampleRate = 1_000,
         frameSamples = 100,

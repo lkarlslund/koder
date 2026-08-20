@@ -163,6 +163,9 @@ class CallController(
     private var outputSequence = 0L
 	private var outputUtteranceId = ""
 	    @Volatile private var acceptingOutput = false
+		private var listeningEndpointConfig = EndpointConfig(sampleRate = endpointSampleRate, frameSamples = endpointFrameSamples)
+		private var outputEndpointConfig = bargeInEndpointConfig(listeningEndpointConfig)
+		private var endpointConfiguredForOutput = false
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
 		@Volatile private var interruptedPlayback = false
@@ -195,13 +198,16 @@ class CallController(
 		telecomHeld = false
 		connectionSound.stop()
 		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
-		endpoint.configure(EndpointConfig(
+		listeningEndpointConfig = EndpointConfig(
 			sampleRate = endpointSampleRate,
 			frameSamples = endpointFrameSamples,
 			startThreshold = startThreshold,
 			endThreshold = (startThreshold - 0.15f).coerceAtLeast(0.1f),
 			endSilenceMilliseconds = vadSilenceMilliseconds.coerceIn(300, 1_200),
-		))
+		)
+		outputEndpointConfig = bargeInEndpointConfig(listeningEndpointConfig)
+		endpointConfiguredForOutput = false
+		endpoint.configure(listeningEndpointConfig)
 		telecom.setBuiltInAudioRoute(builtInAudioRoute)
 		VoiceCallControlRegistry.attach(this)
 		snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", activeSessionId = sessionId, voiceSessionId = chatId)
@@ -463,6 +469,7 @@ class CallController(
 					if (outputUtteranceId != frame.utteranceId) outputSequence = 0
 					outputUtteranceId = frame.utteranceId
                     acceptingOutput = true
+					configureEndpointForOutput(true)
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
 					audioConfig?.input?.let { startMicrophone(it, showListeningState = false) }
@@ -470,17 +477,28 @@ class CallController(
             }
             "tts_end" -> {
 				if (acceptingOutput) {
-					acceptingOutput = false
-					playback.finish { onMain { maybeListen(force = true) } }
+					val completedUtteranceId = frame.utteranceId
+					playback.finish {
+						onMain {
+							if (outputUtteranceId != completedUtteranceId) return@onMain
+							acceptingOutput = false
+							outputUtteranceId = ""
+							outputSequence = 0
+							configureEndpointForOutput(false)
+							maybeListen(force = true)
+						}
+					}
+				} else {
+					outputUtteranceId = ""
+					outputSequence = 0
 				}
-				outputUtteranceId = ""
-				outputSequence = 0
             }
             "error" -> {
                 acceptingOutput = false
 				outputUtteranceId = ""
 				outputSequence = 0
                 playback.stop()
+				configureEndpointForOutput(false)
 				val message = frame.error.ifBlank { "Voice request failed" }
 				snapshot = snapshot.copy(
 					historyLoading = false,
@@ -501,7 +519,10 @@ class CallController(
         if (frame.kind != VoiceAudioFrameKind.OUTPUT_PCM || frame.sequence != outputSequence) {
             acceptingOutput = false
             playback.stop()
-            onMain { update(Stage.ERROR, "Speech audio arrived out of order") }
+			onMain {
+				configureEndpointForOutput(false)
+				update(Stage.ERROR, "Speech audio arrived out of order")
+			}
             return
         }
 		listener.onAudioLevel(pcmLevel(frame.pcm), false)
@@ -560,11 +581,14 @@ class CallController(
     @Synchronized
     private fun processMicrophoneFrame(format: VoiceAudioFormat, samples: ShortArray) {
         if (!running) return
-        try {
+		try {
 			val evaluated = endpoint.evaluate(samples)
 			diagnostics.recordInput(samples, evaluated.vad, utteranceId.isNotBlank())
-			listener.onAudioLevel(pcmLevel(samples), true)
-			listener.onAudioWaveform(pcmWaveform(samples), true)
+			val speechDetected = utteranceId.isNotBlank() || evaluated.events.any { it is UtteranceEvent.Started }
+			if (!acceptingOutput || speechDetected) {
+				listener.onAudioLevel(pcmLevel(samples), true)
+				listener.onAudioWaveform(pcmWaveform(samples), true)
+			}
 			for (event in evaluated.events) {
                 when (event) {
                     is UtteranceEvent.Started -> {
@@ -588,10 +612,11 @@ class CallController(
 						}
                     }
                     is UtteranceEvent.Continued -> sendPCM(event.frame)
-                    is UtteranceEvent.Committed -> {
+					is UtteranceEvent.Committed -> {
                         val completedId = utteranceId
                         utteranceId = ""
 						stopMicrophone()
+						configureEndpointForOutput(false)
 						connection.commitAudio(completedId)
 						if (!serverReady) connectionSound.disconnected()
 						interruptedPlayback = false
@@ -602,11 +627,12 @@ class CallController(
                     }
                 }
             }
-        } catch (error: Exception) {
+		} catch (error: Exception) {
             val failedId = utteranceId
             utteranceId = ""
 			interruptedPlayback = false
 			stopMicrophone()
+			configureEndpointForOutput(false)
             connection.cancelAudio(failedId)
             onMain { update(Stage.ERROR, error.message ?: "Voice capture failed") }
         }
@@ -616,6 +642,13 @@ class CallController(
         val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         samples.forEach(pcm::putShort)
         connection.sendAudio(inputSequence++, pcm.array())
+	}
+
+	@Synchronized
+	private fun configureEndpointForOutput(outputActive: Boolean) {
+		if (endpointConfiguredForOutput == outputActive) return
+		endpointConfiguredForOutput = outputActive
+		endpoint.configure(if (outputActive) outputEndpointConfig else listeningEndpointConfig)
 	}
 
 	private fun stopMicrophone() {
