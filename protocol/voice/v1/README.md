@@ -136,8 +136,10 @@ selected session, `chats` lists its chats, and `chat_id` identifies the selected
 voice chat. Chat summaries include role, activity, runtime state, and the
 model-authored `status_text` published through the global `chat_status` tool.
 `call_state.voice_sessions` lists selectable durable voice chats and omits
-archived and deleted ones for compatibility with older clients.
-Session summaries carry `archived`, `pinned`, `favorite`, and `deleted` flags
+archived and deleted ones for compatibility with older clients. Deleted
+sessions are also omitted from REST lists and server statistics; deletion is
+permanent rather than a user-visible organization state.
+Session summaries carry `archived`, `pinned`, and `favorite` flags
 plus an RFC 3339 `updated_at` timestamp. `last_message` is the latest completed
 spoken result, and monotonic `result_count` lets each client maintain its own
 read cursor without server-side device state. Ephemeral `busy` and `status`
@@ -145,6 +147,17 @@ fields describe a currently loaded chat's live work and are never persisted.
 Pinned chats are ordered first and each group is then ordered most recently
 used first. Organization changes do not change `updated_at`; it remains the
 conversation's actual last-activity time.
+
+Native clients manage the normal hierarchy through authenticated REST calls:
+
+- `PATCH /voice/v1/sessions/{session_id}` renames or archives/restores a session.
+- `DELETE /voice/v1/sessions/{session_id}` permanently deletes an idle session.
+- `PATCH /voice/v1/sessions/{session_id}/chats/{chat_id}` renames or
+  archives/restores a chat.
+- `DELETE /voice/v1/sessions/{session_id}/chats/{chat_id}` permanently deletes
+  an archived leaf chat. Requiring archive first prevents accidental loss and
+  preserves parent/child chat integrity.
+
 `call_state.history` contains only the newest five complete conversational
 turns, and `history_has_more` indicates whether the client can request an older
 page. A history cursor is the first visible transcript entry ID; pages remain

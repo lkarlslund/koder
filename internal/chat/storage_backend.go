@@ -117,6 +117,21 @@ func (s *Source) DeleteSessionData(ctx context.Context, sessionID id.ID) error {
 	return deleteSessionData(ctx, deps.Store, sessionID)
 }
 
+// DeleteRecordData permanently removes one chat and its persisted timeline.
+func (s *Source) DeleteRecordData(ctx context.Context, chatID id.ID) error {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return err
+	}
+	if chatID == "" {
+		return fmt.Errorf("delete chat data: chat id is required")
+	}
+	if err := DeletePersistedData(ctx, deps.Store, chatID); err != nil {
+		return err
+	}
+	return deleteRecord(ctx, deps.Store, chatID)
+}
+
 func (s *Source) TimelinePage(ctx context.Context, chatID, before id.ID, limit int, all bool) (TimelinePage, error) {
 	deps, err := s.currentDeps()
 	if err != nil {

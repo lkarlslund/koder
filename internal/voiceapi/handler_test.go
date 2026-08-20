@@ -116,6 +116,50 @@ func (f *fakeBackend) ListVoiceSessions(context.Context) ([]voice.Session, error
 	return []voice.Session{{ID: "session-1", Title: "Laptop repair"}}, nil
 }
 
+type managedFakeBackend struct{ *fakeBackend }
+
+func (f *managedFakeBackend) UpdateClientSession(_ context.Context, sessionID string, update voice.SessionUpdate) (voice.Session, error) {
+	for index := range f.sessions {
+		if f.sessions[index].ID != sessionID {
+			continue
+		}
+		if update.Title != nil {
+			f.sessions[index].Title = *update.Title
+		}
+		if update.Archived != nil {
+			f.sessions[index].Archived = *update.Archived
+		}
+		return f.sessions[index], nil
+	}
+	return voice.Session{}, fmt.Errorf("session not found")
+}
+
+func (f *managedFakeBackend) DeleteClientSession(_ context.Context, sessionID string) error {
+	f.sessions = slices.DeleteFunc(f.sessions, func(item voice.Session) bool { return item.ID == sessionID })
+	return nil
+}
+
+func (f *managedFakeBackend) UpdateClientChat(_ context.Context, sessionID, chatID string, update voice.ChatUpdate) (voice.Chat, error) {
+	for index := range f.chats {
+		if f.chats[index].SessionID != sessionID || f.chats[index].ID != chatID {
+			continue
+		}
+		if update.Title != nil {
+			f.chats[index].Title = *update.Title
+		}
+		if update.Archived != nil {
+			f.chats[index].Archived = *update.Archived
+		}
+		return f.chats[index], nil
+	}
+	return voice.Chat{}, fmt.Errorf("chat not found")
+}
+
+func (f *managedFakeBackend) DeleteClientChat(_ context.Context, sessionID, chatID string) error {
+	f.chats = slices.DeleteFunc(f.chats, func(item voice.Chat) bool { return item.SessionID == sessionID && item.ID == chatID })
+	return nil
+}
+
 func (f *fakeBackend) ListSessionChats(_ context.Context, sessionID string) ([]voice.Chat, error) {
 	var out []voice.Chat
 	for _, chat := range f.chats {
@@ -645,6 +689,53 @@ func TestHandlerExposesNativeSessionChatHierarchy(t *testing.T) {
 	}
 }
 
+func TestHandlerManagesNativeSessionsAndChats(t *testing.T) {
+	backend := &managedFakeBackend{fakeBackend: &fakeBackend{
+		sessions: []voice.Session{{ID: "session-1", Title: "Old"}, {ID: "deleted", Title: "Gone", Deleted: true}},
+		chats:    []voice.Chat{{ID: "chat-1", SessionID: "session-1", Title: "Chat", Role: "voice"}},
+	}}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+	do := func(method, path, body string) (int, sessionsResponse) {
+		req, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer secret")
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		var decoded sessionsResponse
+		if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, decoded
+	}
+
+	status, home := do(http.MethodGet, "/voice/v1/sessions", "")
+	if status != http.StatusOK || len(home.Sessions) != 1 || home.Sessions[0].ID != "session-1" {
+		t.Fatalf("deleted session was exposed: status=%d body=%#v", status, home)
+	}
+	status, home = do(http.MethodPatch, "/voice/v1/sessions/session-1", `{"title":"Renamed","archived":true}`)
+	if status != http.StatusOK || home.Session == nil || home.Session.Title != "Renamed" || !home.Session.Archived {
+		t.Fatalf("session update: status=%d body=%#v", status, home)
+	}
+	status, home = do(http.MethodPatch, "/voice/v1/sessions/session-1/chats/chat-1", `{"title":"Renamed chat","archived":true}`)
+	if status != http.StatusOK || len(home.Chats) != 1 || home.Chats[0].Title != "Renamed chat" || !home.Chats[0].Archived {
+		t.Fatalf("chat update: status=%d body=%#v", status, home)
+	}
+	status, home = do(http.MethodDelete, "/voice/v1/sessions/session-1/chats/chat-1", "")
+	if status != http.StatusOK || len(home.Chats) != 0 {
+		t.Fatalf("chat delete: status=%d body=%#v", status, home)
+	}
+	status, home = do(http.MethodDelete, "/voice/v1/sessions/session-1", "")
+	if status != http.StatusOK || len(home.Sessions) != 0 {
+		t.Fatalf("session delete: status=%d body=%#v", status, home)
+	}
+}
+
 func TestHandlerRenamesVoiceSession(t *testing.T) {
 	backend := &fakeBackend{voiceChats: []voice.Session{{ID: "voice-1", Title: "Old"}}}
 	server := httptest.NewServer(NewHandler(backend, "secret"))
@@ -753,7 +844,10 @@ func TestHandlerProtectsAndValidatesVoiceSessionsEndpoint(t *testing.T) {
 }
 
 func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
-	handler := NewHandler(&fakeBackend{}, "secret")
+	handler := NewHandler(&fakeBackend{
+		sessions:   []voice.Session{{ID: "session-1"}, {ID: "deleted-session", Deleted: true}},
+		voiceChats: []voice.Session{{ID: "voice-1"}, {ID: "voice-2"}, {ID: "deleted-voice", Deleted: true}},
+	}, "secret")
 	release, _, err := handler.Lease.AcquireDeviceConnection("phone-1", "call-1", "voice-1")
 	if err != nil {
 		t.Fatal(err)

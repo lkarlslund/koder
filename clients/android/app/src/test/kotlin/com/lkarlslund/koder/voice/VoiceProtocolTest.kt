@@ -212,10 +212,8 @@ class VoiceProtocolTest {
 		val home = VoiceProtocol.parseHome(
 			"""{"protocol":"voice.v1","voice_sessions":[{"id":"newer","title":"Newer","updated_at":"2026-08-20T12:00:00Z","last_message":"Finished the task.","result_count":7,"busy":true,"status":"running_tools"},{"id":"pinned","title":"Pinned","updated_at":"2026-08-18T12:00:00Z","pinned":true,"favorite":true},{"id":"old","title":"Old","archived":true,"deleted":true}]}""",
 		)
-		assertEquals(listOf("pinned", "newer", "old"), home.voiceSessions.map { it.id })
+		assertEquals(listOf("pinned", "newer"), home.voiceSessions.map { it.id })
 		assertTrue(home.voiceSessions.first().favorite)
-		assertTrue(home.voiceSessions.last().archived)
-		assertTrue(home.voiceSessions.last().deleted)
 		val newer = home.voiceSessions.first { it.id == "newer" }
 		assertEquals("Finished the task.", newer.lastMessage)
 		assertEquals(7, newer.resultCount)
@@ -226,6 +224,9 @@ class VoiceProtocolTest {
 		assertEquals(false, update.getBoolean("pinned"))
 		assertEquals(true, update.getBoolean("archived"))
 		assertFalse(update.has("title"))
+		val chatUpdate = JSONObject(VoiceProtocol.updateChatRequest(title = "New title", archived = true))
+		assertEquals("New title", chatUpdate.getString("title"))
+		assertTrue(chatUpdate.getBoolean("archived"))
 	}
 
 	@Test

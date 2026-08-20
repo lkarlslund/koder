@@ -126,20 +126,22 @@ func (c *Controller) StreamVoiceSpeech(ctx context.Context, text string, consume
 
 // ListVoiceSessions returns bounded summaries suitable for voice routing.
 func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, error) {
-	state, err := c.Sessions(ctx)
+	all, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	all := append(append([]domain.Session(nil), state.Sessions...), state.QuickChats...)
 	out := make([]voice.Session, 0, len(all))
 	for _, session := range all {
 		if session.Kind != domain.SessionKindRegular && session.Kind != domain.SessionKindQuick && session.Kind != domain.SessionKindVoice {
 			continue
 		}
+		if !session.DeletedAt.IsZero() {
+			continue
+		}
 		summary := voice.Session{
 			ID:          string(session.ID),
 			Title:       voiceSessionTitle(session),
-			Kind:        string(session.Kind),
+			Kind:        session.Kind.String(),
 			LastMessage: session.LastMessage,
 			UpdatedAt:   session.UpdatedAt,
 			Archived:    session.Archived,
@@ -270,7 +272,7 @@ func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, title string)
 		snapshot.Chats[0].Title = title
 	}
 	sessionSummary := voice.Session{
-		ID: string(snapshot.Session.ID), Title: voiceSessionTitle(snapshot.Session), Kind: string(snapshot.Session.Kind),
+		ID: string(snapshot.Session.ID), Title: voiceSessionTitle(snapshot.Session), Kind: snapshot.Session.Kind.String(),
 		UpdatedAt: snapshot.Session.UpdatedAt, ChatCount: 1, VoiceChats: 1,
 	}
 	chatRecord := snapshot.Chats[0]
@@ -298,6 +300,9 @@ func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error
 		if session.Kind != domain.SessionKindVoice {
 			continue
 		}
+		if !session.DeletedAt.IsZero() {
+			continue
+		}
 		summary := voiceSessionSummary(session)
 		snapshot, loaded := live[session.ID]
 		if !loaded && summary.LastMessage == "" {
@@ -314,6 +319,141 @@ func (c *Controller) ListVoiceChats(ctx context.Context) ([]voice.Session, error
 		out = append(out, summary)
 	}
 	return out, nil
+}
+
+// UpdateClientSession changes session organization metadata for a native
+// client without changing the session's last-activity timestamp.
+func (c *Controller) UpdateClientSession(ctx context.Context, sessionID string, update voice.SessionUpdate) (voice.Session, error) {
+	if c.agent == nil {
+		return voice.Session{}, fmt.Errorf("no chat agent")
+	}
+	if update.Deleted != nil {
+		return voice.Session{}, fmt.Errorf("deleted sessions cannot be restored; delete removes them permanently")
+	}
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return voice.Session{}, err
+	}
+	current := owner.Snapshot().Session
+	if !c.sessionInWorkspace(current) {
+		return voice.Session{}, fmt.Errorf("session %s does not belong to this workspace", current.ID)
+	}
+	var title *string
+	if update.Title != nil {
+		normalized := truncateVoiceText(strings.TrimSpace(*update.Title), 80)
+		if normalized == "" {
+			return voice.Session{}, fmt.Errorf("session title is required")
+		}
+		title = &normalized
+	}
+	updated, err := owner.UpdateSessionMetadata(ctx, func(session *domain.Session) {
+		if title != nil {
+			session.Title = *title
+			session.TitleGeneratedAt = time.Time{}
+			session.TitleRefreshCount = 0
+		}
+		if update.Archived != nil {
+			session.Archived = *update.Archived
+			if session.Archived {
+				session.Pinned = false
+			}
+		}
+		if update.Pinned != nil {
+			session.Pinned = *update.Pinned
+			if session.Pinned {
+				session.Archived = false
+			}
+		}
+		if update.Favorite != nil {
+			session.Favorite = *update.Favorite
+		}
+	})
+	if err != nil {
+		return voice.Session{}, fmt.Errorf("update session: %w", err)
+	}
+	state, err := c.Sessions(ctx)
+	if err != nil {
+		return voice.Session{}, err
+	}
+	c.broadcast("sessions_delta", sessionListPayload(state, ""))
+	return clientSessionSummary(updated, owner.Snapshot().Chats), nil
+}
+
+// DeleteClientSession permanently removes an idle session and its chats.
+func (c *Controller) DeleteClientSession(ctx context.Context, sessionID string) error {
+	return c.DeleteSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+}
+
+// UpdateClientChat changes one chat's title or archive state.
+func (c *Controller) UpdateClientChat(ctx context.Context, sessionID, chatID string, update voice.ChatUpdate) (voice.Chat, error) {
+	if c.agent == nil {
+		return voice.Chat{}, fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return voice.Chat{}, err
+	}
+	snapshot := owner.Snapshot()
+	if !c.sessionInWorkspace(snapshot.Session) {
+		return voice.Chat{}, fmt.Errorf("session %s does not belong to this workspace", snapshot.Session.ID)
+	}
+	request := chattool.UpdateRequest{Archived: update.Archived}
+	if update.Title != nil {
+		request.Title = strings.TrimSpace(*update.Title)
+		if request.Title == "" {
+			return voice.Chat{}, fmt.Errorf("chat title is required")
+		}
+	}
+	if _, _, err := owner.UpdateChat(ctx, id.ID(strings.TrimSpace(chatID)), request); err != nil {
+		return voice.Chat{}, err
+	}
+	chats, err := c.ListSessionChats(ctx, sessionID)
+	if err != nil {
+		return voice.Chat{}, err
+	}
+	for _, item := range chats {
+		if item.ID == strings.TrimSpace(chatID) {
+			c.broadcast("chats_delta", map[string]any{"session_id": snapshot.Session.ID, "chats": owner.Snapshot().Chats})
+			return item, nil
+		}
+	}
+	return voice.Chat{}, fmt.Errorf("chat %s not found after update", chatID)
+}
+
+// DeleteClientChat permanently removes an archived leaf chat.
+func (c *Controller) DeleteClientChat(ctx context.Context, sessionID, chatID string) error {
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(owner.Snapshot().Session) {
+		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
+	}
+	if err := owner.DeleteChat(ctx, id.ID(strings.TrimSpace(chatID))); err != nil {
+		return err
+	}
+	c.broadcast("chats_delta", map[string]any{"session_id": sessionID, "chats": owner.Snapshot().Chats})
+	return nil
+}
+
+func clientSessionSummary(session domain.Session, chats []domain.Chat) voice.Session {
+	summary := voice.Session{
+		ID: string(session.ID), Title: voiceSessionTitle(session), Kind: session.Kind.String(), LastMessage: session.LastMessage,
+		UpdatedAt: session.UpdatedAt, Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite,
+	}
+	for _, item := range chats {
+		if item.Archived {
+			continue
+		}
+		summary.ChatCount++
+		if item.WorkflowRole == chatrole.Voice {
+			summary.VoiceChats++
+		}
+	}
+	return summary
 }
 
 // CreateVoiceTarget creates either a disposable one-chat managed workspace or

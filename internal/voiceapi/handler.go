@@ -153,6 +153,11 @@ type updateSessionRequest struct {
 	Deleted  *bool   `json:"deleted,omitempty"`
 }
 
+type updateChatRequest struct {
+	Title    *string `json:"title,omitempty"`
+	Archived *bool   `json:"archived,omitempty"`
+}
+
 type bindDeviceRequest struct {
 	Code   string                `json:"code"`
 	Device deviceauth.DeviceInfo `json:"device"`
@@ -645,6 +650,8 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 	build := version.Current()
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
+	sessions = withoutDeletedSessions(sessions)
+	voiceSessions = withoutDeletedSessions(voiceSessions)
 	response := serverInfoResponse{
 		Protocol:             protocolVersion,
 		ServerTime:           now,
@@ -722,12 +729,14 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	sessions = withoutDeletedSessions(sessions)
 	sortVoiceSessions(sessions)
 	workSessions, err := h.Backend.ListVoiceSessions(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	workSessions = withoutDeletedSessions(workSessions)
 	slices.SortStableFunc(workSessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	response := sessionsResponse{
 		Protocol: protocolVersion, Sessions: workSessions, VoiceSession: created, VoiceSessions: sessions,
@@ -779,6 +788,10 @@ func (h *Handler) serveTemporaryVoiceSession(w http.ResponseWriter, r *http.Requ
 func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/voice/v1/sessions/"), "/")
 	parts := strings.Split(path, "/")
+	if len(parts) == 3 && parts[1] == "chats" {
+		h.serveSessionChat(w, r, parts[0], parts[2])
+		return
+	}
 	if len(parts) == 2 && parts[1] == "chats" {
 		h.serveSessionChats(w, r, parts[0])
 		return
@@ -791,6 +804,10 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
 		w.Header().Set("Allow", http.MethodPatch+", "+http.MethodDelete)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if backend, ok := h.Backend.(voice.SessionManagementBackend); ok {
+		h.serveManagedSession(w, r, backend, sessionID)
 		return
 	}
 	if r.Method == http.MethodDelete {
@@ -843,6 +860,57 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &updated, VoiceSessions: sessions})
 }
 
+func (h *Handler) serveManagedSession(w http.ResponseWriter, r *http.Request, backend voice.SessionManagementBackend, sessionID string) {
+	var updated *voice.Session
+	if r.Method == http.MethodDelete {
+		if err := backend.DeleteClientSession(r.Context(), sessionID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		request, ok := decodeUpdateSessionRequest(w, r)
+		if !ok {
+			return
+		}
+		item, err := backend.UpdateClientSession(r.Context(), sessionID, voice.SessionUpdate{
+			Title: request.Title, Archived: request.Archived, Pinned: request.Pinned, Favorite: request.Favorite, Deleted: request.Deleted,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		updated = &item
+	}
+	sessions, err := h.Backend.ListVoiceSessions(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sessions = withoutDeletedSessions(sessions)
+	slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	writeSessionsResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Session: updated, Sessions: sessions})
+}
+
+func decodeUpdateSessionRequest(w http.ResponseWriter, r *http.Request) (updateSessionRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request updateSessionRequest
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid session request: "+err.Error(), http.StatusBadRequest)
+		return updateSessionRequest{}, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "invalid session request: expected one JSON object", http.StatusBadRequest)
+		return updateSessionRequest{}, false
+	}
+	if request.Title == nil && request.Archived == nil && request.Pinned == nil && request.Favorite == nil && request.Deleted == nil {
+		http.Error(w, "session update is empty", http.StatusBadRequest)
+		return updateSessionRequest{}, false
+	}
+	return request, true
+}
+
 func (h *Handler) serveSessionChats(w http.ResponseWriter, r *http.Request, sessionID string) {
 	backend, ok := h.Backend.(voice.SessionChatBackend)
 	if !ok {
@@ -880,6 +948,57 @@ func (h *Handler) serveSessionChats(w http.ResponseWriter, r *http.Request, sess
 	writeSessionsResponse(w, status, sessionsResponse{Protocol: protocolVersion, Chat: created, Chats: chats})
 }
 
+func (h *Handler) serveSessionChat(w http.ResponseWriter, r *http.Request, sessionID, chatID string) {
+	backend, ok := h.Backend.(voice.SessionManagementBackend)
+	if !ok {
+		http.Error(w, "session management backend is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	chatBackend, ok := h.Backend.(voice.SessionChatBackend)
+	if !ok {
+		http.Error(w, "session chat backend is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodPatch:
+		r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		var request updateChatRequest
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, "invalid chat request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			http.Error(w, "invalid chat request: expected one JSON object", http.StatusBadRequest)
+			return
+		}
+		if request.Title == nil && request.Archived == nil {
+			http.Error(w, "chat update is empty", http.StatusBadRequest)
+			return
+		}
+		if _, err := backend.UpdateClientChat(r.Context(), sessionID, chatID, voice.ChatUpdate{Title: request.Title, Archived: request.Archived}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case http.MethodDelete:
+		if err := backend.DeleteClientChat(r.Context(), sessionID, chatID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
+		w.Header().Set("Allow", http.MethodPatch+", "+http.MethodDelete)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	chats, err := chatBackend.ListSessionChats(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeSessionsResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Chats: chats})
+}
+
 func decodeCreateSessionRequest(w http.ResponseWriter, r *http.Request) (createSessionRequest, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
 	decoder := json.NewDecoder(r.Body)
@@ -913,6 +1032,10 @@ func sortVoiceSessions(sessions []voice.Session) {
 		}
 		return b.UpdatedAt.Compare(a.UpdatedAt)
 	})
+}
+
+func withoutDeletedSessions(sessions []voice.Session) []voice.Session {
+	return slices.DeleteFunc(sessions, func(item voice.Session) bool { return item.Deleted })
 }
 
 func (h *Handler) serveArtifact(w http.ResponseWriter, r *http.Request) {

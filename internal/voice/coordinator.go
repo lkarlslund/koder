@@ -52,6 +52,12 @@ type SessionUpdate struct {
 	Deleted  *bool
 }
 
+// ChatUpdate changes user-managed chat metadata without affecting history.
+type ChatUpdate struct {
+	Title    *string
+	Archived *bool
+}
+
 // DelegationResult is the public outcome of work performed in an ordinary chat.
 type DelegationResult struct {
 	SessionID      string `json:"session_id"`
@@ -118,6 +124,15 @@ type SessionChatBackend interface {
 	CreateVoiceChatInSession(context.Context, string, string) (Chat, error)
 	CreateTemporaryVoiceChat(context.Context, string) (Session, Chat, error)
 	RunVoiceChatTurn(context.Context, string, string, string, TurnOptions, func(Session) error) (Message, error)
+}
+
+// SessionManagementBackend exposes the same organization operations used by
+// Koder's web session browser to native voice clients.
+type SessionManagementBackend interface {
+	UpdateClientSession(context.Context, string, SessionUpdate) (Session, error)
+	DeleteClientSession(context.Context, string) error
+	UpdateClientChat(context.Context, string, string, ChatUpdate) (Chat, error)
+	DeleteClientChat(context.Context, string, string) error
 }
 
 // ResponsePacing controls spoken answer length without adding instructions to chat history.

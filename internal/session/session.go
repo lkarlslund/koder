@@ -28,6 +28,7 @@ const (
 	EventChatAdded       EventKind = "chat_added"
 	EventChatChanged     EventKind = "chat_changed"
 	EventChatArchived    EventKind = "chat_archived"
+	EventChatDeleted     EventKind = "chat_deleted"
 	EventSessionChanged  EventKind = "session_changed"
 	EventPlanningChanged EventKind = "planning_changed"
 	EventTasksChanged    EventKind = "tasks_changed"
@@ -876,6 +877,53 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 		onChatArchived(ctx, target.ID)
 	}
 	return status, nextChatID, nil
+}
+
+// DeleteChat permanently removes an archived leaf chat and its history.
+func (s *Session) DeleteChat(ctx context.Context, chatID id.ID) error {
+	if s == nil {
+		return fmt.Errorf("session is required")
+	}
+	if chatID == "" {
+		return fmt.Errorf("chat id is required")
+	}
+	s.mu.RLock()
+	target, ok := chatByID(s.chats, chatID)
+	if !ok {
+		s.mu.RUnlock()
+		return fmt.Errorf("chat %s not found", chatID)
+	}
+	if !target.Archived {
+		s.mu.RUnlock()
+		return fmt.Errorf("archive chat %s before deleting it", chatID)
+	}
+	for _, item := range s.chats {
+		if item.ParentChatID != nil && *item.ParentChatID == chatID {
+			s.mu.RUnlock()
+			return fmt.Errorf("cannot delete chat %s while it has child chats", chatID)
+		}
+	}
+	runtime := s.runtimes[chatID]
+	s.mu.RUnlock()
+	if runtime != nil {
+		if err := runtime.DrainAndClose(ctx); err != nil {
+			return fmt.Errorf("close chat %s: %w", chatID, err)
+		}
+	}
+	if err := s.chatsSrc.DeleteRecordData(ctx, chatID); err != nil {
+		return fmt.Errorf("delete chat %s: %w", chatID, err)
+	}
+	s.mu.Lock()
+	s.chats = slices.DeleteFunc(s.chats, func(item domain.Chat) bool { return item.ID == chatID })
+	delete(s.runtimes, chatID)
+	unsub := s.unsubs[chatID]
+	delete(s.unsubs, chatID)
+	s.mu.Unlock()
+	if unsub != nil {
+		unsub()
+	}
+	s.emit(Event{Kind: EventChatDeleted, SessionID: target.SessionID, Chat: target})
+	return nil
 }
 
 // ReorderChats persists and applies the complete chat order.

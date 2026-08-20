@@ -2391,7 +2391,7 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 			listed = target
 		}
 	}
-	if listed.ID == "" || listed.Kind != string(domain.SessionKindVoice) || listed.ChatCount != 1 || listed.VoiceChats != 1 {
+	if listed.ID == "" || listed.Kind != domain.SessionKindVoice.String() || listed.ChatCount != 1 || listed.VoiceChats != 1 {
 		t.Fatalf("voice session missing from native hierarchy: %#v", targets)
 	}
 	ensured, err := ctrl.EnsureVoiceSession(ctx, string(voiceSession.ID))
@@ -2403,7 +2403,7 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	}
 }
 
-func TestVoiceChatOrganizationIsDurableRecoverableAndDoesNotChangeLastUsed(t *testing.T) {
+func TestVoiceChatOrganizationIsDurableAndDeletedChatsAreOmitted(t *testing.T) {
 	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
 	ctx := context.Background()
 	created, _, err := ctrl.CreateVoiceChat(ctx, "Organize me")
@@ -2453,8 +2453,8 @@ func TestVoiceChatOrganizationIsDurableRecoverableAndDoesNotChangeLastUsed(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || !listed[0].Deleted {
-		t.Fatalf("deleted voice session was not recoverable: %#v", listed)
+	if len(listed) != 0 {
+		t.Fatalf("deleted voice session remained listed: %#v", listed)
 	}
 	value = false
 	restored, err := ctrl.UpdateVoiceSession(ctx, string(created.ID), voice.SessionUpdate{Deleted: &value, Archived: &value})
@@ -2466,6 +2466,75 @@ func TestVoiceChatOrganizationIsDurableRecoverableAndDoesNotChangeLastUsed(t *te
 	}
 	if _, err := ctrl.EnsureVoiceSession(ctx, string(created.ID)); err != nil {
 		t.Fatalf("restored voice session is not selectable: %v", err)
+	}
+}
+
+func TestNativeClientManagesSessionsAndChats(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	created, err := ctrl.CreateSession(ctx, "Original", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	side, err := ctrl.NewChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, "Side chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := true
+	title := "Renamed session"
+	updated, err := ctrl.UpdateClientSession(ctx, string(created.ID), voice.SessionUpdate{Title: &title, Archived: &archived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != title || !updated.Archived {
+		t.Fatalf("updated session = %#v", updated)
+	}
+	listed, err := ctrl.ListVoiceSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listedSession := slices.IndexFunc(listed, func(item voice.Session) bool { return item.ID == string(created.ID) })
+	if listedSession < 0 || !listed[listedSession].Archived {
+		t.Fatalf("archived session was not manageable: %#v", listed)
+	}
+	archived = false
+	if _, err := ctrl.UpdateClientSession(ctx, string(created.ID), voice.SessionUpdate{Archived: &archived}); err != nil {
+		t.Fatal(err)
+	}
+	archived = true
+	chatTitle := "Renamed side chat"
+	updatedChat, err := ctrl.UpdateClientChat(ctx, string(created.ID), string(side.ID), voice.ChatUpdate{Title: &chatTitle, Archived: &archived})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedChat.Title != chatTitle || !updatedChat.Archived {
+		t.Fatalf("updated chat = %#v", updatedChat)
+	}
+	if err := ctrl.DeleteClientChat(ctx, string(created.ID), string(side.ID)); err != nil {
+		t.Fatal(err)
+	}
+	chats, err := ctrl.ListSessionChats(ctx, string(created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range chats {
+		if item.ID == string(side.ID) {
+			t.Fatalf("deleted chat remained listed: %#v", chats)
+		}
+	}
+	if err := ctrl.DeleteClientSession(ctx, string(created.ID)); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = ctrl.ListVoiceSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(listed, func(item voice.Session) bool { return item.ID == string(created.ID) }) {
+		t.Fatalf("deleted session remained listed: %#v", listed)
 	}
 }
 

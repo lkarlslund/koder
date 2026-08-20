@@ -208,18 +208,23 @@ object VoiceProtocol {
 		deleted?.let { put("deleted", it) }
 	}.toString()
 
+	fun updateChatRequest(title: String? = null, archived: Boolean? = null): String = JSONObject().apply {
+		title?.let { put("title", it.trim()) }
+		archived?.let { put("archived", it) }
+	}.toString()
+
 	fun parseHome(payload: String): VoiceHome {
 		val root = JSONObject(payload)
 		val protocol = root.optString("protocol")
 		require(protocol == VOICE_PROTOCOL) { "Unsupported voice protocol: $protocol" }
 		return VoiceHome(
-			sessions = root.optJSONArray("sessions").mapObjects { it.toVoiceSession() }
+			sessions = root.optJSONArray("sessions").mapObjects { it.toVoiceSession() }.filterNot { it.deleted }
 				.sortedByDescending { it.updatedAt ?: Instant.MIN },
 			chats = root.optJSONArray("chats").mapObjects { it.toVoiceSession() }
 				.sortedByDescending { it.updatedAt ?: Instant.MIN },
 			createdSession = root.optJSONObject("session")?.toVoiceSession(),
 			createdChat = root.optJSONObject("chat")?.toVoiceSession(),
-			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() }
+			voiceSessions = root.optJSONArray("voice_sessions").mapObjects { it.toVoiceSession() }.filterNot { it.deleted }
 				.sortedWith(compareByDescending<VoiceSession> { it.pinned }.thenByDescending { it.updatedAt ?: Instant.MIN }),
 			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
 			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),

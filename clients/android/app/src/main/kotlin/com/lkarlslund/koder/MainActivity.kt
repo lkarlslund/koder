@@ -115,7 +115,7 @@ import kotlin.math.abs
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
 	private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, SESSION, CHAT }
-	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED, DELETED }
+	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
     private lateinit var controller: CallController
@@ -749,10 +749,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		root.addView(appBar, spaced(bottom = 6))
 		val availableSessions = home.sessions.ifEmpty { home.voiceSessions }
 		val counts = mapOf(
-			ConversationFilter.ACTIVE to availableSessions.count { !it.archived && !it.deleted },
-			ConversationFilter.FAVORITES to availableSessions.count { it.favorite && !it.archived && !it.deleted },
-			ConversationFilter.ARCHIVED to availableSessions.count { it.archived && !it.deleted },
-			ConversationFilter.DELETED to availableSessions.count { it.deleted },
+			ConversationFilter.ACTIVE to availableSessions.count { !it.archived },
+			ConversationFilter.FAVORITES to availableSessions.count { it.favorite && !it.archived },
+			ConversationFilter.ARCHIVED to availableSessions.count { it.archived },
 		)
 		root.addView(LinearLayout(this).apply {
 			orientation = LinearLayout.HORIZONTAL
@@ -761,7 +760,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					ConversationFilter.ACTIVE -> "Active"
 					ConversationFilter.FAVORITES -> "Starred"
 					ConversationFilter.ARCHIVED -> "Archived"
-					ConversationFilter.DELETED -> "Deleted"
 				}
 				addView(TextView(this@MainActivity).apply {
 					text = "$label ${counts[filter]}"
@@ -799,10 +797,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 		val visibleSessions = availableSessions.filter { session ->
 			when (conversationFilter) {
-				ConversationFilter.ACTIVE -> !session.archived && !session.deleted
-				ConversationFilter.FAVORITES -> session.favorite && !session.archived && !session.deleted
-				ConversationFilter.ARCHIVED -> session.archived && !session.deleted
-				ConversationFilter.DELETED -> session.deleted
+				ConversationFilter.ACTIVE -> !session.archived
+				ConversationFilter.FAVORITES -> session.favorite && !session.archived
+				ConversationFilter.ARCHIVED -> session.archived
 			}
 		}
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1373,7 +1370,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
 	private fun koderSessionCard(session: VoiceSession) = LinearLayout(this).apply {
-		orientation = LinearLayout.VERTICAL
+		orientation = LinearLayout.HORIZONTAL
+		gravity = Gravity.CENTER_VERTICAL
 		setPadding(dp(14), dp(12), dp(14), dp(12))
 		background = cardBackground()
 		isClickable = true
@@ -1386,17 +1384,76 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		val counts = "${session.chatCount} chat${if (session.chatCount == 1) "" else "s"} · ${session.voiceChatCount} voice"
 		val time = session.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty()
-		addView(label(titleText).apply {
-			setTypeface(typeface, Typeface.BOLD)
-			maxLines = 1
-			ellipsize = TextUtils.TruncateAt.END
-		}, matchWrap())
-		addView(helper(listOf(kind, counts, time).filter(String::isNotBlank).joinToString(" · ")).apply {
-			maxLines = 1
-			ellipsize = TextUtils.TruncateAt.END
-		}, spaced(top = 3))
+		addView(LinearLayout(this@MainActivity).apply {
+			orientation = LinearLayout.VERTICAL
+			addView(label(titleText).apply {
+				setTypeface(typeface, Typeface.BOLD)
+				maxLines = 1
+				ellipsize = TextUtils.TruncateAt.END
+			}, matchWrap())
+			addView(helper(listOf(kind, counts, time).filter(String::isNotBlank).joinToString(" · ")).apply {
+				maxLines = 1
+				ellipsize = TextUtils.TruncateAt.END
+			}, spaced(top = 3))
+		}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+		addView(TextView(this@MainActivity).apply {
+			text = "⋮"
+			textSize = 24f
+			gravity = Gravity.CENTER
+			minWidth = dp(48)
+			minHeight = dp(48)
+			contentDescription = "Session options for $titleText"
+			setOnClickListener { showKoderSessionMenu(it, session) }
+		})
 		contentDescription = "Open $titleText. $counts"
 		setOnClickListener { loadSession(session) }
+	}
+
+	private fun showKoderSessionMenu(anchor: View, session: VoiceSession) {
+		PopupMenu(this, anchor).apply {
+			menu.add("Rename")
+			menu.add(if (session.archived) "Restore from archive" else "Archive")
+			menu.add("Delete permanently")
+			setOnMenuItemClickListener { item ->
+				when (item.title.toString()) {
+					"Rename" -> showRenameKoderSessionDialog(session)
+					"Archive" -> updateKoderSession(session, archived = true)
+					"Restore from archive" -> updateKoderSession(session, archived = false)
+					"Delete permanently" -> showDeleteKoderSessionDialog(session)
+				}
+				true
+			}
+			show()
+		}
+	}
+
+	private fun updateKoderSession(session: VoiceSession, title: String? = null, archived: Boolean? = null) {
+		sessionClient.update(settings.server, settings.token, session.id, title = title, archived = archived) { result ->
+			runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = ::showManagementError) }
+		}
+	}
+
+	private fun showRenameKoderSessionDialog(session: VoiceSession) {
+		val field = EditText(this).apply { setText(session.title); setSingleLine(); selectAll() }
+		AlertDialog.Builder(this)
+			.setTitle("Rename session")
+			.setView(field)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Rename") { _, _ -> updateKoderSession(session, title = field.text.toString()) }
+			.show()
+	}
+
+	private fun showDeleteKoderSessionDialog(session: VoiceSession) {
+		AlertDialog.Builder(this)
+			.setTitle("Delete session permanently?")
+			.setMessage("${session.title.ifBlank { "This session" }} and all of its chats and history will be permanently removed. This cannot be undone.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Delete") { _, _ ->
+				sessionClient.delete(settings.server, settings.token, session.id) { result ->
+					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = ::showManagementError) }
+				}
+			}
+			.show()
 	}
 
 	private fun loadSession(session: VoiceSession) {
@@ -1443,41 +1500,121 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				maxLines = 1
 				ellipsize = TextUtils.TruncateAt.END
 			}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(10) })
+			addView(TextView(this@MainActivity).apply {
+				text = "⋮"
+				textSize = 26f
+				gravity = Gravity.CENTER
+				minWidth = dp(48)
+				minHeight = dp(48)
+				contentDescription = "Session options"
+				setOnClickListener { showKoderSessionMenu(it, session) }
+			})
 		}, spaced(bottom = 10))
 		root.addView(helper("Voice conversations can use this session’s workspace, tools, and other chats."), spaced(bottom = 12))
 		val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 		if (home.chats.isEmpty()) {
 			list.addView(helper("This session has no chats."), spaced(top = 12, bottom = 12))
 		} else {
-			home.chats.forEach { chat -> list.addView(koderChatCard(chat), spaced(bottom = 5)) }
+			home.chats.forEach { chat -> list.addView(koderChatCard(session, chat), spaced(bottom = 5)) }
 		}
 		root.addView(ScrollView(this).apply { addView(list, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 		root.addView(Button(this).apply {
 			text = "+  New voice conversation"
 			isAllCaps = false
-			isEnabled = session.kind != "quick"
-			contentDescription = if (isEnabled) "Create a voice conversation in this session" else "Temporary sessions contain one chat"
+			isEnabled = session.kind != "quick" && !session.archived
+			contentDescription = when {
+				session.archived -> "Restore this session before creating a conversation"
+				isEnabled -> "Create a voice conversation in this session"
+				else -> "Temporary sessions contain one chat"
+			}
 			setOnClickListener { showCreateVoiceSessionDialog() }
 		}, spaced(top = 8))
 		showContent(root)
 	}
 
-	private fun koderChatCard(chat: VoiceSession) = LinearLayout(this).apply {
-		orientation = LinearLayout.VERTICAL
+	private fun koderChatCard(session: VoiceSession, chat: VoiceSession) = LinearLayout(this).apply {
+		orientation = LinearLayout.HORIZONTAL
+		gravity = Gravity.CENTER_VERTICAL
 		setPadding(dp(14), dp(11), dp(14), dp(11))
 		background = cardBackground()
-		val selectable = chat.role == "voice" && !chat.archived
+		val selectable = chat.role == "voice" && !chat.archived && !session.archived
 		alpha = if (selectable) 1f else 0.72f
-		addView(label(chat.title.ifBlank { "Untitled chat" }).apply {
-			setTypeface(typeface, if (selectable) Typeface.BOLD else Typeface.NORMAL)
-		}, matchWrap())
+		val titleText = chat.title.ifBlank { "Untitled chat" }
 		val detail = listOf(chat.role.ifBlank { "chat" }.replaceFirstChar { it.titlecase() }, chat.statusText.ifBlank { chat.status }, chat.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty())
 			.filter(String::isNotBlank).joinToString(" · ")
-		addView(helper(detail), spaced(top = 3))
-		isClickable = selectable
-		isFocusable = selectable
+		addView(LinearLayout(this@MainActivity).apply {
+			orientation = LinearLayout.VERTICAL
+			addView(label(titleText).apply {
+				setTypeface(typeface, if (selectable) Typeface.BOLD else Typeface.NORMAL)
+			}, matchWrap())
+			addView(helper(detail), spaced(top = 3))
+		}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+		addView(TextView(this@MainActivity).apply {
+			text = "⋮"
+			textSize = 24f
+			gravity = Gravity.CENTER
+			minWidth = dp(48)
+			minHeight = dp(48)
+			contentDescription = "Chat options for $titleText"
+			setOnClickListener { showKoderChatMenu(it, chat) }
+		})
+		isClickable = true
+		isFocusable = true
 		contentDescription = if (selectable) "Open voice conversation ${chat.title}" else "${chat.title}, ${chat.role} chat, visible but not selectable"
-		if (selectable) setOnClickListener { openChat(chat) }
+		setOnClickListener { view -> if (selectable) openChat(chat) else showKoderChatMenu(view, chat) }
+	}
+
+	private fun showKoderChatMenu(anchor: View, chat: VoiceSession) {
+		PopupMenu(this, anchor).apply {
+			menu.add("Rename")
+			menu.add(if (chat.archived) "Restore from archive" else "Archive")
+			if (chat.archived) menu.add("Delete permanently")
+			setOnMenuItemClickListener { item ->
+				when (item.title.toString()) {
+					"Rename" -> showRenameKoderChatDialog(chat)
+					"Archive" -> updateKoderChat(chat, archived = true)
+					"Restore from archive" -> updateKoderChat(chat, archived = false)
+					"Delete permanently" -> showDeleteKoderChatDialog(chat)
+				}
+				true
+			}
+			show()
+		}
+	}
+
+	private fun updateKoderChat(chat: VoiceSession, title: String? = null, archived: Boolean? = null) {
+		val session = selectedKoderSession ?: return
+		sessionClient.updateChat(settings.server, settings.token, session.id, chat.id, title, archived) { result ->
+			runOnUiThread { result.fold(onSuccess = { showSession(session, it) }, onFailure = ::showManagementError) }
+		}
+	}
+
+	private fun showRenameKoderChatDialog(chat: VoiceSession) {
+		val field = EditText(this).apply { setText(chat.title); setSingleLine(); selectAll() }
+		AlertDialog.Builder(this)
+			.setTitle("Rename chat")
+			.setView(field)
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Rename") { _, _ -> updateKoderChat(chat, title = field.text.toString()) }
+			.show()
+	}
+
+	private fun showDeleteKoderChatDialog(chat: VoiceSession) {
+		val session = selectedKoderSession ?: return
+		AlertDialog.Builder(this)
+			.setTitle("Delete chat permanently?")
+			.setMessage("${chat.title.ifBlank { "This chat" }} and its history will be permanently removed. This cannot be undone.")
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Delete") { _, _ ->
+				sessionClient.deleteChat(settings.server, settings.token, session.id, chat.id) { result ->
+					runOnUiThread { result.fold(onSuccess = { showSession(session, it) }, onFailure = ::showManagementError) }
+				}
+			}
+			.show()
+	}
+
+	private fun showManagementError(error: Throwable) {
+		Toast.makeText(this, error.message ?: "The change could not be completed", Toast.LENGTH_LONG).show()
 	}
 
     private fun showAbout() {
@@ -1672,7 +1809,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			ConversationFilter.ACTIVE -> "Your conversations will live here."
 			ConversationFilter.FAVORITES -> "No starred conversations yet."
 			ConversationFilter.ARCHIVED -> "Nothing is archived."
-			ConversationFilter.DELETED -> "Deleted conversations will appear here."
 		}
 		addView(body(heading).apply {
             gravity = Gravity.CENTER

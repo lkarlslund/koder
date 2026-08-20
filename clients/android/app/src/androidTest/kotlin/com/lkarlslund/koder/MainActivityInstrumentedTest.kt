@@ -529,13 +529,23 @@ class MainActivityInstrumentedTest {
 		try {
 			SecureSettings(context).save(server.url("/").toString(), "")
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-				waitForText(scenario, "Laptop repair")
+				val homeLabels = waitForText(scenario, "Laptop repair")
+				assertTrue(homeLabels.none { it.startsWith("Deleted ") })
+				onView(withContentDescription("Session options for Laptop repair")).perform(click())
+				onView(withText("Rename")).perform(click())
+				onView(withText("Rename session")).inRoot(isDialog()).check(matches(isDisplayed()))
+				onView(withText("Cancel")).inRoot(isDialog()).perform(click())
 				onView(withContentDescription("Open Laptop repair. 3 chats · 1 voice")).perform(click())
 				val labels = waitForText(scenario, "Laptop conversation")
 				assertTrue(labels.contains("BIOS investigation"))
 				assertTrue(labels.any { it.contains("Checking firmware") })
 				onView(withContentDescription("BIOS investigation, execution chat, visible but not selectable")).check(matches(isDisplayed()))
 				onView(withContentDescription("Open voice conversation Laptop conversation")).check(matches(isDisplayed()))
+				onView(withContentDescription("Chat options for BIOS investigation")).perform(click())
+				onView(withText("Archive")).check(matches(isDisplayed()))
+				onView(withText("Rename")).perform(click())
+				onView(withText("Rename chat")).inRoot(isDialog()).check(matches(isDisplayed()))
+				onView(withText("Cancel")).inRoot(isDialog()).perform(click())
 			}
 		} finally {
 			server.close()

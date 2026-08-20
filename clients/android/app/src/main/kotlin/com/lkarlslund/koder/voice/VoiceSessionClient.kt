@@ -47,6 +47,25 @@ class VoiceSessionClient(
 		)
 	}
 
+	fun updateChat(
+		server: String,
+		token: String,
+		sessionId: String,
+		chatId: String,
+		title: String? = null,
+		archived: Boolean? = null,
+		callback: (Result<VoiceHome>) -> Unit,
+	) {
+		request(
+			server, token, "/voice/v1/sessions/$sessionId/chats/$chatId",
+			VoiceProtocol.updateChatRequest(title, archived), VoiceProtocol::parseHome, callback, "PATCH",
+		)
+	}
+
+	fun deleteChat(server: String, token: String, sessionId: String, chatId: String, callback: (Result<VoiceHome>) -> Unit) {
+		request(server, token, "/voice/v1/sessions/$sessionId/chats/$chatId", null, VoiceProtocol::parseHome, callback, "DELETE")
+	}
+
 	fun rename(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
 		update(server, token, sessionId, title = title, callback = callback)
 	}

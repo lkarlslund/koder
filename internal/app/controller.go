@@ -869,7 +869,7 @@ func (c *Controller) SubscribeSelection(ctx context.Context, selection Selection
 
 func (c *Controller) eventForSelectedSession(event sessionpkg.Event, selectedChatID id.ID) (Event, bool) {
 	switch event.Kind {
-	case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived:
+	case sessionpkg.EventChatAdded, sessionpkg.EventChatChanged, sessionpkg.EventChatArchived, sessionpkg.EventChatDeleted:
 		update := event.Update
 		if update.Snapshot.Chat.ID == "" {
 			update.Snapshot = event.Snapshot
