@@ -1621,10 +1621,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				if (model.isDefault) append(" — system default")
 			}
 		}.toTypedArray()
-		val current = models.indexOfFirst { it.providerId == chat.providerId && it.id == chat.modelId }.coerceAtLeast(0)
 		AlertDialog.Builder(this)
-			.setTitle("Choose a model · system default first")
-			.setSingleChoiceItems(labels, current) { dialog, which ->
+			.setTitle("Choose an available model · system default first")
+			.setItems(labels) { dialog, which ->
 				val model = models[which]
 				val ownerSessionId = chat.sessionId.ifBlank { selectedKoderSession?.id.orEmpty() }
 				sessionClient.updateChat(
@@ -1633,7 +1632,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				) { result ->
 					runOnUiThread {
 						result.fold(
-							onSuccess = {
+							onSuccess = { home ->
+								val updated = home.chats.firstOrNull { it.id == chat.id }
+								if (updated != null) {
+									currentSessionChats = currentSessionChats.map { if (it.id == updated.id) updated else it }
+									if (pendingSession?.id == updated.id) pendingSession = updated
+								}
 								dialog.dismiss()
 								lastRecoveryError = ""
 								if (startAfterModelRecovery) {

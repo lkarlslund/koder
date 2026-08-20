@@ -65,6 +65,7 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -567,13 +568,22 @@ class MainActivityInstrumentedTest {
 
 	@Test
 	fun openingVoiceChatWithRemovedModelOffersSystemDefaultBeforeConnecting() {
+		val modelUpdated = CountDownLatch(1)
+		val modelUpdateBody = AtomicReference("")
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
-			override fun dispatch(request: RecordedRequest): MockResponse = when (request.target) {
-				"/voice/v1/sessions" -> MockResponse.Builder().body(
+			override fun dispatch(request: RecordedRequest): MockResponse = when {
+				request.method == "PATCH" && request.target == "/voice/v1/sessions/session-old/chats/voice-old" -> {
+					modelUpdateBody.set(request.body?.utf8().orEmpty())
+					modelUpdated.countDown()
+					MockResponse.Builder().body(
+						"""{"protocol":"voice.v1","chats":[{"id":"voice-old","session_id":"session-old","title":"Old conversation","role":"voice","backend":"koder","interaction_mode":"voice","provider_id":"local","model_id":"current-model"}]}""",
+					).build()
+				}
+				request.target == "/voice/v1/sessions" -> MockResponse.Builder().body(
 					"""{"protocol":"voice.v1","sessions":[{"id":"session-old","title":"Old project","kind":"regular","chat_count":1,"voice_chat_count":1}],"voice_sessions":[],"chat_backends":[{"id":"koder","label":"Koder","available":true,"models":[{"provider_id":"local","id":"current-model","name":"Local / current-model","default":true}]}]}""",
 				).build()
-				"/voice/v1/sessions/session-old/chats" -> MockResponse.Builder().body(
+				request.target == "/voice/v1/sessions/session-old/chats" -> MockResponse.Builder().body(
 					"""{"protocol":"voice.v1","chats":[{"id":"voice-old","session_id":"session-old","title":"Old conversation","role":"voice","backend":"koder","interaction_mode":"voice","provider_id":"removed","model_id":"gone"}],"voice_sessions":[]}""",
 				).build()
 				else -> MockResponse.Builder().code(404).build()
@@ -587,8 +597,17 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Open Old project. 1 chat · 1 voice")).perform(click())
 				waitForDisplayedText("Old conversation")
 				onView(withContentDescription("Open voice conversation Old conversation")).perform(click())
-				waitForDisplayedText("Choose a model · system default first")
+				waitForDisplayedText("Choose an available model · system default first")
 				onView(withText("Local / current-model — system default")).inRoot(isDialog()).check(matches(isDisplayed()))
+				onView(withText("Local / current-model — system default")).inRoot(isDialog()).check { view, error ->
+					if (error != null) throw error
+					assertFalse(view is android.widget.Checkable)
+				}
+				onView(withText("Local / current-model — system default")).inRoot(isDialog()).perform(click())
+				assertTrue("model replacement was not sent", modelUpdated.await(5, TimeUnit.SECONDS))
+				val update = org.json.JSONObject(modelUpdateBody.get())
+				assertEquals("local", update.getString("provider_id"))
+				assertEquals("current-model", update.getString("model_id"))
 			}
 		} finally {
 			server.close()
