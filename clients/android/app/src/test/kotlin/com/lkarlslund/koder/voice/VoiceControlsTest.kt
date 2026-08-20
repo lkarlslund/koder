@@ -16,6 +16,13 @@ class VoiceControlsTest {
 	}
 
 	@Test
+	fun turnFailureRemainsConnectedAndPreservesPauseOrMute() {
+		assertEquals(CallController.Stage.LISTENING, turnFailureStage(paused = false, muted = false))
+		assertEquals(CallController.Stage.MUTED, turnFailureStage(paused = false, muted = true))
+		assertEquals(CallController.Stage.HELD, turnFailureStage(paused = true, muted = false))
+	}
+
+	@Test
 	fun primaryControlDistinguishesFailureFromPause() {
 		assertEquals("Retry", primaryVoiceControlLabel(CallController.Stage.ERROR, false))
 		assertEquals("Resume", primaryVoiceControlLabel(CallController.Stage.DISCONNECTED, false))

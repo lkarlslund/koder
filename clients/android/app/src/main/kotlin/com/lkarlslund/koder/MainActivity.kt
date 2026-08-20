@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var selectedKoderSession: VoiceSession? = null
 	private var currentSessionChats: List<VoiceSession> = emptyList()
 	private var lastRecoveryError = ""
+	private var lastTurnErrorId = ""
 	private var startAfterModelRecovery = false
     private var pendingStart = false
     private var pendingPhoneCapability: PhoneCapability? = null
@@ -386,9 +387,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (snapshot.stage == CallController.Stage.RECORDING) delegatedWorkPending = false
 		runOnUiThread {
 			latestCallSnapshot = snapshot
-			if (snapshot.errorCode == "model_unavailable" && snapshot.detail != lastRecoveryError) {
-				lastRecoveryError = snapshot.detail
+			val recoveryErrorKey = snapshot.turnErrorId.ifBlank { snapshot.detail }
+			if (snapshot.errorCode == "model_unavailable" && recoveryErrorKey != lastRecoveryError) {
+				lastRecoveryError = recoveryErrorKey
 				pendingSession?.let(::showChatModelDialog)
+			}
+			if (snapshot.turnErrorId.isNotBlank() && snapshot.turnErrorId != lastTurnErrorId) {
+				lastTurnErrorId = snapshot.turnErrorId
+				Toast.makeText(this, snapshot.detail.ifBlank { "Voice request failed" }, Toast.LENGTH_LONG).show()
 			}
 			if (screen != Screen.CHAT) return@runOnUiThread
 			voiceOrb?.mode = voiceOrbMode(snapshot.stage)

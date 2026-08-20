@@ -45,6 +45,7 @@ class CallController(
 		val audioEndpointName: String = "",
 		val audioEndpoints: List<VoiceAudioEndpoint> = emptyList(),
 		val phoneToolsConnected: Boolean = false,
+		val turnErrorId: String = "",
     )
 
     interface Listener {
@@ -480,9 +481,14 @@ class CallController(
 				outputUtteranceId = ""
 				outputSequence = 0
                 playback.stop()
-				snapshot = snapshot.copy(historyLoading = false)
-				snapshot = snapshot.copy(errorCode = frame.errorCode)
-				update(Stage.ERROR, frame.error.ifBlank { "Voice request failed" })
+				val message = frame.error.ifBlank { "Voice request failed" }
+				snapshot = snapshot.copy(
+					historyLoading = false,
+					errorCode = frame.errorCode,
+					turnErrorId = frame.utteranceId.ifBlank { "error:${System.nanoTime()}" },
+				)
+				update(turnFailureStage(pausedByUser || telecomHeld, microphoneMuted), message)
+				if (!pausedByUser && !telecomHeld && !microphoneMuted) maybeListen(force = true)
             }
         }
         publish()

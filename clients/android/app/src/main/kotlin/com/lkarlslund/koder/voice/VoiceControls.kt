@@ -4,6 +4,12 @@ fun muteControlLabel(muted: Boolean): String = if (muted) "Unmute" else "Mute"
 
 fun processingStatusText(): String = "Thinking…"
 
+fun turnFailureStage(paused: Boolean, muted: Boolean): CallController.Stage = when {
+	paused -> CallController.Stage.HELD
+	muted -> CallController.Stage.MUTED
+	else -> CallController.Stage.LISTENING
+}
+
 enum class VoiceResponsePacing(val wireValue: String, val title: String, val description: String) {
 	CONCISE("concise", "Concise", "One brief sentence when possible"),
 	NORMAL("normal", "Normal", "One or two short sentences"),

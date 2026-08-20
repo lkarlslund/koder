@@ -399,6 +399,54 @@ class VoiceConnectionInstrumentedTest {
 		assertEquals(listOf("start", "pcm:0", "pcm:1", "commit"), replay.toList())
 	}
 
+	@Test
+	fun serverTurnErrorDoesNotDisconnectConversation() {
+		val ready = CountDownLatch(1)
+		val errorReceived = CountDownLatch(1)
+		val secondUtteranceReceived = CountDownLatch(1)
+		val utteranceCount = AtomicInteger()
+		val disconnectCount = AtomicInteger()
+		server.enqueue(
+			MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+				override fun onOpen(webSocket: WebSocket, response: Response) {
+					webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+				}
+
+				override fun onMessage(webSocket: WebSocket, text: String) {
+					val message = JSONObject(text)
+					if (message.getString("type") != "utterance") return
+					if (utteranceCount.incrementAndGet() == 1) {
+						val id = message.getString("utterance_id")
+						webSocket.send("""{"type":"error","protocol":"voice.v1","utterance_id":"$id","error":"Choose another model","error_code":"model_unavailable"}""")
+						webSocket.send("""{"type":"ready","protocol":"voice.v1","state":"listening"}""")
+					} else {
+						secondUtteranceReceived.countDown()
+					}
+				}
+			}).build(),
+		)
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+
+		VoiceConnection(object : VoiceConnection.Listener {
+			override fun onConnected() = Unit
+			override fun onFrame(frame: VoiceServerFrame) {
+				if (frame.type == "ready") ready.countDown()
+				if (frame.type == "error" && frame.errorCode == "model_unavailable") errorReceived.countDown()
+			}
+			override fun onDisconnected(reason: String) {
+				disconnectCount.incrementAndGet()
+			}
+		}).use { connection ->
+			connection.connect(server.url("/").toString(), "")
+			assertTrue("conversation did not become ready", ready.await(5, TimeUnit.SECONDS))
+			connection.sendUtterance("first")
+			assertTrue("turn error was not delivered", errorReceived.await(5, TimeUnit.SECONDS))
+			connection.sendUtterance("second")
+			assertTrue("connection could not send a second turn after the error", secondUtteranceReceived.await(5, TimeUnit.SECONDS))
+			assertEquals(0, disconnectCount.get())
+		}
+	}
+
 	private fun outputAudio(sequence: Long): ByteArray = VoiceProtocol.encodeAudio(
 		VoiceAudioFrame(VoiceAudioFrameKind.OUTPUT_PCM, 0, sequence, byteArrayOf((sequence + 1).toByte(), 0)),
 	)
