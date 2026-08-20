@@ -5405,6 +5405,7 @@
           if (!this.settings.ui) this.settings.ui = {};
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
 		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32};
+		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
 		  this.browserStatus = this.settings.browser_runtime || this.browserStatus;
 		  delete this.settings.browser_runtime;
           this.applyTTSSettings(this.settings.ui.tts);
@@ -5429,18 +5430,19 @@
             this.settingsStatus = err.message; this.settingsStatusKind = 'danger';
           }).finally(() => { this.settingsLoading = false; });
         },
-		settingsTabs() { return ['general', 'security', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
+		settingsTabs() { return ['general', 'codex', 'security', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
         selectSettingsTab(tab) {
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
 		  if (tab === 'security') this.loadVoiceDevices();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', security: 'Security', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', codex: 'Codex', security: 'Security', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
         settingsTabDescription(tab) {
           return {
             general: 'Defaults for new chats and the interface',
+			codex: 'External Codex turn backend',
 			security: 'Registered Android phones and device access',
             browser: 'Managed Chromium used by browser tools',
             tts: 'Speech output and playback testing',
@@ -6230,6 +6232,7 @@
               general: source.general,
               ui: source.ui,
               browser: source.browser,
+			  codex: source.codex,
               compaction: source.compaction,
               thinking: source.thinking,
               prompts: source.prompts,

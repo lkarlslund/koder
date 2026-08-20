@@ -285,6 +285,7 @@ type PreferencesState struct {
 	ToolDefaults   []ToolDefaultPreference  `json:"tool_defaults"`
 	Browser        NativeBrowserPreferences `json:"browser"`
 	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
+	Codex          CodexPreferences         `json:"codex"`
 	RestartKeys    []string                 `json:"restart_keys,omitempty"`
 }
 
@@ -295,6 +296,13 @@ type NativeBrowserPreferences struct {
 	OperationTimeout int    `json:"operation_timeout_seconds"`
 	MaxTabsPerChat   int    `json:"max_tabs_per_chat"`
 	MaxTabsGlobal    int    `json:"max_tabs_global"`
+}
+
+type CodexPreferences struct {
+	Configured bool   `json:"configured"`
+	Enabled    bool   `json:"enabled"`
+	Executable string `json:"executable"`
+	Home       string `json:"home"`
 }
 
 // GeneralPreferences contains global non-provider settings.

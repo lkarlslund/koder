@@ -1078,6 +1078,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.General.MaxToolLoopSteps = 77
 	prefs.General.MaxChildChats = 3
 	prefs.UI.Theme = "dark"
+	prefs.Codex.Enabled = true
+	prefs.Codex.Executable = "/opt/codex/bin/codex"
+	prefs.Codex.Home = "/var/lib/koder-codex"
 	prefs.Compaction.UseChatModel = false
 	prefs.Compaction.ProviderID = "test"
 	prefs.Compaction.ModelID = "compact-model"
@@ -1130,6 +1133,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if loaded.MaxToolLoopSteps != 77 || loaded.MaxChildChats != 3 || loaded.UI.Theme != "dark" || loaded.Compaction.ModelID != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d child=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.MaxChildChats, loaded.UI.Theme, loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
+	}
+	if !loaded.Codex.Enabled || loaded.Codex.Executable != "/opt/codex/bin/codex" || loaded.Codex.Home != "/var/lib/koder-codex" {
+		t.Fatalf("expected saved codex settings, got %#v", loaded.Codex)
 	}
 	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProviderID != "test" || loaded.Thinking.CavemanModelID != "model" || loaded.Thinking.CavemanPrompt != "rewrite thinking:\n{{thinking}}" || loaded.Thinking.CavemanMinTokens != 96 {
 		t.Fatalf("expected saved thinking settings, got %#v", loaded.Thinking)

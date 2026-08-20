@@ -1280,6 +1280,13 @@
                 </div>
               </div>
 
+			  <div class="settings-section" x-show="settingsTab === 'codex'">
+				<div class="alert alert-info"><i class="bi bi-arrow-clockwise me-1"></i> Restart Koder after changing these process settings. Codex authentication and model configuration belong to the OS account running Koder.</div>
+				<div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Codex chats</span><div class="settings-field-help">Offer Codex as a turn backend in the new-chat dialog.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.codex.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+				<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-executable">Codex executable</label><div class="settings-field-help">Command name or absolute path visible to the Koder service.</div></div><div class="settings-field-control"><input id="settings-codex-executable" class="form-control font-monospace" x-model="settings.codex.executable" placeholder="codex" autocomplete="off"></div></div>
+				<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-home">Codex home</label><div class="settings-field-help">Optional absolute CODEX_HOME. Leave empty to use the service account's normal Codex login and configuration.</div></div><div class="settings-field-control"><input id="settings-codex-home" class="form-control font-monospace" x-model="settings.codex.home" placeholder="Use service account default" autocomplete="off"></div></div>
+			  </div>
+
 				<div x-show="settingsTab === 'security'">
 					<div class="settings-list-header"><div><div class="fw-semibold">Android devices</div><div class="small text-secondary">Each phone has a separate encrypted credential. Revoking one does not disconnect the others.</div></div><button class="btn btn-sm btn-outline-primary" type="button" @click="openPhoneBinding()"><i class="bi bi-phone me-1"></i>Bind phone</button></div>
 					<div class="text-secondary py-3" x-show="voiceDevicesLoading"><span class="spinner-border spinner-border-sm me-2"></span>Loading devices</div>

@@ -283,6 +283,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
+	if err := applyCodexPreferences(&next, prefs.Codex); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
 	if err := applyCompactionPreferences(&next, prefs.Compaction); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1211,12 +1215,29 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		ToolDefaults:   toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
 		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
+		Codex:          codexPreferencesFromConfig(c.cfg.Codex),
 	}
 	for idx := range state.ModelConfigs {
 		state.ModelConfigs[idx] = decorateModelConfigPreference(c.cfg, state.ModelOverlays, state.ModelConfigs[idx])
 	}
 	repairPreferencesDefaultModel(&state, liveModels)
 	return state, nil
+}
+
+func codexPreferencesFromConfig(cfg config.Codex) CodexPreferences {
+	return CodexPreferences{Configured: true, Enabled: cfg.Enabled, Executable: cfg.Executable, Home: cfg.Home}
+}
+
+func applyCodexPreferences(cfg *config.Config, prefs CodexPreferences) error {
+	if !prefs.Configured {
+		return nil
+	}
+	home := strings.TrimSpace(prefs.Home)
+	if home != "" && !filepath.IsAbs(home) {
+		return fmt.Errorf("codex home must be an absolute path")
+	}
+	cfg.Codex = config.Codex{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Home: home}
+	return nil
 }
 
 func nativeBrowserPreferencesFromConfig(cfg config.Browser) NativeBrowserPreferences {
