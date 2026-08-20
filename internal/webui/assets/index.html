@@ -611,7 +611,7 @@
           <i class="bi browser-voice-idle-icon" :class="browserVoice.muted ? 'bi-mic-mute-fill' : 'bi-stars'"></i>
         </div>
         <div class="browser-voice-state" x-text="browserVoiceStatusLabel()"></div>
-        <div class="browser-voice-detail" x-text="browserVoice.detail || browserVoice.error || 'Speak naturally. Koder will listen when you start talking.'"></div>
+		<div class="browser-voice-detail" x-text="browserVoice.detail || browserVoice.error || (browserVoice.mode === 'vad' ? 'Speak naturally. Koder will listen when you start talking.' : 'Hold the microphone button while you speak.')"></div>
       </div>
       <footer class="browser-voice-controls">
 		<button type="button" class="browser-voice-control" :class="{'active': browserVoice.mode === 'vad'}" title="Toggle voice activation" @click="setBrowserVoiceMode(browserVoice.mode === 'vad' ? 'ptt' : 'vad')"><i class="bi bi-soundwave"></i></button>

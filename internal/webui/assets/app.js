@@ -4553,7 +4553,7 @@
           const client = this.browserVoiceClient;
           this.browserVoiceClient = null;
           if (client) await client.stop();
-          this.browserVoice = {...this.browserVoice, active: false, state: 'idle', level: 0, muted: false, detail: 'Conversation ended'};
+		  this.browserVoice = {...this.browserVoice, active: false, state: 'idle', level: 0, muted: false, detail: ''};
 		  await this.refreshVoiceChatPresence();
         },
         async closeBrowserVoice() {
