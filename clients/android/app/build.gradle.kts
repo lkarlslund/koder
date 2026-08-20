@@ -225,6 +225,7 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+	implementation("com.plasmoverse:concentus:1.0.0")
     implementation("androidx.activity:activity-ktx:1.12.2")
     implementation("androidx.core:core:1.17.0")
     implementation("androidx.core:core-telecom:1.0.1")

@@ -49,6 +49,10 @@ class VoiceReadinessCheck(
 	private var finished = false
 	private var frameSamples = SileroVad.FRAME_SAMPLES
 	private var vadDetected = false
+	private var audioConfig: VoiceAudioConfig? = null
+	private var inputOpusEncoder: OpusAudioEncoder? = null
+	private var outputOpusDecoder: OpusAudioDecoder? = null
+	private var captureStarted = false
 
 	@Synchronized
 	fun start(server: String, token: String, languages: Set<String>, sensitivity: Int, silenceMilliseconds: Int) {
@@ -58,6 +62,10 @@ class VoiceReadinessCheck(
 		playbackComplete = false
 		transcript = ""
 		vadDetected = false
+		audioConfig = null
+		inputOpusEncoder = null
+		outputOpusDecoder = null
+		captureStarted = false
 		val detector = detectorFactory()
 		frameSamples = detector.frameSamples
 		endpoint = VadEndpointPipeline(detector).apply {
@@ -84,7 +92,10 @@ class VoiceReadinessCheck(
 	}
 
 	private fun socketListener(languages: Set<String>) = object : WebSocketListener() {
-		override fun onOpen(webSocket: WebSocket, response: Response) = listener.onProgress(Step.SERVER, "Connected and authorized")
+		override fun onOpen(webSocket: WebSocket, response: Response) {
+			webSocket.send(VoiceProtocol.hello())
+			listener.onProgress(Step.SERVER, "Connected and authorized")
+		}
 
 		override fun onMessage(webSocket: WebSocket, text: String) {
 			runCatching { handle(VoiceProtocol.parse(text), languages) }
@@ -93,7 +104,13 @@ class VoiceReadinessCheck(
 
 		override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
 			runCatching { VoiceProtocol.decodeAudio(bytes.toByteArray()) }.onSuccess { frame ->
-				if (frame.kind == VoiceAudioFrameKind.OUTPUT_PCM) playback.write(frame.pcm)
+				val config = audioConfig ?: return@onSuccess
+				val pcm = when (frame.kind) {
+					VoiceAudioFrameKind.OUTPUT_PCM -> frame.payload
+					VoiceAudioFrameKind.OUTPUT_OPUS -> outputOpusDecoder?.decode(frame.payload)
+					else -> null
+				}
+				if (pcm != null) playback.write(pcm)
 			}.onFailure { fail("Invalid readiness audio: ${it.message}") }
 		}
 
@@ -110,12 +127,23 @@ class VoiceReadinessCheck(
 	private fun handle(frame: VoiceServerFrame, languages: Set<String>) {
 		if (finished) return
 		when (frame.type) {
-			"readiness_ready" -> beginCapture(frame.audioConfig?.input ?: return fail("Server omitted microphone format"), languages)
+			"readiness_ready" -> {
+				val config = frame.audioConfig ?: return fail("Server omitted microphone format")
+				audioConfig = config
+				if (config.transportSelected() && !captureStarted) {
+					captureStarted = true
+					beginCapture(config.input, languages)
+				}
+			}
 			"transcript" -> {
 				transcript = frame.transcript
 				listener.onProgress(Step.STT, "Heard: ${frame.transcript}")
 			}
 			"tts_start" -> {
+				outputOpusDecoder = when (audioConfig?.selectedOutputTransport()?.encoding) {
+					VoiceProtocol.OPUS_ENCODING -> OpusAudioDecoder(audioConfig!!.selectedOutputTransport())
+					else -> null
+				}
 				playback.start(frame.audioFormat ?: return fail("Server omitted playback format"))
 				listener.onProgress(Step.PLAYBACK, "Playing the server response")
 			}
@@ -149,11 +177,17 @@ class VoiceReadinessCheck(
 						is UtteranceEvent.Started -> {
 							utteranceId = UUID.randomUUID().toString()
 							sequence = 0
-							socket?.send(VoiceProtocol.audioStart(utteranceId, format, languages))
+							val transport = audioConfig?.selectedInputTransport() ?: format
+							inputOpusEncoder = if (transport.encoding == VoiceProtocol.OPUS_ENCODING) {
+								OpusAudioEncoder(transport, INPUT_OPUS_BITRATE)
+							} else null
+							socket?.send(VoiceProtocol.audioStart(utteranceId, transport, languages))
 							event.frames.forEach(::sendAudio)
 						}
 						is UtteranceEvent.Continued -> sendAudio(event.frame)
 						is UtteranceEvent.Committed -> {
+							inputOpusEncoder?.finish()?.let(::sendOpus)
+							inputOpusEncoder = null
 							microphone.stop()
 							socket?.send(VoiceProtocol.audioCommit(utteranceId))
 							listener.onProgress(Step.STT, "Transcribing with Koder")
@@ -167,10 +201,21 @@ class VoiceReadinessCheck(
 	}
 
 	private fun sendAudio(samples: ShortArray) {
+		inputOpusEncoder?.let { encoder ->
+			encoder.append(samples).forEach(::sendOpus)
+			return
+		}
 		val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
 			samples.forEach(::putShort)
 		}.array()
 		val payload = VoiceProtocol.encodeAudio(VoiceAudioFrame(VoiceAudioFrameKind.INPUT_PCM, 0, sequence++, pcm))
+		socket?.send(ByteString.of(*payload))
+	}
+
+	private fun sendOpus(packet: EncodedAudioPacket) {
+		val payload = VoiceProtocol.encodeAudio(
+			VoiceAudioFrame(VoiceAudioFrameKind.INPUT_OPUS, 0, sequence++, packet.payload),
+		)
 		socket?.send(ByteString.of(*payload))
 	}
 
@@ -200,6 +245,8 @@ class VoiceReadinessCheck(
 		timeout = null
 		microphone.stop()
 		playback.stop()
+		inputOpusEncoder = null
+		outputOpusDecoder = null
 		endpoint?.close()
 		endpoint = null
 		socket?.cancel()

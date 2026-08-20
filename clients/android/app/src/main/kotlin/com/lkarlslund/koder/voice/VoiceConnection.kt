@@ -145,7 +145,9 @@ class VoiceConnection(
 					val frame = VoiceProtocol.parse(text)
 					val roundTrip = synchronized(this@VoiceConnection) {
 						observe(frame)
-						if (frame.type == "ready") replayPending(webSocket, expectedSocketAttempt)
+						if (frame.type == "ready" && frame.audioConfig?.transportSelected() != false) {
+							replayPending(webSocket, expectedSocketAttempt)
+						}
 						if (frame.type == "pong") pendingPingAtNanos?.let { started ->
 							pendingPingAtNanos = null
 							((System.nanoTime() - started).coerceAtLeast(0) / 1_000_000)
@@ -233,20 +235,29 @@ class VoiceConnection(
 		return id
 	}
 
-	fun sendAudio(sequence: Long, pcm: ByteArray) {
-		val payload = VoiceProtocol.encodeAudio(
-			VoiceAudioFrame(VoiceAudioFrameKind.INPUT_PCM, 0, sequence, pcm),
+	fun sendAudio(
+		sequence: Long,
+		payload: ByteArray,
+		kind: VoiceAudioFrameKind = VoiceAudioFrameKind.INPUT_PCM,
+		sourcePCMBytes: Int = payload.size,
+	) {
+		require(kind == VoiceAudioFrameKind.INPUT_PCM || kind == VoiceAudioFrameKind.INPUT_OPUS) {
+			"Client may only send input audio"
+		}
+		require(sourcePCMBytes > 0) { "Source PCM byte count must be positive" }
+		val encodedPayload = VoiceProtocol.encodeAudio(
+			VoiceAudioFrame(kind, 0, sequence, payload),
 		)
-		val encoded = ByteString.of(*payload)
+		val encoded = ByteString.of(*encodedPayload)
 		synchronized(this) {
 			val pending = pendingTurn as? PendingAudio ?: error("No audio utterance is active")
 			check(!pending.committed) { "Audio utterance is already committed" }
 			check(sequence == pending.frames.size.toLong()) { "Audio sequence $sequence is out of order" }
-			check(pending.bufferedPCMBytes + pcm.size <= pending.maxBufferedPCMBytes) {
+			check(pending.bufferedPCMBytes + sourcePCMBytes <= pending.maxBufferedPCMBytes) {
 				"Buffered speech exceeds the negotiated utterance duration"
 			}
 			pending.frames += encoded
-			pending.bufferedPCMBytes += pcm.size
+			pending.bufferedPCMBytes += sourcePCMBytes
 			socket?.send(encoded)
 		}
 	}
@@ -288,7 +299,7 @@ class VoiceConnection(
 
 	private fun observe(frame: VoiceAudioFrame): Boolean {
 		val pending = pendingTurn ?: return true
-		if (activeOutputUtteranceId != pending.id || frame.kind != VoiceAudioFrameKind.OUTPUT_PCM) return true
+		if (activeOutputUtteranceId != pending.id || frame.kind !in setOf(VoiceAudioFrameKind.OUTPUT_PCM, VoiceAudioFrameKind.OUTPUT_OPUS)) return true
 		if (frame.sequence < pending.nextOutputSequence) return false
 		if (frame.sequence == pending.nextOutputSequence) pending.nextOutputSequence++
 		return true

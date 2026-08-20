@@ -194,7 +194,7 @@ class VoiceConnectionInstrumentedTest {
 				if (frame.type == "history_search" && frame.searchResults.singleOrNull()?.match?.id == "match-1") clientReceivedSearch.countDown()
             }
 			override fun onAudioFrame(frame: VoiceAudioFrame) {
-				if (frame.kind == VoiceAudioFrameKind.OUTPUT_PCM && frame.pcm.contentEquals(byteArrayOf(3, 0, 4, 0))) {
+				if (frame.kind == VoiceAudioFrameKind.OUTPUT_PCM && frame.payload.contentEquals(byteArrayOf(3, 0, 4, 0))) {
 					clientReceivedAudio.countDown()
 				}
 			}

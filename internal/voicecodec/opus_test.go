@@ -1,10 +1,29 @@
 package voicecodec
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"math"
 	"testing"
 )
+
+func TestOpusDecoderAcceptsConcentusPacket(t *testing.T) {
+	packet, err := base64.StdEncoding.DecodeString("SIKIQFJfcb0AAACmGGAMKu3f+EXrVlamUlGH5rhZQ1KVz6MR3JE0agIoHLrFV4vtl4PF0FZZNBBISoeilA2o3Oett2SnKxaA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := NewOpusDecoder(16_000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm, err := decoder.Decode(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pcm) != 640 || rmsPCM(pcm) < 500 {
+		t.Fatalf("decoded Concentus packet: bytes=%d RMS=%.1f", len(pcm), rmsPCM(pcm))
+	}
+}
 
 func TestOpusRoundTripSpeechFrames(t *testing.T) {
 	for _, test := range []struct {

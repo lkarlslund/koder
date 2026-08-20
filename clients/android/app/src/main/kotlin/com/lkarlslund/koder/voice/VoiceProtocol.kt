@@ -154,7 +154,17 @@ data class VoiceAudioConfig(
     val input: VoiceAudioFormat,
     val output: VoiceAudioFormat,
     val maxUtteranceSeconds: Int,
+	val transportEncodings: List<String> = emptyList(),
+	val inputTransport: VoiceAudioFormat? = null,
+	val outputTransport: VoiceAudioFormat? = null,
 )
+
+internal fun VoiceAudioConfig.transportSelected(): Boolean =
+	(inputTransport != null && outputTransport != null) || transportEncodings.isEmpty()
+
+internal fun VoiceAudioConfig.selectedInputTransport(): VoiceAudioFormat = inputTransport ?: input
+
+internal fun VoiceAudioConfig.selectedOutputTransport(): VoiceAudioFormat = outputTransport ?: output
 
 data class AppUpdate(
     val channel: String,
@@ -207,6 +217,8 @@ data class ServerInfo(
 enum class VoiceAudioFrameKind(val wireValue: Int) {
     INPUT_PCM(1),
     OUTPUT_PCM(2),
+	INPUT_OPUS(3),
+	OUTPUT_OPUS(4),
     ;
 
     companion object {
@@ -219,7 +231,7 @@ data class VoiceAudioFrame(
     val kind: VoiceAudioFrameKind,
     val flags: Int,
     val sequence: Long,
-    val pcm: ByteArray,
+    val payload: ByteArray,
 )
 
 data class VoiceServerFrame(
@@ -354,6 +366,7 @@ object VoiceProtocol {
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)
 		.put("response_pacing", responsePacing.wireValue)
+		.put("audio_encodings", JSONArray(listOf(OPUS_ENCODING, PCM16_ENCODING)))
         .toString()
 
 	fun ping(): String = JSONObject()
@@ -407,17 +420,20 @@ object VoiceProtocol {
     fun encodeAudio(frame: VoiceAudioFrame): ByteArray {
         require(frame.flags in 0..255) { "Audio flags must fit in one byte" }
         require(frame.sequence in 0..UINT32_MAX) { "Audio sequence must fit in uint32" }
-        require(frame.pcm.isNotEmpty() && frame.pcm.size <= MAX_AUDIO_PAYLOAD && frame.pcm.size % 2 == 0) {
-            "Audio payload must be non-empty, even-sized PCM16 up to $MAX_AUDIO_PAYLOAD bytes"
+        require(frame.payload.isNotEmpty() && frame.payload.size <= MAX_AUDIO_PAYLOAD) {
+			"Audio payload must be non-empty and at most $MAX_AUDIO_PAYLOAD bytes"
         }
-        return ByteBuffer.allocate(AUDIO_HEADER_BYTES + frame.pcm.size)
+		require((frame.kind != VoiceAudioFrameKind.INPUT_PCM && frame.kind != VoiceAudioFrameKind.OUTPUT_PCM) || frame.payload.size % 2 == 0) {
+			"PCM16 audio payload must have an even byte count"
+		}
+        return ByteBuffer.allocate(AUDIO_HEADER_BYTES + frame.payload.size)
             .order(ByteOrder.BIG_ENDIAN)
             .put(AUDIO_MAGIC)
             .put(frame.kind.wireValue.toByte())
             .put(frame.flags.toByte())
             .putShort(0)
             .putInt(frame.sequence.toInt())
-            .put(frame.pcm)
+            .put(frame.payload)
             .array()
     }
 
@@ -430,11 +446,14 @@ object VoiceProtocol {
         val flags = buffer.get().toInt() and 0xff
         require(buffer.short.toInt() == 0) { "Voice audio reserved bytes must be zero" }
         val sequence = buffer.int.toLong() and UINT32_MAX
-        val pcm = ByteArray(buffer.remaining()).also(buffer::get)
-        require(pcm.isNotEmpty() && pcm.size <= MAX_AUDIO_PAYLOAD && pcm.size % 2 == 0) {
-            "Invalid voice PCM16 payload size ${pcm.size}"
+        val audio = ByteArray(buffer.remaining()).also(buffer::get)
+		require(audio.isNotEmpty() && audio.size <= MAX_AUDIO_PAYLOAD) {
+			"Invalid voice audio payload size ${audio.size}"
         }
-        return VoiceAudioFrame(kind, flags, sequence, pcm)
+		require((kind != VoiceAudioFrameKind.INPUT_PCM && kind != VoiceAudioFrameKind.OUTPUT_PCM) || audio.size % 2 == 0) {
+			"Invalid PCM16 payload size ${audio.size}"
+		}
+        return VoiceAudioFrame(kind, flags, sequence, audio)
     }
 
     fun selectSession(sessionId: String): String = JSONObject()
@@ -602,6 +621,9 @@ object VoiceProtocol {
 		input = getJSONObject("input").toAudioFormat(),
 		output = getJSONObject("output").toAudioFormat(),
 		maxUtteranceSeconds = getInt("max_utterance_seconds"),
+		transportEncodings = optJSONArray("transport_encodings").mapStrings(),
+		inputTransport = optJSONObject("input_transport")?.toAudioFormat(),
+		outputTransport = optJSONObject("output_transport")?.toAudioFormat(),
 	)
 
     private fun JSONObject.toVoiceMessage(): VoiceMessage = VoiceMessage(
@@ -627,10 +649,13 @@ object VoiceProtocol {
 			.filterValues { it.isNotBlank() } + optJSONObject("metadata")?.toStringMap().orEmpty(),
 	)
 
-    private fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> {
+	private fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> {
         if (this == null) return emptyList()
         return List(length()) { index -> transform(getJSONObject(index)) }
-    }
+	}
+
+	private fun JSONArray?.mapStrings(): List<String> =
+		if (this == null) emptyList() else List(length()) { index -> getString(index) }
 
 	private fun JSONObject.toStringMap(): Map<String, String> = keys().asSequence()
 		.associateWith { key -> optString(key) }
@@ -639,6 +664,8 @@ object VoiceProtocol {
 	private const val AUDIO_HEADER_BYTES = 12
 	private const val MAX_AUDIO_PAYLOAD = 64 * 1024
 	private const val UINT32_MAX = 0xffff_ffffL
+	const val PCM16_ENCODING = "pcm_s16le"
+	const val OPUS_ENCODING = "opus"
 }
 
 private fun JSONObject.toAppUpdate() = AppUpdate(

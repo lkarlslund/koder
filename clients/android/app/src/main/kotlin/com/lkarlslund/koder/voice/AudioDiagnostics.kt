@@ -130,7 +130,7 @@ internal class AudioDiagnosticsTracker(
 	}
 
 	@Synchronized
-	fun recordOutput(frame: VoiceAudioFrame, format: VoiceAudioFormat) {
+	fun recordOutput(frame: VoiceAudioFrame, format: VoiceAudioFormat, decodedPCMBytes: Int = frame.payload.size) {
 		when {
 			frame.sequence > expectedOutputSequence -> droppedOutputFrames += frame.sequence - expectedOutputSequence
 			frame.sequence < expectedOutputSequence -> duplicateOutputFrames++
@@ -146,7 +146,7 @@ internal class AudioDiagnosticsTracker(
 		}
 		previousOutputAtNanos = now
 		val bytesPerFrame = format.channels.coerceAtLeast(1) * 2
-		previousOutputDurationMillis = frame.pcm.size.toDouble() / bytesPerFrame / format.sampleRate.coerceAtLeast(1) * 1_000.0
+		previousOutputDurationMillis = decodedPCMBytes.toDouble() / bytesPerFrame / format.sampleRate.coerceAtLeast(1) * 1_000.0
 	}
 
 	@Synchronized fun recordRoundTrip(milliseconds: Long) {
@@ -165,8 +165,8 @@ internal class AudioDiagnosticsTracker(
 		vadState = if (active) vadState else "idle",
 		inputRoute = route.ifBlank { "Phone audio" },
 		outputRoute = route.ifBlank { "Phone audio" },
-		inputFormat = config?.input,
-		outputFormat = config?.output,
+		inputFormat = config?.selectedInputTransport(),
+		outputFormat = config?.selectedOutputTransport(),
 		capturedFrames = capturedFrames,
 		receivedFrames = receivedFrames,
 		droppedOutputFrames = droppedOutputFrames,

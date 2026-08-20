@@ -30,7 +30,20 @@ class VoiceProtocolTest {
 		val hello = JSONObject(VoiceProtocol.hello(VoiceResponsePacing.CONCISE))
 		assertEquals("hello", hello.getString("type"))
 		assertEquals("concise", hello.getString("response_pacing"))
+		assertEquals(listOf("opus", "pcm_s16le"), List(hello.getJSONArray("audio_encodings").length()) { hello.getJSONArray("audio_encodings").getString(it) })
 		assertFalse(hello.has("text"))
+	}
+
+	@Test
+	fun parsesNegotiatedTransportWithoutChangingLocalPcmFormats() {
+		val frame = VoiceProtocol.parse(
+			"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"transport_encodings":["opus","pcm_s16le"],"input_transport":{"encoding":"opus","sample_rate":16000,"channels":1},"output_transport":{"encoding":"opus","sample_rate":24000,"channels":1},"max_utterance_seconds":60}}""",
+		)
+		val config = checkNotNull(frame.audioConfig)
+		assertEquals("pcm_s16le", config.input.encoding)
+		assertEquals("opus", config.selectedInputTransport().encoding)
+		assertEquals("opus", config.selectedOutputTransport().encoding)
+		assertTrue(config.transportSelected())
 	}
 
 	@Test
@@ -277,14 +290,14 @@ class VoiceProtocolTest {
 				kind = VoiceAudioFrameKind.INPUT_PCM,
 				flags = 0,
 				sequence = 0x01020304,
-				pcm = byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte()),
+				payload = byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte()),
 			),
 		)
 		assertEquals("4b56413101000000010203043412ccff", encoded.toHex())
 		val decoded = VoiceProtocol.decodeAudio(encoded)
 		assertEquals(VoiceAudioFrameKind.INPUT_PCM, decoded.kind)
 		assertEquals(0x01020304, decoded.sequence)
-		assertTrue(decoded.pcm.contentEquals(byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte())))
+		assertTrue(decoded.payload.contentEquals(byteArrayOf(0x34, 0x12, 0xcc.toByte(), 0xff.toByte())))
 	}
 
 	@Test

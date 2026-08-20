@@ -88,12 +88,13 @@ class CallController(
 			phoneDevice.connect(connectedServer, connectedToken, callId)
 		}
         override fun onFrame(frame: VoiceServerFrame) = onMain { handleFrame(frame) }
-        override fun onAudioFrame(frame: VoiceAudioFrame) = handleOutputAudio(frame)
+		override fun onAudioFrame(frame: VoiceAudioFrame) = onMain { handleOutputAudio(frame) }
 		override fun onRoundTripMillis(milliseconds: Long) = diagnostics.recordRoundTrip(milliseconds)
 		override fun onDisconnected(reason: String) = onMain {
 			serverReady = false
 			phoneDevice.close()
 			acceptingOutput = false
+			outputOpusDecoder = null
 			playback.stop()
 			diagnostics.recordReconnect()
 			if (running) {
@@ -160,7 +161,9 @@ class CallController(
 	private var utteranceId = ""
 	@Volatile private var captureActive = false
     private var inputSequence = 0L
+	private var inputOpusEncoder: OpusAudioEncoder? = null
     private var outputSequence = 0L
+	private var outputOpusDecoder: OpusAudioDecoder? = null
 	private var outputUtteranceId = ""
 	    @Volatile private var acceptingOutput = false
 		private var listeningEndpointConfig = EndpointConfig(sampleRate = endpointSampleRate, frameSamples = endpointFrameSamples)
@@ -189,6 +192,8 @@ class CallController(
         serverReady = false
         telecomReady = false
         audioConfig = null
+		inputOpusEncoder = null
+		outputOpusDecoder = null
 		connectedServer = server
 		connectedToken = token
 			speechLanguages = languages.toSet()
@@ -352,6 +357,7 @@ class CallController(
     private fun cancelCapture() {
 		stopMicrophone()
         endpoint.reset()
+		inputOpusEncoder = null
 		interruptedPlayback = false
         val pending = utteranceId
         utteranceId = ""
@@ -364,6 +370,8 @@ class CallController(
         serverReady = false
 		stopMicrophone()
         playback.stop()
+		inputOpusEncoder = null
+		outputOpusDecoder = null
 		stopWorkingSound()
 		connectionSound.stop()
 		interruptedPlayback = false
@@ -415,10 +423,14 @@ class CallController(
             )
 			connection.resumeSelection(selectedSessionId, selectedChatId)
         }
-        frame.audioConfig?.let { audioConfig = it }
+		frame.audioConfig?.let { audioConfig = it }
         when (frame.type) {
 			"ready" -> {
 				snapshot = snapshot.copy(appUpdate = frame.appUpdate)
+				if (frame.audioConfig?.transportSelected() == false) {
+					publish()
+					return
+				}
 				val becameReady = !serverReady
 				serverReady = true
 				if (becameReady) connectionSound.ready()
@@ -469,6 +481,10 @@ class CallController(
 					if (outputUtteranceId != frame.utteranceId) outputSequence = 0
 					outputUtteranceId = frame.utteranceId
                     acceptingOutput = true
+					outputOpusDecoder = when (audioConfig?.selectedOutputTransport()?.encoding) {
+						VoiceProtocol.OPUS_ENCODING -> OpusAudioDecoder(audioConfig!!.selectedOutputTransport())
+						else -> null
+					}
 					configureEndpointForOutput(true)
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
@@ -484,6 +500,7 @@ class CallController(
 							acceptingOutput = false
 							outputUtteranceId = ""
 							outputSequence = 0
+							outputOpusDecoder = null
 							configureEndpointForOutput(false)
 							maybeListen(force = true)
 						}
@@ -491,12 +508,14 @@ class CallController(
 				} else {
 					outputUtteranceId = ""
 					outputSequence = 0
+					outputOpusDecoder = null
 				}
             }
             "error" -> {
                 acceptingOutput = false
 				outputUtteranceId = ""
 				outputSequence = 0
+				outputOpusDecoder = null
                 playback.stop()
 				configureEndpointForOutput(false)
 				val message = frame.error.ifBlank { "Voice request failed" }
@@ -515,8 +534,13 @@ class CallController(
     @Synchronized
 	private fun handleOutputAudio(frame: VoiceAudioFrame) {
         if (!running || !acceptingOutput) return
-		audioConfig?.output?.let { diagnostics.recordOutput(frame, it) }
-        if (frame.kind != VoiceAudioFrameKind.OUTPUT_PCM || frame.sequence != outputSequence) {
+		val config = audioConfig ?: return
+		val expectedKind = if (config.selectedOutputTransport().encoding == VoiceProtocol.OPUS_ENCODING) {
+			VoiceAudioFrameKind.OUTPUT_OPUS
+		} else {
+			VoiceAudioFrameKind.OUTPUT_PCM
+		}
+        if (frame.kind != expectedKind || frame.sequence != outputSequence) {
             acceptingOutput = false
             playback.stop()
 			onMain {
@@ -525,10 +549,22 @@ class CallController(
 			}
             return
         }
-		listener.onAudioLevel(pcmLevel(frame.pcm), false)
-		listener.onAudioWaveform(pcmWaveform(frame.pcm), false)
+		val pcm = try {
+			outputOpusDecoder?.decode(frame.payload) ?: frame.payload
+		} catch (error: Exception) {
+			acceptingOutput = false
+			playback.stop()
+			onMain {
+				configureEndpointForOutput(false)
+				update(Stage.ERROR, "Could not decode speech audio: ${error.message}")
+			}
+			return
+		}
+		diagnostics.recordOutput(frame, config.output, pcm.size)
+		listener.onAudioLevel(pcmLevel(pcm), false)
+		listener.onAudioWaveform(pcmWaveform(pcm), false)
         outputSequence++
-        playback.write(frame.pcm)
+		playback.write(pcm)
     }
 
 	    private fun maybeListen(force: Boolean = false) {
@@ -599,8 +635,12 @@ class CallController(
 							playback.stop()
 							interruptionFeedback.acknowledge()
 						}
+						val transport = audioConfig?.selectedInputTransport() ?: format
+						inputOpusEncoder = if (transport.encoding == VoiceProtocol.OPUS_ENCODING) {
+							OpusAudioEncoder(transport, INPUT_OPUS_BITRATE)
+						} else null
 						utteranceId = connection.startAudio(
-							format,
+							transport,
 							speechLanguages,
 							audioConfig?.maxUtteranceSeconds ?: MAX_BUFFERED_UTTERANCE_SECONDS,
 						)
@@ -613,8 +653,10 @@ class CallController(
                     }
                     is UtteranceEvent.Continued -> sendPCM(event.frame)
 					is UtteranceEvent.Committed -> {
+						inputOpusEncoder?.finish()?.let(::sendOpus)
+						inputOpusEncoder = null
                         val completedId = utteranceId
-                        utteranceId = ""
+						utteranceId = ""
 						stopMicrophone()
 						configureEndpointForOutput(false)
 						connection.commitAudio(completedId)
@@ -630,6 +672,7 @@ class CallController(
 		} catch (error: Exception) {
             val failedId = utteranceId
             utteranceId = ""
+			inputOpusEncoder = null
 			interruptedPlayback = false
 			stopMicrophone()
 			configureEndpointForOutput(false)
@@ -639,9 +682,22 @@ class CallController(
     }
 
 	private fun sendPCM(samples: ShortArray) {
+		inputOpusEncoder?.let { encoder ->
+			encoder.append(samples).forEach(::sendOpus)
+			return
+		}
         val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         samples.forEach(pcm::putShort)
         connection.sendAudio(inputSequence++, pcm.array())
+	}
+
+	private fun sendOpus(packet: EncodedAudioPacket) {
+		connection.sendAudio(
+			inputSequence++,
+			packet.payload,
+			VoiceAudioFrameKind.INPUT_OPUS,
+			packet.sourcePCMBytes,
+		)
 	}
 
 	@Synchronized
