@@ -78,6 +78,15 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 	}
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
 	current := inferCapabilities(providerID, cfg, model)
+	// An explicit task from the provider's live model listing is newer and more
+	// authoritative than a previously probed or heuristic cache entry.
+	if current.CapabilitiesKnown && strings.TrimSpace(current.CapabilitySource) == "openai-models-task" {
+		cache.Entries[key] = capabilityEntryFromModel(providerID, cfg, current)
+		if err := s.save(cache); err != nil {
+			return domain.Model{}, err
+		}
+		return current, nil
+	}
 	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
 		if strings.TrimSpace(entry.CapabilitySource) != "heuristic" {
 			return applyEntry(current, entry), nil

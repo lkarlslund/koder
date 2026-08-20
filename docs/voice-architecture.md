@@ -1,11 +1,11 @@
-# Voice-first Android architecture
+# Voice conversation architecture
 
 Status: implemented first release
 
-Koder's Android client is a native phone-style voice surface over the existing
-session system. Android owns call audio and endpointing. Koder owns speech
-services, durable voice-chat history, coordinated work, and
-generic presentations.
+Koder exposes the same voice-chat system through its native Android client and
+the Web UI. Each client owns microphone capture, local endpointing, and audio
+playback. Koder owns speech services, durable voice-chat history, coordinated
+work, and generic presentations.
 
 The app lives in this repository under `clients/android`, but remains a separate
 Gradle product. Its only integration boundary is the authenticated, versioned
@@ -102,8 +102,23 @@ mechanics; the role prompt only defines the generic conversational behavior.
   action enum contains only capabilities advertised by that phone.
 
 Voice chats and their transcripts are normal chats and remain inspectable in
-the Web UI. Android intentionally exposes only the session/chat browser rather
-than reproducing the browser workspace or planning UI.
+the Web UI. When a voice chat is selected there, the microphone action opens a
+browser conversation surface backed by the same `voice.v1` connection as
+Android. The browser uses Web Audio for echo-cancelled microphone capture,
+energy-based endpointing, PCM resampling, streamed PCM playback, and local
+barge-in. The old global TTS toggle is intentionally absent: speech belongs to
+an explicit voice conversation and ordinary visual chats stay quiet.
+
+The already-connected Web UI obtains a 30-second, single-use voice upgrade
+ticket over its normal RPC channel. It offers that ticket as a WebSocket
+subprotocol, so Android bearer credentials are never exposed to JavaScript or
+placed in a URL. Koder consumes the ticket during the upgrade and assigns the
+browser tab its own device lease identity. A browser tab and an Android phone
+can therefore hold different active voice chats concurrently, while each
+individual client still has only one active conversation.
+
+Android intentionally exposes only the session/chat browser rather than
+reproducing the browser workspace or planning UI.
 
 Transcript history uses the same indexed timeline-page storage path as the Web
 UI. A ready snapshot carries only the newest five complete user/assistant

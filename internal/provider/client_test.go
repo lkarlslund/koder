@@ -69,6 +69,25 @@ func TestListModelsMapsAdvertisedSpeechTasks(t *testing.T) {
 	}
 }
 
+func TestCapabilityStorePrefersAdvertisedSpeechTaskOverCachedProbe(t *testing.T) {
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{BaseURL: "http://speech.example/v1"}
+	key := capabilityKey("speech", cfg.BaseURL, "koder-stt")
+	if err := store.save(capabilityFile{Entries: map[string]capabilityEntry{
+		key: {ProviderID: "speech", BaseURL: cfg.BaseURL, ModelID: "koder-stt", SupportsChat: true, CapabilitySource: "probe", CapabilitiesKnown: true, DetectedAt: time.Now()},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	model, err := store.EnrichModel("speech", cfg, domain.Model{ID: "koder-stt", SupportsSTT: true, CapabilitiesKnown: true, CapabilitySource: "openai-models-task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.SupportsSTT || model.SupportsChat || model.CapabilitySource != "openai-models-task" {
+		t.Fatalf("advertised speech task was overwritten by stale cache: %#v", model)
+	}
+}
+
 func TestSerializePromptEnvelopeUsesSingleLeadingSystemMessage(t *testing.T) {
 	env := PromptEnvelope{
 		Instructions: []InstructionBlock{

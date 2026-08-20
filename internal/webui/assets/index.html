@@ -20,6 +20,7 @@
   <script defer src="/assets/vendor/mermaid/mermaid.min.js"></script>
   <link href="/assets/app.css" rel="stylesheet">
   <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/browser_voice.js"></script>
   <script defer src="/assets/app.js"></script>
   <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
 </head>
@@ -49,7 +50,7 @@
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions &amp; Chats" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
 		<button class="btn btn-sm btn-outline-primary" title="Connect Android phone" @click="openPhoneBinding()"><i class="bi bi-phone"></i><span class="visually-hidden">Connect Android phone</span></button>
-        <button class="btn btn-sm" :class="ttsEnabled ? 'btn-success' : 'btn-outline-secondary'" :title="ttsButtonTitle()" @click="toggleTTSOutput()"><i class="bi" :class="ttsEnabled ? 'bi-volume-up-fill' : 'bi-volume-mute'"></i><span class="visually-hidden" x-text="ttsButtonTitle()"></span></button>
+		<button class="btn btn-sm" :class="browserVoice.active ? 'btn-info' : 'btn-outline-info'" type="button" x-show="voiceChatMode()" :title="browserVoice.active ? 'Open voice conversation' : 'Start voice conversation'" @click="openBrowserVoice()" style="display: none;"><i class="bi" :class="browserVoice.active ? 'bi-soundwave' : 'bi-mic-fill'"></i><span class="visually-hidden">Voice conversation</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
     </nav>
@@ -570,6 +571,37 @@
   <div class="exec-process-tooltip shadow" x-show="execHover.open && !execProcessModal.open" :style="execHoverStyle()" style="display: none;">
     <div class="exec-process-tooltip-title" x-text="execHover.title"></div>
     <pre x-text="execHover.output"></pre>
+  </div>
+
+  <div class="browser-voice-backdrop" x-show="browserVoice.open" x-transition @keydown.escape.window="closeBrowserVoice()" style="display: none;">
+    <section class="browser-voice-panel" role="dialog" aria-modal="true" aria-labelledby="browser-voice-title">
+      <header class="browser-voice-header">
+        <div>
+          <div class="browser-voice-kicker"><img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true"> Koder Voice</div>
+          <h2 class="h5 mb-0 text-truncate" id="browser-voice-title" x-text="activeChat().title || activeChat().Title || 'Voice conversation'"></h2>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-light" title="Close voice conversation" @click="closeBrowserVoice()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="browser-voice-stage">
+        <div class="browser-voice-orb" :class="browserVoiceCircleClass()" :style="{'--voice-level': browserVoice.level}">
+          <div class="browser-voice-stars"></div>
+          <div class="browser-voice-wave"></div>
+          <div class="browser-voice-spinner" x-show="browserVoice.state === 'working'"><i class="bi bi-asterisk"></i></div>
+          <i class="bi browser-voice-idle-icon" :class="browserVoice.muted ? 'bi-mic-mute-fill' : 'bi-stars'"></i>
+        </div>
+        <div class="browser-voice-state" x-text="browserVoiceStatusLabel()"></div>
+        <div class="browser-voice-detail" x-text="browserVoice.detail || browserVoice.error || 'Speak naturally. Koder will listen when you start talking.'"></div>
+        <div class="browser-voice-text" x-show="browserVoice.transcript || browserVoice.response" style="display: none;">
+          <div x-show="browserVoice.transcript"><span class="browser-voice-speaker">You</span><span x-text="browserVoice.transcript"></span></div>
+          <div x-show="browserVoice.response"><span class="browser-voice-speaker">Koder</span><span x-text="browserVoice.response"></span></div>
+        </div>
+      </div>
+      <footer class="browser-voice-controls">
+        <button type="button" class="browser-voice-control" :class="{'active': browserVoice.muted}" :disabled="!browserVoice.active" :title="browserVoice.muted ? 'Unmute microphone' : 'Mute microphone'" @click="toggleBrowserVoiceMute()"><i class="bi" :class="browserVoice.muted ? 'bi-mic-mute-fill' : 'bi-mic-fill'"></i></button>
+        <button type="button" class="browser-voice-control browser-voice-control-main" :class="browserVoice.active ? 'hangup' : 'start'" :title="browserVoice.active ? 'End voice conversation' : 'Start voice conversation'" @click="toggleBrowserVoice()"><i class="bi" :class="browserVoice.active ? 'bi-telephone-x-fill' : 'bi-mic-fill'"></i></button>
+        <button type="button" class="browser-voice-control" :disabled="!browserVoice.active || browserVoice.state !== 'recording'" title="Finish speaking now" @click="finishBrowserVoiceUtterance()"><i class="bi bi-check-lg"></i></button>
+      </footer>
+    </section>
   </div>
 
   <div class="modal-backdrop-lite user-input-backdrop" x-show="userInputQuestions().length > 0" x-transition style="display: none;">
@@ -1210,10 +1242,7 @@
 				</div>
 
               <div class="settings-section" x-show="settingsTab === 'tts'">
-                <div class="settings-field">
-                  <div class="settings-field-label"><span class="settings-field-title">TTS output</span></div>
-                  <div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.ui.tts.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div>
-                </div>
+                <div class="alert alert-info">Voice conversations use the STT and TTS models configured for Koder Voice. The controls below remain available for testing standalone speech output.</div>
                 <div class="settings-field">
                   <div class="settings-field-label"><label class="settings-field-title">TTS model</label><div class="settings-field-help">Speech-capable model used for playback.</div></div>
                   <div class="settings-field-control"><div class="input-group"><input class="form-control" :value="ttsModelLabel()" :title="ttsModelLabel()" readonly><button class="btn btn-outline-secondary" type="button" title="Choose TTS model" aria-label="Choose TTS model" @click="openSettingsModelPicker({kind: 'tts', title: 'TTS model', subtitle: 'Speech output'})"><i class="bi bi-search"></i></button><button class="btn btn-outline-secondary" type="button" title="Use automatically detected TTS model" aria-label="Use automatically detected TTS model" @click="setTTSModelValue('')"><i class="bi bi-stars"></i></button></div></div>

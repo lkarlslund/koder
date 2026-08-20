@@ -19,6 +19,14 @@ Android installation returns HTTP 409; different registered devices may hold
 calls concurrently. Reconnects with the same device and `call_id` replace the
 old socket atomically.
 
+The same-origin Koder Web UI does not receive an Android bearer token. Its
+existing browser RPC connection mints a 30-second, single-use ticket and the
+browser offers `voice.v1` plus `koder-browser.<ticket>` in
+`Sec-WebSocket-Protocol`. Koder consumes the ticket during the upgrade and
+selects `voice.v1` as the negotiated subprotocol. This is an internal Web UI
+authentication bridge; third-party and native clients continue to use bearer
+authentication.
+
 Before opening a live WebSocket, native clients use the authenticated session
 and chat endpoints:
 

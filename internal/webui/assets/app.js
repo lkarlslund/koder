@@ -1048,7 +1048,8 @@
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
 		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserPanelOpen: false, browserTabs: [], browserTabsLoading: false, browserPanelError: '', browserPanelTimer: null,
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsEnabled: false, ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsSpokenItems: {}, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: ''}, browserVoiceClient: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1559,7 +1560,6 @@
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
-          if (msg.type === 'tts') this.applyTTSSettings(msg.payload);
         },
         applyStateDelta(delta) {
           if (!delta) return;
@@ -1707,7 +1707,6 @@
           const seq = active ? ++this.scrollRestoreSeq : this.scrollRestoreSeq;
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[id] || snapshots[String(id)] || {};
-          const wasStreaming = this.snapshotIsStreaming(current);
           const next = {...current};
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
@@ -1761,8 +1760,6 @@
           }
           if (delta.error) this.error = delta.error;
           this.syncInterruptArmed();
-          if (active && delta.item) this.maybeSpeakTimelineItem(delta.item, next);
-          if (active && wasStreaming && !this.snapshotIsStreaming(next)) this.maybeSpeakLatestAssistant(next);
           if (active) {
             const changedItemID = delta.item ? this.timelineItemID(delta.item) : '';
             this.afterTranscriptDOMUpdate(() => {
@@ -2216,6 +2213,9 @@
           const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
+		  if (this.browserVoiceClient && (this.browserVoiceClient.options.sessionID !== this.currentSessionID() || this.browserVoiceClient.options.chatID !== String(this.activeChatID() || '').trim())) {
+			this.closeBrowserVoice();
+		  }
           this.syncBrowserTabActivity();
           this.hydratingSession = {active: false, id: '', title: '', error: ''};
           this.clearSwitchingChat();
@@ -2254,8 +2254,9 @@
         hydratingSessionMode() { return !!this.hydratingSession.active; },
         sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
         quickChatMode() { return this.isQuickSession(this.currentSession()); },
-        voiceChatMode() { return this.isVoiceSession(this.currentSession()); },
-        singleChatMode() { return this.quickChatMode() || this.voiceChatMode(); },
+        legacyVoiceSessionMode() { return this.isVoiceSession(this.currentSession()); },
+        voiceChatMode() { return this.legacyVoiceSessionMode() || this.activeChatRole() === 'voice'; },
+        singleChatMode() { return this.quickChatMode() || this.legacyVoiceSessionMode(); },
         workspaceSessionMode() { return !this.singleChatMode(); },
         switchingChatMode() { return !!this.switchingChat.active; },
         welcomeMessage() { return this.state.error || this.state.Error || ''; },
@@ -3035,6 +3036,7 @@
         },
         modalOpenName() {
           if (this.userInputQuestions().length > 0) return 'user_input';
+		  if (this.browserVoice?.open) return 'browser_voice';
           if (this.imageLightbox?.open) return 'image';
 		  if (this.browserPreview?.open) return 'browser_preview';
           if (this.showProviderEditor) return 'provider';
@@ -4437,47 +4439,103 @@
           if (this.toastTimer) clearTimeout(this.toastTimer);
           this.toastTimer = setTimeout(() => { this.toast = ''; this.toastTimer = null; }, 4500);
         },
-        ttsButtonTitle() { return this.ttsEnabled ? 'Disable TTS output' : 'Enable TTS output'; },
-        toggleTTSOutput() {
-          const enabled = !this.ttsEnabled;
-          this.rpc('set_tts_enabled', {enabled}).then(settings => {
-            this.applyTTSSettings(settings);
-            this.showToast(this.ttsEnabled ? 'TTS output enabled' : 'TTS output disabled');
+        async openBrowserVoice() {
+          if (!this.voiceChatMode()) {
+            this.showToast('Select a voice chat first');
+            return;
+          }
+          this.browserVoice = {...this.browserVoice, open: true};
+          if (!this.browserVoice.active) await this.startBrowserVoice();
+        },
+        async startBrowserVoice() {
+          if (this.browserVoice.active) return;
+          if (!window.KoderBrowserVoice?.BrowserVoiceClient) {
+            this.browserVoice = {...this.browserVoice, error: 'Browser voice support failed to load'};
+            return;
+          }
+          const sessionID = this.currentSessionID();
+          const chatID = String(this.activeChatID() || '').trim();
+          const client = new window.KoderBrowserVoice.BrowserVoiceClient({
+            sessionID,
+            chatID,
+            ticketProvider: () => this.rpc('browser_voice_ticket', {}),
+            onLevel: level => { this.browserVoice = {...this.browserVoice, level}; },
+            onEvent: (type, payload) => this.handleBrowserVoiceEvent(type, payload),
           });
+          this.browserVoiceClient = client;
+          this.browserVoice = {open: true, active: true, state: 'connecting', detail: 'Requesting microphone access', transcript: '', response: '', level: 0, muted: false, error: ''};
+          try {
+            await client.start();
+          } catch (error) {
+            if (this.browserVoiceClient === client) this.browserVoiceClient = null;
+            this.browserVoice = {...this.browserVoice, active: false, state: 'idle', error: error.message || String(error)};
+          }
+        },
+        handleBrowserVoiceEvent(type, payload = {}) {
+          if (type === 'state') {
+            const state = String(payload.state || 'idle');
+            const working = payload.working_on || {};
+            const detail = state === 'working'
+              ? ('Using tools' + (working.title ? ' · ' + working.title : ''))
+              : ({connecting: 'Connecting to Koder', reconnecting: 'Restoring the connection', listening: 'Listening for you', recording: 'I can hear you', transcribing: 'Turning speech into text', processing: 'Koder is thinking', speaking: 'Koder is speaking', idle: 'Conversation ended'}[state] || '');
+            this.browserVoice = {...this.browserVoice, state, detail, error: state === 'listening' ? '' : this.browserVoice.error};
+            return;
+          }
+          if (type === 'ready') {
+            this.browserVoice = {...this.browserVoice, active: true, error: ''};
+            return;
+          }
+          if (type === 'transcript') {
+            this.browserVoice = {...this.browserVoice, transcript: String(payload.transcript || '').trim(), response: ''};
+            return;
+          }
+          if (type === 'message') {
+            const message = payload.message || {};
+            this.browserVoice = {...this.browserVoice, response: String(message.spoken_text || '').trim()};
+            return;
+          }
+          if (type === 'render') {
+            this.browserVoice = {...this.browserVoice, detail: 'Showing the result in the conversation'};
+            return;
+          }
+          if (type === 'muted') {
+            this.browserVoice = {...this.browserVoice, muted: !!payload.muted};
+            return;
+          }
+          if (type === 'error') {
+            this.browserVoice = {...this.browserVoice, error: String(payload.error || 'Voice conversation failed'), detail: ''};
+          }
+        },
+        async stopBrowserVoice() {
+          const client = this.browserVoiceClient;
+          this.browserVoiceClient = null;
+          if (client) await client.stop();
+          this.browserVoice = {...this.browserVoice, active: false, state: 'idle', level: 0, muted: false, detail: 'Conversation ended'};
+        },
+        async closeBrowserVoice() {
+          await this.stopBrowserVoice();
+          this.browserVoice = {...this.browserVoice, open: false};
+        },
+        toggleBrowserVoice() {
+          if (this.browserVoice.active) return this.stopBrowserVoice();
+          return this.startBrowserVoice();
+        },
+        toggleBrowserVoiceMute() {
+          if (this.browserVoiceClient) this.browserVoiceClient.setMuted(!this.browserVoice.muted);
+        },
+        finishBrowserVoiceUtterance() {
+          if (this.browserVoiceClient) this.browserVoiceClient.finishUtterance();
+        },
+        browserVoiceCircleClass() {
+          return 'voice-' + String(this.browserVoice.state || 'idle') + (this.browserVoice.muted ? ' voice-muted' : '');
+        },
+        browserVoiceStatusLabel() {
+          return ({connecting: 'Connecting', reconnecting: 'Reconnecting', listening: 'Listening', recording: 'You are speaking', transcribing: 'Understanding', processing: 'Thinking', working: 'Working', speaking: 'Speaking', idle: 'Voice conversation'}[this.browserVoice.state] || 'Voice conversation');
         },
         applyTTSSettings(settings) {
           if (!settings) return;
           this.ttsSettings = Object.assign({}, this.ttsSettings || {}, settings);
-          this.ttsEnabled = !!(settings.enabled || settings.Enabled);
           if (this.settings?.ui) this.settings.ui.tts = Object.assign({}, this.settings.ui.tts || {}, this.ttsSettings);
-        },
-        maybeSpeakTimelineItem(item, snapshot) {
-          if (!this.ttsEnabled || !item || this.snapshotIsStreaming(snapshot)) return;
-          const kind = String(item.kind || item.Kind || '').trim();
-          if (kind !== 'assistant') return;
-          const id = this.timelineItemID(item);
-          const content = item.content || item.Content || {};
-          const text = String(content.text || content.Text || '').trim();
-          if (!id || !text || this.ttsSpokenItems[id] === text) return;
-          this.ttsSpokenItems = {...this.ttsSpokenItems, [id]: text};
-          this.speakText(text);
-        },
-        maybeSpeakLatestAssistant(snapshot) {
-          const chatID = String(snapshot?.Chat?.ID || snapshot?.Chat?.id || snapshot?.chat?.ID || snapshot?.chat?.id || this.activeChatID() || '').trim();
-          const timeline = this.timelineForChat(chatID, snapshot);
-          for (let i = timeline.length - 1; i >= 0; i--) {
-            const item = timeline[i];
-            const kind = String(item?.kind || item?.Kind || '').trim();
-            if (kind === 'assistant') {
-              this.maybeSpeakTimelineItem(item, snapshot);
-              return;
-            }
-          }
-        },
-        speakText(text) {
-          this.rpc('tts_speech', {text}).then(result => {
-            this.playTTSAudioResult(result);
-          }).catch(err => this.showToast(err.message || 'TTS failed'));
         },
         playTTSAudioResult(result) {
             const audioBase64 = result.audio_base64 || result.AudioBase64 || '';
@@ -4855,7 +4913,7 @@
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
-          this.sessionTab = this.quickChatMode() ? 'chats' : (this.voiceChatMode() ? 'voice' : 'sessions');
+          this.sessionTab = this.quickChatMode() ? 'chats' : (this.legacyVoiceSessionMode() ? 'voice' : 'sessions');
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });

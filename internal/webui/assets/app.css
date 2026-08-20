@@ -390,6 +390,40 @@
     .settings-inline-status { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); align-items: center; gap: .75rem; padding: .65rem .75rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); }
     .settings-prompt, .settings-json { min-height: 14rem; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
+    .browser-voice-backdrop { position: fixed; inset: 0; z-index: 1080; display: grid; place-items: center; padding: 1rem; background: rgba(3, 7, 18, .78); backdrop-filter: blur(12px); }
+    .browser-voice-panel { width: min(520px, 100%); max-height: calc(100dvh - 2rem); overflow: auto; color: #e8f7ff; border: 1px solid rgba(76, 201, 240, .28); border-radius: 1.35rem; background: linear-gradient(160deg, rgba(13, 25, 47, .98), rgba(5, 10, 24, .98)); box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, .55), 0 0 4rem rgba(67, 191, 255, .1); }
+    .browser-voice-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.15rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .browser-voice-kicker { display: flex; align-items: center; gap: .45rem; margin-bottom: .25rem; color: #72dcff; font-size: .72rem; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    .browser-voice-kicker .koder-logo { width: 1.1rem; height: 1.1rem; }
+    .browser-voice-stage { display: grid; justify-items: center; padding: 2rem 1.4rem 1.3rem; text-align: center; }
+    .browser-voice-orb { --voice-level: 0; position: relative; width: min(18rem, 62vw); aspect-ratio: 1; overflow: hidden; display: grid; place-items: center; border: 1px solid rgba(98, 218, 255, .5); border-radius: 50%; isolation: isolate; background: radial-gradient(circle at 50% 42%, rgba(33, 129, 177, .2), rgba(4, 9, 25, .98) 68%); box-shadow: 0 0 calc(1.5rem + var(--voice-level) * 3rem) rgba(61, 205, 255, calc(.18 + var(--voice-level) * .35)), inset 0 0 3rem rgba(56, 189, 248, .08); transition: box-shadow .08s linear, border-color .2s ease; }
+    .browser-voice-stars { position: absolute; inset: -40%; opacity: .9; background-image: radial-gradient(circle, rgba(255,255,255,.95) 0 1px, transparent 1.4px), radial-gradient(circle, rgba(89,214,255,.8) 0 1px, transparent 1.5px), radial-gradient(circle, rgba(169,117,255,.72) 0 1px, transparent 1.5px); background-size: 37px 41px, 61px 57px, 83px 79px; background-position: 0 0, 13px 21px, 31px 7px; transform: scale(1); animation: browser-voice-drift 12s linear infinite; }
+    .browser-voice-wave { position: absolute; z-index: 2; width: 72%; height: calc(.22rem + var(--voice-level) * 4.5rem); min-height: .22rem; border-radius: 50%; opacity: 0; background: linear-gradient(90deg, transparent, #54e9ff 20%, #e9fbff 50%, #54e9ff 80%, transparent); filter: drop-shadow(0 0 .65rem #38d9ff); transition: height .07s linear, opacity .2s ease; }
+    .voice-recording .browser-voice-wave, .voice-speaking .browser-voice-wave { opacity: .95; }
+    .voice-speaking .browser-voice-wave { background: linear-gradient(90deg, transparent, #a873ff 20%, #f1e9ff 50%, #a873ff 80%, transparent); filter: drop-shadow(0 0 .7rem #9d63ff); animation: browser-voice-model-wave .75s ease-in-out infinite alternate; }
+    .voice-processing .browser-voice-stars, .voice-transcribing .browser-voice-stars, .voice-connecting .browser-voice-stars, .voice-reconnecting .browser-voice-stars { animation: browser-voice-warp 1.2s linear infinite; background-size: 24px 72px, 39px 100px, 53px 130px; filter: blur(.35px); }
+    .voice-working .browser-voice-stars { animation-duration: 5s; }
+    .browser-voice-spinner { position: relative; z-index: 3; display: grid; place-items: center; width: 4.5rem; height: 4.5rem; border: 2px solid rgba(114,220,255,.18); border-top-color: #72dcff; border-radius: 50%; animation: browser-voice-spin 1s linear infinite; font-size: 1.4rem; color: #b3efff; }
+    .browser-voice-idle-icon { position: relative; z-index: 2; color: rgba(205, 245, 255, .86); font-size: 2rem; text-shadow: 0 0 1.3rem rgba(80, 216, 255, .9); }
+    .voice-recording .browser-voice-idle-icon, .voice-speaking .browser-voice-idle-icon, .voice-working .browser-voice-idle-icon { opacity: 0; }
+    .voice-muted { border-color: rgba(148,163,184,.4); filter: saturate(.55); }
+    .browser-voice-state { margin-top: 1.25rem; font-size: 1.2rem; font-weight: 650; letter-spacing: .01em; }
+    .browser-voice-detail { min-height: 1.5rem; margin-top: .35rem; color: #9bb2c8; font-size: .9rem; }
+    .browser-voice-text { width: 100%; margin-top: 1.25rem; padding: .9rem 1rem; border: 1px solid rgba(255,255,255,.08); border-radius: .85rem; background: rgba(255,255,255,.035); text-align: left; font-size: .9rem; }
+    .browser-voice-text > div + div { margin-top: .55rem; }
+    .browser-voice-speaker { display: inline-block; min-width: 3.6rem; margin-right: .5rem; color: #72dcff; font-weight: 700; }
+    .browser-voice-controls { display: flex; align-items: center; justify-content: center; gap: 1rem; padding: 1.1rem 1.25rem 1.4rem; }
+    .browser-voice-control { width: 3.15rem; height: 3.15rem; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.16); border-radius: 50%; color: #e7f8ff; background: rgba(255,255,255,.07); font-size: 1.15rem; transition: transform .16s ease, background .16s ease, opacity .16s ease; }
+    .browser-voice-control:hover:not(:disabled) { transform: translateY(-2px); background: rgba(255,255,255,.13); }
+    .browser-voice-control:disabled { opacity: .35; }
+    .browser-voice-control.active { background: rgba(255,193,7,.22); color: #ffd75e; }
+    .browser-voice-control-main { width: 4.25rem; height: 4.25rem; font-size: 1.45rem; border: 0; }
+    .browser-voice-control-main.start { background: linear-gradient(145deg, #23b7e5, #247bff); box-shadow: 0 0 1.5rem rgba(36,150,255,.35); }
+    .browser-voice-control-main.hangup { background: linear-gradient(145deg, #f04458, #c91f3b); box-shadow: 0 0 1.5rem rgba(238,49,79,.3); }
+    @keyframes browser-voice-drift { from { transform: scale(.85) rotate(0deg); } to { transform: scale(1.12) rotate(8deg); } }
+    @keyframes browser-voice-warp { from { transform: scale(.62); opacity: .4; } to { transform: scale(1.45); opacity: 1; } }
+    @keyframes browser-voice-model-wave { from { transform: scaleY(.4); } to { transform: scaleY(1.2); } }
+    @keyframes browser-voice-spin { to { transform: rotate(360deg); } }
     .koder-math-inline { display: inline; }
     .koder-math-display { overflow-x: auto; overflow-y: hidden; margin: .75rem 0; padding-bottom: .15rem; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }

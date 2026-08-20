@@ -1713,13 +1713,22 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	document := string(body)
 	appJS := getAssetBody(t, srv, "/assets/app.js")
+	browserVoiceJS := getAssetBody(t, srv, "/assets/browser_voice.js")
 	appCSS := getAssetBody(t, srv, "/assets/app.css")
-	fullPage := document + "\n" + appJS + "\n" + appCSS
+	fullPage := document + "\n" + appJS + "\n" + browserVoiceJS + "\n" + appCSS
 	if !strings.Contains(document, `/assets/app.css`) {
 		t.Fatalf("expected app CSS to be loaded from embedded assets")
 	}
 	if !strings.Contains(document, `/assets/app.js`) {
 		t.Fatalf("expected app JS to be loaded from embedded assets")
+	}
+	if !strings.Contains(document, `/assets/browser_voice.js`) ||
+		!strings.Contains(fullPage, `browser_voice_ticket`) ||
+		!strings.Contains(fullPage, `audio_start`) ||
+		!strings.Contains(fullPage, `audio_commit`) ||
+		!strings.Contains(fullPage, `browser-voice-orb`) ||
+		strings.Contains(fullPage, `toggleTTSOutput()`) {
+		t.Fatalf("expected browser voice conversation transport and no standalone TTS toggle")
 	}
 	if !strings.Contains(fullPage, `welcomeMode()`) ||
 		!strings.Contains(fullPage, `welcome-view`) ||
@@ -1762,9 +1771,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
 	}
 	appScript := strings.Index(document, `/assets/app.js`)
+	voiceScript := strings.Index(document, `/assets/browser_voice.js`)
 	alpineScript := strings.Index(document, `/assets/vendor/alpine/cdn.min.js`)
-	if appScript < 0 || alpineScript < 0 || appScript > alpineScript {
-		t.Fatalf("expected app JS to load before Alpine so x-data scope is registered before Alpine initializes")
+	if voiceScript < 0 || appScript < 0 || alpineScript < 0 || voiceScript > appScript || appScript > alpineScript {
+		t.Fatalf("expected browser voice and app JS to load before Alpine in dependency order")
 	}
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
