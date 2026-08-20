@@ -3,6 +3,7 @@ package modelruntime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -162,12 +163,27 @@ func (r *Runtime) ensureSessionAgents(ctx context.Context, session domain.Sessio
 	if err != nil {
 		return domain.Session{}, err
 	}
-	_, modelID, err := chatModel(chat)
+	model, err := r.settings.Model(chat)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	resolution, err := r.agents.Resolve(ctx, client, modelID, snapshot)
+	resolution, err := r.agents.Resolve(ctx, client, session.ID, chat.ID, model.SourceModelID, snapshot)
 	if err != nil {
+		r.RecordLifecycle(session.ID, "agents_resolution_failed", "", map[string]string{
+			"chat_id":          string(chat.ID),
+			"provider_id":      model.SourceProviderID,
+			"configured_model": model.ModelID,
+			"provider_model":   model.SourceModelID,
+			"error":            err.Error(),
+		})
+		slog.Error("project instruction resolution failed",
+			"session_id", session.ID,
+			"chat_id", chat.ID,
+			"provider_id", model.SourceProviderID,
+			"configured_model", model.ModelID,
+			"provider_model", model.SourceModelID,
+			"error", err,
+		)
 		return domain.Session{}, err
 	}
 	files := make([]domain.AgentsFile, 0, len(resolution.Snapshot.Files))

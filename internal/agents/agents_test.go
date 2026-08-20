@@ -2,9 +2,17 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/provider"
 )
 
 func TestNormalizeProjectRootDoesNotSearchParentMarkers(t *testing.T) {
@@ -113,5 +121,50 @@ func TestParseResolverResponse(t *testing.T) {
 	}
 	if got.ResolvedAgentsMD != "a" || got.ConflictSummary != "No conflicts" {
 		t.Fatalf("unexpected parse result: %#v", got)
+	}
+}
+
+func TestResolveAssociatesProviderTraceWithChat(t *testing.T) {
+	t.Parallel()
+
+	var receivedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode resolver request: %v", err)
+			return
+		}
+		receivedModel = request.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"resolved_agents_md\":\"Use tests.\",\"conflict_summary\":\"No conflicts\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, agentsFileName), []byte("Use tests.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(t.TempDir(), "")
+	snapshot, err := manager.DiscoverProject(context.Background(), projectRoot, projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := debugsrv.NewRecorder()
+	client, err := provider.New("test", config.Provider{BaseURL: server.URL}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, chatID := id.ID("session-test"), id.ID("chat-test")
+	if _, err := manager.Resolve(context.Background(), client, sessionID, chatID, "provider-model", snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if receivedModel != "provider-model" {
+		t.Fatalf("resolver provider model = %q, want provider-model", receivedModel)
+	}
+	traces := recorder.HTTPTraces(debugsrv.HTTPTraceFilter{SessionID: sessionID, ChatID: chatID})
+	if len(traces) != 1 {
+		t.Fatalf("resolver traces = %#v, want one trace associated with the chat", traces)
 	}
 }

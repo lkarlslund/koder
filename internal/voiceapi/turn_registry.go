@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -118,7 +119,7 @@ func (t *cachedTurn) finish(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if err != nil {
-		frame := serverFrame{Type: "error", UtteranceID: t.utteranceID, Error: err.Error()}
+		frame := serverFrame{Type: "error", UtteranceID: t.utteranceID, Error: err.Error(), ErrorCode: clientErrorCode(err)}
 		t.events = append(t.events, turnEvent{frame: &frame})
 	} else if t.audioStarted {
 		frame := serverFrame{Type: "tts_end", UtteranceID: t.utteranceID}
@@ -228,6 +229,14 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 		message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
 	}
 	if err != nil {
+		slog.Error("voice turn failed",
+			"call_id", turn.callID,
+			"utterance_id", turn.utteranceID,
+			"voice_session_id", turn.voiceSessionID,
+			"session_id", turn.sessionID,
+			"chat_id", turn.chatID,
+			"error", err,
+		)
 		turn.finish(err)
 		return
 	}

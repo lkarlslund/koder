@@ -464,11 +464,11 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	if err != nil {
 		return domain.Session{}, err
 	}
-	_, modelID, err := chatModel(chat)
+	model, err := e.settings.Model(chat)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	resolution, err := e.agents.Resolve(ctx, client, modelID, snapshot)
+	resolution, err := e.agents.Resolve(ctx, client, session.ID, chat.ID, model.SourceModelID, snapshot)
 	if err != nil {
 		return domain.Session{}, err
 	}

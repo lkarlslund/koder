@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
@@ -181,7 +182,7 @@ func (m *Manager) Save(resolution Resolution) error {
 	return os.WriteFile(m.cachePath(resolution.Snapshot.ProjectRoot, resolution.Snapshot.Checksum), data, 0o644)
 }
 
-func (m *Manager) Resolve(ctx context.Context, client *provider.Client, modelID string, snapshot Snapshot) (Resolution, error) {
+func (m *Manager) Resolve(ctx context.Context, client *provider.Client, sessionID, chatID id.ID, modelID string, snapshot Snapshot) (Resolution, error) {
 	if len(snapshot.Files) == 0 {
 		return Resolution{
 			Snapshot:        snapshot,
@@ -221,7 +222,9 @@ func (m *Manager) Resolve(ctx context.Context, client *provider.Client, modelID 
 			string(body))
 	}
 	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
-		Model: modelID,
+		SessionID: sessionID,
+		ChatID:    chatID,
+		Model:     modelID,
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: "Resolve project instruction files into a single AGENTS.md and conflict summary."},
 			{Role: provider.RoleUser, Content: prompt.String()},

@@ -2933,6 +2933,96 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	}
 }
 
+func TestRunVoiceTurnResolvesCustomModelForProjectInstructions(t *testing.T) {
+	const (
+		aliasModel   = "friendly medium"
+		backingModel = "provider-model"
+	)
+	var modelsMu sync.Mutex
+	var receivedModels []string
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":%q,"object":"model"}]}`, backingModel)
+		case "/v1/chat/completions":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			var request struct {
+				Model string `json:"model"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil {
+				t.Error(err)
+				return
+			}
+			modelsMu.Lock()
+			receivedModels = append(receivedModels, request.Model)
+			modelsMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(string(body), "Resolve project instruction files") {
+				_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"resolved_agents_md\":\"Run focused tests.\",\"conflict_summary\":\"No conflicts\"}"},"finish_reason":"stop"}]}`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The resumed conversation works."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: 5 * time.Second},
+		}
+		cfg.Defaults.ModelID = aliasModel
+		cfg.SetModelConfig(config.ModelConfig{
+			ProviderID: "test", ModelID: aliasModel,
+			SourceProviderID: "test", SourceModelID: backingModel,
+			ContextWindow: 32768,
+		})
+	})
+	state, err := ctrl.Sessions(context.Background())
+	if err != nil || len(state.Sessions) == 0 {
+		t.Fatalf("sessions = %#v, %v", state.Sessions, err)
+	}
+	target := state.Sessions[0]
+	if err := os.WriteFile(filepath.Join(target.ProjectRoot, "AGENTS.md"), []byte("Run focused tests.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	voiceChat, err := ctrl.CreateVoiceChatInSession(context.Background(), string(target.ID), domain.ChatCreateSpec{
+		Title: "Alias voice", InteractionMode: domain.InteractionModeVoice,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voiceChat.ModelID != aliasModel {
+		t.Fatalf("voice chat model = %q, want alias %q", voiceChat.ModelID, aliasModel)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	message, err := ctrl.RunVoiceChatTurn(ctx, string(target.ID), voiceChat.ID, "Resume this conversation", voice.TurnOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.SpokenText != "The resumed conversation works." {
+		t.Fatalf("voice response = %#v", message)
+	}
+	modelsMu.Lock()
+	defer modelsMu.Unlock()
+	if len(receivedModels) < 2 {
+		t.Fatalf("provider requests = %v, want instruction resolution and voice turn", receivedModels)
+	}
+	for _, modelID := range receivedModels {
+		if modelID != backingModel {
+			t.Fatalf("provider received model %q through custom alias; all requests = %v", modelID, receivedModels)
+		}
+	}
+}
+
 func TestApplyVoiceRuntimeSummaryUsesPersistedPreviewAndLiveWorkState(t *testing.T) {
 	chatID := id.ID("voice-chat")
 	summary := voice.Session{}

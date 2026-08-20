@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -41,6 +42,21 @@ func (r *Runtime) CompleteModelRequest(ctx context.Context, session domain.Sessi
 	req.Model = model.SourceModelID
 	resp, streamed, cavemanJob, err := r.chatWithRetry(ctx, session, chat, client, out, req, assistantItem)
 	if err != nil {
+		r.RecordLifecycle(session.ID, "model_request_failed", "", map[string]string{
+			"chat_id":          string(chat.ID),
+			"provider_id":      model.SourceProviderID,
+			"configured_model": model.ModelID,
+			"provider_model":   model.SourceModelID,
+			"error":            err.Error(),
+		})
+		slog.Error("model request failed",
+			"session_id", session.ID,
+			"chat_id", chat.ID,
+			"provider_id", model.SourceProviderID,
+			"configured_model", model.ModelID,
+			"provider_model", model.SourceModelID,
+			"error", err,
+		)
 		return chatpkg.ModelResponse{}, err
 	}
 	reasoning, err := r.reasoningContentForResponse(ctx, chat, client, resp.Reasoning, cavemanJob, out)
