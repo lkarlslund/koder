@@ -360,16 +360,19 @@ class MainActivityInstrumentedTest {
                 assertFalse(labels.contains("Send"))
                 assertFalse(labels.any { it.contains("Message Koder") })
                 scenario.onActivity { activity ->
+					activity.showUpdateStatus(AndroidAppUpdater.Status.Available("next-dev"))
+				}
+				onView(withText("Update!")).check(matches(isDisplayed())).perform(click())
+				waitForDisplayedText("Downloading update…")
+				scenario.onActivity { activity ->
                     activity.showUpdateStatus(AndroidAppUpdater.Status.Downloading("next-dev", 42, 100))
-                    val progress = activity.findViewById<View>(android.R.id.content)
-                        .findByDescription("Update download progress") as ProgressBar
-                    assertEquals(View.VISIBLE, progress.visibility)
-                    assertEquals(42, progress.progress)
-                    assertTrue(
-                        activity.findViewById<View>(android.R.id.content).allText()
-                            .any { it.equals("Downloading next-dev · 42%", ignoreCase = true) },
-                    )
                 }
+				onView(withContentDescription("Update download progress")).inRoot(isDialog()).check { view, error ->
+					if (error != null) throw error
+					assertEquals(42, (view as ProgressBar).progress)
+				}
+				onView(withText(org.hamcrest.Matchers.containsString("next-dev · 42%"))).inRoot(isDialog()).check(matches(isDisplayed()))
+				onView(withText("Cancel")).inRoot(isDialog()).perform(click())
                 onView(withContentDescription("More options")).perform(click())
                 onView(withText("Server info")).check(matches(isDisplayed()))
                 onView(withText("Settings")).check(matches(isDisplayed()))
@@ -669,12 +672,46 @@ class MainActivityInstrumentedTest {
 				// DateUtils may render a recent timestamp as "Yesterday" rather
 				// than "1 day ago" depending on the emulator date and locale.
 				assertEquals(2, labels.count { it.startsWith("Session · 0 chats · 0 voice · ") })
-                assertTrue(waitForText(scenario, "Update Koder").any { it.contains("next-dev") })
+				val updatedLabels = waitForText(scenario, "Update!")
+				assertTrue(updatedLabels.indexOf("Update!") < updatedLabels.indexOf("⋮"))
             }
         } finally {
             server.close()
         }
     }
+
+	@Test
+	fun returningToForegroundChecksForUpdatesAndRefreshesSessions() {
+		val packageInfo = context.packageManager.getPackageInfo(
+			context.packageName,
+			PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+		)
+		val signer = MessageDigest.getInstance("SHA-256")
+			.digest(requireNotNull(packageInfo.signingInfo).apkContentsSigners.single().toByteArray())
+			.joinToString("") { "%02x".format(it) }
+		val update = """"app_update":{"channel":"local","application_id":"${context.packageName}","version_code":${packageInfo.longVersionCode + 1},"version_name":"foreground-dev","signing_certificate_sha256":"$signer","apk_sha256":"${"a".repeat(64)}","apk_size":1024,"download_uri":"/voice/v1/android/koder.apk"}"""
+		val server = MockWebServer()
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","sessions":[{"id":"session-old","title":"Before foreground","updated_at":"2026-08-18T12:00:00Z"}],"voice_sessions":[]}""",
+		).build())
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","sessions":[{"id":"session-new","title":"After foreground","updated_at":"2026-08-20T12:00:00Z"}],"voice_sessions":[],$update}""",
+		).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForDisplayedText("Before foreground")
+				scenario.moveToState(Lifecycle.State.CREATED)
+				scenario.moveToState(Lifecycle.State.RESUMED)
+				waitForDisplayedText("After foreground")
+				onView(withText("Update!")).check(matches(isDisplayed()))
+				onView(withContentDescription("Update available: foreground-dev")).check(matches(isDisplayed()))
+			}
+		} finally {
+			server.close()
+		}
+	}
 
 	@Test
 	fun transcriptSearchJumpsToServerSideMatch() {

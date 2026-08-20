@@ -39,7 +39,7 @@ class AndroidAppUpdater(
     private data class Candidate(val update: AppUpdate, val server: String, val token: String)
 
     private var candidate: Candidate? = null
-    private var download: Call? = null
+    @Volatile private var download: Call? = null
 
     fun consider(update: AppUpdate?, server: String, token: String) {
         val next = update?.let { Candidate(it, server.trim(), token.trim()) }
@@ -48,6 +48,7 @@ class AndroidAppUpdater(
                 .getOrElse { it.message ?: "Could not verify installed Koder" }
         }
         candidate = next?.takeIf { rejection == null }
+        if (download != null) return
         listener(candidate?.let { Status.Available(it.update.versionName) } ?: Status.Hidden)
     }
 
@@ -79,6 +80,12 @@ class AndroidAppUpdater(
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     activity.runOnUiThread {
+                        if (download !== call) return@runOnUiThread
+                        download = null
+                        if (call.isCanceled()) {
+                            listener(candidate?.let { Status.Available(it.update.versionName) } ?: Status.Hidden)
+                            return@runOnUiThread
+                        }
                         listener(Status.Error(e.message ?: "Update download failed"))
                     }
                 }
@@ -103,6 +110,7 @@ class AndroidAppUpdater(
                                         if (percent != lastPercent) {
                                             lastPercent = percent
                                             activity.runOnUiThread {
+                                                if (download !== call) return@runOnUiThread
                                                 listener(
                                                     Status.Downloading(
                                                         selected.update.versionName,
@@ -114,16 +122,24 @@ class AndroidAppUpdater(
                                         }
                                     }
                                 }
-                                activity.runOnUiThread { listener(Status.Busy("Verifying update…")) }
+                                activity.runOnUiThread {
+                                    if (download === call) listener(Status.Busy("Verifying update…"))
+                                }
                                 verifyArchive(temporary, selected.update)
                                 if (complete.exists()) require(complete.delete()) { "Could not replace cached update" }
                                 require(temporary.renameTo(complete)) { "Could not finalize downloaded update" }
                             } finally {
                                 temporary.delete()
                             }
-                            activity.runOnUiThread { openInstaller(complete) }
+                            activity.runOnUiThread {
+                                if (download !== call || call.isCanceled()) return@runOnUiThread
+                                download = null
+                                openInstaller(complete)
+                            }
                         } catch (failure: Exception) {
                             activity.runOnUiThread {
+                                if (download !== call) return@runOnUiThread
+                                download = null
                                 listener(Status.Error(failure.message ?: "Update verification failed"))
                             }
                         }
@@ -133,9 +149,17 @@ class AndroidAppUpdater(
         }
     }
 
-    fun close() {
-        download?.cancel()
+    fun cancel() {
+        val active = download
         download = null
+        active?.cancel()
+        listener(candidate?.let { Status.Available(it.update.versionName) } ?: Status.Hidden)
+    }
+
+    fun close() {
+        val active = download
+        download = null
+        active?.cancel()
     }
 
     private fun installedApp(): InstalledApp {

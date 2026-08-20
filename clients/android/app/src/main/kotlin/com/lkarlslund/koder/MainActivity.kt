@@ -1,6 +1,7 @@
 package com.lkarlslund.koder
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ClipData
@@ -10,6 +11,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -17,6 +20,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings as AndroidSettings
 import android.text.TextUtils
 import android.text.InputType
@@ -120,6 +124,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.sin
 import org.json.JSONTokener
 import kotlin.math.abs
 
@@ -154,10 +159,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var pendingPhoneAction = ""
 	private var pendingPhonePolicy = PhoneActionPolicy.OFF
     private var lastAppUpdate: AppUpdate? = null
+	private var latestUpdateStatus: AndroidAppUpdater.Status = AndroidAppUpdater.Status.Hidden
+	private var resumedOnce = false
+	private var updateCheckGeneration = 0L
 	private var conversationFilter = ConversationFilter.ACTIVE
 
-    private var updateButton: Button? = null
-    private var updateProgress: ProgressBar? = null
+	private var updateIndicator: TextView? = null
+	private var updateDialog: AlertDialog? = null
+	private var updateDialogDetail: TextView? = null
+	private var updateDialogProgress: ProgressBar? = null
     private var status: TextView? = null
     private var transcript: TextView? = null
     private var feed: LinearLayout? = null
@@ -297,6 +307,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		appVisible = true
 	}
 
+	override fun onResume() {
+		super.onResume()
+		if (resumedOnce) refreshForegroundState() else resumedOnce = true
+	}
+
 	override fun onStop() {
 		appVisible = false
 		super.onStop()
@@ -304,10 +319,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     override fun onDestroy() {
         requestGeneration++
+		updateCheckGeneration++
 		readinessCheck?.close()
         sessionClient.close()
 		bindingClient.close()
         appUpdater.close()
+		updateDialog?.dismiss()
+		updateDialog = null
         controller.close()
         super.onDestroy()
     }
@@ -758,6 +776,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             gravity = Gravity.CENTER_VERTICAL
             addView(logo(), LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
             addView(title("Koder Voice").apply { textSize = 24f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+			addView(updateAction(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { marginEnd = dp(4) })
             addView(TextView(this@MainActivity).apply {
                 text = "⋮"
                 textSize = 30f
@@ -810,19 +829,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 			}
 		}, spaced(bottom = 6))
-
-        updateButton = Button(this).apply {
-            visibility = View.GONE
-            setOnClickListener { appUpdater.install() }
-        }
-        root.addView(updateButton, matchWrap())
-        updateProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            visibility = View.GONE
-            contentDescription = "Update download progress"
-        }
-        root.addView(updateProgress, spaced(top = 6, bottom = 10))
-
 		val visibleSessions = availableSessions.filter { session ->
 			when (conversationFilter) {
 				ConversationFilter.ACTIVE -> !session.archived
@@ -1908,6 +1914,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
         }
     }
+
+	private fun refreshForegroundState() {
+		settings = secureSettings.load()
+		if (settings.server.isBlank() || isFinishing || isDestroyed) return
+		val generation = ++updateCheckGeneration
+		sessionClient.list(settings.server, settings.token) { result ->
+			runOnUiThread {
+				if (generation != updateCheckGeneration || isFinishing || isDestroyed) return@runOnUiThread
+				result.onSuccess { home ->
+					if (screen == Screen.HOME) {
+						showHome(home)
+					} else {
+						lastAppUpdate = home.appUpdate
+						appUpdater.consider(home.appUpdate, settings.server, settings.token)
+					}
+				}
+			}
+		}
+	}
 
 	private fun compactLastUsedText(timestamp: Long): String {
         val now = System.currentTimeMillis()
@@ -3234,8 +3259,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
     private fun clearCallViews() {
-        updateButton = null
-        updateProgress = null
+		updateIndicator?.clearAnimation()
+		updateIndicator = null
         status = null
         transcript = null
         feed = null
@@ -3264,44 +3289,169 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     internal fun showUpdateStatus(next: AndroidAppUpdater.Status) = runOnUiThread {
-        val button = updateButton ?: return@runOnUiThread
-        val progress = updateProgress
-        when (next) {
+		latestUpdateStatus = next
+		renderUpdateIndicator(next)
+		renderUpdateDialog(next)
+	}
+
+	private fun updateAction(): TextView = object : TextView(this) {
+		private val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFF3C4.toInt() }
+
+		override fun onDraw(canvas: Canvas) {
+			super.onDraw(canvas)
+			if (!ValueAnimator.areAnimatorsEnabled() || !isShown) return
+			val wave = (sin(SystemClock.uptimeMillis() / 340.0) + 1.0) / 2.0
+			pulsePaint.alpha = (80 + wave * 175).toInt()
+			canvas.drawCircle(dp(12).toFloat(), height / 2f, dp(4).toFloat(), pulsePaint)
+			postInvalidateOnAnimation()
+		}
+	}.apply {
+		text = "Update!"
+		textSize = 13f
+		setTypeface(typeface, Typeface.BOLD)
+		gravity = Gravity.CENTER
+		setPadding(dp(22), 0, dp(10), 0)
+		minWidth = dp(82)
+		isClickable = true
+		isFocusable = true
+		background = GradientDrawable().apply {
+			cornerRadius = dp(19).toFloat()
+			setColor(0xFFFFB300.toInt())
+		}
+		setTextColor(0xFF2B1B00.toInt())
+		setOnClickListener { beginAppUpdate() }
+		updateIndicator = this
+		renderUpdateIndicator(latestUpdateStatus)
+	}
+
+	private fun renderUpdateIndicator(next: AndroidAppUpdater.Status) {
+		val indicator = updateIndicator ?: return
+		if (next == AndroidAppUpdater.Status.Hidden) {
+			indicator.clearAnimation()
+			indicator.visibility = View.GONE
+			return
+		}
+		indicator.visibility = View.VISIBLE
+		indicator.contentDescription = when (next) {
+			is AndroidAppUpdater.Status.Available -> "Update available: ${next.versionName}"
+			is AndroidAppUpdater.Status.Downloading -> "Downloading update ${next.versionName}"
+			is AndroidAppUpdater.Status.Busy -> next.message
+			is AndroidAppUpdater.Status.Error -> "Update failed: ${next.message}"
+			AndroidAppUpdater.Status.Hidden -> ""
+		}
+	}
+
+	private fun beginAppUpdate() {
+		val versionName = when (val status = latestUpdateStatus) {
+			is AndroidAppUpdater.Status.Available -> status.versionName
+			is AndroidAppUpdater.Status.Downloading -> status.versionName
+			is AndroidAppUpdater.Status.Error, is AndroidAppUpdater.Status.Busy -> lastAppUpdate?.versionName.orEmpty()
+			AndroidAppUpdater.Status.Hidden -> ""
+		}
+		if (versionName.isBlank()) return
+		showUpdateDownloadDialog(versionName)
+		if (latestUpdateStatus is AndroidAppUpdater.Status.Available || latestUpdateStatus is AndroidAppUpdater.Status.Error) {
+			appUpdater.install()
+		} else {
+			renderUpdateDialog(latestUpdateStatus)
+		}
+	}
+
+	private fun showUpdateDownloadDialog(versionName: String) {
+		updateDialog?.dismiss()
+		val content = column().apply {
+			setPadding(dp(4), dp(4), dp(4), 0)
+			addView(body(versionName).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
+			addView(ProgressBar(this@MainActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
+				max = 100
+				progress = 0
+				contentDescription = "Update download progress"
+				updateDialogProgress = this
+			}, spaced(top = 16))
+			addView(helper("Starting download…").apply {
+				contentDescription = "Update download details"
+				updateDialogDetail = this
+			}, spaced(top = 8))
+		}
+		updateDialog = AlertDialog.Builder(this)
+			.setTitle("Downloading update…")
+			.setView(content)
+			.setPositiveButton("Retry", null)
+			.setNegativeButton("Cancel") { _, _ -> appUpdater.cancel() }
+			.setCancelable(false)
+			.create()
+			.apply {
+				setOnDismissListener {
+					updateDialog = null
+					updateDialogDetail = null
+					updateDialogProgress = null
+				}
+				show()
+				getButton(AlertDialog.BUTTON_POSITIVE)?.visibility = View.GONE
+			}
+	}
+
+	private fun renderUpdateDialog(next: AndroidAppUpdater.Status) {
+		val dialog = updateDialog ?: return
+		val detail = updateDialogDetail
+		val progress = updateDialogProgress
+		when (next) {
             AndroidAppUpdater.Status.Hidden -> {
-                button.visibility = View.GONE
-                progress?.visibility = View.GONE
+				dialog.dismiss()
             }
             is AndroidAppUpdater.Status.Available -> {
-                button.text = "Update Koder · ${next.versionName}"
-                button.isEnabled = true
-                button.visibility = View.VISIBLE
-                progress?.visibility = View.GONE
+				dialog.setTitle("Update available")
+				detail?.text = next.versionName
+				progress?.visibility = View.GONE
+				dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "Cancel"
+				dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+					text = "Download"
+					visibility = View.VISIBLE
+					setOnClickListener { appUpdater.install() }
+				}
             }
             is AndroidAppUpdater.Status.Downloading -> {
-                val percent = ((next.downloadedBytes * 100) / next.totalBytes).toInt().coerceIn(0, 100)
-                button.text = "Downloading ${next.versionName} · $percent%"
-                button.isEnabled = false
-                button.visibility = View.VISIBLE
+				val percent = if (next.totalBytes > 0) ((next.downloadedBytes * 100) / next.totalBytes).toInt().coerceIn(0, 100) else 0
+				dialog.setTitle("Downloading update…")
+				dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "Cancel"
+				detail?.text = if (next.totalBytes > 0) {
+					"${next.versionName} · $percent% · ${formatUpdateBytes(next.downloadedBytes)} / ${formatUpdateBytes(next.totalBytes)}"
+				} else {
+					"${next.versionName} · ${formatUpdateBytes(next.downloadedBytes)}"
+				}
                 progress?.apply {
-                    isIndeterminate = false
+					isIndeterminate = next.totalBytes <= 0
                     this.progress = percent
                     visibility = View.VISIBLE
                 }
+				dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility = View.GONE
             }
             is AndroidAppUpdater.Status.Busy -> {
-                button.text = next.message
-                button.isEnabled = false
-                button.visibility = View.VISIBLE
-                progress?.visibility = View.GONE
+				dialog.setTitle("Preparing update…")
+				dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "Cancel"
+				detail?.text = next.message
+				progress?.apply { isIndeterminate = true; visibility = View.VISIBLE }
+				dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.visibility = View.GONE
             }
             is AndroidAppUpdater.Status.Error -> {
-                button.text = "${next.message} · Retry"
-                button.isEnabled = true
-                button.visibility = View.VISIBLE
+				dialog.setTitle("Update failed")
+				detail?.text = next.message
                 progress?.visibility = View.GONE
+				dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "Close"
+				dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+					text = "Retry"
+					visibility = View.VISIBLE
+					setOnClickListener { appUpdater.install() }
+				}
             }
         }
     }
+
+	private fun formatUpdateBytes(bytes: Long): String = when {
+		bytes >= 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
+		bytes >= 1024L -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
+		else -> "$bytes B"
+	}
 
     private fun showScrollable(content: View) = showContent(ScrollView(this).apply { addView(content, matchWrap()) })
 
