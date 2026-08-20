@@ -485,7 +485,7 @@ class MainActivityInstrumentedTest {
 				}
 				onView(withContentDescription("Hide transcript")).perform(click())
 				scenario.onActivity { activity ->
-					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is thinking")
+					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is connecting")
 					assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
 				}
 				val orbStates = listOf(
@@ -793,10 +793,12 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Reset fullscreen image")).perform(click())
 				onView(withContentDescription("Save fullscreen image")).check(matches(isDisplayed()))
 				onView(withContentDescription("Share fullscreen image")).check(matches(isDisplayed()))
-				onView(withContentDescription("Close fullscreen image")).perform(click())
-				onView(withContentDescription("Show transcript")).perform(click())
-				onView(withContentDescription("View phone photo thumbnails done View four candidates")).check(matches(isDisplayed()))
-			}
+					onView(withContentDescription("Close fullscreen image")).perform(click())
+					onView(withContentDescription("Show transcript")).perform(click())
+					onView(withContentDescription("View phone photo thumbnails done View four candidates")).check(matches(isDisplayed()))
+					onView(withContentDescription("What is happening nearby. Open presentation")).check(matches(isDisplayed())).perform(click())
+					onView(withContentDescription("Koder structured presentation")).check(matches(isDisplayed()))
+				}
 		} finally {
 			voiceSocket?.close(1000, "test complete")
 			server.close()
