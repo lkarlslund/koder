@@ -2982,7 +2982,31 @@ func TestWebSocketHelloPushesGitDiffSeparately(t *testing.T) {
 }
 
 func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slots", "/props", "/v1/slots", "/v1/props", "/v1/chat/completions":
+			http.NotFound(w, r)
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model"}]}`))
+		default:
+			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+		}
+	}))
+	defer providerServer.Close()
+
 	ctrl := newTestController(t)
+	if _, err := ctrl.SaveProvider(context.Background(), app.ProviderDraft{
+		OriginalProviderID: "test",
+		ProviderID:         "test",
+		TemplateID:         "openai-compatible",
+		Kind:               "openai-compatible",
+		Name:               "Test",
+		BaseURL:            providerServer.URL + "/v1",
+		Model:              "model",
+		Stream:             true,
+	}); err != nil {
+		t.Fatalf("save test provider: %v", err)
+	}
 	if _, err := ctrl.SaveModelConfig(context.Background(), app.ModelConfigPreference{
 		ProviderID:       "test",
 		ModelID:          "next-model",
