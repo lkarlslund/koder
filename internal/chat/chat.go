@@ -2185,6 +2185,10 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 		if !ok {
 			continue
 		}
+		// Timeline items handed to persistence and subscribers are value copies,
+		// but AssistantMessage.Tools is a slice. Copy it before mutation so a
+		// fast follow-up update cannot race with JSON encoding an earlier value.
+		assistant.Tools = slices.Clone(assistant.Tools)
 		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
 		if call == nil {
 			continue

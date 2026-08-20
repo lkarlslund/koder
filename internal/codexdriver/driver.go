@@ -234,15 +234,23 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 	if started.Thread.ID == "" {
 		return "", fmt.Errorf("codex thread/start returned no thread id")
 	}
-	if err := m.bindings.put(ctx, Binding{ChatID: chatRecord.ID, ThreadID: started.Thread.ID, Model: started.Model}); err != nil {
-		return "", err
-	}
 	if title := strings.TrimSpace(chatRecord.Title); title != "" {
 		if err := m.client.Call(ctx, "thread/name/set", map[string]string{"threadId": started.Thread.ID, "name": title}, nil); err != nil {
+			m.deleteThreadBestEffort(started.Thread.ID)
 			return "", fmt.Errorf("name Codex thread: %w", err)
 		}
 	}
+	if err := m.bindings.put(ctx, Binding{ChatID: chatRecord.ID, ThreadID: started.Thread.ID, Model: started.Model}); err != nil {
+		m.deleteThreadBestEffort(started.Thread.ID)
+		return "", err
+	}
 	return started.Thread.ID, nil
+}
+
+func (m *Manager) deleteThreadBestEffort(threadID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+	defer cancel()
+	_ = m.client.Call(ctx, "thread/delete", map[string]string{"threadId": threadID}, nil)
 }
 
 func codexApprovalPolicy(session domain.Session, chatRecord domain.Chat) string {
