@@ -79,6 +79,23 @@ func TestManagerPersistsCodexTurnInKoderTimeline(t *testing.T) {
 	}
 }
 
+func TestCodexSandboxUsesAppServerProtocolValues(t *testing.T) {
+	tests := []struct {
+		profile string
+		want    string
+	}{
+		{profile: "readonly", want: "read-only"},
+		{profile: "default", want: "workspace-write"},
+		{profile: "full-access", want: "danger-full-access"},
+	}
+	for _, test := range tests {
+		chatRecord := domain.Chat{PermissionProfile: test.profile}
+		if got := codexSandbox(domain.Session{}, chatRecord); got != test.want {
+			t.Fatalf("profile %q sandbox = %q, want %q", test.profile, got, test.want)
+		}
+	}
+}
+
 func TestManagerMirrorsCodexChatLifecycle(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -182,8 +199,11 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]string{"userAgent": "fake"}})
 		case "initialized":
 		case "thread/start":
+			var params map[string]any
+			if json.Unmarshal(msg.Params, &params) != nil || params["sandbox"] != "workspace-write" {
+				os.Exit(4)
+			}
 			if os.Getenv("KODER_CODEX_DRIVER_APPROVAL") == "1" {
-				var params map[string]any
 				if json.Unmarshal(msg.Params, &params) != nil || params["approvalPolicy"] != "on-request" {
 					os.Exit(4)
 				}

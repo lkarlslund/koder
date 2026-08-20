@@ -271,11 +271,11 @@ func codexSandbox(session domain.Session, chatRecord domain.Chat) string {
 	}
 	switch profile {
 	case "readonly":
-		return "readOnly"
+		return "read-only"
 	case "full-access":
-		return "dangerFullAccess"
+		return "danger-full-access"
 	default:
-		return "workspaceWrite"
+		return "workspace-write"
 	}
 }
 
