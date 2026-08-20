@@ -15,6 +15,7 @@ import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
+import androidx.lifecycle.Lifecycle
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.action.ViewActions.click
@@ -35,6 +36,7 @@ import com.lkarlslund.koder.voice.BuiltInAudioRoute
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.VoiceCallService
+import com.lkarlslund.koder.voice.VoiceResultNotifier
 import com.lkarlslund.koder.voice.audioRouteChipText
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -591,6 +593,77 @@ class MainActivityInstrumentedTest {
 		}
 	}
 
+	@Test
+	fun delegatedResultNotifiesInBackgroundAndReturnsToExactTranscript() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		buildList {
+			add(Manifest.permission.RECORD_AUDIO)
+			if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
+			if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+		}.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
+		val server = MockWebServer()
+		var voiceSocket: WebSocket? = null
+		val voiceSockets = mutableListOf<WebSocket>()
+		var connectionCount = 0
+		val listener = object : WebSocketListener() {
+			override fun onOpen(webSocket: WebSocket, response: Response) {
+				voiceSocket = webSocket
+				synchronized(voiceSockets) { voiceSockets += webSocket }
+				connectionCount++
+				val history = if (connectionCount > 1) ""","history":[{"id":"assistant-result-1","role":"assistant","text":"The delegated result is ready."}]""" else ""
+				webSocket.send(
+					"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"voice_session_id":"voice-result","active_session_id":"work-1","sessions":[{"id":"work-1","title":"Research"}],"voice_sessions":[{"id":"voice-result","title":"Background work"}]$history}}""",
+				)
+			}
+		}
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse = when {
+				request.target == "/voice/v1/sessions" -> MockResponse.Builder().body(
+					"""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-result","title":"Background work"}]}""",
+				).build()
+				request.target.startsWith("/voice/v1?") -> MockResponse.Builder().webSocketUpgrade(listener).build()
+				else -> MockResponse.Builder().code(404).build()
+			}
+		}
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		val notificationManager = context.getSystemService(NotificationManager::class.java)
+		val resultNotificationId = VoiceResultNotifier.notificationId("voice-result", "assistant-result-1")
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Background work")
+				onView(withContentDescription("Open voice conversation Background work")).perform(click())
+				waitForText(scenario, "Speaker")
+				scenario.moveToState(Lifecycle.State.CREATED)
+				checkNotNull(voiceSocket).send(
+					"""{"type":"state","protocol":"voice.v1","state":"working","working_on":{"id":"work-1","title":"Research"}}""",
+				)
+				checkNotNull(voiceSocket).send(
+					"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"The delegated result is ready.","transcript_id":"assistant-result-1","parts":[{"mime_type":"text/plain","data":"The delegated result is ready."}]}}""",
+				)
+				val completion = waitForNotification(notificationManager, resultNotificationId)
+				assertEquals("Background work is ready", completion.extras.getString(Notification.EXTRA_TITLE))
+				assertEquals("The delegated result is ready.", completion.extras.getString(Notification.EXTRA_TEXT))
+				assertTrue(completion.contentIntent != null)
+				waitForVoiceNotification(notificationManager) { it.hasAction("End") }.action("End").actionIntent.send()
+				waitForNoVoiceNotification(notificationManager)
+			}
+			val resultIntent = Intent(context, MainActivity::class.java)
+				.putExtra(VoiceResultNotifier.EXTRA_VOICE_SESSION_ID, "voice-result")
+				.putExtra(VoiceResultNotifier.EXTRA_TRANSCRIPT_ID, "assistant-result-1")
+			ActivityScenario.launch<MainActivity>(resultIntent).use { scenario ->
+				waitForDisplayedText("The delegated result is ready.")
+				waitForNoNotification(notificationManager, resultNotificationId)
+				waitForVoiceNotification(notificationManager) { it.hasAction("End") }.action("End").actionIntent.send()
+				waitForNoVoiceNotification(notificationManager)
+			}
+		} finally {
+			notificationManager.cancel(resultNotificationId)
+			synchronized(voiceSockets) { voiceSockets.toList() }.forEach { it.close(1000, "test complete") }
+			server.close()
+		}
+	}
+
     private fun waitForText(scenario: ActivityScenario<MainActivity>, wanted: String): List<String> {
         var lastLabels = emptyList<String>()
         repeat(50) {
@@ -666,6 +739,22 @@ class MainActivityInstrumentedTest {
 			Thread.sleep(100)
 		}
 		error("Koder voice notification was not removed")
+	}
+
+	private fun waitForNotification(manager: NotificationManager, id: Int): Notification {
+		repeat(80) {
+			manager.activeNotifications.firstOrNull { it.id == id }?.notification?.let { return it }
+			Thread.sleep(100)
+		}
+		error("Timed out waiting for notification $id; active=${manager.activeNotifications.joinToString { "${it.id}:${it.notification.extras.getString(Notification.EXTRA_TITLE)}" }}")
+	}
+
+	private fun waitForNoNotification(manager: NotificationManager, id: Int) {
+		repeat(80) {
+			if (manager.activeNotifications.none { it.id == id }) return
+			Thread.sleep(100)
+		}
+		error("Notification $id was not removed")
 	}
 
 	private fun Notification.hasAction(title: String): Boolean = actions?.any { it.title.toString() == title } == true

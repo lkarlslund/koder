@@ -82,6 +82,7 @@ import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.VoiceProtocol
+import com.lkarlslund.koder.voice.VoiceResultNotifier
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
 import com.lkarlslund.koder.voice.audioRouteChipText
@@ -92,6 +93,7 @@ import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
+import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -159,6 +161,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
 	private var pendingImageSave: PresentedImage? = null
+	private var appVisible = false
+	private var delegatedWorkPending = false
+	private var pendingResultSessionId = ""
+	private var pendingResultTranscriptId = ""
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (!pendingStart) return@registerForActivityResult
         pendingStart = false
@@ -221,6 +227,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             }
         })
         settings = secureSettings.load()
+		rememberResultIntent(intent)
 		if (!bindFromIntent(intent)) {
 			if (settings.server.isBlank()) showSetup() else loadHome()
 		}
@@ -228,8 +235,22 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	override fun onNewIntent(intent: Intent) {
 		super.onNewIntent(intent)
+		handleVoiceResultIntent(intent)
+	}
+
+	private fun handleVoiceResultIntent(intent: Intent) {
 		setIntent(intent)
-		bindFromIntent(intent)
+		if (!bindFromIntent(intent) && rememberResultIntent(intent)) openPendingResult()
+	}
+
+	override fun onStart() {
+		super.onStart()
+		appVisible = true
+	}
+
+	override fun onStop() {
+		appVisible = false
+		super.onStop()
 	}
 
     override fun onDestroy() {
@@ -261,6 +282,24 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		return true
 	}
 
+	private fun rememberResultIntent(intent: Intent?): Boolean {
+		val sessionId = intent?.getStringExtra(VoiceResultNotifier.EXTRA_VOICE_SESSION_ID).orEmpty()
+		if (sessionId.isBlank()) return false
+		pendingResultSessionId = sessionId
+		pendingResultTranscriptId = intent?.getStringExtra(VoiceResultNotifier.EXTRA_TRANSCRIPT_ID).orEmpty()
+		VoiceResultNotifier.cancel(this, pendingResultSessionId, pendingResultTranscriptId)
+		return true
+	}
+
+	private fun openPendingResult() {
+		if (pendingResultSessionId.isBlank()) return
+		if (screen == Screen.CHAT && pendingSession?.id == pendingResultSessionId) {
+			focusPendingResult()
+		} else if (settings.server.isNotBlank()) {
+			loadHome("Opening completed work…")
+		}
+	}
+
 	private fun showBindingProgress() {
 		screen = Screen.LOADING
 		clearCallViews()
@@ -273,8 +312,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		})
 	}
 
-	    override fun onSnapshot(snapshot: CallController.Snapshot) {
-        runOnUiThread {
+	override fun onSnapshot(snapshot: CallController.Snapshot) {
+		if (snapshot.stage == CallController.Stage.WORKING) delegatedWorkPending = true
+		if (snapshot.stage == CallController.Stage.RECORDING) delegatedWorkPending = false
+		runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
 			latestCallSnapshot = snapshot
 			snapshot.voiceSessions.firstOrNull { it.id == snapshot.voiceSessionId }?.let {
@@ -313,8 +354,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     override fun onUserMessage(text: String) = addBubble("You", text)
 
-    override fun onAssistantMessage(message: VoiceMessage) {
-        runOnUiThread {
+	override fun onAssistantMessage(message: VoiceMessage) {
+		val sessionId = pendingSession?.id.orEmpty().ifBlank { latestCallSnapshot.voiceSessionId }
+		if (shouldNotifyCompletedWork(appVisible, delegatedWorkPending, sessionId)) {
+			val title = pendingSession?.title.orEmpty().ifBlank {
+				latestCallSnapshot.voiceSessions.firstOrNull { it.id == sessionId }?.title.orEmpty()
+			}
+			VoiceResultNotifier.show(this, sessionId, title, message.transcriptId, message.spokenText)
+		}
+		delegatedWorkPending = false
+		runOnUiThread {
             if (screen != Screen.CHAT) return@runOnUiThread
 			val parts = message.parts.ifEmpty {
                 listOf(VoicePart(mimeType = "text/plain", data = message.spokenText))
@@ -330,11 +379,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			transcriptParts.forEach { addPart(it, message.transcriptId) }
 			updateConversationMode(null)
+			focusPendingResult()
         }
     }
 
 	override fun onHistoryPage(entries: List<VoiceTranscriptEntry>) {
-		runOnUiThread { prependHistory(entries) }
+		runOnUiThread {
+			prependHistory(entries)
+			focusPendingResult()
+		}
 	}
 
 	override fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) {
@@ -436,6 +489,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     private fun showHome(home: VoiceHome) {
+		if (pendingResultSessionId.isNotBlank()) {
+			home.voiceSessions.firstOrNull { it.id == pendingResultSessionId }?.let {
+				openChat(it)
+				return
+			}
+			pendingResultSessionId = ""
+			pendingResultTranscriptId = ""
+		}
         screen = Screen.HOME
         clearCallViews()
         val root = column()
@@ -1652,6 +1713,22 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		latestButton?.visibility = View.GONE
 		scrollToBottom(force = true)
+		focusPendingResult()
+	}
+
+	private fun focusPendingResult() {
+		if (pendingResultSessionId.isBlank() || pendingSession?.id != pendingResultSessionId) return
+		transcriptShown = true
+		presentationShown = false
+		updateConversationMode(latestCallSnapshot.stage)
+		val target = feed?.findTaggedView("message:$pendingResultTranscriptId")
+		if (pendingResultTranscriptId.isNotBlank() && target == null) {
+			controller.loadOlderHistory()
+			return
+		}
+		feedScroll?.post { target?.let { feedScroll?.smoothScrollTo(0, it.top) } }
+		pendingResultSessionId = ""
+		pendingResultTranscriptId = ""
 	}
 
 	private fun prependHistory(entries: List<VoiceTranscriptEntry>) {
