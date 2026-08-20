@@ -63,18 +63,19 @@ Optional query parameters:
   `ready` on a replacement socket;
 - `resume_transcript` and `resume_message`: whether those text events already
   reached the client; and
-- `resume_output_sequence`: the first output PCM sequence the client still
+- `resume_output_sequence`: the first output audio sequence the client still
   needs. Earlier output frames are not replayed.
 
 Resume cursors are meaningful only with `resume_utterance_id`. Invalid cursors
 are rejected during the HTTP handshake.
 
 Text frames are UTF-8 JSON and include `"protocol":"voice.v1"`. Binary frames
-are PCM envelopes described below.
+use the audio envelope described below.
 
 ## Client text frames
 
-- `hello`: request a fresh `ready` snapshot and optionally set
+- `hello`: request a fresh `ready` snapshot, offer `audio_encodings` in
+  preference order, and optionally set
   `response_pacing` to `concise`, `normal`, or `detailed` for subsequent turns
   on this connection. The pacing instruction is never added to chat history.
 - `ping`: request `pong`.
@@ -115,7 +116,7 @@ which has one `language` field rather than a native allow-list.
 Examples:
 
 ```json
-{"type":"hello","protocol":"voice.v1","response_pacing":"normal"}
+{"type":"hello","protocol":"voice.v1","response_pacing":"normal","audio_encodings":["opus","pcm_s16le"]}
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
 {"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
@@ -128,7 +129,8 @@ Examples:
 ## Server text frames
 
 - `ready`: listening state, `audio_config`, `call_state`, and an optional signed
-  Android `app_update`.
+  Android `app_update`. The first snapshot advertises transport encodings; a
+  second snapshot after `hello` contains the selected input/output transport.
 - `state`: `recording`, `transcribing`, `processing`, `working`, or `speaking` for an
   utterance.
 - `transcript`: final server STT text.
@@ -194,7 +196,10 @@ are ephemeral and are never persisted as transcript turns.
   "state": "listening",
   "audio_config": {
     "input": {"encoding":"pcm_s16le","sample_rate":16000,"channels":1},
-    "output": {"encoding":"pcm_s16le","sample_rate":44100,"channels":1},
+    "output": {"encoding":"pcm_s16le","sample_rate":24000,"channels":1},
+    "transport_encodings": ["opus","pcm_s16le"],
+    "input_transport": {"encoding":"opus","sample_rate":16000,"channels":1},
+    "output_transport": {"encoding":"opus","sample_rate":24000,"channels":1},
     "max_utterance_seconds": 60
   },
   "call_state": {
@@ -284,23 +289,33 @@ before returning success. The server accepts one provider belonging to the
 active call, bounds frames to 128 KiB, results to 64 KiB, and waits at most two
 minutes for local permission or confirmation.
 
-## Binary PCM envelope
+`input` and `output` are the decoded PCM contracts consumed by STT and
+playback. `input_transport` and `output_transport` are the selected wire
+contracts. If a client sends no `audio_encodings`, Koder selects PCM and old
+clients can ignore the added fields. A client must wait for a selected
+transport before replaying an in-flight turn when the initial snapshot contains
+`transport_encodings`.
 
-All integers are big-endian except PCM samples, which are signed 16-bit
-little-endian. The fixed header is 12 bytes:
+## Binary audio envelope
+
+Header integers are big-endian. PCM samples are signed 16-bit little-endian;
+Opus payloads are raw packets without Ogg or RTP framing. The fixed header is
+12 bytes:
 
 | Offset | Bytes | Meaning |
 | --- | ---: | --- |
 | 0 | 4 | ASCII `KVA1` |
-| 4 | 1 | kind: `1` input PCM, `2` output PCM |
+| 4 | 1 | kind: `1` input PCM, `2` output PCM, `3` input Opus, `4` output Opus |
 | 5 | 1 | flags; zero in v1 |
 | 6 | 2 | reserved; must be zero |
 | 8 | 4 | unsigned sequence number |
-| 12 | 1..65536 | non-empty, even-sized PCM16LE payload |
+| 12 | 1..65536 | non-empty audio payload; PCM kinds must have even size |
 
 Sequences start at zero independently for each input and output stream and must
-be contiguous. The server rejects malformed, oversized, odd-sized, wrong-kind,
-or out-of-order frames. Total input is bounded by `max_utterance_seconds`.
+be contiguous. Negotiated Opus uses 20 ms packets, mono 16 kHz input at 18
+kbit/s constrained VBR and mono 24 kHz output at 32 kbit/s constrained VBR.
+The server rejects malformed, oversized, wrong-kind, or out-of-order frames.
+Total input is bounded by decoded duration in `max_utterance_seconds`.
 
 ## Generic message parts
 
@@ -412,7 +427,7 @@ Clients reconnect with the same `call_id` and `voice_session_id`, then wait for
 `ready` and resend the same in-flight utterance with its original
 `utterance_id`. Koder owns the work independently of either WebSocket and
 deduplicates that resend. The resume query cursor suppresses transcript,
-message, and PCM output the client already received. An audio utterance is
+message, and audio output the client already received. An audio utterance is
 replayed as its original `audio_start`, contiguous binary input frames, and
 `audio_commit`; a recording interrupted before commit may continue appending
 frames after reconnect. Reusing an utterance ID with different text or audio is

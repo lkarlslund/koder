@@ -3,7 +3,6 @@ package voiceapi
 import (
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/lkarlslund/koder/internal/voice"
 	"github.com/lkarlslund/koder/internal/voicecodec"
@@ -23,8 +22,11 @@ func advertisedAudioConfig(base voice.AudioConfig) voice.AudioConfig {
 
 func negotiatedAudioConfig(base voice.AudioConfig, offered []string) voice.AudioConfig {
 	encoding := voice.PCM16LE
-	if slices.Contains(offered, voice.Opus) {
-		encoding = voice.Opus
+	for _, candidate := range offered {
+		if candidate == voice.Opus || candidate == voice.PCM16LE {
+			encoding = candidate
+			break
+		}
 	}
 	input := base.Input
 	input.Encoding = encoding

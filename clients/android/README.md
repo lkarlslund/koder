@@ -32,8 +32,8 @@ export ANDROID_HOME=/opt/android-sdk
 The JVM suite covers protocol interoperability and deterministic VAD
 endpointing without live speech services. The managed-device suite boots the
 real Activity, checks setup and conversation-list states, runs real Silero
-inference, and tests authenticated mock HTTP/WebSocket interoperability and PCM
-in both directions.
+inference, and tests authenticated mock HTTP/WebSocket interoperability and
+negotiated Opus/PCM audio in both directions.
 
 Before a release or compatibility-sensitive change, run the focused matrix on
 an Android 9 small phone, an Android 16 phone, and an Android 16 tablet:
@@ -142,8 +142,11 @@ Automatic for unrestricted detection, choose one language for the strongest
 hint, or choose several languages you actually speak to bias detection away
 from unrelated languages. Changes apply on the next conversation connection.
 
-Android runs on-device Silero VAD, streams microphone PCM to Koder, plays
-Koder's streamed PCM reply, and displays text, images, and generic MIME
+Android runs on-device Silero VAD over local PCM, then streams 20 ms Opus
+packets to Koder and decodes Koder's Opus reply before playback. The protocol
+falls back to PCM with older servers and clients. A bundled pure-Java codec
+keeps this path compatible with Android 9 without native ABI libraries. The app
+also displays text, images, and generic MIME
 attachments. Koder—not Android—calls the configured remote STT and TTS
 endpoints. While voice is active, ordinary transcript text stays hidden. A
 deliberate visual response automatically opens a separate presentation panel;

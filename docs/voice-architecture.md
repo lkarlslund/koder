@@ -56,31 +56,29 @@ There is no separate stateless router or summarizer model call.
 
 ## Mobile audio transport
 
-`voice.v1` currently carries sequence-numbered PCM16 frames: roughly 256
-kbit/s upstream at 16 kHz mono and 384 kbit/s downstream at 24 kHz mono,
-before WebSocket/TLS overhead. That is acceptable on a LAN but unnecessarily
-expensive on constrained mobile links.
+`voice.v1` capability-negotiates sequence-numbered, raw 20 ms mono Opus
+packets. Android offers `opus` and `pcm_s16le` in `hello`; Koder selects Opus at
+18 kbit/s constrained VBR upstream (16 kHz) and 32 kbit/s downstream (24 kHz).
+Clients that omit the offer continue using the original PCM frames, which cost
+roughly 256 kbit/s upstream and 384 kbit/s downstream before WebSocket/TLS
+overhead.
 
-The intended compressed transport is negotiated Opus with PCM fallback, not
-generic WebSocket compression. Twenty-millisecond mono Opus frames around
-16–20 kbit/s for speech upstream and 28–40 kbit/s downstream provide about an
-order-of-magnitude reduction with low codec delay. Codec negotiation must keep
-the speech-service PCM format separate from the phone transport format. It
-also has to preserve Koder's single-binary builds and Android 9 compatibility:
-Android guarantees Opus encoding only from Android 10, and a Koder-side native
-libopus dependency cannot silently become a host installation requirement.
-For those reasons Opus requires a separately tested protocol capability and
-portable codec packaging rather than changing the existing frame flag in
-place. TCP/WebSocket still has head-of-line blocking; Opus FEC does not solve
-that, so a future loss-tolerant transport would be a separate WebRTC or QUIC
-decision.
+The advertised `input` and `output` fields remain the local speech-service PCM
+formats. Separate `input_transport` and `output_transport` fields describe the
+wire encoding, so VAD, STT, TTS, waveform rendering, and AudioTrack never need
+to pretend compressed bytes are PCM. Koder uses a pure-Go Opus codec and
+Android bundles the pure-Java Concentus codec. There is no host `libopus`, NDK,
+or ABI dependency, and the same path runs on the supported Android 9/API 28
+minimum. Go/Kotlin cross-codec fixtures and managed API 28/API 36 tests protect
+interoperability. TCP/WebSocket still has head-of-line blocking; a future
+loss-tolerant transport remains a separate WebRTC or QUIC decision.
 
-Android retains every captured frame for the current bounded utterance before
+Android retains every encoded frame for the current bounded utterance before
 attempting network transmission. If the link drops during speech, microphone
 capture and VAD continue, the UI says that speech is buffered locally, and the
 replacement socket replays `audio_start`, all contiguous frames, and
 `audio_commit` before newly queued traffic. The buffer is capped by the
-server-advertised maximum utterance duration. If no utterance is underway, the
+server-advertised decoded-PCM duration rather than compressed byte size. If no utterance is underway, the
 microphone stops on disconnect: a distinct periodic offline cue means Koder is
 not listening. The first successful `ready` after initial connection or a
 reconnect stops that cue, plays a short acknowledgement, and resumes capture.
