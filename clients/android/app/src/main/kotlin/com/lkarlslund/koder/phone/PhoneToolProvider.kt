@@ -26,6 +26,7 @@ import android.os.StatFs
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.ContactsContract
+import android.provider.CallLog
 import android.provider.Telephony
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
@@ -115,6 +116,7 @@ class AndroidPhoneToolProvider(
         "search_contacts" -> contacts(args)
         "upcoming_calendar" -> calendar(args)
         "search_sms" -> sms(args)
+		"search_call_history" -> callHistory(args)
         "recent_notifications" -> notifications(args)
         "place_call" -> placeCall(args)
         "send_sms" -> sendSMS(args)
@@ -232,6 +234,31 @@ class AndroidPhoneToolProvider(
         }
         return PhoneToolResult("Found ${rows.length()} SMS messages", JSONObject().put("messages", rows))
     }
+
+	private fun callHistory(args: Map<String, String>): PhoneToolResult {
+		val query = args["query"].orEmpty().lowercase(Locale.getDefault())
+		val numberQuery = args["phone_number"].orEmpty().lowercase(Locale.getDefault())
+		val since = parseTime(args["since_time"])?.toEpochMilli() ?: 0L
+		val rows = JSONArray()
+		activity.contentResolver.query(CallLog.Calls.CONTENT_URI, arrayOf(
+			CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.TYPE,
+		), null, null, CallLog.Calls.DEFAULT_SORT_ORDER).useCursor { cursor ->
+			while (cursor.moveToNext() && rows.length() < limit(args)) {
+				val number = cursor.string(0)
+				val name = cursor.string(1)
+				val date = cursor.getLong(2)
+				if (date < since || (numberQuery.isNotBlank() && numberQuery !in number.lowercase()) ||
+					(query.isNotBlank() && query !in name.lowercase() && query !in number.lowercase())) continue
+				rows.put(JSONObject()
+					.put("contact_name", name)
+					.put("phone_number", number)
+					.put("time", Instant.ofEpochMilli(date).toString())
+					.put("duration_seconds", cursor.getLong(3))
+					.put("direction", callDirection(cursor.getInt(4))))
+			}
+		}
+		return PhoneToolResult("Found ${rows.length()} call history entries", JSONObject().put("calls", rows))
+	}
 
     private fun notifications(args: Map<String, String>): PhoneToolResult {
         val query = args["query"].orEmpty().lowercase(Locale.getDefault())
@@ -428,4 +455,14 @@ internal fun phoneLocationResult(location: Location, address: Address?): PhoneTo
 	address?.getAddressLine(0)?.takeIf(String::isNotBlank)?.let { data.put("formatted_address", it) }
 	val summary = if (placeName.isBlank()) "Current location coordinates are available" else "Current location resolved to $placeName"
 	return PhoneToolResult("$summary with ${location.accuracy.toInt()} meter accuracy", data)
+}
+
+internal fun callDirection(type: Int): String = when (type) {
+	CallLog.Calls.INCOMING_TYPE -> "incoming"
+	CallLog.Calls.OUTGOING_TYPE -> "outgoing"
+	CallLog.Calls.MISSED_TYPE -> "missed"
+	CallLog.Calls.REJECTED_TYPE -> "rejected"
+	CallLog.Calls.BLOCKED_TYPE -> "blocked"
+	CallLog.Calls.VOICEMAIL_TYPE -> "voicemail"
+	else -> "unknown"
 }

@@ -181,6 +181,31 @@ class MainActivityInstrumentedTest {
 		}
 	}
 
+	@Test
+	fun callHistoryToolQueriesTheAndroidProviderWhenPermissionIsGranted() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CALL_LOG)
+		val secureSettings = SecureSettings(context)
+		secureSettings.savePhoneActionPolicy("search_call_history", PhoneActionPolicy.ON)
+		val completed = CountDownLatch(1)
+		var resultData: org.json.JSONObject? = null
+		var provider: AndroidPhoneToolProvider? = null
+		ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+			scenario.onActivity { activity ->
+				provider = AndroidPhoneToolProvider(activity, secureSettings)
+				assertTrue("search_call_history" in provider?.enabledActions().orEmpty())
+				provider?.execute("search_call_history", mapOf("limit" to "5")) { result ->
+					assertTrue(result.isSuccess)
+					resultData = result.getOrThrow().data as? org.json.JSONObject
+					completed.countDown()
+				}
+			}
+			assertTrue(completed.await(5, TimeUnit.SECONDS))
+			assertTrue(resultData?.has("calls") == true)
+			provider?.close()
+		}
+	}
+
     @Test
 	fun setupDoesNotKeepTheScreenAwake() {
 		clearSettings()
@@ -348,6 +373,7 @@ class MainActivityInstrumentedTest {
 				assertEquals(PhoneActionPolicy.OFF, SecureSettings(context).load().phoneActionPolicies["open_app"])
 				assertTrue("device" in SecureSettings(context).load().enabledPhoneCapabilities)
                 assertTrue(settingsLabels.contains("Contacts"))
+				assertTrue(settingsLabels.contains("Call history"))
                 assertTrue(settingsLabels.contains("Notifications & email previews"))
             }
         } finally {

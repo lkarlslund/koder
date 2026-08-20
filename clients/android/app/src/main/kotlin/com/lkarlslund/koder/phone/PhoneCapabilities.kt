@@ -42,6 +42,12 @@ object PhoneCapabilities {
             setOf("place_call"),
             arrayOf(Manifest.permission.CALL_PHONE),
         ),
+		PhoneCapability(
+			"call_history", "Call history",
+			"Search recent incoming, outgoing, rejected, and missed calls by contact, number, or time.",
+			setOf("search_call_history"),
+			arrayOf(Manifest.permission.READ_CALL_LOG),
+		),
         PhoneCapability(
             "messages", "SMS messages",
             "Search stored text messages or send one after phone confirmation.",

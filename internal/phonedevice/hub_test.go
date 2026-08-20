@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,16 @@ func TestHubAppliesPhoneConfirmationPolicies(t *testing.T) {
 	}
 	if !got[OpenApp] {
 		t.Fatal("invalid open_app policy did not retain safe catalog default")
+	}
+}
+
+func TestCatalogPublishesCallHistoryAsReadOnlySearch(t *testing.T) {
+	entry, ok := known[SearchCallHistory]
+	if !ok {
+		t.Fatal("search_call_history is missing from phone catalog")
+	}
+	if entry.Confirmation || !strings.Contains(entry.Arguments, "since_time") || !strings.Contains(entry.Summary, "missed calls") {
+		t.Fatalf("call history catalog entry = %#v", entry)
 	}
 }
 

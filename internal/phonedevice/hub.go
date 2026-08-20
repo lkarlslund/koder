@@ -20,6 +20,7 @@ const (
 	SearchContacts      Action = "search_contacts"
 	UpcomingCalendar    Action = "upcoming_calendar"
 	SearchSMS           Action = "search_sms"
+	SearchCallHistory   Action = "search_call_history"
 	RecentNotifications Action = "recent_notifications"
 	PlaceCall           Action = "place_call"
 	SendSMS             Action = "send_sms"
@@ -53,6 +54,7 @@ var catalog = []CatalogEntry{
 	{SearchContacts, "Search device contacts and return matching names, phone numbers, and email addresses", "query; optional limit", false},
 	{UpcomingCalendar, "Search calendar events in a time range", "optional query, start_time, end_time, limit", false},
 	{SearchSMS, "Search SMS messages stored on the phone", "optional query, phone_number, since_time, limit", false},
+	{SearchCallHistory, "Search recent incoming, outgoing, rejected, and missed calls stored on the phone", "optional query, phone_number, since_time, limit", false},
 	{RecentNotifications, "Search current notifications, including enabled email and messaging previews", "optional query, app, limit", false},
 	{PlaceCall, "Place a real phone call after confirmation on the phone", "phone_number or contact_name", true},
 	{SendSMS, "Send an SMS after confirmation on the phone", "phone_number or contact_name; message", true},
