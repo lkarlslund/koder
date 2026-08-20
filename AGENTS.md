@@ -1,5 +1,11 @@
 # Repo Instructions
 
+## Testing
+
+- Select verification by change risk using `docs/testing.md`. It covers both
+  Koder and Koder Voice, including when focused tests, interoperability tests,
+  Android emulation, or full release/nightly suites are required.
+
 ## Go Commands
 
 - Run Go commands normally from the real repository root at `/home/lak/github-repos/koder`.
