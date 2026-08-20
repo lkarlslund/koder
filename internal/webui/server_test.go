@@ -1728,9 +1728,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `audio_start`) ||
 		!strings.Contains(fullPage, `audio_commit`) ||
 		!strings.Contains(fullPage, `browser-voice-orb`) ||
-		!strings.Contains(fullPage, `newChat('normal')`) ||
-		!strings.Contains(fullPage, `newChat('voice')`) ||
-		!strings.Contains(fullPage, `Codex chat <em>Soon</em>`) ||
+		!strings.Contains(fullPage, `openChatCreator()`) ||
+		!strings.Contains(fullPage, `chat_backends`) ||
+		!strings.Contains(fullPage, `Koder additions`) ||
 		!strings.Contains(fullPage, `beginBrowserVoicePTT`) ||
 		!strings.Contains(fullPage, `setBrowserVoiceMode`) ||
 		!strings.Contains(fullPage, `Hold to talk`) ||

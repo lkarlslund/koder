@@ -1050,6 +1050,7 @@
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
+		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -4289,18 +4290,45 @@
           this.switchingChat = {active: false, id: '', title: '', startedAt: 0};
           this.reportClientStateSoon();
         },
-        newChat(role = 'normal') {
+        openChatCreator() {
 		  this.newChatMenuOpen = false;
-		  const voice = role === 'voice';
-		  this.rpc('new_chat', {title: voice ? 'Voice conversation' : 'Chat', role: voice ? 'voice' : 'orchestrator'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message));
+		  const toolStates = {};
+		  this.codexToolChoices().forEach(tool => { toolStates[tool.id] = true; });
+		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: toolStates}};
+		  this.rpc('chat_backends', {}).then(backends => {
+			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
+			this.chatCreator.loading = false;
+		  }).catch(err => { this.chatCreator.loading = false; this.chatCreator.error = err.message; });
 		},
+		closeChatCreator() { if (!this.chatCreator.busy) this.chatCreator.open = false; },
+		chatCreatorBackend(id = this.chatCreator.draft.backend) { return (this.chatCreator.backends || []).find(item => item.id === id) || null; },
+		selectChatBackend(id) {
+		  const backend = this.chatCreatorBackend(id);
+		  if (!backend || !backend.available) return;
+		  this.chatCreator.draft.backend = id;
+		  this.chatCreator.draft.model_id = id === 'codex' ? String((backend.models || []).find(model => model.default)?.id || backend.models?.[0]?.id || '') : '';
+		},
+		chatCreatorRoleOptions() { return [{id: 'orchestrator', label: 'Orchestrator', help: 'Coordinates work and other chats'}, {id: 'planning', label: 'Planning', help: 'Plans milestones and tasks'}, {id: 'execution', label: 'Execution', help: 'Implements a focused objective'}, {id: 'general', label: 'General', help: 'A flexible conversation'}]; },
+		codexToolChoices() { return [{id:'chat_status', label:'Chat status'}, {id:'chat_list', label:'Chats'}, {id:'chat_start', label:'Start chats'}, {id:'chat_send', label:'Message chats'}, {id:'session_list', label:'Sessions'}, {id:'milestone_list', label:'Milestones'}, {id:'milestone_update', label:'Update milestones'}, {id:'task_list', label:'Tasks'}, {id:'task_update_item', label:'Update tasks'}, {id:'present', label:'Present media'}, {id:'phone_photos_search', label:'Phone photos'}]; },
+		createChatFromDraft() {
+		  const draft = this.chatCreator.draft;
+		  const backend = this.chatCreatorBackend(draft.backend);
+		  if (!backend?.available) { this.chatCreator.error = backend?.detail || 'Selected backend is unavailable'; return; }
+		  if (!String(draft.title || '').trim()) { this.chatCreator.error = 'Title is required'; return; }
+		  this.chatCreator.busy = true; this.chatCreator.error = '';
+		  const payload = {...draft, title: String(draft.title).trim()};
+		  if (draft.workflow_role !== 'execution') { payload.milestone_key = ''; payload.task_ref = ''; }
+		  if (draft.backend !== 'codex') payload.tool_states = {};
+		  this.rpc('new_chat', payload).then(s => { this.chatCreator.open = false; this.chatCreator.busy = false; this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.chatCreator.busy = false; this.chatCreator.error = err.message; });
+		},
+		newChat(role = 'normal') { this.openChatCreator(); if (role === 'voice') this.chatCreator.draft.interaction_mode = 'voice'; },
 		toggleNewChatMenu(event) {
 		  if (this.newChatMenuOpen) { this.newChatMenuOpen = false; return; }
 		  const rect = event?.currentTarget?.getBoundingClientRect?.();
 		  if (rect) this.newChatMenuPosition = {top: Math.round(rect.bottom + 6) + 'px', right: Math.max(8, Math.round(window.innerWidth - rect.right)) + 'px'};
 		  this.newChatMenuOpen = true;
 		},
-		chatTypeIcon(chat) { return this.chatArchived(chat) ? 'bi-archive' : ((chat.workflow_role || chat.WorkflowRole) === 'voice' ? 'bi-mic-fill' : 'bi-chat-left-text'); },
+		chatTypeIcon(chat) { if (this.chatArchived(chat)) return 'bi-archive'; if ((chat.interaction_mode || chat.InteractionMode) === 'voice' || (chat.workflow_role || chat.WorkflowRole) === 'voice') return 'bi-mic-fill'; return (chat.backend || chat.Backend) === 'codex' ? 'bi-terminal' : 'bi-chat-left-text'; },
         renameChat(chat) {
           const id = this.chatID(chat);
           if (!id) return;

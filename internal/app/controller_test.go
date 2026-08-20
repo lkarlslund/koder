@@ -2650,6 +2650,16 @@ func TestNewTypedChatForSelectionCreatesTopLevelVoiceChat(t *testing.T) {
 	if _, err := ctrl.NewTypedChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, "Future", domain.WorkflowRole("codex")); err == nil {
 		t.Fatal("unsupported chat type was accepted")
 	}
+	codexChat, err := ctrl.CreateChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, domain.ChatCreateSpec{
+		Title: "Codex implementation", Backend: domain.ChatBackendCodex, WorkflowRole: domain.WorkflowRoleExecution,
+		ModelID: "gpt-test", TaskRef: "M001T008", ToolStates: domain.ToolStates{domain.ToolKindChatStart: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codexChat.Backend != domain.ChatBackendCodex || codexChat.WorkflowRole != domain.WorkflowRoleExecution || codexChat.InteractionMode != domain.InteractionModeText || codexChat.ModelID != "gpt-test" || codexChat.AssignedTaskRef != "M001T008" || codexChat.ToolStates[domain.ToolKindChatStart] {
+		t.Fatalf("codex chat = %#v", codexChat)
+	}
 }
 
 func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
