@@ -1801,13 +1801,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             setPadding(dp(10), 0, dp(8), 0)
         }
         composer.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        composer.addView(Button(this).apply {
-            text = "➤"
+        composer.addView(ImageButton(this).apply {
+            setImageResource(R.drawable.ic_voice_send)
             contentDescription = "Send message"
-            minWidth = dp(56)
-            isAllCaps = false
-            backgroundTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
-            setTextColor(themeColor(android.R.attr.colorBackground))
+            imageTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
+            background = null
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
+            ViewCompat.setTooltipText(this, "Send message")
             setOnClickListener {
                 val message = typedMessage?.text?.toString().orEmpty()
                 if (message.isNotBlank()) {
@@ -1815,7 +1818,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     typedMessage?.text?.clear()
                 }
             }
-        })
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
 		composerView = composer
         root.addView(composer, matchWrap())
         showContent(root)

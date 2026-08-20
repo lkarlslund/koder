@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
@@ -464,6 +465,18 @@ class MainActivityInstrumentedTest {
 				onView(withText("Create")).perform(click())
 				val labels = waitForText(scenario, "Creating conversation…")
 				assertTrue(labels.contains("Trip planning"))
+				onView(withContentDescription("Show transcript")).perform(click())
+				onView(withContentDescription("Send message")).check(matches(isDisplayed()))
+				scenario.onActivity { activity ->
+					val button = activity.findViewById<View>(android.R.id.content).findByDescription("Send message") as ImageButton
+					val expectedSize = (48 * activity.resources.displayMetrics.density).toInt()
+					assertEquals(expectedSize, button.width)
+					assertEquals(expectedSize, button.height)
+					assertEquals(null, button.background)
+					val composer = button.parent as ViewGroup
+					assertEquals(composer.width - composer.paddingRight, button.right)
+				}
+				onView(withContentDescription("Hide transcript")).perform(click())
 				scenario.onActivity { activity ->
 					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is thinking")
 					assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
