@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -171,6 +172,7 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 	if err := m.client.Call(ctx, "turn/start", params, &started); err != nil {
 		return fmt.Errorf("start Codex turn with model %q: %w", strings.TrimSpace(snapshot.Chat.ModelID), err)
 	}
+	slog.Debug("codex turn started", "chat_id", snapshot.Chat.ID, "thread_id", threadID, "turn_id", started.Turn.ID, "model", strings.TrimSpace(snapshot.Chat.ModelID))
 	if started.Turn.ID == "" {
 		return fmt.Errorf("codex turn/start returned no turn id")
 	}
@@ -202,6 +204,7 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 			resumeParams["dynamicTools"] = dynamicTools
 		}
 		if err := m.client.Call(ctx, "thread/resume", resumeParams, &resumed); err == nil {
+			slog.Debug("codex thread resumed", "chat_id", chatRecord.ID, "thread_id", binding.ThreadID, "binding_model", binding.Model, "requested_model", chatRecord.ModelID)
 			return binding.ThreadID, nil
 		}
 	}
@@ -239,6 +242,7 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 		m.deleteThreadBestEffort(started.Thread.ID)
 		return "", fmt.Errorf("codex thread started with model %q, requested %q", actualModel, requestedModel)
 	}
+	slog.Debug("codex thread started", "chat_id", chatRecord.ID, "thread_id", started.Thread.ID, "requested_model", requestedModel, "actual_model", started.Model)
 	if title := strings.TrimSpace(chatRecord.Title); title != "" {
 		if err := m.client.Call(ctx, "thread/name/set", map[string]string{"threadId": started.Thread.ID, "name": title}, nil); err != nil {
 			m.deleteThreadBestEffort(started.Thread.ID)

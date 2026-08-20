@@ -171,6 +171,40 @@ func TestNewChatWithSpecResolvesBackendDefaultModel(t *testing.T) {
 	}
 }
 
+func TestEnsureChatModelDoesNotReplaceCodexModelWithKoderDefault(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := owner.Snapshot().Chats[0]
+	created, err := owner.NewChatWithSpec(ctx, &root.ID, domain.ChatCreateSpec{
+		Title: "Codex worker", Backend: domain.ChatBackendCodex, WorkflowRole: domain.WorkflowRoleExecution, ModelID: "gpt-codex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ensured, err := owner.EnsureChatModel(ctx, created.Snapshot().Chat.ID, "native-provider", "native-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ensured.ProviderID != "" || ensured.ModelID != "gpt-codex" {
+		t.Fatalf("ensured codex identity = %q/%q, want empty provider and gpt-codex", ensured.ProviderID, ensured.ModelID)
+	}
+	if runtimeModel := created.Snapshot().Chat.ModelID; runtimeModel != "gpt-codex" {
+		t.Fatalf("runtime model = %q, want gpt-codex", runtimeModel)
+	}
+}
+
 func TestVoiceChatCanCoordinateSiblingChats(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

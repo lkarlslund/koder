@@ -1220,7 +1220,9 @@ func (s *Session) EnsureChatModels(ctx context.Context, defaultProvider, default
 	return chats, nil
 }
 
-// EnsureChatModel fills missing provider/model fields from session defaults.
+// EnsureChatModel fills missing native-provider fields from Koder defaults.
+// External backends own their model namespace and must never inherit a Koder
+// provider merely because their provider ID is intentionally empty.
 func (s *Session) EnsureChatModel(ctx context.Context, chatID id.ID, defaultProvider, defaultModel string) (domain.Chat, error) {
 	if s == nil {
 		return domain.Chat{}, fmt.Errorf("session is required")
@@ -1230,6 +1232,9 @@ func (s *Session) EnsureChatModel(ctx context.Context, chatID id.ID, defaultProv
 	s.mu.RUnlock()
 	if !ok {
 		return domain.Chat{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	if chatRecord.EffectiveBackend() != domain.ChatBackendKoder {
+		return chatRecord, nil
 	}
 	if strings.TrimSpace(chatRecord.ProviderID) != "" && strings.TrimSpace(chatRecord.ModelID) != "" {
 		return chatRecord, nil
