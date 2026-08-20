@@ -79,6 +79,48 @@ func TestManagerPersistsCodexTurnInKoderTimeline(t *testing.T) {
 	}
 }
 
+func TestManagerPreservesMessagesAroundCodexToolCall(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	client := codexapp.New(codexapp.Config{
+		Executable: os.Args[0],
+		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
+		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_MULTI_MESSAGE=1"},
+	})
+	manager := New(client, st, nil)
+	manager.SetToolBridge(&fakeToolBridge{})
+	t.Cleanup(func() { _ = manager.Close() })
+	sessionRecord := domain.Session{ID: "session-messages", ProjectRoot: t.TempDir()}
+	chatRecord := domain.Chat{ID: "chat-messages", SessionID: sessionRecord.ID, Backend: domain.ChatBackendCodex}
+	source := chat.NewSource(func() chat.Deps { return chat.Deps{Store: st} })
+	if err := source.PutRecord(context.Background(), chatRecord); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := source.Load(context.Background(), sessionRecord, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(runtime.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := manager.RunTurn(ctx, runtime, chat.DriverTurn{Input: domain.QueuedInput{ID: "input-messages", Text: "Check it"}}, make(chan domain.Event, 32)); err != nil {
+		t.Fatal(err)
+	}
+	timeline := runtime.SnapshotTimeline()
+	if len(timeline) != 4 {
+		t.Fatalf("timeline = %#v", timeline)
+	}
+	before, beforeOK := timeline[1].Content.(domain.AssistantMessage)
+	tool, toolOK := timeline[2].Content.(domain.AssistantMessage)
+	after, afterOK := timeline[3].Content.(domain.AssistantMessage)
+	if !beforeOK || before.Text != "Let me check." || !toolOK || len(tool.Tools) != 1 || !afterOK || after.Text != "It worked." {
+		t.Fatalf("message/tool ordering = %#v", timeline)
+	}
+}
+
 func TestCodexSandboxUsesAppServerProtocolValues(t *testing.T) {
 	tests := []struct {
 		profile string
@@ -227,6 +269,11 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 				_ = enc.Encode(map[string]any{"id": 77, "method": "item/commandExecution/requestApproval", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "itemId": "command-1", "reason": "Create marker", "command": "touch marker"}})
 				continue
 			}
+			if os.Getenv("KODER_CODEX_DRIVER_MULTI_MESSAGE") == "1" {
+				_ = enc.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "message-before", "type": "agentMessage", "text": ""}}})
+				_ = enc.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "thread-1", "turnId": "turn-1", "itemId": "message-before", "delta": "Let me check."}})
+				_ = enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "message-before", "type": "agentMessage", "text": "Let me check."}}})
+			}
 			_ = enc.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "call-1", "type": "dynamicToolCall", "tool": "milestone_list"}}})
 			_ = enc.Encode(map[string]any{"id": 99, "method": "item/tool/call", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "callId": "call-1", "tool": "milestone_list", "arguments": map[string]any{}}})
 		case "turn/interrupt":
@@ -253,7 +300,17 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 			}
 			if string(msg.ID) == "99" {
 				_ = enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "call-1", "type": "dynamicToolCall", "status": "completed"}}})
-				_ = enc.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "thread-1", "turnId": "turn-1", "itemId": "message-1", "delta": "Done."}})
+				messageText := "Done."
+				messageID := "message-1"
+				if os.Getenv("KODER_CODEX_DRIVER_MULTI_MESSAGE") == "1" {
+					messageText = "It worked."
+					messageID = "message-after"
+					_ = enc.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": messageID, "type": "agentMessage", "text": ""}}})
+				}
+				_ = enc.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "thread-1", "turnId": "turn-1", "itemId": messageID, "delta": messageText}})
+				if os.Getenv("KODER_CODEX_DRIVER_MULTI_MESSAGE") == "1" {
+					_ = enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": messageID, "type": "agentMessage", "text": messageText}}})
+				}
 				_ = enc.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed", "items": []any{}}}})
 			}
 		}

@@ -293,6 +293,29 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 	defer m.clearApprovals(chatID)
 	assistantItem := rt.NextAssistantItem()
 	var text, reasoning strings.Builder
+	activeMessageID := ""
+	assistantMessages := 0
+	flushAssistant := func(completedText string) error {
+		if strings.TrimSpace(text.String()) == "" && strings.TrimSpace(completedText) != "" {
+			text.WriteString(completedText)
+		}
+		if strings.TrimSpace(text.String()) == "" && strings.TrimSpace(reasoning.String()) == "" {
+			return nil
+		}
+		item, err := rt.AppendAssistantMessage(ctx, assistantItem, domain.AssistantMessage{
+			Text:      text.String(),
+			Reasoning: domain.ReasoningContent{Text: reasoning.String()},
+		})
+		if err != nil {
+			return err
+		}
+		out <- domain.Event{Kind: domain.EventKindMessageDone, Item: item}
+		assistantMessages++
+		text.Reset()
+		reasoning.Reset()
+		assistantItem = rt.NextAssistantItem()
+		return nil
+	}
 	running := map[string]domain.ToolKind{}
 	for {
 		select {
@@ -319,6 +342,15 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 				}
 			case "item/agentMessage/delta":
 				delta := stringField(msg.Params, "delta")
+				messageID := stringField(msg.Params, "itemId")
+				if activeMessageID != "" && messageID != "" && messageID != activeMessageID && text.Len() > 0 {
+					if err := flushAssistant(""); err != nil {
+						return err
+					}
+				}
+				if messageID != "" {
+					activeMessageID = messageID
+				}
 				text.WriteString(delta)
 				out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: delta, Item: assistantItem}
 			case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
@@ -338,9 +370,21 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 					out <- domain.Event{Kind: domain.EventKindToolStart, Tool: kind, ToolCallID: itemID}
 				}
 			case "item/completed":
-				if completed := agentTextFromItem(msg.Params); completed != "" && text.Len() == 0 {
-					text.WriteString(completed)
-					out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: completed, Item: assistantItem}
+				if completed := agentTextFromItem(msg.Params); completed != "" {
+					messageID := itemIDFromParams(msg.Params)
+					if activeMessageID != "" && messageID != "" && messageID != activeMessageID && text.Len() > 0 {
+						if err := flushAssistant(""); err != nil {
+							return err
+						}
+					}
+					if text.Len() == 0 {
+						text.WriteString(completed)
+						out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: completed, Item: assistantItem}
+					}
+					if err := flushAssistant(""); err != nil {
+						return err
+					}
+					activeMessageID = ""
 				}
 				itemID := itemIDFromParams(msg.Params)
 				if kind := running[itemID]; kind != "" {
@@ -360,17 +404,12 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 					}
 					return errors.New(failure)
 				}
-				if strings.TrimSpace(text.String()) == "" && strings.TrimSpace(reasoning.String()) == "" {
-					return fmt.Errorf("codex turn completed without an assistant response")
-				}
-				item, err := rt.AppendAssistantMessage(ctx, assistantItem, domain.AssistantMessage{
-					Text:      text.String(),
-					Reasoning: domain.ReasoningContent{Text: reasoning.String()},
-				})
-				if err != nil {
+				if err := flushAssistant(""); err != nil {
 					return err
 				}
-				out <- domain.Event{Kind: domain.EventKindMessageDone, Item: item}
+				if assistantMessages == 0 {
+					return fmt.Errorf("codex turn completed without an assistant response")
+				}
 				return nil
 			}
 		}
@@ -449,13 +488,16 @@ func (m *Manager) handleApprovalRequest(ctx context.Context, rt *chat.Chat, msg 
 	if body == "" {
 		body = "Codex requests permission to continue this operation."
 	}
-	if _, err := rt.AttachToolApproval(ctx, request.ItemID, domain.ApprovalRequest{ID: domain.ID(request.ItemID), Status: domain.ApprovalStatusPending, Body: body}); err != nil {
-		return err
-	}
 	key := approvalKey(rt.Snapshot().Chat.ID, request.ItemID)
 	m.approvalMu.Lock()
 	m.approvals[key] = pendingApproval{requestID: append(json.RawMessage(nil), msg.ID...), method: msg.Method}
 	m.approvalMu.Unlock()
+	if _, err := rt.AttachToolApproval(ctx, request.ItemID, domain.ApprovalRequest{ID: domain.ID(request.ItemID), Status: domain.ApprovalStatusPending, Body: body}); err != nil {
+		m.approvalMu.Lock()
+		delete(m.approvals, key)
+		m.approvalMu.Unlock()
+		return err
+	}
 	out <- domain.Event{Kind: domain.EventKindApprovalAsk, ToolCallID: request.ItemID, Text: body, Meta: map[string]string{"approval_driver": "external"}}
 	return nil
 }
