@@ -33,17 +33,17 @@ class VoiceSessionClient(
 		request(server, token, "/voice/v1/sessions/$sessionId/chats", null, VoiceProtocol::parseHome, callback)
 	}
 
-	fun createVoiceChat(server: String, token: String, sessionId: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+	fun createVoiceChat(server: String, token: String, sessionId: String, spec: VoiceChatCreateSpec, callback: (Result<VoiceHome>) -> Unit) {
 		request(
 			server, token, "/voice/v1/sessions/$sessionId/chats",
-			VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback,
+			VoiceProtocol.createVoiceChatRequest(spec), VoiceProtocol::parseHome, callback,
 		)
 	}
 
-	fun createTemporary(server: String, token: String, title: String, callback: (Result<VoiceHome>) -> Unit) {
+	fun createTemporary(server: String, token: String, spec: VoiceChatCreateSpec, callback: (Result<VoiceHome>) -> Unit) {
 		request(
 			server, token, "/voice/v1/sessions/temporary",
-			VoiceProtocol.createSessionRequest(title), VoiceProtocol::parseHome, callback,
+			VoiceProtocol.createVoiceChatRequest(spec), VoiceProtocol::parseHome, callback,
 		)
 	}
 

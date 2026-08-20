@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 func TestResponsePacingValidationAndLimits(t *testing.T) {
@@ -49,15 +51,15 @@ func (f *fakeBackend) EnsureVoiceChat(_ context.Context, sessionID, chatID strin
 	return Chat{}, context.Canceled
 }
 
-func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID, title string) (Chat, error) {
-	chat := Chat{ID: "created-chat", SessionID: sessionID, Title: title, Role: "voice"}
+func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID string, spec domain.ChatCreateSpec) (Chat, error) {
+	chat := Chat{ID: "created-chat", SessionID: sessionID, Title: spec.Title, Role: "orchestrator", Backend: "koder", WorkflowRole: "orchestrator", InteractionMode: "voice"}
 	f.chats = append(f.chats, chat)
 	return chat, nil
 }
 
-func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, title string) (Session, Chat, error) {
-	session := Session{ID: "temporary-session", Title: title, Kind: "quick"}
-	chat := Chat{ID: "temporary-chat", SessionID: session.ID, Title: title, Role: "voice"}
+func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, spec domain.ChatCreateSpec) (Session, Chat, error) {
+	session := Session{ID: "temporary-session", Title: spec.Title, Kind: "quick"}
+	chat := Chat{ID: "temporary-chat", SessionID: session.ID, Title: spec.Title, Role: "orchestrator", Backend: "koder", WorkflowRole: "orchestrator", InteractionMode: "voice"}
 	f.sessions = append(f.sessions, session)
 	f.chats = append(f.chats, chat)
 	return session, chat, nil
@@ -208,7 +210,7 @@ func TestNativeCallSelectsVoiceChatAndLoadsItsHistory(t *testing.T) {
 	if _, err := call.SelectVoiceChat(context.Background(), "session-1", "work"); err == nil {
 		t.Fatal("selected a non-voice chat")
 	}
-	created, err := call.CreateVoiceChat(context.Background(), "session-1", "Another conversation")
+	created, err := call.CreateVoiceChat(context.Background(), "session-1", domain.ChatCreateSpec{Title: "Another conversation", InteractionMode: domain.InteractionModeVoice})
 	if err != nil || created.ID != "created-chat" {
 		t.Fatalf("created chat = %#v, %v", created, err)
 	}

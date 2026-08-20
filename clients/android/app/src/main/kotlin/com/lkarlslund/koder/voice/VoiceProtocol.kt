@@ -15,6 +15,11 @@ data class VoiceSession(
 	val sessionId: String = "",
 	val kind: String = "",
 	val role: String = "",
+	val backend: String = "koder",
+	val workflowRole: String = "",
+	val interactionMode: String = "",
+	val modelId: String = "",
+	val permissionProfile: String = "",
 	val chatCount: Int = 0,
 	val voiceChatCount: Int = 0,
     val lastMessage: String = "",
@@ -27,6 +32,35 @@ data class VoiceSession(
 	val busy: Boolean = false,
 	val status: String = "",
 	val statusText: String = "",
+)
+
+val VoiceSession.isVoiceChat: Boolean
+	get() = interactionMode == "voice" || (interactionMode.isBlank() && role == "voice")
+
+data class VoiceChatModelOption(
+	val id: String,
+	val name: String,
+	val description: String = "",
+	val isDefault: Boolean = false,
+)
+
+data class VoiceChatBackendOption(
+	val id: String,
+	val label: String,
+	val available: Boolean,
+	val detail: String = "",
+	val models: List<VoiceChatModelOption> = emptyList(),
+)
+
+data class VoiceChatCreateSpec(
+	val title: String,
+	val backend: String = "koder",
+	val workflowRole: String = "orchestrator",
+	val modelId: String = "",
+	val permissionProfile: String = "",
+	val milestoneKey: String = "",
+	val taskRef: String = "",
+	val toolStates: Map<String, Boolean> = emptyMap(),
 )
 
 data class VoicePart(
@@ -124,6 +158,7 @@ data class VoiceHome(
 	val createdChat: VoiceSession? = null,
     val createdVoiceSession: VoiceSession? = null,
     val appUpdate: AppUpdate? = null,
+	val chatBackends: List<VoiceChatBackendOption> = emptyList(),
 )
 
 data class ServerInfo(
@@ -194,6 +229,20 @@ object VoiceProtocol {
 		.put("title", title.trim())
 		.toString()
 
+	fun createVoiceChatRequest(spec: VoiceChatCreateSpec): String = JSONObject()
+		.put("title", spec.title.trim())
+		.put("backend", spec.backend)
+		.put("workflow_role", spec.workflowRole)
+		.put("interaction_mode", "voice")
+		.apply {
+			if (spec.modelId.isNotBlank()) put("model_id", spec.modelId)
+			if (spec.permissionProfile.isNotBlank()) put("permission_profile", spec.permissionProfile)
+			if (spec.milestoneKey.isNotBlank()) put("milestone_key", spec.milestoneKey)
+			if (spec.taskRef.isNotBlank()) put("task_ref", spec.taskRef)
+			if (spec.toolStates.isNotEmpty()) put("tool_states", JSONObject(spec.toolStates))
+		}
+		.toString()
+
 	fun updateSessionRequest(
 		title: String? = null,
 		archived: Boolean? = null,
@@ -228,6 +277,15 @@ object VoiceProtocol {
 				.sortedWith(compareByDescending<VoiceSession> { it.pinned }.thenByDescending { it.updatedAt ?: Instant.MIN }),
 			createdVoiceSession = root.optJSONObject("voice_session")?.toVoiceSession(),
 			appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
+			chatBackends = root.optJSONArray("chat_backends").mapObjects { backend ->
+				VoiceChatBackendOption(
+					id = backend.getString("id"), label = backend.optString("label", backend.getString("id")),
+					available = backend.optBoolean("available"), detail = backend.optString("detail"),
+					models = backend.optJSONArray("models").mapObjects { model ->
+						VoiceChatModelOption(model.getString("id"), model.optString("name", model.getString("id")), model.optString("description"), model.optBoolean("default"))
+					},
+				)
+			},
 		)
 	}
 
@@ -476,6 +534,11 @@ object VoiceProtocol {
 		sessionId = optString("session_id"),
 		kind = optString("kind"),
 		role = optString("role"),
+		backend = optString("backend", "koder"),
+		workflowRole = optString("workflow_role", optString("role")),
+		interactionMode = optString("interaction_mode", if (optString("role") == "voice") "voice" else "text"),
+		modelId = optString("model_id"),
+		permissionProfile = optString("permission_profile"),
 		chatCount = optInt("chat_count"),
 		voiceChatCount = optInt("voice_chat_count"),
 		lastMessage = optString("last_message"),

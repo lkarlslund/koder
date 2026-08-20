@@ -30,13 +30,16 @@ authentication.
 Before opening a live WebSocket, native clients use the authenticated session
 and chat endpoints:
 
-- `GET /voice/v1/sessions` lists normal Koder sessions in `sessions` and
-  advertises an optional signed Android update;
+- `GET /voice/v1/sessions` lists normal Koder sessions in `sessions`, live
+  `chat_backends` (including Codex models and availability), and an optional
+  signed Android update;
 - `GET /voice/v1/sessions/<session-id>/chats` lists every chat in a session.
-  Clients show ordinary chats as context but only select chats whose role is
-  `voice`;
-- `POST /voice/v1/sessions/<session-id>/chats` with an optional `title` creates
-  a top-level voice chat in that regular session;
+  Clients show ordinary chats as context but only select chats whose
+  `interaction_mode` is `voice`;
+- `POST /voice/v1/sessions/<session-id>/chats` accepts the shared chat creation
+  fields `title`, `backend`, `workflow_role`, `model_id`,
+  `permission_profile`, optional milestone/task scope, and `tool_states`.
+  The server always sets `interaction_mode` to `voice` for this endpoint;
 - `POST /voice/v1/sessions/temporary` creates a quick session with one voice
   chat and returns them as `session` and `chat`;
 - `GET /voice/v1/server-info` returns a live, authenticated diagnostics snapshot
@@ -141,8 +144,11 @@ Examples:
 
 `call_state.sessions` lists normal Koder sessions, `session_id` identifies the
 selected session, `chats` lists its chats, and `chat_id` identifies the selected
-voice chat. Chat summaries include role, activity, runtime state, and the
-model-authored `status_text` published through the global `chat_status` tool.
+voice chat. Chat summaries explicitly include `backend`, `workflow_role`, and
+`interaction_mode`, plus activity, runtime state, model, permission profile,
+and the model-authored `status_text` published through the global
+`chat_status` tool. The deprecated `role` field mirrors `workflow_role`; old
+servers and clients may still use `role: voice` during rolling upgrades.
 `call_state.voice_sessions` lists selectable durable voice chats and omits
 archived and deleted ones for compatibility with older clients. Deleted
 sessions are also omitted from REST lists and server statistics; deletion is

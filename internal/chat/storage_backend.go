@@ -247,11 +247,15 @@ type CreateRecordRequest struct {
 	Session           domain.Session
 	Title             string
 	Role              domain.WorkflowRole
+	Backend           domain.ChatBackend
+	InteractionMode   domain.InteractionMode
 	ParentID          *id.ID
 	ProviderID        string
 	ModelID           string
 	PermissionProfile string
 	ToolStates        map[domain.ToolKind]bool
+	MilestoneKey      string
+	TaskRef           string
 	Position          int
 }
 
@@ -270,26 +274,34 @@ func createRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 	}
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
-		ID:                id.NewAt(now),
-		SessionID:         session.ID,
-		ParentChatID:      req.ParentID,
-		Title:             strings.TrimSpace(req.Title),
-		WorkflowRole:      req.Role,
-		Backend:           domain.ChatBackendKoder,
-		InteractionMode:   domain.InteractionModeText,
-		ProviderID:        strings.TrimSpace(req.ProviderID),
-		ModelID:           strings.TrimSpace(req.ModelID),
-		PermissionProfile: strings.TrimSpace(req.PermissionProfile),
-		ToolStates:        cloneToolStates(req.ToolStates),
-		Position:          position,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                 id.NewAt(now),
+		SessionID:          session.ID,
+		ParentChatID:       req.ParentID,
+		Title:              strings.TrimSpace(req.Title),
+		WorkflowRole:       req.Role,
+		Backend:            req.Backend,
+		InteractionMode:    req.InteractionMode,
+		ProviderID:         strings.TrimSpace(req.ProviderID),
+		ModelID:            strings.TrimSpace(req.ModelID),
+		PermissionProfile:  strings.TrimSpace(req.PermissionProfile),
+		ToolStates:         cloneToolStates(req.ToolStates),
+		ActiveMilestoneKey: strings.TrimSpace(req.MilestoneKey),
+		AssignedTaskRef:    strings.TrimSpace(req.TaskRef),
+		Position:           position,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if chatRecord.Title == "" {
 		chatRecord.Title = "New Chat"
 	}
 	if chatRecord.WorkflowRole == "" {
 		chatRecord.WorkflowRole = chatrole.General
+	}
+	if chatRecord.Backend == "" {
+		chatRecord.Backend = domain.ChatBackendKoder
+	}
+	if chatRecord.InteractionMode == "" {
+		chatRecord.InteractionMode = domain.InteractionModeText
 	}
 	if chatRecord.PermissionProfile == "" {
 		chatRecord.PermissionProfile = session.PermissionProfile

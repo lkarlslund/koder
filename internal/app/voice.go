@@ -11,7 +11,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -167,6 +166,21 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 	return out, nil
 }
 
+// VoiceChatBackends exposes the same live backend discovery used by the web
+// chat creator in the bounded voice protocol shape.
+func (c *Controller) VoiceChatBackends(ctx context.Context) []voice.ChatBackendOption {
+	states := c.ChatBackends(ctx)
+	out := make([]voice.ChatBackendOption, 0, len(states))
+	for _, state := range states {
+		option := voice.ChatBackendOption{ID: string(state.ID), Label: state.Label, Available: state.Available, Detail: state.Detail}
+		for _, model := range state.Models {
+			option.Models = append(option.Models, voice.ChatModelOption{ID: model.ID, Name: model.Name, Description: model.Description, Default: model.Default})
+		}
+		out = append(out, option)
+	}
+	return out
+}
+
 // ListSessionChats returns bounded metadata for every chat in one session.
 func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]voice.Chat, error) {
 	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
@@ -185,8 +199,11 @@ func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]
 		}
 		out = append(out, voice.Chat{
 			ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID),
-			Title: chatRecord.Title, Role: voiceChatRoleLabel(chatRecord),
-			LastMessage: chatRecord.LastMessage, UpdatedAt: chatRecord.UpdatedAt,
+			Title: chatRecord.Title, Role: string(chatRecord.EffectiveWorkflowRole()),
+			Backend: string(chatRecord.EffectiveBackend()), WorkflowRole: string(chatRecord.EffectiveWorkflowRole()),
+			InteractionMode: string(chatRecord.EffectiveInteractionMode()), ModelID: chatRecord.ModelID,
+			PermissionProfile: chatRecord.PermissionProfile,
+			LastMessage:       chatRecord.LastMessage, UpdatedAt: chatRecord.UpdatedAt,
 			Archived: chatRecord.Archived, Busy: status.Busy,
 			Status: string(status.State), StatusText: status.StatusText,
 		})
@@ -206,7 +223,7 @@ func (c *Controller) EnsureVoiceChat(ctx context.Context, sessionID, chatID stri
 	}
 	chatID = strings.TrimSpace(chatID)
 	for _, item := range chats {
-		if item.Archived || item.Role != string(chatrole.Voice) {
+		if item.Archived || item.InteractionMode != string(domain.InteractionModeVoice) {
 			continue
 		}
 		if chatID == "" || item.ID == chatID {
@@ -221,7 +238,7 @@ func (c *Controller) EnsureVoiceChat(ctx context.Context, sessionID, chatID stri
 
 // CreateVoiceChatInSession creates a selectable top-level voice orchestrator
 // alongside the session's existing chats.
-func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, title string) (voice.Chat, error) {
+func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID string, spec domain.ChatCreateSpec) (voice.Chat, error) {
 	owner, err := c.agent.LoadSession(ctx, id.ID(strings.TrimSpace(sessionID)))
 	if err != nil {
 		return voice.Chat{}, err
@@ -233,11 +250,16 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, ti
 	if snapshot.Session.Kind == domain.SessionKindQuick {
 		return voice.Chat{}, fmt.Errorf("quick sessions cannot create additional chats")
 	}
-	title = truncateVoiceText(strings.TrimSpace(title), 80)
-	if title == "" {
-		title = "Voice conversation"
+	spec = spec.Normalized()
+	spec.InteractionMode = domain.InteractionModeVoice
+	spec.Title = truncateVoiceText(spec.Title, 80)
+	if spec.Title == "" {
+		spec.Title = "Voice conversation"
 	}
-	runtime, err := owner.NewRootChatWithDimensions(ctx, title, chatrole.Orchestrator, domain.ChatBackendKoder, domain.InteractionModeVoice)
+	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
+		return voice.Chat{}, fmt.Errorf("codex backend is disabled")
+	}
+	runtime, err := owner.NewChatWithSpec(ctx, nil, spec)
 	if err != nil {
 		return voice.Chat{}, err
 	}
@@ -245,14 +267,21 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID, ti
 	c.broadcast("chats_delta", map[string]any{"session_id": snapshot.Session.ID, "chats": owner.Snapshot().Chats})
 	return voice.Chat{
 		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
-		Role: voiceChatRoleLabel(chatRecord), UpdatedAt: chatRecord.UpdatedAt,
+		Role: string(chatRecord.EffectiveWorkflowRole()), Backend: string(chatRecord.EffectiveBackend()),
+		WorkflowRole: string(chatRecord.EffectiveWorkflowRole()), InteractionMode: string(chatRecord.EffectiveInteractionMode()),
+		ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
 	}, nil
 }
 
 // CreateTemporaryVoiceChat creates a quick session whose only chat is a voice
 // orchestrator and whose project root is Koder-managed scratch storage.
-func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, title string) (voice.Session, voice.Chat, error) {
-	owner, err := c.agent.CreateQuickVoiceSession(ctx)
+func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, spec domain.ChatCreateSpec) (voice.Session, voice.Chat, error) {
+	spec = spec.Normalized()
+	spec.InteractionMode = domain.InteractionModeVoice
+	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
+		return voice.Session{}, voice.Chat{}, fmt.Errorf("codex backend is disabled")
+	}
+	owner, err := c.agent.CreateQuickSessionWithSpec(ctx, spec)
 	if err != nil {
 		return voice.Session{}, voice.Chat{}, err
 	}
@@ -260,7 +289,7 @@ func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, title string)
 	if len(snapshot.Chats) != 1 {
 		return voice.Session{}, voice.Chat{}, fmt.Errorf("temporary voice session must contain exactly one chat")
 	}
-	title = truncateVoiceText(strings.TrimSpace(title), 80)
+	title := truncateVoiceText(spec.Title, 80)
 	if title != "" {
 		if err := c.RenameSession(ctx, snapshot.Session.ID, title); err != nil {
 			return voice.Session{}, voice.Chat{}, err
@@ -278,7 +307,9 @@ func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, title string)
 	chatRecord := snapshot.Chats[0]
 	chatSummary := voice.Chat{
 		ID: string(chatRecord.ID), SessionID: string(chatRecord.SessionID), Title: chatRecord.Title,
-		Role: string(chatRecord.WorkflowRole), UpdatedAt: chatRecord.UpdatedAt,
+		Role: string(chatRecord.EffectiveWorkflowRole()), Backend: string(chatRecord.EffectiveBackend()),
+		WorkflowRole: string(chatRecord.EffectiveWorkflowRole()), InteractionMode: string(chatRecord.EffectiveInteractionMode()),
+		ModelID: chatRecord.ModelID, PermissionProfile: chatRecord.PermissionProfile, UpdatedAt: chatRecord.UpdatedAt,
 	}
 	return sessionSummary, chatSummary, nil
 }
@@ -1238,15 +1269,6 @@ func voiceSessionTitle(session domain.Session) string {
 
 func isVoiceInteraction(chatRecord domain.Chat) bool {
 	return chatRecord.EffectiveInteractionMode() == domain.InteractionModeVoice
-}
-
-// Keep the native voice protocol compatible while Android migrates from the
-// old composite role field to an explicit interaction-mode field.
-func voiceChatRoleLabel(chatRecord domain.Chat) string {
-	if isVoiceInteraction(chatRecord) {
-		return string(chatrole.Voice)
-	}
-	return string(chatRecord.EffectiveWorkflowRole())
 }
 
 func voiceSessionSummary(session domain.Session) voice.Session {

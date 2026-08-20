@@ -21,6 +21,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/deviceauth"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -179,15 +180,15 @@ func (f *fakeBackend) EnsureVoiceChat(_ context.Context, sessionID, chatID strin
 	return voice.Chat{}, fmt.Errorf("voice chat not found")
 }
 
-func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID, title string) (voice.Chat, error) {
-	chat := voice.Chat{ID: "chat-created", SessionID: sessionID, Title: title, Role: "voice"}
+func (f *fakeBackend) CreateVoiceChatInSession(_ context.Context, sessionID string, spec domain.ChatCreateSpec) (voice.Chat, error) {
+	chat := voice.Chat{ID: "chat-created", SessionID: sessionID, Title: spec.Title, Role: "orchestrator", Backend: "koder", WorkflowRole: "orchestrator", InteractionMode: "voice"}
 	f.chats = append(f.chats, chat)
 	return chat, nil
 }
 
-func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, title string) (voice.Session, voice.Chat, error) {
-	session := voice.Session{ID: "temporary-session", Title: title, Kind: "quick", ChatCount: 1, VoiceChats: 1}
-	chat := voice.Chat{ID: "temporary-chat", SessionID: session.ID, Title: title, Role: "voice"}
+func (f *fakeBackend) CreateTemporaryVoiceChat(_ context.Context, spec domain.ChatCreateSpec) (voice.Session, voice.Chat, error) {
+	session := voice.Session{ID: "temporary-session", Title: spec.Title, Kind: "quick", ChatCount: 1, VoiceChats: 1}
+	chat := voice.Chat{ID: "temporary-chat", SessionID: session.ID, Title: spec.Title, Role: "orchestrator", Backend: "koder", WorkflowRole: "orchestrator", InteractionMode: "voice"}
 	f.sessions = append(f.sessions, session)
 	f.chats = append(f.chats, chat)
 	return session, chat, nil
@@ -706,11 +707,11 @@ func TestHandlerExposesNativeSessionChatHierarchy(t *testing.T) {
 		t.Fatalf("chat list status=%d body=%#v", status, chats)
 	}
 	status, created := do(http.MethodPost, "/voice/v1/sessions/session-1/chats", `{"title":"Another voice chat"}`)
-	if status != http.StatusCreated || created.Chat == nil || created.Chat.SessionID != "session-1" || created.Chat.Role != "voice" {
+	if status != http.StatusCreated || created.Chat == nil || created.Chat.SessionID != "session-1" || created.Chat.WorkflowRole != "orchestrator" || created.Chat.InteractionMode != "voice" {
 		t.Fatalf("chat creation status=%d body=%#v", status, created)
 	}
 	status, temporary := do(http.MethodPost, "/voice/v1/sessions/temporary", `{"title":"One-off task"}`)
-	if status != http.StatusCreated || temporary.Session == nil || temporary.Session.Kind != "quick" || temporary.Chat == nil || temporary.Chat.Role != "voice" {
+	if status != http.StatusCreated || temporary.Session == nil || temporary.Session.Kind != "quick" || temporary.Chat == nil || temporary.Chat.WorkflowRole != "orchestrator" || temporary.Chat.InteractionMode != "voice" {
 		t.Fatalf("temporary creation status=%d body=%#v", status, temporary)
 	}
 }

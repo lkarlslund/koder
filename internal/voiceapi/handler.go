@@ -24,6 +24,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
 	"github.com/lkarlslund/koder/internal/deviceauth"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/version"
@@ -107,20 +108,27 @@ func NewHandler(backend backend, token string) *Handler {
 }
 
 type clientFrame struct {
-	Type           string             `json:"type"`
-	Protocol       string             `json:"protocol,omitempty"`
-	UtteranceID    string             `json:"utterance_id,omitempty"`
-	Text           string             `json:"text,omitempty"`
-	SessionID      string             `json:"session_id,omitempty"`
-	ChatID         string             `json:"chat_id,omitempty"`
-	VoiceSessionID string             `json:"voice_session_id,omitempty"`
-	Title          string             `json:"title,omitempty"`
-	AudioFormat    *voice.AudioFormat `json:"audio_format,omitempty"`
-	Languages      []string           `json:"languages,omitempty"`
-	BeforeID       string             `json:"before_id,omitempty"`
-	Limit          int                `json:"limit,omitempty"`
-	Query          string             `json:"query,omitempty"`
-	ResponsePacing string             `json:"response_pacing,omitempty"`
+	Type              string              `json:"type"`
+	Protocol          string              `json:"protocol,omitempty"`
+	UtteranceID       string              `json:"utterance_id,omitempty"`
+	Text              string              `json:"text,omitempty"`
+	SessionID         string              `json:"session_id,omitempty"`
+	ChatID            string              `json:"chat_id,omitempty"`
+	VoiceSessionID    string              `json:"voice_session_id,omitempty"`
+	Title             string              `json:"title,omitempty"`
+	AudioFormat       *voice.AudioFormat  `json:"audio_format,omitempty"`
+	Languages         []string            `json:"languages,omitempty"`
+	BeforeID          string              `json:"before_id,omitempty"`
+	Limit             int                 `json:"limit,omitempty"`
+	Query             string              `json:"query,omitempty"`
+	ResponsePacing    string              `json:"response_pacing,omitempty"`
+	Backend           domain.ChatBackend  `json:"backend,omitempty"`
+	WorkflowRole      domain.WorkflowRole `json:"workflow_role,omitempty"`
+	ModelID           string              `json:"model_id,omitempty"`
+	PermissionProfile string              `json:"permission_profile,omitempty"`
+	MilestoneKey      string              `json:"milestone_key,omitempty"`
+	TaskRef           string              `json:"task_ref,omitempty"`
+	ToolStates        domain.ToolStates   `json:"tool_states,omitempty"`
 }
 
 type serverFrame struct {
@@ -144,14 +152,15 @@ type serverFrame struct {
 }
 
 type sessionsResponse struct {
-	Protocol      string                  `json:"protocol"`
-	Session       *voice.Session          `json:"session,omitempty"`
-	Sessions      []voice.Session         `json:"sessions,omitempty"`
-	Chat          *voice.Chat             `json:"chat,omitempty"`
-	Chats         []voice.Chat            `json:"chats,omitempty"`
-	VoiceSession  *voice.Session          `json:"voice_session,omitempty"`
-	VoiceSessions []voice.Session         `json:"voice_sessions"`
-	AppUpdate     *androidupdate.Manifest `json:"app_update,omitempty"`
+	Protocol      string                    `json:"protocol"`
+	Session       *voice.Session            `json:"session,omitempty"`
+	Sessions      []voice.Session           `json:"sessions,omitempty"`
+	Chat          *voice.Chat               `json:"chat,omitempty"`
+	Chats         []voice.Chat              `json:"chats,omitempty"`
+	VoiceSession  *voice.Session            `json:"voice_session,omitempty"`
+	VoiceSessions []voice.Session           `json:"voice_sessions"`
+	AppUpdate     *androidupdate.Manifest   `json:"app_update,omitempty"`
+	ChatBackends  []voice.ChatBackendOption `json:"chat_backends,omitempty"`
 }
 
 type serverInfoResponse struct {
@@ -181,7 +190,7 @@ type serverInfoResponse struct {
 }
 
 type createSessionRequest struct {
-	Title string `json:"title"`
+	domain.ChatCreateSpec
 }
 
 type updateSessionRequest struct {
@@ -545,7 +554,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "create_voice_chat":
 			audio = nil
-			if _, err := call.CreateVoiceChat(ctx, frame.SessionID, frame.Title); err != nil {
+			if _, err := call.CreateVoiceChat(ctx, frame.SessionID, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
 					return
 				}
@@ -556,7 +565,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "create_temporary_voice_chat":
 			audio = nil
-			if _, _, err := call.CreateTemporaryVoiceChat(ctx, frame.Title); err != nil {
+			if _, _, err := call.CreateTemporaryVoiceChat(ctx, voiceChatCreateSpec(frame.Title, frame.Backend, frame.WorkflowRole, frame.ModelID, frame.PermissionProfile, frame.MilestoneKey, frame.TaskRef, frame.ToolStates)); err != nil {
 				if writeErr := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: err.Error()}); writeErr != nil {
 					return
 				}
@@ -786,6 +795,7 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 	slices.SortStableFunc(workSessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	response := sessionsResponse{
 		Protocol: protocolVersion, Sessions: workSessions, VoiceSession: created, VoiceSessions: sessions,
+		ChatBackends: h.chatBackendOptions(r.Context()),
 	}
 	if h.Updates != nil {
 		meta, available, err := h.Updates.Manifest()
@@ -808,6 +818,16 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) chatBackendOptions(ctx context.Context) []voice.ChatBackendOption {
+	provider, ok := h.Backend.(interface {
+		VoiceChatBackends(context.Context) []voice.ChatBackendOption
+	})
+	if !ok {
+		return []voice.ChatBackendOption{{ID: "koder", Label: "Koder", Available: true}}
+	}
+	return provider.VoiceChatBackends(ctx)
+}
+
 func (h *Handler) serveTemporaryVoiceSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -823,7 +843,7 @@ func (h *Handler) serveTemporaryVoiceSession(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	session, chat, err := backend.CreateTemporaryVoiceChat(r.Context(), request.Title)
+	session, chat, err := backend.CreateTemporaryVoiceChat(r.Context(), normalizeVoiceChatSpec(request.ChatCreateSpec))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -971,7 +991,7 @@ func (h *Handler) serveSessionChats(w http.ResponseWriter, r *http.Request, sess
 		if !valid {
 			return
 		}
-		chat, err := backend.CreateVoiceChatInSession(r.Context(), sessionID, request.Title)
+		chat, err := backend.CreateVoiceChatInSession(r.Context(), sessionID, normalizeVoiceChatSpec(request.ChatCreateSpec))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1059,6 +1079,18 @@ func decodeCreateSessionRequest(w http.ResponseWriter, r *http.Request) (createS
 		return createSessionRequest{}, false
 	}
 	return request, true
+}
+
+func voiceChatCreateSpec(title string, backend domain.ChatBackend, role domain.WorkflowRole, modelID, permissionProfile, milestoneKey, taskRef string, toolStates domain.ToolStates) domain.ChatCreateSpec {
+	return normalizeVoiceChatSpec(domain.ChatCreateSpec{
+		Title: title, Backend: backend, WorkflowRole: role, ModelID: modelID,
+		PermissionProfile: permissionProfile, MilestoneKey: milestoneKey, TaskRef: taskRef, ToolStates: toolStates,
+	})
+}
+
+func normalizeVoiceChatSpec(spec domain.ChatCreateSpec) domain.ChatCreateSpec {
+	spec.InteractionMode = domain.InteractionModeVoice
+	return spec.Normalized()
 }
 
 func writeSessionsResponse(w http.ResponseWriter, status int, response sessionsResponse) {

@@ -179,6 +179,25 @@ func (r *Registry) CreateQuick(ctx context.Context, sessionID id.ID, projectRoot
 	return r.createQuick(ctx, sessionID, projectRoot, chatrole.Standalone)
 }
 
+// CreateQuickWithSpec creates a one-chat managed session using the same chat
+// dimensions as the browser and phone creation surfaces.
+func (r *Registry) CreateQuickWithSpec(ctx context.Context, sessionID id.ID, projectRoot string, spec domain.ChatCreateSpec) (*Session, error) {
+	spec = spec.Normalized()
+	if _, ok := chatrole.DefaultRegistry().Lookup(chatrole.Role(spec.WorkflowRole)); !ok {
+		return nil, fmt.Errorf("profile %q is not registered", spec.WorkflowRole)
+	}
+	if spec.Backend != domain.ChatBackendKoder && spec.Backend != domain.ChatBackendCodex {
+		return nil, fmt.Errorf("chat backend %q is not supported", spec.Backend)
+	}
+	if spec.InteractionMode != domain.InteractionModeText && spec.InteractionMode != domain.InteractionModeVoice {
+		return nil, fmt.Errorf("interaction mode %q is not supported", spec.InteractionMode)
+	}
+	if spec.MilestoneKey != "" && spec.TaskRef != "" {
+		return nil, fmt.Errorf("chat scope may select a milestone or a task, not both")
+	}
+	return r.createWithSpec(ctx, spec.Title, projectRoot, false, sessionID, domain.SessionKindQuick, true, spec)
+}
+
 // CreateQuickVoice creates a one-chat managed session whose chat uses the
 // voice orchestrator profile.
 func (r *Registry) CreateQuickVoice(ctx context.Context, sessionID id.ID, projectRoot string) (*Session, error) {
@@ -198,6 +217,10 @@ func (r *Registry) CreateVoice(ctx context.Context, title string) (*Session, err
 }
 
 func (r *Registry) create(ctx context.Context, title, projectRoot string, createProjectRoot bool, sessionID id.ID, kind domain.SessionKind, managed bool, role domain.WorkflowRole) (*Session, error) {
+	return r.createWithSpec(ctx, title, projectRoot, createProjectRoot, sessionID, kind, managed, domain.ChatCreateSpec{WorkflowRole: role})
+}
+
+func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string, createProjectRoot bool, sessionID id.ID, kind domain.SessionKind, managed bool, spec domain.ChatCreateSpec) (*Session, error) {
 	if r == nil || r.store == nil {
 		return nil, fmt.Errorf("session registry store is required")
 	}
@@ -228,16 +251,31 @@ func (r *Registry) create(ctx context.Context, title, projectRoot string, create
 		}
 	}
 	cfg := r.currentConfig()
+	modelID := cfg.DefaultModel
+	if spec.Backend == domain.ChatBackendCodex {
+		modelID = spec.ModelID
+	} else if spec.ModelID != "" {
+		modelID = spec.ModelID
+	}
+	permissionProfile := cfg.PermissionProfile
+	if spec.PermissionProfile != "" {
+		permissionProfile = spec.PermissionProfile
+	}
 	session, err := createSessionRecordWithOptions(ctx, r.store, r.chatsSrc, createSessionOptions{
-		ID:                 sessionID,
-		Title:              title,
-		ProviderID:         cfg.DefaultProvider,
-		ModelID:            cfg.DefaultModel,
-		PermissionProfile:  cfg.PermissionProfile,
-		Kind:               kind,
-		ProjectRoot:        projectRoot,
-		ProjectRootManaged: managed,
-		InitialChatRole:    role,
+		ID:                     sessionID,
+		Title:                  title,
+		ProviderID:             cfg.DefaultProvider,
+		ModelID:                modelID,
+		PermissionProfile:      permissionProfile,
+		Kind:                   kind,
+		ProjectRoot:            projectRoot,
+		ProjectRootManaged:     managed,
+		InitialChatRole:        spec.WorkflowRole,
+		InitialChatBackend:     spec.Backend,
+		InitialInteractionMode: spec.InteractionMode,
+		InitialToolStates:      spec.ToolStates,
+		InitialMilestoneKey:    spec.MilestoneKey,
+		InitialTaskRef:         spec.TaskRef,
 	})
 	if err != nil {
 		return nil, err

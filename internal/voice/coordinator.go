@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 // Session is the bounded session summary exposed to a voice call.
@@ -28,19 +30,40 @@ type Session struct {
 }
 
 // Chat is a bounded chat summary shown beneath a session in the native app.
-// Only chats with the voice role may be selected as the live conversation;
-// the remaining chats are visible coordination targets.
+// InteractionMode controls whether it may be selected as a live voice
+// conversation; Backend and WorkflowRole remain independent.
 type Chat struct {
-	ID          string    `json:"id"`
-	SessionID   string    `json:"session_id"`
-	Title       string    `json:"title"`
-	Role        string    `json:"role"`
-	LastMessage string    `json:"last_message,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
-	Archived    bool      `json:"archived,omitempty"`
-	Busy        bool      `json:"busy,omitempty"`
-	Status      string    `json:"status,omitempty"`
-	StatusText  string    `json:"status_text,omitempty"`
+	ID                string    `json:"id"`
+	SessionID         string    `json:"session_id"`
+	Title             string    `json:"title"`
+	Role              string    `json:"role,omitempty"` // Deprecated: use WorkflowRole.
+	Backend           string    `json:"backend"`
+	WorkflowRole      string    `json:"workflow_role"`
+	InteractionMode   string    `json:"interaction_mode"`
+	ModelID           string    `json:"model_id,omitempty"`
+	PermissionProfile string    `json:"permission_profile,omitempty"`
+	LastMessage       string    `json:"last_message,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+	Archived          bool      `json:"archived,omitempty"`
+	Busy              bool      `json:"busy,omitempty"`
+	Status            string    `json:"status,omitempty"`
+	StatusText        string    `json:"status_text,omitempty"`
+}
+
+// ChatBackendOption describes a live turn backend offered during chat creation.
+type ChatBackendOption struct {
+	ID        string            `json:"id"`
+	Label     string            `json:"label"`
+	Available bool              `json:"available"`
+	Detail    string            `json:"detail,omitempty"`
+	Models    []ChatModelOption `json:"models,omitempty"`
+}
+
+type ChatModelOption struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
 }
 
 // SessionUpdate changes user-managed voice conversation metadata.
@@ -121,8 +144,8 @@ type VoiceSessionBackend interface {
 type SessionChatBackend interface {
 	ListSessionChats(context.Context, string) ([]Chat, error)
 	EnsureVoiceChat(context.Context, string, string) (Chat, error)
-	CreateVoiceChatInSession(context.Context, string, string) (Chat, error)
-	CreateTemporaryVoiceChat(context.Context, string) (Session, Chat, error)
+	CreateVoiceChatInSession(context.Context, string, domain.ChatCreateSpec) (Chat, error)
+	CreateTemporaryVoiceChat(context.Context, domain.ChatCreateSpec) (Session, Chat, error)
 	RunVoiceChatTurn(context.Context, string, string, string, TurnOptions, func(Session) error) (Message, error)
 }
 
@@ -430,12 +453,13 @@ func (c *Call) SelectVoiceChat(ctx context.Context, sessionID, chatID string) (M
 }
 
 // CreateVoiceChat creates and selects a voice chat in an existing session.
-func (c *Call) CreateVoiceChat(ctx context.Context, sessionID, title string) (Chat, error) {
+func (c *Call) CreateVoiceChat(ctx context.Context, sessionID string, spec domain.ChatCreateSpec) (Chat, error) {
 	backend, ok := c.backend.(SessionChatBackend)
 	if !ok {
 		return Chat{}, fmt.Errorf("session chat backend is unavailable")
 	}
-	chat, err := backend.CreateVoiceChatInSession(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(title))
+	spec.Title = strings.TrimSpace(spec.Title)
+	chat, err := backend.CreateVoiceChatInSession(ctx, strings.TrimSpace(sessionID), spec)
 	if err != nil {
 		return Chat{}, err
 	}
@@ -445,12 +469,13 @@ func (c *Call) CreateVoiceChat(ctx context.Context, sessionID, title string) (Ch
 
 // CreateTemporaryVoiceChat creates and selects a quick session backed by a
 // managed scratch folder.
-func (c *Call) CreateTemporaryVoiceChat(ctx context.Context, title string) (Session, Chat, error) {
+func (c *Call) CreateTemporaryVoiceChat(ctx context.Context, spec domain.ChatCreateSpec) (Session, Chat, error) {
 	backend, ok := c.backend.(SessionChatBackend)
 	if !ok {
 		return Session{}, Chat{}, fmt.Errorf("session chat backend is unavailable")
 	}
-	session, chat, err := backend.CreateTemporaryVoiceChat(ctx, strings.TrimSpace(title))
+	spec.Title = strings.TrimSpace(spec.Title)
+	session, chat, err := backend.CreateTemporaryVoiceChat(ctx, spec)
 	if err != nil {
 		return Session{}, Chat{}, err
 	}

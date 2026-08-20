@@ -99,6 +99,25 @@ func (e *Engine) CreateQuickVoiceSession(ctx context.Context) (*sessionpkg.Sessi
 	return e.createQuickSession(ctx, true)
 }
 
+// CreateQuickSessionWithSpec creates a managed one-chat session using the
+// shared backend/role/interaction contract.
+func (e *Engine) CreateQuickSessionWithSpec(ctx context.Context, spec domain.ChatCreateSpec) (*sessionpkg.Session, error) {
+	if e == nil || e.registry == nil {
+		return nil, fmt.Errorf("session registry is required")
+	}
+	sessionID := id.New()
+	root := filepath.Join(e.cfg.StateDir(), "quick-chats", string(sessionID))
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("create quick chat project root: %w", err)
+	}
+	owner, err := e.registry.CreateQuickWithSpec(ctx, sessionID, root, spec)
+	if err != nil {
+		_ = os.RemoveAll(root)
+		return nil, err
+	}
+	return owner, nil
+}
+
 func (e *Engine) createQuickSession(ctx context.Context, voice bool) (*sessionpkg.Session, error) {
 	if e == nil || e.registry == nil {
 		return nil, fmt.Errorf("session registry is required")

@@ -76,6 +76,26 @@ func TestCreateQuickVoiceSessionOwnsOneVoiceChatAndScratchWorkspace(t *testing.T
 	}
 }
 
+func TestCreateQuickSessionWithSpecPersistsAllChatDimensions(t *testing.T) {
+	engine, _ := newQuickTestEngine(t)
+	owner, err := engine.CreateQuickSessionWithSpec(context.Background(), domain.ChatCreateSpec{
+		Title: "Milestone four", Backend: domain.ChatBackendCodex, WorkflowRole: domain.WorkflowRoleExecution,
+		InteractionMode: domain.InteractionModeVoice, ModelID: "gpt-test", PermissionProfile: "readonly",
+		MilestoneKey: "M004", ToolStates: domain.ToolStates{domain.ToolKindChatStart: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := owner.Snapshot()
+	if len(snapshot.Chats) != 1 {
+		t.Fatalf("quick chats = %#v", snapshot.Chats)
+	}
+	chatRecord := snapshot.Chats[0]
+	if chatRecord.Backend != domain.ChatBackendCodex || chatRecord.WorkflowRole != domain.WorkflowRoleExecution || chatRecord.InteractionMode != domain.InteractionModeVoice || chatRecord.ModelID != "gpt-test" || chatRecord.PermissionProfile != "readonly" || chatRecord.ActiveMilestoneKey != "M004" || chatRecord.ToolStates[domain.ToolKindChatStart] {
+		t.Fatalf("quick chat dimensions = %#v", chatRecord)
+	}
+}
+
 func TestCreateVoiceSessionOwnsOneVoiceChat(t *testing.T) {
 	engine, _ := newQuickTestEngine(t)
 	owner, err := engine.CreateVoiceSession(context.Background(), "Morning voice")

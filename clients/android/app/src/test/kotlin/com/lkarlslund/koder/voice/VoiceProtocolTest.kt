@@ -156,6 +156,28 @@ class VoiceProtocolTest {
         assertEquals("It boots.", frame.callState?.history?.single()?.text)
     }
 
+	@Test
+	fun voiceChatCreationKeepsBackendRoleAndInteractionIndependent() {
+		val request = JSONObject(VoiceProtocol.createVoiceChatRequest(VoiceChatCreateSpec(
+			title = "Implement milestone", backend = "codex", workflowRole = "execution",
+			modelId = "gpt-5.6-codex", permissionProfile = "workspace-write", milestoneKey = "M4",
+			toolStates = mapOf("chat_status" to true, "session_start" to false),
+		)))
+		assertEquals("codex", request.getString("backend"))
+		assertEquals("execution", request.getString("workflow_role"))
+		assertEquals("voice", request.getString("interaction_mode"))
+		assertEquals("M4", request.getString("milestone_key"))
+		assertFalse(request.getJSONObject("tool_states").getBoolean("session_start"))
+
+		val home = VoiceProtocol.parseHome(
+			"""{"protocol":"voice.v1","chat_backends":[{"id":"koder","label":"Koder","available":true},{"id":"codex","label":"Codex","available":true,"models":[{"id":"gpt-5.6-codex","name":"GPT-5.6 Codex","default":true}]}],"chats":[{"id":"chat-1","session_id":"session-1","title":"Milestone","role":"execution","backend":"codex","workflow_role":"execution","interaction_mode":"voice","model_id":"gpt-5.6-codex"}]}""",
+		)
+		assertEquals("codex", home.chatBackends.last().id)
+		assertTrue(home.chatBackends.last().models.single().isDefault)
+		assertTrue(home.chats.single().isVoiceChat)
+		assertEquals("execution", home.chats.single().workflowRole)
+	}
+
     @Test
     fun decodesSignedAppUpdate() {
         val frame = VoiceProtocol.parse(

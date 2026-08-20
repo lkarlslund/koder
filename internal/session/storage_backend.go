@@ -31,16 +31,21 @@ func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg
 }
 
 type createSessionOptions struct {
-	ID                 id.ID
-	Title              string
-	ProviderID         string
-	ModelID            string
-	PermissionProfile  string
-	ParentID           *id.ID
-	Kind               domain.SessionKind
-	ProjectRoot        string
-	ProjectRootManaged bool
-	InitialChatRole    domain.WorkflowRole
+	ID                     id.ID
+	Title                  string
+	ProviderID             string
+	ModelID                string
+	PermissionProfile      string
+	ParentID               *id.ID
+	Kind                   domain.SessionKind
+	ProjectRoot            string
+	ProjectRootManaged     bool
+	InitialChatRole        domain.WorkflowRole
+	InitialChatBackend     domain.ChatBackend
+	InitialInteractionMode domain.InteractionMode
+	InitialToolStates      domain.ToolStates
+	InitialMilestoneKey    string
+	InitialTaskRef         string
 }
 
 func createSessionRecordWithOptions(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, opts createSessionOptions) (domain.Session, error) {
@@ -74,12 +79,18 @@ func createSessionRecordWithOptions(ctx context.Context, st *store.Store, chatsS
 		return domain.Session{}, fmt.Errorf("chat source is required")
 	}
 	if _, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{
-		Session:    session,
-		Title:      "Main",
-		Role:       role,
-		ProviderID: opts.ProviderID,
-		ModelID:    opts.ModelID,
-		Position:   0,
+		Session:           session,
+		Title:             "Main",
+		Role:              role,
+		Backend:           opts.InitialChatBackend,
+		InteractionMode:   opts.InitialInteractionMode,
+		ProviderID:        opts.ProviderID,
+		ModelID:           opts.ModelID,
+		PermissionProfile: opts.PermissionProfile,
+		ToolStates:        opts.InitialToolStates,
+		MilestoneKey:      opts.InitialMilestoneKey,
+		TaskRef:           opts.InitialTaskRef,
+		Position:          0,
 	}); err != nil {
 		return domain.Session{}, err
 	}

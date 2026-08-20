@@ -2714,7 +2714,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if err := ctrl.RenameSession(context.Background(), target.ID, target.Title); err != nil {
 		t.Fatal(err)
 	}
-	voiceChat, err := ctrl.CreateVoiceChatInSession(context.Background(), string(target.ID), "Phone assistant")
+	voiceChat, err := ctrl.CreateVoiceChatInSession(context.Background(), string(target.ID), domain.ChatCreateSpec{Title: "Phone assistant", InteractionMode: domain.InteractionModeVoice})
 	if err != nil {
 		t.Fatal(err)
 	}

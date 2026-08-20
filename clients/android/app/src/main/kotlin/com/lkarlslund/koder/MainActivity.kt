@@ -29,6 +29,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
@@ -40,6 +42,7 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -79,6 +82,8 @@ import com.lkarlslund.koder.voice.VoiceMessage
 import com.lkarlslund.koder.voice.VoicePart
 import com.lkarlslund.koder.voice.VoiceSession
 import com.lkarlslund.koder.voice.VoiceSessionClient
+import com.lkarlslund.koder.voice.VoiceChatCreateSpec
+import com.lkarlslund.koder.voice.VoiceChatBackendOption
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
@@ -99,6 +104,7 @@ import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
 import com.lkarlslund.koder.voice.conversationTimeLabel
 import com.lkarlslund.koder.voice.isNearConversationBottom
+import com.lkarlslund.koder.voice.isVoiceChat
 import com.lkarlslund.koder.voice.highContrastEnabled
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
@@ -1476,7 +1482,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun showSession(session: VoiceSession, home: VoiceHome) {
 		if (pendingResultSessionId.isNotBlank() && pendingResultOwnerSessionId == session.id) {
-			home.chats.firstOrNull { it.id == pendingResultSessionId && it.role == "voice" }?.let {
+			home.chats.firstOrNull { it.id == pendingResultSessionId && it.isVoiceChat }?.let {
 				selectedKoderSession = session
 				openChat(it)
 				return
@@ -1534,7 +1540,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		gravity = Gravity.CENTER_VERTICAL
 		setPadding(dp(14), dp(11), dp(14), dp(11))
 		background = cardBackground()
-		val selectable = chat.role == "voice" && !chat.archived && !session.archived
+		val selectable = chat.isVoiceChat && !chat.archived && !session.archived
 		alpha = if (selectable) 1f else 0.72f
 		val titleText = chat.title.ifBlank { "Untitled chat" }
 		val detail = listOf(chat.role.ifBlank { "chat" }.replaceFirstChar { it.titlecase() }, chat.statusText.ifBlank { chat.status }, chat.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty())
@@ -1858,40 +1864,76 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     private fun showCreateVoiceSessionDialog() {
 		val session = selectedKoderSession ?: return
-        val titleField = EditText(this).apply {
-			hint = "For example: Voice planning"
-            contentDescription = "Conversation name"
-            setSingleLine()
-        }
-        AlertDialog.Builder(this)
-            .setTitle("New conversation")
-			.setMessage("Create a voice conversation inside ${session.title}.")
-            .setView(titleField)
-            .setNegativeButton("Cancel", null)
-			.setPositiveButton("Create") { _, _ -> createVoiceChat(session, titleField.text.toString()) }
-            .show()
+		showChatCreator("New conversation", "Create a voice conversation inside ${session.title}.") { spec -> createVoiceChat(session, spec) }
     }
 
 	private fun showCreateTemporaryConversationDialog() {
-		val titleField = EditText(this).apply {
-			hint = "Temporary conversation"
-			contentDescription = "Temporary conversation name"
-			setSingleLine()
-		}
-		AlertDialog.Builder(this)
-			.setTitle("New temporary conversation")
-			.setMessage("Koder will create a quick session with a private scratch folder and one fully tooled voice chat.")
-			.setView(titleField)
-			.setNegativeButton("Cancel", null)
-			.setPositiveButton("Create") { _, _ -> createTemporaryConversation(titleField.text.toString()) }
-			.show()
+		showChatCreator("New temporary conversation", "Koder will create a quick session with a private scratch folder and one fully tooled voice chat.") { spec -> createTemporaryConversation(spec) }
 	}
 
-	private fun createVoiceChat(session: VoiceSession, title: String) {
-		val normalizedTitle = title.trim().ifBlank { "Voice conversation" }
+	private fun showChatCreator(dialogTitle: String, message: String, create: (VoiceChatCreateSpec) -> Unit) {
+		val backends = readinessHome?.chatBackends.orEmpty().filter { it.available }.ifEmpty {
+			listOf(VoiceChatBackendOption("koder", "Koder", true))
+		}
+		val titleField = EditText(this).apply { hint = "Conversation name"; contentDescription = "Conversation name"; setSingleLine() }
+		val backendSpinner = Spinner(this)
+		val roleSpinner = Spinner(this)
+		val modelSpinner = Spinner(this)
+		val permissionSpinner = Spinner(this)
+		val milestoneField = EditText(this).apply { hint = "Optional milestone key"; setSingleLine() }
+		val taskField = EditText(this).apply { hint = "Optional task reference"; setSingleLine() }
+		val roles = listOf("orchestrator", "planning", "execution", "standalone")
+		val permissions = listOf("Inherit session policy", "Read only", "Workspace write", "Full access")
+		backendSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, backends.map { it.label })
+		roleSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, roles.map { it.replaceFirstChar(Char::titlecase) })
+		permissionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, permissions)
+		fun updateModels(position: Int) {
+			val models = backends[position.coerceIn(backends.indices)].models
+			modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Backend default") + models.map { it.name })
+			modelSpinner.isEnabled = models.isNotEmpty()
+			modelSpinner.setSelection((models.indexOfFirst { it.isDefault } + 1).coerceAtLeast(0))
+		}
+		backendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+			override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateModels(position)
+			override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+		}
+		updateModels(0)
+		val fields = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(20), dp(8), dp(20), dp(8))
+			addView(helper(message), spaced(bottom = 12))
+			addView(label("Name")); addView(titleField, spaced(bottom = 10))
+			addView(label("Turn backend")); addView(backendSpinner, spaced(bottom = 10))
+			addView(label("Chat role")); addView(roleSpinner, spaced(bottom = 10))
+			addView(label("Model")); addView(modelSpinner, spaced(bottom = 10))
+			addView(label("Permission profile")); addView(permissionSpinner, spaced(bottom = 10))
+			addView(label("Execution scope")); addView(milestoneField); addView(taskField)
+			addView(helper("Choose a milestone or a task, not both. Scope is used by execution chats."), spaced(top = 4))
+		}
+		AlertDialog.Builder(this).setTitle(dialogTitle).setView(ScrollView(this).apply { addView(fields) })
+			.setNegativeButton("Cancel", null)
+			.setPositiveButton("Create") { _, _ ->
+				val backend = backends[backendSpinner.selectedItemPosition.coerceIn(backends.indices)]
+				val modelIndex = modelSpinner.selectedItemPosition - 1
+				val permission = listOf("", "readonly", "workspace-write", "full-access")[permissionSpinner.selectedItemPosition]
+				val milestone = milestoneField.text.toString().trim()
+				val task = taskField.text.toString().trim()
+				if (milestone.isNotBlank() && task.isNotBlank()) {
+					Toast.makeText(this, "Choose a milestone or a task, not both", Toast.LENGTH_LONG).show()
+					return@setPositiveButton
+				}
+				create(VoiceChatCreateSpec(
+					title = titleField.text.toString().trim().ifBlank { "Voice conversation" }, backend = backend.id,
+					workflowRole = roles[roleSpinner.selectedItemPosition], modelId = backend.models.getOrNull(modelIndex)?.id.orEmpty(),
+					permissionProfile = permission, milestoneKey = milestone, taskRef = task,
+				))
+			}.show()
+	}
+
+	private fun createVoiceChat(session: VoiceSession, spec: VoiceChatCreateSpec) {
 		showConversationCreationProgress("Creating voice conversation…")
 		val generation = ++requestGeneration
-		sessionClient.createVoiceChat(settings.server, settings.token, session.id, normalizedTitle) { result ->
+		sessionClient.createVoiceChat(settings.server, settings.token, session.id, spec) { result ->
 			runOnUiThread {
 				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
 				result.fold(
@@ -1905,11 +1947,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun createTemporaryConversation(title: String) {
-		val normalizedTitle = title.trim().ifBlank { "Temporary conversation" }
+	private fun createTemporaryConversation(spec: VoiceChatCreateSpec) {
 		showConversationCreationProgress("Creating temporary conversation…")
 		val generation = ++requestGeneration
-		sessionClient.createTemporary(settings.server, settings.token, normalizedTitle) { result ->
+		sessionClient.createTemporary(settings.server, settings.token, spec.copy(title = spec.title.ifBlank { "Temporary conversation" })) { result ->
 			runOnUiThread {
 				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
 				result.fold(
