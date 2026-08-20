@@ -157,6 +157,9 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
+	if e.codex != nil {
+		e.codex.SetToolBridge(codexToolBridge{engine: e})
+	}
 	return e
 }
 

@@ -17,11 +17,30 @@ import (
 
 type Instructions func(domain.Session, domain.Chat) string
 
+type DynamicTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+type ToolBridge interface {
+	Definitions(context.Context, *chat.Chat) ([]DynamicTool, error)
+	Call(context.Context, *chat.Chat, string, string, json.RawMessage) (string, error)
+}
+
 type Manager struct {
 	client       *codexapp.Client
 	bindings     bindingStore
 	instructions Instructions
+	tools        ToolBridge
 	threadMu     sync.Mutex
+}
+
+func (m *Manager) SetToolBridge(bridge ToolBridge) {
+	if m != nil {
+		m.tools = bridge
+	}
 }
 
 func New(client *codexapp.Client, st *store.Store, instructions Instructions) *Manager {
@@ -72,7 +91,7 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 
 	events, unsubscribe := m.client.Subscribe(1024)
 	defer unsubscribe()
-	threadID, err := m.ensureThread(ctx, snapshot.Session, snapshot.Chat)
+	threadID, err := m.ensureThread(ctx, rt, snapshot.Session, snapshot.Chat)
 	if err != nil {
 		return err
 	}
@@ -104,9 +123,17 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 	return m.consumeTurn(ctx, rt, threadID, started.Turn.ID, events, out)
 }
 
-func (m *Manager) ensureThread(ctx context.Context, session domain.Session, chatRecord domain.Chat) (string, error) {
+func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domain.Session, chatRecord domain.Chat) (string, error) {
 	m.threadMu.Lock()
 	defer m.threadMu.Unlock()
+	var dynamicTools []DynamicTool
+	if m.tools != nil {
+		var err error
+		dynamicTools, err = m.tools.Definitions(ctx, rt)
+		if err != nil {
+			return "", fmt.Errorf("build Koder tools for Codex: %w", err)
+		}
+	}
 	if binding, ok, err := m.bindings.find(ctx, chatRecord.ID); err != nil {
 		return "", err
 	} else if ok && binding.ThreadID != "" {
@@ -115,14 +142,22 @@ func (m *Manager) ensureThread(ctx context.Context, session domain.Session, chat
 				ID string `json:"id"`
 			} `json:"thread"`
 		}
-		if err := m.client.Call(ctx, "thread/resume", map[string]any{"threadId": binding.ThreadID}, &resumed); err == nil {
+		resumeParams := map[string]any{"threadId": binding.ThreadID}
+		if len(dynamicTools) > 0 {
+			resumeParams["dynamicTools"] = dynamicTools
+		}
+		if err := m.client.Call(ctx, "thread/resume", resumeParams, &resumed); err == nil {
 			return binding.ThreadID, nil
 		}
 	}
 	params := map[string]any{
 		"cwd":            session.ProjectRoot,
 		"approvalPolicy": "never",
+		"sandbox":        codexSandbox(session, chatRecord),
 		"ephemeral":      false,
+	}
+	if len(dynamicTools) > 0 {
+		params["dynamicTools"] = dynamicTools
 	}
 	if model := strings.TrimSpace(chatRecord.ModelID); model != "" {
 		params["model"] = model
@@ -150,6 +185,21 @@ func (m *Manager) ensureThread(ctx context.Context, session domain.Session, chat
 	return started.Thread.ID, nil
 }
 
+func codexSandbox(session domain.Session, chatRecord domain.Chat) string {
+	profile := strings.TrimSpace(chatRecord.PermissionProfile)
+	if profile == "" {
+		profile = strings.TrimSpace(session.PermissionProfile)
+	}
+	switch profile {
+	case "readonly":
+		return "readOnly"
+	case "full-access":
+		return "dangerFullAccess"
+	default:
+		return "workspaceWrite"
+	}
+}
+
 func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turnID string, events <-chan codexapp.Message, out chan<- domain.Event) error {
 	assistantItem := rt.NextAssistantItem()
 	var text, reasoning strings.Builder
@@ -166,6 +216,10 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 				continue
 			}
 			switch msg.Method {
+			case "item/tool/call":
+				if err := m.handleDynamicTool(ctx, rt, msg); err != nil {
+					return err
+				}
 			case "item/agentMessage/delta":
 				delta := stringField(msg.Params, "delta")
 				text.WriteString(delta)
@@ -213,6 +267,32 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 			}
 		}
 	}
+}
+
+func (m *Manager) handleDynamicTool(ctx context.Context, rt *chat.Chat, msg codexapp.Message) error {
+	if m.tools == nil {
+		return m.client.Respond(msg.ID, map[string]any{
+			"contentItems": []map[string]string{{"type": "inputText", "text": "Koder tool bridge is unavailable"}},
+			"success":      false,
+		}, nil)
+	}
+	var request struct {
+		CallID    string          `json:"callId"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(msg.Params, &request); err != nil {
+		return m.client.Respond(msg.ID, nil, &codexapp.RPCError{Code: -32602, Message: err.Error()})
+	}
+	output, err := m.tools.Call(ctx, rt, request.Tool, request.CallID, request.Arguments)
+	success := err == nil
+	if err != nil {
+		output = "Tool error: " + err.Error()
+	}
+	return m.client.Respond(msg.ID, map[string]any{
+		"contentItems": []map[string]string{{"type": "inputText", "text": output}},
+		"success":      success,
+	}, nil)
 }
 
 const defaultInterruptTimeout = 3 * time.Second
