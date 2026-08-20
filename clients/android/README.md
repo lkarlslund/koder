@@ -8,7 +8,7 @@ Gradle build in the Koder repository and talks only to `voice.v1`.
 - JDK 21
 - Android SDK platform 36
 - Android SDK Build Tools 37.0.0
-- Android Emulator plus Google x86_64 API 36 image for managed tests
+- Android Emulator plus Google x86 API 28 and x86_64 API 36 images for managed tests
 - KVM acceleration on Linux
 
 On the Arch Linux development host, the SDK is `/opt/android-sdk` and JDK 21 is
@@ -34,6 +34,21 @@ endpointing without live speech services. The managed-device suite boots the
 real Activity, checks setup and conversation-list states, runs real Silero
 inference, and tests authenticated mock HTTP/WebSocket interoperability and PCM
 in both directions.
+
+Before a release or compatibility-sensitive change, run the focused matrix on
+an Android 9 small phone, an Android 16 phone, and an Android 16 tablet:
+
+```sh
+./gradlew voiceCompatibilityGroupDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.lkarlslund.koder.DeviceMatrixInstrumentedTest
+```
+
+The matrix renders light and dark configurations, rotates the UI, checks the
+first-run microphone permission boundary, and exercises the supported minimum
+API across phone and tablet layouts. The ordinary API 36 suite remains the
+fast, comprehensive interoperability run, including simulated reconnects and
+audio-route changes. This emulator matrix is intentionally local/release-gated
+rather than a per-commit GitHub job, to avoid consuming hosted build minutes.
 
 An opt-in test can authenticate to a live Koder without modifying a chat:
 

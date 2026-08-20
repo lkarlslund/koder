@@ -185,7 +185,28 @@ android {
                     systemImageSource = "google"
                     testedAbi = "x86_64"
                 }
+				create("voiceApi28Small") {
+					device = "Small Phone"
+					apiLevel = 28
+					systemImageSource = "google"
+					testedAbi = "x86"
+				}
+				create("voiceApi36Tablet") {
+					device = "Medium Tablet"
+					apiLevel = 36
+					systemImageSource = "google"
+					testedAbi = "x86_64"
+				}
             }
+			groups {
+				create("voiceCompatibility") {
+					targetDevices.addAll(listOf(
+						localDevices["voiceApi28Small"],
+						localDevices["voiceApi36"],
+						localDevices["voiceApi36Tablet"],
+					))
+				}
+			}
         }
     }
 }
