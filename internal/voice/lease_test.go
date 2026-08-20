@@ -38,6 +38,19 @@ func TestCallLeaseAllowsOneActiveCallPerDevice(t *testing.T) {
 	}
 }
 
+func TestCallLeaseAllowsOnlyOneDevicePerVoiceChat(t *testing.T) {
+	lease := NewCallLease()
+	release, _, err := lease.AcquireDeviceConnection("phone-1", "call-1", "voice-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if _, _, err := lease.AcquireDeviceConnection("browser-1", "call-2", "voice-1"); !errors.Is(err, ErrCallActive) {
+		t.Fatalf("second device acquired the same voice chat: %v", err)
+	}
+}
+
 func TestCallLeaseReconnectReplacesSameOwner(t *testing.T) {
 	lease := NewCallLease()
 	oldRelease, oldReplaced, err := lease.AcquireConnection("call-1", "voice-1")

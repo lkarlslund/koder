@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// ErrCallActive is returned when another voice call is already active for the
-// same connected device.
-var ErrCallActive = errors.New("another voice chat is already active on this device")
+// ErrCallActive is returned when either the device is already in another
+// conversation or the requested voice chat is in use by another device.
+var ErrCallActive = errors.New("voice chat is already active")
 
 // ActiveCall identifies one device's current call.
 type ActiveCall struct {
@@ -73,6 +73,12 @@ func (l *CallLease) AcquireDeviceConnection(deviceID, callID, voiceSessionID str
 	if entry != nil && entry.active.CallID != callID {
 		return nil, nil, ErrCallActive
 	}
+	voiceSessionID = strings.TrimSpace(voiceSessionID)
+	for otherDeviceID, other := range l.devices {
+		if otherDeviceID != deviceID && voiceSessionID != "" && other.active.VoiceSessionID == voiceSessionID {
+			return nil, nil, ErrCallActive
+		}
+	}
 	if entry == nil {
 		entry = &callLeaseEntry{}
 		l.devices[deviceID] = entry
@@ -87,7 +93,7 @@ func (l *CallLease) AcquireDeviceConnection(deviceID, callID, voiceSessionID str
 	entry.active = ActiveCall{
 		DeviceID:       deviceID,
 		CallID:         callID,
-		VoiceSessionID: strings.TrimSpace(voiceSessionID),
+		VoiceSessionID: voiceSessionID,
 		StartedAt:      time.Now().UTC(),
 	}
 	var once sync.Once

@@ -59,6 +59,36 @@ type Handler struct {
 	browser browserTickets
 }
 
+// ChatPresence describes the live device holding a voice chat lease.
+type ChatPresence struct {
+	Occupied       bool      `json:"occupied"`
+	OwnedByBrowser bool      `json:"owned_by_browser"`
+	DeviceKind     string    `json:"device_kind,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+}
+
+// VoiceChatPresence reports whether a selected voice chat is currently in use.
+func (h *Handler) VoiceChatPresence(chatID, browserClientID string) ChatPresence {
+	chatID = strings.TrimSpace(chatID)
+	browserDeviceID := "browser:" + strings.TrimSpace(browserClientID)
+	for _, active := range h.Lease.Snapshots() {
+		if active.VoiceSessionID != chatID {
+			continue
+		}
+		kind := "phone"
+		if strings.HasPrefix(active.DeviceID, "browser:") {
+			kind = "browser"
+		}
+		return ChatPresence{
+			Occupied:       true,
+			OwnedByBrowser: active.DeviceID == browserDeviceID,
+			DeviceKind:     kind,
+			StartedAt:      active.StartedAt,
+		}
+	}
+	return ChatPresence{}
+}
+
 type browserDeviceContextKey struct{}
 
 // MintBrowserTicket creates a short-lived, single-use WebSocket credential

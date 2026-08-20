@@ -918,6 +918,29 @@ func TestHandlerReportsAuthenticatedServerInfo(t *testing.T) {
 	}
 }
 
+func TestVoiceChatPresenceDistinguishesPhoneAndRequestingBrowser(t *testing.T) {
+	handler := NewHandler(&fakeBackend{}, "")
+	release, _, err := handler.Lease.AcquireDeviceConnection("phone-1", "call-1", "voice-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	presence := handler.VoiceChatPresence("voice-1", "web-1")
+	if !presence.Occupied || presence.OwnedByBrowser || presence.DeviceKind != "phone" || presence.StartedAt.IsZero() {
+		t.Fatalf("phone presence = %#v", presence)
+	}
+	release()
+
+	release, _, err = handler.Lease.AcquireDeviceConnection("browser:web-1", "call-2", "voice-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	presence = handler.VoiceChatPresence("voice-1", "web-1")
+	if !presence.Occupied || !presence.OwnedByBrowser || presence.DeviceKind != "browser" {
+		t.Fatalf("browser presence = %#v", presence)
+	}
+}
+
 func TestHandlerTranscribesStreamsAndDelegatesAudio(t *testing.T) {
 	backend := &fakeBackend{}
 	server := httptest.NewServer(NewHandler(backend, ""))
@@ -1046,7 +1069,7 @@ func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
 	}
 }
 
-func TestHandlerEnforcesOneCallPerDeviceAndAllowsDifferentDevices(t *testing.T) {
+func TestHandlerEnforcesOneCallPerDeviceAndOneDevicePerVoiceChat(t *testing.T) {
 	server := httptest.NewServer(NewHandler(&fakeBackend{}, ""))
 	defer server.Close()
 	ctx := context.Background()
@@ -1066,7 +1089,14 @@ func TestHandlerEnforcesOneCallPerDeviceAndAllowsDifferentDevices(t *testing.T) 
 		t.Fatalf("concurrent dial response=%v err=%v", response, err)
 	}
 	phoneTwo := &websocket.DialOptions{HTTPHeader: http.Header{"X-Koder-Device-ID": []string{"phone-2"}}}
-	secondDevice, _, err := websocket.Dial(ctx, url+"?call_id=second", phoneTwo)
+	_, response, err = websocket.Dial(ctx, url+"?call_id=second", phoneTwo)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusConflict {
+		t.Fatalf("second device acquired occupied voice chat: response=%v err=%v", response, err)
+	}
+	secondDevice, _, err := websocket.Dial(ctx, url+"?call_id=second&voice_session_id=voice-2", phoneTwo)
 	if err != nil {
 		t.Fatalf("second device was not allowed: %v", err)
 	}

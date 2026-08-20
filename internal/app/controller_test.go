@@ -2629,6 +2629,29 @@ func TestNativeClientManagesSessionsAndChats(t *testing.T) {
 	}
 }
 
+func TestNewTypedChatForSelectionCreatesTopLevelVoiceChat(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
+	ctx := context.Background()
+	created, err := ctrl.CreateSession(ctx, "Project", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := ctrl.StateForSelection(ctx, Selection{SessionID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceChat, err := ctrl.NewTypedChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, "Voice conversation", domain.WorkflowRoleVoice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voiceChat.WorkflowRole != domain.WorkflowRoleVoice || voiceChat.ParentChatID != nil {
+		t.Fatalf("voice chat = %#v", voiceChat)
+	}
+	if _, err := ctrl.NewTypedChatForSelection(ctx, Selection{SessionID: created.ID, ChatID: state.ActiveChatID}, "Future", domain.WorkflowRole("codex")); err == nil {
+		t.Fatal("unsupported chat type was accepted")
+	}
+}
+
 func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	var targetChatID string
 	var requestsMu sync.Mutex

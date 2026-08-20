@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -1298,13 +1299,28 @@ func (c *Controller) CancelToolForSelection(ctx context.Context, selection Selec
 	return rt.CancelTool(toolCallID)
 }
 
-// NewChatForSelection creates a chat in the selected session without changing controller selection.
+// NewChatForSelection creates a normal child chat in the selected session
+// without changing controller selection.
 func (c *Controller) NewChatForSelection(ctx context.Context, selection Selection, title string) (domain.Chat, error) {
+	return c.NewTypedChatForSelection(ctx, selection, title, domain.WorkflowRoleOrchestrator)
+}
+
+// NewTypedChatForSelection creates a supported user-facing chat type in the
+// selected session without changing controller selection.
+func (c *Controller) NewTypedChatForSelection(ctx context.Context, selection Selection, title string, role domain.WorkflowRole) (domain.Chat, error) {
 	owner, session, parent, _, err := c.resolveSelectedRuntime(ctx, selection, true)
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	rt, err := owner.NewChat(ctx, parent.ID, title)
+	var rt *chat.Chat
+	switch role {
+	case "", domain.WorkflowRoleOrchestrator:
+		rt, err = owner.NewChat(ctx, parent.ID, title)
+	case domain.WorkflowRoleVoice:
+		rt, err = owner.NewRootChat(ctx, title, chatrole.Voice)
+	default:
+		return domain.Chat{}, fmt.Errorf("chat type %q is not supported", role)
+	}
 	if err != nil {
 		return domain.Chat{}, err
 	}
