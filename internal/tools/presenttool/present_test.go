@@ -51,6 +51,36 @@ func TestPresentNormalizesVersionedGenericCard(t *testing.T) {
 	}
 }
 
+func TestPresentAcceptsProviderStringifiedCardAndTextTitleAlias(t *testing.T) {
+	card := `{"version":1,"blocks":[{"kind":"text","title":"Fairphone 6","style":"heading"},{"kind":"text","text":"Available now."}]}`
+	stringified, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := (tool{}).NormalizeArgs(map[string]string{"card": string(stringified)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded document
+	if err := json.Unmarshal([]byte(args["content"]), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Blocks[0].Text != "Fairphone 6" || decoded.Blocks[0].Title != "" {
+		t.Fatalf("normalized heading = %#v", decoded.Blocks[0])
+	}
+}
+
+func TestPresentAcceptsPresentationDocumentMIME(t *testing.T) {
+	content := `{"version":1,"blocks":[{"kind":"text","text":"Fairphone 6"}]}`
+	args, err := (tool{}).NormalizeArgs(map[string]string{"mime_type": presentationMIME, "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["mime_type"] != presentationMIME || !strings.Contains(args["content"], "Fairphone 6") {
+		t.Fatalf("normalized args = %#v", args)
+	}
+}
+
 func TestPresentRejectsInvalidGenericCards(t *testing.T) {
 	tests := []string{
 		`{"version":2,"blocks":[{"kind":"text","text":"Hi"}]}`,

@@ -14,7 +14,7 @@ import (
 
 const (
 	presentationMIME = "application/vnd.koder.presentation+json"
-	parameters       = `{"type":"object","properties":{"title":{"type":"string","description":"Short heading for the visual card"},"mime_type":{"type":"string","enum":["text/plain","text/markdown","application/json"],"description":"Representation type for legacy free-form content"},"content":{"type":"string","description":"Legacy free-form material to display"},"card":{"type":"object","description":"Versioned generic visual card. Prefer this for structured content.","properties":{"version":{"type":"integer","enum":[1]},"blocks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"kind":{"type":"string","enum":["text","image","key_value","list","progress","action","file"]},"text":{"type":"string"},"style":{"type":"string","enum":["body","heading","caption","code"]},"uri":{"type":"string"},"title":{"type":"string"},"alt":{"type":"string"},"label":{"type":"string"},"detail":{"type":"string"},"name":{"type":"string"},"mime_type":{"type":"string"},"value":{"type":"integer"},"max":{"type":"integer"},"items":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"}},"additionalProperties":false}}},"required":["kind"],"additionalProperties":false}}},"required":["version","blocks"],"additionalProperties":false}},"anyOf":[{"required":["mime_type","content"]},{"required":["card"]}],"additionalProperties":false}`
+	parameters       = `{"type":"object","properties":{"title":{"type":"string","description":"Short heading for the visual card"},"mime_type":{"type":"string","enum":["text/plain","text/markdown","application/json","application/vnd.koder.presentation+json"],"description":"Format of content. Markdown is rendered on companion screens; the Koder presentation MIME contains a version 1 card document."},"content":{"type":"string","description":"Material to display in the declared format"},"card":{"type":"object","description":"A JSON object (not a quoted JSON string) containing a version 1 generic visual card. Prefer this for structured content.","properties":{"version":{"type":"integer","enum":[1]},"blocks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"kind":{"type":"string","enum":["text","image","key_value","list","progress","action","file"]},"text":{"type":"string"},"style":{"type":"string","enum":["body","heading","caption","code"]},"uri":{"type":"string"},"title":{"type":"string"},"alt":{"type":"string"},"label":{"type":"string"},"detail":{"type":"string"},"name":{"type":"string"},"mime_type":{"type":"string"},"value":{"type":"integer"},"max":{"type":"integer"},"items":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"}},"additionalProperties":false}}},"required":["kind"],"additionalProperties":false}}},"required":["version","blocks"],"additionalProperties":false}},"anyOf":[{"required":["mime_type","content"]},{"required":["card"]}],"additionalProperties":false}`
 )
 
 type document struct {
@@ -51,7 +51,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Present on companion screen",
 		Description: "Deliberately show visual material separately from the spoken response.",
-		Usage:       "Use when the user asks to see something, or when visual detail is useful. Prefer card with version 1 and generic blocks: text {text,style}, image {uri,title,alt}, key_value {items:[{key,value}]}, list {items:[{title,detail}]}, progress {label,value,max,detail}, action {label,uri}, or file {name,uri,mime_type,detail}. Then give a short plain conversational final response that refers to it; do not copy the presentation into that response. Legacy text/plain, text/markdown, and application/json content remain available.",
+		Usage:       "Use when the user asks to see something, or when visual detail is useful. Supported inputs are (1) card: a JSON object, never a quoted JSON string, with version 1 and blocks; or (2) content plus mime_type: text/plain, text/markdown, application/json, or application/vnd.koder.presentation+json. Markdown is rendered. Card blocks are text {text,style}, image {uri,title,alt}, key_value {items:[{key,value}]}, list {items:[{title,detail}]}, progress {label,value,max,detail}, action {label,uri}, and file {name,uri,mime_type,detail}. A text block uses text, not title. Then give a short plain conversational final response that refers to it; do not copy the presentation into that response.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -83,14 +83,20 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return out, nil
 	}
 	mimeType := strings.TrimSpace(strings.ToLower(args["mime_type"]))
-	switch mimeType {
-	case "text/plain", "text/markdown", "application/json":
-	default:
-		return nil, fmt.Errorf("unsupported presentation MIME type %q", mimeType)
-	}
 	content := strings.TrimSpace(args["content"])
 	if content == "" {
 		return nil, errors.New("presentation content is required")
+	}
+	switch mimeType {
+	case "text/plain", "text/markdown", "application/json":
+	case presentationMIME:
+		canonical, err := normalizeDocument(content)
+		if err != nil {
+			return nil, err
+		}
+		content = canonical
+	default:
+		return nil, fmt.Errorf("unsupported presentation MIME type %q", mimeType)
 	}
 	if len(content) > 64*1024 {
 		return nil, errors.New("presentation content exceeds 64 KiB")
@@ -105,6 +111,15 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 func normalizeDocument(raw string) (string, error) {
 	if len(raw) > 64*1024 {
 		return "", errors.New("presentation card exceeds 64 KiB")
+	}
+	// Be tolerant of providers that stringify a schema-declared object. The
+	// canonical stored form remains an object document, so clients never need
+	// to understand this compatibility input.
+	if strings.HasPrefix(strings.TrimSpace(raw), `"`) {
+		var unquoted string
+		if err := json.Unmarshal([]byte(raw), &unquoted); err == nil {
+			raw = unquoted
+		}
 	}
 	var doc document
 	decoder := json.NewDecoder(strings.NewReader(raw))
@@ -156,6 +171,11 @@ func validateBlock(value *block) error {
 	}
 	switch value.Kind {
 	case "text":
+		// Older model output sometimes put a heading in the generic title field.
+		// Preserve that content while normalizing to the documented text field.
+		if strings.TrimSpace(value.Text) == "" && strings.TrimSpace(value.Title) != "" {
+			value.Text, value.Title = value.Title, ""
+		}
 		if strings.TrimSpace(value.Text) == "" {
 			return errors.New("text block requires text")
 		}
