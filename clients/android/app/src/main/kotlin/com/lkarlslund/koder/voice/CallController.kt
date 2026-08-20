@@ -119,15 +119,15 @@ class CallController(
         override fun onCallReady() = onMain { telecomReady = true; maybeListen() }
         override fun onCallHeld(held: Boolean) = onMain {
 			telecomHeld = held
-            if (held) {
+			if (held) {
 				stopMicrophone()
 				acceptingOutput = false
-                playback.stop()
-                update(Stage.HELD, "Conversation on hold")
-            } else {
-                telecomReady = true
-                maybeListen()
-            }
+				playback.stop()
+				update(Stage.HELD, "Conversation on hold")
+			} else {
+				telecomReady = true
+				maybeListen()
+			}
         }
 
         override fun onAudioEndpoint(name: String) = onMain {
