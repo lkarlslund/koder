@@ -1049,7 +1049,7 @@
 		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserPanelOpen: false, browserTabs: [], browserTabsLoading: false, browserPanelError: '', browserPanelTimer: null,
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
-		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false,
+		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -4294,7 +4294,12 @@
 		  const voice = role === 'voice';
 		  this.rpc('new_chat', {title: voice ? 'Voice conversation' : 'Chat', role: voice ? 'voice' : 'orchestrator'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => this.showToast(err.message));
 		},
-		toggleNewChatMenu() { this.newChatMenuOpen = !this.newChatMenuOpen; },
+		toggleNewChatMenu(event) {
+		  if (this.newChatMenuOpen) { this.newChatMenuOpen = false; return; }
+		  const rect = event?.currentTarget?.getBoundingClientRect?.();
+		  if (rect) this.newChatMenuPosition = {top: Math.round(rect.bottom + 6) + 'px', right: Math.max(8, Math.round(window.innerWidth - rect.right)) + 'px'};
+		  this.newChatMenuOpen = true;
+		},
 		chatTypeIcon(chat) { return this.chatArchived(chat) ? 'bi-archive' : ((chat.workflow_role || chat.WorkflowRole) === 'voice' ? 'bi-mic-fill' : 'bi-chat-left-text'); },
         renameChat(chat) {
           const id = this.chatID(chat);

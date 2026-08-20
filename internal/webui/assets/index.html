@@ -363,8 +363,8 @@
 		  <div class="d-flex align-items-center gap-1" x-show="workspaceSessionMode()">
             <button class="btn btn-sm btn-outline-secondary" title="Cleanup chats" @click="openCleanupDialog()"><i class="bi bi-magic"></i></button>
 			<div class="new-chat-picker" @click.outside="newChatMenuOpen = false">
-			  <button class="btn btn-sm btn-outline-primary" type="button" title="New chat" :aria-expanded="newChatMenuOpen ? 'true' : 'false'" @click="toggleNewChatMenu()"><i class="bi bi-plus-lg"></i></button>
-			  <div class="new-chat-menu shadow" x-show="newChatMenuOpen" x-transition style="display: none;">
+			  <button class="btn btn-sm btn-outline-primary" type="button" title="New chat" :aria-expanded="newChatMenuOpen ? 'true' : 'false'" @click="toggleNewChatMenu($event)"><i class="bi bi-plus-lg"></i></button>
+			  <div class="new-chat-menu shadow" x-show="newChatMenuOpen" x-transition :style="newChatMenuPosition" style="display: none;">
 				<button type="button" class="new-chat-option" @click="newChat('normal')"><i class="bi bi-chat-left-text"></i><span><strong>Normal chat</strong><small>Standard Koder conversation</small></span></button>
 				<button type="button" class="new-chat-option" @click="newChat('voice')"><i class="bi bi-mic-fill text-info"></i><span><strong>Voice chat</strong><small>Spoken conversation with tools</small></span></button>
 				<button type="button" class="new-chat-option" disabled title="Coming soon"><i class="bi bi-terminal"></i><span><strong>Codex chat <em>Soon</em></strong><small>Agent protocol / ACP conversation</small></span></button>

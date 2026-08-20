@@ -137,7 +137,7 @@
     .composer-send-group { position: relative; }
     .composer-send-menu { position: absolute; right: 0; bottom: calc(100% + .35rem); z-index: 40; }
 	.new-chat-picker { position: relative; }
-	.new-chat-menu { position: absolute; z-index: 70; top: calc(100% + .4rem); right: 0; width: min(19rem, calc(100vw - 2rem)); overflow: hidden; padding: .35rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+	.new-chat-menu { position: fixed; z-index: 1070; width: min(19rem, calc(100vw - 2rem)); overflow: hidden; padding: .35rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
 	.new-chat-option { width: 100%; display: grid; grid-template-columns: 2rem minmax(0, 1fr); align-items: center; gap: .55rem; padding: .65rem .7rem; border: 0; border-radius: .55rem; color: var(--bs-body-color); background: transparent; text-align: left; }
 	.new-chat-option:hover:not(:disabled) { background: var(--bs-tertiary-bg); }
 	.new-chat-option:disabled { opacity: .5; }
