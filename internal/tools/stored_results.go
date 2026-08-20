@@ -205,6 +205,7 @@ type MilestoneStoredItem struct {
 	LegacyRef          string `json:"ref,omitempty"`
 	Title              string `json:"title"`
 	Status             string `json:"status"`
+	Archived           bool   `json:"archived,omitempty"`
 	Notes              string `json:"notes,omitempty"`
 	DependsOnKey       string `json:"depends_on_key,omitempty"`
 	LegacyDependsOnKey string `json:"depends_on_ref,omitempty"`
@@ -238,11 +239,18 @@ type ChatListStoredResult struct {
 }
 
 type TaskStoredItem struct {
-	ID      id.ID  `json:"id"`
-	Key     string `json:"key,omitempty"`
-	Content string `json:"content"`
-	Note    string `json:"note,omitempty"`
-	Status  string `json:"status"`
+	ID       id.ID  `json:"id"`
+	Key      string `json:"key,omitempty"`
+	Content  string `json:"content"`
+	Note     string `json:"note,omitempty"`
+	Status   string `json:"status"`
+	Archived bool   `json:"archived,omitempty"`
+}
+
+type PlanningLifecycleStoredResult struct {
+	Entity string `json:"entity"`
+	Key    string `json:"key"`
+	Action string `json:"action"`
 }
 
 type TaskListStoredResult struct {
@@ -355,32 +363,33 @@ type ErrorStoredResult struct {
 	Message string `json:"message"`
 }
 
-func (ReadStoredResult) storedResultPayload()          {}
-func (BashStoredResult) storedResultPayload()          {}
-func (ExecStoredResult) storedResultPayload()          {}
-func (ExecListStoredResult) storedResultPayload()      {}
-func (EditStoredResult) storedResultPayload()          {}
-func (WriteStoredResult) storedResultPayload()         {}
-func (LintStoredResult) storedResultPayload()          {}
-func (GlobStoredResult) storedResultPayload()          {}
-func (GrepStoredResult) storedResultPayload()          {}
-func (QuestionStoredResult) storedResultPayload()      {}
-func (TaskStoredResult) storedResultPayload()          {}
-func (UpdatePlanStoredResult) storedResultPayload()    {}
-func (MilestonePlanStoredResult) storedResultPayload() {}
-func (ChatListStoredResult) storedResultPayload()      {}
-func (TaskListStoredResult) storedResultPayload()      {}
-func (SkillStoredResult) storedResultPayload()         {}
-func (WebFetchStoredResult) storedResultPayload()      {}
-func (WebSearchStoredResult) storedResultPayload()     {}
-func (ViewImageStoredResult) storedResultPayload()     {}
-func (ShowMediaStoredResult) storedResultPayload()     {}
-func (OfferFileStoredResult) storedResultPayload()     {}
-func (PresentationStoredResult) storedResultPayload()  {}
-func (BrowserStoredResult) storedResultPayload()       {}
-func (MCPStoredResult) storedResultPayload()           {}
-func (DeniedStoredResult) storedResultPayload()        {}
-func (ErrorStoredResult) storedResultPayload()         {}
+func (ReadStoredResult) storedResultPayload()              {}
+func (BashStoredResult) storedResultPayload()              {}
+func (ExecStoredResult) storedResultPayload()              {}
+func (ExecListStoredResult) storedResultPayload()          {}
+func (EditStoredResult) storedResultPayload()              {}
+func (WriteStoredResult) storedResultPayload()             {}
+func (LintStoredResult) storedResultPayload()              {}
+func (GlobStoredResult) storedResultPayload()              {}
+func (GrepStoredResult) storedResultPayload()              {}
+func (QuestionStoredResult) storedResultPayload()          {}
+func (TaskStoredResult) storedResultPayload()              {}
+func (UpdatePlanStoredResult) storedResultPayload()        {}
+func (MilestonePlanStoredResult) storedResultPayload()     {}
+func (ChatListStoredResult) storedResultPayload()          {}
+func (TaskListStoredResult) storedResultPayload()          {}
+func (PlanningLifecycleStoredResult) storedResultPayload() {}
+func (SkillStoredResult) storedResultPayload()             {}
+func (WebFetchStoredResult) storedResultPayload()          {}
+func (WebSearchStoredResult) storedResultPayload()         {}
+func (ViewImageStoredResult) storedResultPayload()         {}
+func (ShowMediaStoredResult) storedResultPayload()         {}
+func (OfferFileStoredResult) storedResultPayload()         {}
+func (PresentationStoredResult) storedResultPayload()      {}
+func (BrowserStoredResult) storedResultPayload()           {}
+func (MCPStoredResult) storedResultPayload()               {}
+func (DeniedStoredResult) storedResultPayload()            {}
+func (ErrorStoredResult) storedResultPayload()             {}
 
 func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	env, ok := storedResultFromPart(part)
@@ -927,6 +936,8 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[BrowserStoredResult](env.Payload, formatBrowserStoredResult)
 	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend, MilestoneWrite, MilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
+	case MilestoneArchive, MilestoneDelete, TaskArchive, TaskDelete:
+		return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
 	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename, ChatCleanup:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext, TasksAdd, TasksUpdate:
@@ -934,6 +945,16 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func formatPlanningLifecycleStoredResult(result PlanningLifecycleStoredResult) string {
+	action := strings.TrimSpace(result.Action)
+	entity := strings.TrimSpace(result.Entity)
+	key := strings.TrimSpace(result.Key)
+	if action == "" || entity == "" || key == "" {
+		return ""
+	}
+	return strings.ToUpper(action[:1]) + action[1:] + " " + entity + " " + key + "."
 }
 
 func formatBrowserStoredResult(result BrowserStoredResult) string {
@@ -1195,6 +1216,9 @@ func formatMilestoneTreeItem(item MilestoneStoredItem, children map[string][]Mil
 	}
 	indent := strings.Repeat("  ", depth)
 	line := indent + "- [" + strings.TrimSpace(item.Status) + "] " + strings.TrimSpace(item.Title)
+	if item.Archived {
+		line += " [archived]"
+	}
 	if ref != "" {
 		line += " (" + ref
 		if parentRef := milestoneStoredDependsOnKey(item); parentRef != "" && depth == 0 {
@@ -1250,6 +1274,9 @@ func formatTaskListStoredResult(result TaskListStoredResult) string {
 			key = string(item.ID)
 		}
 		lines = append(lines, fmt.Sprintf("[%s] %s %s", strings.TrimSpace(item.Status), key, strings.TrimSpace(item.Content)))
+		if item.Archived {
+			lines[len(lines)-1] += " [archived]"
+		}
 		if note := strings.TrimSpace(item.Note); note != "" {
 			lines = append(lines, "note: "+note)
 		}

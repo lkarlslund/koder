@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,8 +18,8 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List milestones",
 		Description: "Read the current session milestone plan.",
-		Usage:       "Read the current session milestone plan. Completed milestones are hidden by default; pass completed=true when you need to inspect finished work. Use this to understand the long-horizon plan before choosing or breaking down work. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
-		Parameters:  `{"type":"object","properties":{"completed":{"type":"boolean","description":"Include completed milestones. Defaults to false."}},"additionalProperties":false}`,
+		Usage:       "Read the current session milestone plan. Completed and archived milestones are hidden by default. Pass completed=true to include finished work and archived=true to include archived milestones. Archived milestones remain durable but cannot receive work until restored.",
+		Parameters:  `{"type":"object","properties":{"completed":{"type":"boolean","description":"Include completed milestones. Defaults to false."},"archived":{"type":"boolean","description":"Include archived milestones. Defaults to false."}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
@@ -42,6 +43,20 @@ func init() {
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key to move, returned by milestone_list or milestone_add"},"depends_on_key":{"type":"string","description":"Parent milestone key. Use an empty string to make this milestone a root milestone."}},"required":["milestone_key","depends_on_key"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
+	tools.Register(archiveTool{}, tools.ToolSpec{
+		Title:       "Archive milestone",
+		Description: "Archive or restore a milestone.",
+		Usage:       "Set archived=true to hide an inactive milestone without deleting it, or archived=false to restore it. Decomposing or executing milestones, milestones with in-progress tasks, and parents of visible child milestones cannot be archived. Use milestone_list archived=true to find archived milestones.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list"},"archived":{"type":"boolean","description":"true archives the milestone; false restores it"}},"required":["milestone_key","archived"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(deleteTool{}, tools.ToolSpec{
+		Title:       "Delete milestone",
+		Description: "Permanently delete an archived empty milestone.",
+		Usage:       "Permanently erase a milestone. This cannot be undone. The milestone must already be archived, contain no tasks, and have no milestones depending on it. Archive and delete its tasks first, and reparent or delete child milestones before retrying.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Archived milestone key returned by milestone_list archived=true"}},"required":["milestone_key"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(writeTool{}, tools.ToolSpec{
 		Title:       "Updated milestones",
 		Description: "Replace the current milestone plan.",
@@ -52,18 +67,24 @@ type listTool struct{}
 type addItemsTool struct{}
 type updateItemTool struct{}
 type dependTool struct{}
+type archiveTool struct{}
+type deleteTool struct{}
 type writeTool struct{}
 
 func (listTool) ID() tools.ID       { return tools.MilestoneList }
 func (addItemsTool) ID() tools.ID   { return tools.MilestoneAdd }
 func (updateItemTool) ID() tools.ID { return tools.MilestoneUpdate }
 func (dependTool) ID() tools.ID     { return tools.MilestoneDepend }
+func (archiveTool) ID() tools.ID    { return tools.MilestoneArchive }
+func (deleteTool) ID() tools.ID     { return tools.MilestoneDelete }
 func (writeTool) ID() tools.ID      { return tools.MilestoneWrite }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
 func (dependTool) BypassesPermission() bool     { return true }
+func (archiveTool) BypassesPermission() bool    { return true }
+func (deleteTool) BypassesPermission() bool     { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
@@ -86,16 +107,35 @@ func (dependTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.
 	return spec, true
 }
 
+func (archiveTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return lifecycleDefinition(runtime, spec)
+}
+
+func (deleteTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return lifecycleDefinition(runtime, spec)
+}
+
+func lifecycleDefinition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if runtime.ChatRole == chatrole.Execution || tools.AssignedMilestoneKey(runtime) != "" || tools.AssignedTaskRef(runtime) != "" {
+		return tools.ToolSpec{}, false
+	}
+	return spec, true
+}
+
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	raw := strings.TrimSpace(args["completed"])
-	if raw == "" {
-		return map[string]string{}, nil
+	out := map[string]string{}
+	for _, key := range []string{"completed", "archived"} {
+		raw := strings.TrimSpace(args[key])
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", key, err)
+		}
+		out[key] = strconv.FormatBool(value)
 	}
-	completed, err := strconv.ParseBool(raw)
-	if err != nil {
-		return nil, fmt.Errorf("completed: %w", err)
-	}
-	return map[string]string{"completed": strconv.FormatBool(completed)}, nil
+	return out, nil
 }
 
 func (addItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -157,6 +197,26 @@ func (dependTool) NormalizeArgs(args map[string]string) (map[string]string, erro
 	}, nil
 }
 
+func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	key, err := planning.ParseMilestoneKey(args["milestone_key"])
+	if err != nil {
+		return nil, err
+	}
+	archived, err := strconv.ParseBool(strings.TrimSpace(args["archived"]))
+	if err != nil {
+		return nil, fmt.Errorf("archived: %w", err)
+	}
+	return map[string]string{"milestone_key": key, "archived": strconv.FormatBool(archived)}, nil
+}
+
+func (deleteTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	key, err := planning.ParseMilestoneKey(args["milestone_key"])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"milestone_key": key}, nil
+}
+
 func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	raw := strings.TrimSpace(args["milestones"])
 	if raw == "" {
@@ -184,6 +244,15 @@ func (dependTool) Preview(req tools.Request) string {
 	}
 	return "Set milestone " + req.Args["milestone_key"] + " dependency to " + parent
 }
+func (archiveTool) Preview(req tools.Request) string {
+	if req.Args["archived"] == "false" {
+		return "Restore milestone " + req.Args["milestone_key"]
+	}
+	return "Archive milestone " + req.Args["milestone_key"]
+}
+func (deleteTool) Preview(req tools.Request) string {
+	return "Delete milestone " + req.Args["milestone_key"] + " permanently"
+}
 func (writeTool) Preview(req tools.Request) string { return "Replace milestones" }
 
 func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -197,28 +266,31 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 		return tools.Result{}, err
 	}
 	scoped := tools.ScopedMilestonePlan(runtime, plan)
-	listed := filterListedMilestones(scoped, req.Args["completed"] == "true")
-	taskSummaries, err := milestoneTaskSummaries(ctx, control, runtime.SessionID, listed.Milestones)
+	includeArchived := req.Args["archived"] == "true"
+	listed := filterListedMilestones(scoped, req.Args["completed"] == "true", includeArchived)
+	taskSummaries, err := milestoneTaskSummaries(ctx, control, runtime.SessionID, listed.Milestones, includeArchived)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	result := tools.MilestonePlanResultWithTaskSummaries(listed, taskSummaries)
-	if summary := milestoneSummary(scoped.Milestones); summary != "" {
+	summarized := filterListedMilestones(scoped, true, includeArchived)
+	if summary := milestoneSummary(summarized.Milestones); summary != "" {
 		result.Output = summary + "\n" + result.Output
 	}
 	return result, nil
 }
 
-func filterListedMilestones(plan planning.Plan, includeCompleted bool) planning.Plan {
-	if includeCompleted {
-		return plan
-	}
+func filterListedMilestones(plan planning.Plan, includeCompleted, includeArchived bool) planning.Plan {
 	filtered := plan
 	filtered.Milestones = make([]planning.Milestone, 0, len(plan.Milestones))
 	for _, milestone := range plan.Milestones {
-		if milestone.Status != planning.MilestoneStatusCompleted {
-			filtered.Milestones = append(filtered.Milestones, milestone)
+		if milestone.Archived && !includeArchived {
+			continue
 		}
+		if milestone.Status == planning.MilestoneStatusCompleted && !includeCompleted {
+			continue
+		}
+		filtered.Milestones = append(filtered.Milestones, milestone)
 	}
 	return filtered
 }
@@ -242,13 +314,16 @@ func milestoneSummary(milestones []planning.Milestone) string {
 	return "Milestones summary: " + strings.Join(parts, ", ")
 }
 
-func milestoneTaskSummaries(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone) (map[string]string, error) {
+func milestoneTaskSummaries(ctx context.Context, control tools.SessionControl, sessionID id.ID, milestones []planning.Milestone, includeArchived bool) (map[string]string, error) {
 	summaries := make(map[string]string, len(milestones))
 	for _, milestone := range milestones {
 		key := planning.MilestoneKey(milestone)
 		tasks, err := control.ListTasks(ctx, sessionID, key)
 		if err != nil {
 			return nil, err
+		}
+		if !includeArchived {
+			tasks = slices.DeleteFunc(tasks, func(task planning.Task) bool { return task.Archived })
 		}
 		summaries[key] = taskSummary(tasks)
 	}
@@ -314,6 +389,86 @@ func (updateItemTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 func (dependTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
 	return callMilestoneUpdate(ctx, runtime, req)
+}
+
+func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	key := req.Args["milestone_key"]
+	item, ok := milestoneForKey(plan.Milestones, key)
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", key)
+	}
+	archived := req.Args["archived"] == "true"
+	if archived {
+		if item.Status == planning.MilestoneStatusDecomposing || item.Status == planning.MilestoneStatusExecuting {
+			return tools.Result{}, fmt.Errorf("milestone %q is %s; finish or stop active work before archiving it", key, item.Status.String())
+		}
+		tasks, err := control.ListTasks(ctx, runtime.SessionID, key)
+		if err != nil {
+			return tools.Result{}, err
+		}
+		for _, task := range tasks {
+			if !task.Archived && task.Status == planning.TaskStatusInProgress {
+				return tools.Result{}, fmt.Errorf("milestone %q has in-progress task %s", key, planning.TaskKey(task))
+			}
+		}
+		for _, candidate := range plan.Milestones {
+			if !candidate.Archived && planning.MilestoneDependsOnKey(candidate) == key {
+				return tools.Result{}, fmt.Errorf("milestone %q is still the parent of visible milestone %q", key, planning.MilestoneKey(candidate))
+			}
+		}
+	}
+	action := "archived"
+	if !archived {
+		action = "restored"
+	}
+	return planningLifecycleResult("milestone", key, action), nil
+}
+
+func (deleteTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	runtime, req := opts.Runtime, opts.Request
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	key := req.Args["milestone_key"]
+	item, ok := milestoneForKey(plan.Milestones, key)
+	if !ok {
+		return tools.Result{}, fmt.Errorf("milestone %q not found", key)
+	}
+	if !item.Archived {
+		return tools.Result{}, fmt.Errorf("archive milestone %q before deleting it", key)
+	}
+	tasks, err := control.ListTasks(ctx, runtime.SessionID, key)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if len(tasks) > 0 {
+		return tools.Result{}, fmt.Errorf("milestone %q still has %d task(s); archive and delete those tasks first", key, len(tasks))
+	}
+	for _, candidate := range plan.Milestones {
+		if planning.MilestoneDependsOnKey(candidate) == key {
+			return tools.Result{}, fmt.Errorf("milestone %q is still the parent of milestone %q", key, planning.MilestoneKey(candidate))
+		}
+	}
+	return planningLifecycleResult("milestone", key, "deleted"), nil
+}
+
+func planningLifecycleResult(entity, key, action string) tools.Result {
+	stored := tools.PlanningLifecycleStoredResult{Entity: entity, Key: key, Action: action}
+	return tools.Result{Output: tools.DisplayTextForStored(tools.MilestoneArchive, stored), Stored: stored}
 }
 
 func callMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -390,6 +545,17 @@ func (dependTool) SummarizeResult(req tools.Request, result tools.Result) (strin
 	return "Updated milestone dependency", result.Output
 }
 
+func (archiveTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	if req.Args["archived"] == "false" {
+		return "Restored milestone", result.Output
+	}
+	return "Archived milestone", result.Output
+}
+
+func (deleteTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Deleted milestone", result.Output
+}
+
 func (writeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Updated milestones", result.Output
 }
@@ -444,6 +610,31 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 }
 func (dependTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	return finalizeMilestoneUpdate(ctx, runtime, req, result)
+}
+func (archiveTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	archived := req.Args["archived"] == "true"
+	if _, err := control.ArchiveMilestone(ctx, runtime.SessionID, req.Args["milestone_key"], archived); err != nil {
+		return tools.Result{}, err
+	}
+	action := "archived"
+	if !archived {
+		action = "restored"
+	}
+	return planningLifecycleResult("milestone", req.Args["milestone_key"], action), nil
+}
+func (deleteTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if err := control.DeleteMilestone(ctx, runtime.SessionID, req.Args["milestone_key"]); err != nil {
+		return tools.Result{}, err
+	}
+	return planningLifecycleResult("milestone", req.Args["milestone_key"], "deleted"), nil
 }
 func finalizeMilestoneUpdate(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)

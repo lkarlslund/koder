@@ -263,6 +263,84 @@ func TestTaskAddRejectsClosedMilestones(t *testing.T) {
 	}
 }
 
+func TestTaskArchiveListAndDeleteTools(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusReady}}}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Hide me", "Keep me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st), ChatRole: chatrole.Orchestrator}
+	taskKey := planning.TaskKey(items[0])
+	archiveRequest := tools.Request{Tool: domain.ToolKindTaskArchive, Args: map[string]string{"task_key": taskKey, "archived": "true"}}
+	archived, err := executeAndPersist(ctx, t, runtime, archiveRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(archived.Output, "Archived task "+taskKey) {
+		t.Fatalf("archive output = %q", archived.Output)
+	}
+	listed, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskList, Args: map[string]string{"milestone_key": "M001"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(listed.Output, "Hide me") || !strings.Contains(listed.Output, "Keep me") {
+		t.Fatalf("default task list = %q", listed.Output)
+	}
+	listed, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskList, Args: map[string]string{"milestone_key": "M001", "archived": "true"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed.Output, "Hide me [archived]") {
+		t.Fatalf("archived task list = %q", listed.Output)
+	}
+	deleteRequest := tools.Request{Tool: domain.ToolKindTaskDelete, Args: map[string]string{"task_key": taskKey}}
+	if _, err := executeAndPersist(ctx, t, runtime, deleteRequest); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := modeltest.ListTasks(ctx, st, session.ID, "M001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || planning.TaskKey(remaining[0]) != planning.TaskKey(items[1]) {
+		t.Fatalf("deleted task remained: %#v", remaining)
+	}
+	if _, enabled := tools.DefinitionFor(domain.ToolKindTaskDelete, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
+		t.Fatal("task delete should be hidden from execution chats")
+	}
+}
+
+func TestTaskArchiveRejectsInProgressTask(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modeltest.PutPlan(ctx, st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{{Key: "M001", Title: "Implement", Status: planning.MilestoneStatusExecuting}}}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := modeltest.AddTasks(ctx, st, session.ID, "M001", []string{"Running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := modeltest.UpdateTask(ctx, st, items[0].ID, planning.TaskStatusInProgress, "", "started"); err != nil {
+		t.Fatal(err)
+	}
+	runtime := tools.Runtime{SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st), ChatRole: chatrole.Orchestrator}
+	_, err = tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindTaskArchive, Args: map[string]string{"task_key": planning.TaskKey(items[0]), "archived": "true"}}})
+	if err == nil || !strings.Contains(err.Error(), "in_progress") {
+		t.Fatalf("archive in-progress task error = %v", err)
+	}
+}
+
 func TestTaskUpdateRequiresAndPersistsNote(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)

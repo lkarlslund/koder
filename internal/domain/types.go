@@ -68,12 +68,16 @@ const (
 	ToolKindMilestoneAdd        ToolKind = "milestone_add"
 	ToolKindMilestoneUpdate     ToolKind = "milestone_update"
 	ToolKindMilestoneDepend     ToolKind = "milestone_depend"
+	ToolKindMilestoneArchive    ToolKind = "milestone_archive"
+	ToolKindMilestoneDelete     ToolKind = "milestone_delete"
 	ToolKindMilestonePlan       ToolKind = "milestone_plan"
 	ToolKindMilestoneWrite      ToolKind = "milestone_write"
 	ToolKindTaskList            ToolKind = "task_list"
 	ToolKindTaskAddItems        ToolKind = "task_add_items"
 	ToolKindTaskUpdateItem      ToolKind = "task_update_item"
 	ToolKindTaskFetchNext       ToolKind = "task_fetch_next"
+	ToolKindTaskArchive         ToolKind = "task_archive"
+	ToolKindTaskDelete          ToolKind = "task_delete"
 	ToolKindTasksAdd            ToolKind = "tasks_add"
 	ToolKindTasksUpdate         ToolKind = "tasks_update"
 	ToolKindChatList            ToolKind = "chat_list"
@@ -163,12 +167,16 @@ var builtinToolKinds = []ToolKind{
 	ToolKindMilestoneAdd,
 	ToolKindMilestoneUpdate,
 	ToolKindMilestoneDepend,
+	ToolKindMilestoneArchive,
+	ToolKindMilestoneDelete,
 	ToolKindMilestonePlan,
 	ToolKindMilestoneWrite,
 	ToolKindTaskList,
 	ToolKindTaskAddItems,
 	ToolKindTaskUpdateItem,
 	ToolKindTaskFetchNext,
+	ToolKindTaskArchive,
+	ToolKindTaskDelete,
 	ToolKindTasksAdd,
 	ToolKindTasksUpdate,
 	ToolKindChatList,

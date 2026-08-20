@@ -574,6 +574,7 @@ func ValidateTaskProgress(items []Task) error {
 
 func ValidateMilestoneProgress(items []Milestone) error {
 	seenRefs := make(map[string]struct{}, len(items))
+	archivedByKey := make(map[string]bool, len(items))
 	for _, item := range items {
 		key := MilestoneKey(item)
 		if key == "" {
@@ -589,6 +590,7 @@ func ValidateMilestoneProgress(items []Milestone) error {
 			return fmt.Errorf("duplicate milestone key %q", key)
 		}
 		seenRefs[key] = struct{}{}
+		archivedByKey[key] = item.Archived
 	}
 	for _, item := range items {
 		key := MilestoneKey(item)
@@ -601,6 +603,9 @@ func ValidateMilestoneProgress(items []Milestone) error {
 		}
 		if _, exists := seenRefs[dependsOnKey]; !exists {
 			return fmt.Errorf("milestone %q depends on unknown milestone %q", key, dependsOnKey)
+		}
+		if !item.Archived && archivedByKey[dependsOnKey] {
+			return fmt.Errorf("visible milestone %q cannot depend on archived milestone %q", key, dependsOnKey)
 		}
 	}
 	if err := validateMilestoneDependencyCycles(items); err != nil {

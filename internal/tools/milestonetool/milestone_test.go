@@ -45,15 +45,22 @@ func seedPlan(t *testing.T, st *store.Store, sessionID id.ID) {
 }
 
 func TestNormalizeArgsAndDefinitions(t *testing.T) {
-	listed, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "true"})
+	listed, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "true", "archived": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listed["completed"] != "true" {
+	if listed["completed"] != "true" || listed["archived"] != "true" {
 		t.Fatalf("expected completed=true, got %#v", listed)
 	}
 	if _, err := (listTool{}).NormalizeArgs(map[string]string{"completed": "sometimes"}); err == nil {
 		t.Fatal("expected invalid completed boolean error")
+	}
+	archiveArgs, err := (archiveTool{}).NormalizeArgs(map[string]string{"milestone_key": "M001", "archived": "true"})
+	if err != nil || archiveArgs["archived"] != "true" {
+		t.Fatalf("archive args = %#v, %v", archiveArgs, err)
+	}
+	if _, err := (deleteTool{}).NormalizeArgs(map[string]string{"milestone_key": ""}); err == nil {
+		t.Fatal("expected delete to require milestone key")
 	}
 	added, err := (addItemsTool{}).NormalizeArgs(map[string]string{"title": "Alpha", "depends_on_key": "root"})
 	if err != nil {
@@ -76,6 +83,9 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneDepend, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected depend definition to be disabled in execution chats")
+	}
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneArchive, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
+		t.Fatal("expected archive definition to be disabled in execution chats")
 	}
 	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"milestone_key": "alpha", "status": "cancelled", "depends_on_key": ""})
 	if err != nil {
@@ -111,6 +121,57 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	}
 	if !strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","depends_on_key"]`) {
 		t.Fatalf("expected dependency tool to require both keys: %#v", def)
+	}
+}
+
+func TestMilestoneArchiveListAndDeleteTools(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	if err := modeltest.PutPlan(context.Background(), st, planning.Plan{SessionID: session.ID, Milestones: []planning.Milestone{
+		{Key: "M001", Title: "Visible", Status: planning.MilestoneStatusReady},
+		{Key: "M002", Title: "Hidden", Status: planning.MilestoneStatusCompleted, Archived: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindMilestoneList, Args: map[string]string{"completed": "true"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Output, "Hidden") {
+		t.Fatalf("default list exposed archived milestone: %q", result.Output)
+	}
+	result, err = (listTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: domain.ToolKindMilestoneList, Args: map[string]string{"completed": "true", "archived": "true"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Hidden") || !strings.Contains(result.Output, "[archived]") {
+		t.Fatalf("archived list omitted marker: %q", result.Output)
+	}
+	request := tools.Request{Tool: domain.ToolKindMilestoneArchive, Args: map[string]string{"milestone_key": "M001", "archived": "true"}}
+	preview, err := (archiveTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalized, err := (archiveTool{}).FinalizeResult(context.Background(), runtime, request, preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(finalized.Output, "Archived milestone M001") {
+		t.Fatalf("archive output = %q", finalized.Output)
+	}
+	deleteRequest := tools.Request{Tool: domain.ToolKindMilestoneDelete, Args: map[string]string{"milestone_key": "M001"}}
+	preview, err = (deleteTool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: deleteRequest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (deleteTool{}).FinalizeResult(context.Background(), runtime, deleteRequest, preview); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := modeltest.GetPlan(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Milestones) != 1 || planning.MilestoneKey(plan.Milestones[0]) != "M002" {
+		t.Fatalf("delete did not persist: %#v", plan.Milestones)
 	}
 }
 

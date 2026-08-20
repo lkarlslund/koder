@@ -1765,9 +1765,9 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "exec", "Exec"
 	case tools.ChatList, tools.ChatStart, tools.ChatSend, tools.ChatCancel, tools.ChatArchive, tools.ChatRename, tools.ChatCleanup:
 		return "chat", "Chat"
-	case tools.MilestoneList, tools.MilestoneAdd, tools.MilestoneUpdate, tools.MilestonePlan, tools.MilestoneWrite:
+	case tools.MilestoneList, tools.MilestoneAdd, tools.MilestoneUpdate, tools.MilestoneArchive, tools.MilestoneDelete, tools.MilestonePlan, tools.MilestoneWrite:
 		return "milestone", "Milestone"
-	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TasksAdd, tools.TasksUpdate:
+	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TaskArchive, tools.TaskDelete, tools.TasksAdd, tools.TasksUpdate:
 		return "task", "Task"
 	case tools.ViewImage, tools.ShowImage, tools.ShowMedia:
 		return "image", "Image"

@@ -32,12 +32,16 @@ const (
 	MilestoneAdd        ID = domain.ToolKindMilestoneAdd
 	MilestoneUpdate     ID = domain.ToolKindMilestoneUpdate
 	MilestoneDepend     ID = domain.ToolKindMilestoneDepend
+	MilestoneArchive    ID = domain.ToolKindMilestoneArchive
+	MilestoneDelete     ID = domain.ToolKindMilestoneDelete
 	MilestonePlan       ID = domain.ToolKindMilestonePlan
 	MilestoneWrite      ID = domain.ToolKindMilestoneWrite
 	TaskList            ID = domain.ToolKindTaskList
 	TaskAddItems        ID = domain.ToolKindTaskAddItems
 	TaskUpdateItem      ID = domain.ToolKindTaskUpdateItem
 	TaskFetchNext       ID = domain.ToolKindTaskFetchNext
+	TaskArchive         ID = domain.ToolKindTaskArchive
+	TaskDelete          ID = domain.ToolKindTaskDelete
 	TasksAdd            ID = domain.ToolKindTasksAdd
 	TasksUpdate         ID = domain.ToolKindTasksUpdate
 	ChatList            ID = domain.ToolKindChatList

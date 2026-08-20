@@ -137,6 +137,7 @@ func MilestoneStoredResultWithTaskSummaries(plan planning.Plan, summaries map[st
 			Key:          planning.MilestoneKey(item),
 			Title:        item.Title,
 			Status:       item.Status.String(),
+			Archived:     item.Archived,
 			Notes:        item.Notes,
 			DependsOnKey: planning.MilestoneDependsOnKey(item),
 			OwnerChatID:  ownerChatID,
@@ -153,11 +154,12 @@ func BuildTaskListStoredResult(plan planning.Plan, ref string, tasks []planning.
 	items := make([]TaskStoredItem, 0, len(tasks))
 	for _, item := range tasks {
 		items = append(items, TaskStoredItem{
-			ID:      item.ID,
-			Key:     planning.TaskKey(item),
-			Content: item.Content,
-			Note:    item.Note,
-			Status:  item.Status.String(),
+			ID:       item.ID,
+			Key:      planning.TaskKey(item),
+			Content:  item.Content,
+			Note:     item.Note,
+			Status:   item.Status.String(),
+			Archived: item.Archived,
 		})
 	}
 	return TaskListStoredResult{

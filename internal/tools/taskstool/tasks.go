@@ -3,6 +3,7 @@ package taskstool
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -15,8 +16,8 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List tasks",
 		Description: "Read the task list for a milestone.",
-		Usage:       "Read the task list for a milestone. If milestone_key is omitted, this reads the current assigned milestone's tasks.",
-		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"}},"additionalProperties":false}`,
+		Usage:       "Read the task list for a milestone. Archived tasks are hidden by default; pass archived=true when you need to inspect or restore them. If milestone_key is omitted, this reads the current assigned milestone's tasks.",
+		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"},"archived":{"type":"boolean","description":"Include archived tasks. Defaults to false."}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
@@ -40,25 +41,60 @@ func init() {
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
+	tools.Register(archiveTool{}, tools.ToolSpec{
+		Title:       "Archive task",
+		Description: "Archive or restore a task.",
+		Usage:       "Set archived=true to hide an inactive task without deleting it, or archived=false to restore it. An in-progress task cannot be archived. Use task_list archived=true to find archived tasks.",
+		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Task key returned by task_list"},"archived":{"type":"boolean","description":"true archives the task; false restores it"}},"required":["task_key","archived"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
+	tools.Register(deleteTool{}, tools.ToolSpec{
+		Title:       "Delete task",
+		Description: "Permanently delete an archived task.",
+		Usage:       "Permanently erase an archived task. This cannot be undone. Archive the task first; in-progress or visible tasks cannot be deleted.",
+		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Archived task key returned by task_list archived=true"}},"required":["task_key"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 }
 
 type listTool struct{}
 type addItemsTool struct{}
 type updateItemTool struct{}
 type fetchNextTool struct{}
+type archiveTool struct{}
+type deleteTool struct{}
 
 func (listTool) ID() tools.ID       { return tools.TaskList }
 func (addItemsTool) ID() tools.ID   { return tools.TasksAdd }
 func (updateItemTool) ID() tools.ID { return tools.TasksUpdate }
 func (fetchNextTool) ID() tools.ID  { return tools.TaskFetchNext }
+func (archiveTool) ID() tools.ID    { return tools.TaskArchive }
+func (deleteTool) ID() tools.ID     { return tools.TaskDelete }
 
 func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
 func (fetchNextTool) BypassesPermission() bool  { return true }
+func (archiveTool) BypassesPermission() bool    { return true }
+func (deleteTool) BypassesPermission() bool     { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	if tools.AssignedTaskRef(runtime) != "" {
+		return tools.ToolSpec{}, false
+	}
+	return spec, true
+}
+
+func (archiveTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return taskLifecycleDefinition(runtime, spec)
+}
+
+func (deleteTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return taskLifecycleDefinition(runtime, spec)
+}
+
+func taskLifecycleDefinition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if runtime.ChatRole == chatrole.Execution || tools.AssignedMilestoneKey(runtime) != "" || tools.AssignedTaskRef(runtime) != "" {
 		return tools.ToolSpec{}, false
 	}
 	return spec, true
@@ -68,6 +104,13 @@ func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	out := map[string]string{}
 	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
 		out["milestone_key"] = ref
+	}
+	if raw := strings.TrimSpace(args["archived"]); raw != "" {
+		archived, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("archived: %w", err)
+		}
+		out["archived"] = strconv.FormatBool(archived)
 	}
 	return out, nil
 }
@@ -112,7 +155,31 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 }
 
 func (fetchNextTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	return listTool{}.NormalizeArgs(args)
+	out := map[string]string{}
+	if ref := strings.TrimSpace(args["milestone_key"]); ref != "" {
+		out["milestone_key"] = ref
+	}
+	return out, nil
+}
+
+func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	key, err := planning.ParseTaskKey(args["task_key"])
+	if err != nil {
+		return nil, err
+	}
+	archived, err := strconv.ParseBool(strings.TrimSpace(args["archived"]))
+	if err != nil {
+		return nil, fmt.Errorf("archived: %w", err)
+	}
+	return map[string]string{"task_key": key, "archived": strconv.FormatBool(archived)}, nil
+}
+
+func (deleteTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	key, err := planning.ParseTaskKey(args["task_key"])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"task_key": key}, nil
 }
 
 func (listTool) Preview(req tools.Request) string {
@@ -124,6 +191,15 @@ func (addItemsTool) Preview(req tools.Request) string {
 func (updateItemTool) Preview(req tools.Request) string { return "Update task " + req.Args["task_key"] }
 func (fetchNextTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_key"], "Fetch next task")
+}
+func (archiveTool) Preview(req tools.Request) string {
+	if req.Args["archived"] == "false" {
+		return "Restore task " + req.Args["task_key"]
+	}
+	return "Archive task " + req.Args["task_key"]
+}
+func (deleteTool) Preview(req tools.Request) string {
+	return "Delete task " + req.Args["task_key"] + " permanently"
 }
 
 func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -140,7 +216,11 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.TaskBucketResult(plan, ref, tools.ScopedTasks(runtime, tasks), ""), nil
+	tasks = tools.ScopedTasks(runtime, tasks)
+	if req.Args["archived"] != "true" {
+		tasks = filterArchivedTasks(tasks)
+	}
+	return tools.TaskBucketResult(plan, ref, tasks, ""), nil
 }
 
 func (addItemsTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -208,6 +288,7 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 		return tools.Result{}, err
 	}
 	tasks = tools.ScopedTasks(runtime, tasks)
+	tasks = filterArchivedTasks(tasks)
 	for _, item := range tasks {
 		if item.Status == planning.TaskStatusInProgress {
 			return tools.TaskBucketResult(plan, ref, []planning.Task{item}, ""), nil
@@ -220,6 +301,69 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 	}
 	message := "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
 	return tools.TaskBucketResult(plan, ref, tasks, message), nil
+}
+
+func (archiveTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(opts.Runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	item, err := planningTaskByKey(ctx, control, opts.Runtime.SessionID, opts.Request.Args["task_key"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	archived := opts.Request.Args["archived"] == "true"
+	if archived && item.Status == planning.TaskStatusInProgress {
+		return tools.Result{}, fmt.Errorf("task %s is in_progress; finish or stop it before archiving", planning.TaskKey(item))
+	}
+	action := "archived"
+	if !archived {
+		action = "restored"
+	}
+	return taskLifecycleResult(opts.Request.Args["task_key"], action), nil
+}
+
+func (deleteTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(opts.Runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	item, err := planningTaskByKey(ctx, control, opts.Runtime.SessionID, opts.Request.Args["task_key"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if !item.Archived {
+		return tools.Result{}, fmt.Errorf("archive task %s before deleting it", planning.TaskKey(item))
+	}
+	return taskLifecycleResult(opts.Request.Args["task_key"], "deleted"), nil
+}
+
+func filterArchivedTasks(tasks []planning.Task) []planning.Task {
+	out := make([]planning.Task, 0, len(tasks))
+	for _, item := range tasks {
+		if !item.Archived {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func planningTaskByKey(ctx context.Context, control tools.SessionControl, sessionID id.ID, taskKey string) (planning.Task, error) {
+	tasks, err := control.ListTasks(ctx, sessionID, "")
+	if err != nil {
+		return planning.Task{}, err
+	}
+	for _, item := range tasks {
+		if planning.TaskKey(item) == taskKey {
+			return item, nil
+		}
+	}
+	return planning.Task{}, fmt.Errorf("task %s not found", taskKey)
+}
+
+func taskLifecycleResult(key, action string) tools.Result {
+	stored := tools.PlanningLifecycleStoredResult{Entity: "task", Key: key, Action: action}
+	return tools.Result{Output: tools.DisplayTextForStored(tools.TaskArchive, stored), Stored: stored}
 }
 
 func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
@@ -238,6 +382,17 @@ func (fetchNextTool) SummarizeResult(req tools.Request, result tools.Result) (st
 	return "Fetched next task", result.Output
 }
 
+func (archiveTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	if req.Args["archived"] == "false" {
+		return "Restored task", result.Output
+	}
+	return "Archived task", result.Output
+}
+
+func (deleteTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Deleted task", result.Output
+}
+
 func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
 	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
@@ -246,6 +401,9 @@ func (listTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req t
 	plan, tasks, ref, err := persistedTaskBucket(ctx, control, runtime.SessionID, req.Args["milestone_key"])
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if req.Args["archived"] != "true" {
+		tasks = filterArchivedTasks(tasks)
 	}
 	result.Stored = tools.BuildTaskListStoredResult(plan, ref, tasks, "")
 	return result, nil
@@ -296,6 +454,31 @@ func (updateItemTool) FinalizeResult(ctx context.Context, runtime tools.Runtime,
 	result.Output = tools.FormatTaskOutput(stored)
 	return result, nil
 }
+func (archiveTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	archived := req.Args["archived"] == "true"
+	if _, err := control.ArchiveTask(ctx, req.Args["task_key"], archived); err != nil {
+		return tools.Result{}, err
+	}
+	action := "archived"
+	if !archived {
+		action = "restored"
+	}
+	return taskLifecycleResult(req.Args["task_key"], action), nil
+}
+func (deleteTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (tools.Result, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if err := control.DeleteTask(ctx, req.Args["task_key"]); err != nil {
+		return tools.Result{}, err
+	}
+	return taskLifecycleResult(req.Args["task_key"], "deleted"), nil
+}
 
 type preparedTaskUpdate struct {
 	control        tools.SessionControl
@@ -344,6 +527,9 @@ func prepareTaskUpdate(ctx context.Context, runtime tools.Runtime, req tools.Req
 			if planning.TaskKey(tasks[idx]) != taskKey {
 				continue
 			}
+			if tasks[idx].Archived {
+				return preparedTaskUpdate{}, fmt.Errorf("task %s is archived; restore it before updating", taskKey)
+			}
 			if err := ensureTaskUpdateAllowed(runtime, milestone, tasks[idx]); err != nil {
 				return preparedTaskUpdate{}, err
 			}
@@ -377,6 +563,7 @@ func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, 
 	if err != nil {
 		return tools.Result{}, err
 	}
+	tasks = filterArchivedTasks(tasks)
 	message := ""
 	for _, item := range tasks {
 		if item.Status == planning.TaskStatusInProgress {
@@ -400,13 +587,16 @@ func ensureMilestoneAcceptsTasks(plan planning.Plan, ref string) error {
 		if planning.MilestoneKey(milestone) != ref {
 			continue
 		}
+		if milestone.Archived {
+			return fmt.Errorf("milestone %q is archived; restore it before adding tasks", planning.MilestoneKey(milestone))
+		}
 		switch milestone.Status {
 		case planning.MilestoneStatusCompleted, planning.MilestoneStatusCancelled:
 			return fmt.Errorf("milestone %q is %s; cannot add tasks. To reopen this milestone, first call milestone_update with status=ready, then add tasks", planning.MilestoneKey(milestone), milestone.Status.String())
 		}
 		return nil
 	}
-	return nil
+	return fmt.Errorf("milestone %q not found", ref)
 }
 
 func ensureTaskUpdateAllowed(runtime tools.Runtime, milestone planning.Milestone, task planning.Task) error {
