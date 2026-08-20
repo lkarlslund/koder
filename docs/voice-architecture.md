@@ -17,11 +17,12 @@ There are three distinct objects:
 
 - A **session** is the same project or quick session shown by Koder's Web UI.
   Android lists these first, including their ordinary and voice-chat counts.
-- A **voice chat** is a normal top-level chat with `WorkflowRoleVoice` inside a
-  session. A regular session may contain several voice chats and several other
-  chats. Android shows all of them, but only voice chats can be opened as a
-  conversation. A new temporary conversation creates a quick session with one
-  voice chat and a Koder-managed scratch folder.
+- A **voice chat** is a normal top-level chat whose interaction mode is
+  `voice`. Its workflow role and turn backend remain independent. A regular
+  session may contain several voice chats and several text chats. Android shows
+  all of them, but only voice chats can be opened as a conversation. A new
+  temporary conversation creates a quick session with one voice chat and a
+  Koder-managed scratch folder.
 - A **voice call** is one ephemeral authenticated WebSocket connection. Koder
   permits multiple phones to use different voice chats concurrently, while
   enforcing exactly one live voice chat per Android installation.
@@ -38,7 +39,8 @@ Android Core-Telecom call
   -> Silero VAD and endpoint state machine
   -> authenticated voice.v1 WebSocket
   -> remote OpenAI-compatible STT
-  -> normal persistent chat with the Voice profile
+  -> normal persistent chat with voice interaction behavior
+  -> Koder-native or Codex turn driver
   -> optional permission-gated tool call to the connected Android phone
   -> standard tools, including native chat coordination
   -> optional sibling chat and its normal tools
@@ -48,12 +50,12 @@ Android Core-Telecom call
 ```
 
 Every final transcript is a normal user turn in the selected durable voice
-chat. The Voice role supplies short, conversational behavior and the normal
+chat. Voice interaction supplies short, conversational behavior and the normal
 chat loop supplies history, model execution, tool calls, and the final answer.
 There is no separate stateless router or summarizer model call.
 
 Tool mechanics live in each normal tool definition, not in the role prompt.
-The voice profile receives the standard catalog and uses `chat_list`,
+The workflow role receives its normal catalog and uses `chat_list`,
 `chat_send`, and `chat_start` to coordinate work inside its selected session.
 The obsolete voice-only `session_list`, `session_delegate`, and `session_start`
 abstraction is not offered. Android, rather than the model, chooses the session
@@ -69,7 +71,7 @@ state to `working` as soon as the voice chat runs any tool, keeps that state
 across multi-tool model iterations, and optionally adds the delegated session
 summary so Android can show where the work is happening. Android carries an
 already-playing cue across that transition and stops it before speech playback.
-The Voice role returns one or two short, plain conversational sentences after
+Voice interaction asks for one or two short, plain conversational sentences after
 tool work. Its final response explicitly overrides the shared document-format
 guidance: Markdown, headings, lists, tables, code, link syntax, and raw URLs do
 not belong in speech. The server also strips accidental formatting before TTS
@@ -85,6 +87,10 @@ mechanics; the role prompt only defines the generic conversational behavior.
 
 - `internal/voice` owns session/chat call selection contracts, audio framing,
   and the per-device call lease registry.
+- `internal/chat` owns the backend-neutral turn-driver boundary; voice state
+  remains outside the driver.
+- `internal/codexapp` and `internal/codexdriver` supervise Codex app-server and
+  adapt its durable threads and events to normal Koder chats.
 - `internal/voiceapi` owns HTTP/WebSocket authentication and `voice.v1` wire
   DTOs.
 - `internal/app/voice.go` adapts the controller, sessions, providers, chat
