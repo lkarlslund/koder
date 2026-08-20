@@ -19,10 +19,23 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 	return chatpkg.Deps{
 		Store:   e.store,
 		Model:   e,
+		Drivers: e,
 		Tools:   e.toolsRuntime,
 		Runtime: e.toolsRuntime,
 		Life:    e.toolsRuntime,
 		Pending: e.toolsRuntime,
 		Compact: e,
+	}
+}
+
+// DriverForChat selects the turn implementation from the chat's persisted
+// backend. Additional backends are registered here without changing the chat
+// actor or its user-facing lifecycle.
+func (e *Engine) DriverForChat(chatRecord domain.Chat) chatpkg.TurnDriver {
+	switch chatRecord.EffectiveBackend() {
+	case domain.ChatBackendKoder:
+		return chatpkg.NativeTurnDriver{Model: e}
+	default:
+		return nil
 	}
 }

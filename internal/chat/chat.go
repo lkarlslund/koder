@@ -179,11 +179,32 @@ type Chat struct {
 type Deps struct {
 	Store   *store.Store
 	Model   ModelRuntime
+	Drivers TurnDriverResolver
 	Tools   ToolTurnService
 	Runtime ToolRuntimeService
 	Life    ToolLifecycleService
 	Pending PendingToolService
 	Compact CompactService
+}
+
+// TurnDriver owns backend-specific execution of one queued chat turn. The
+// Chat actor remains responsible for queueing, cancellation, persistence, and
+// forwarding the emitted domain events to every connected surface.
+type TurnDriver interface {
+	RunTurn(context.Context, *Chat, DriverTurn, chan<- domain.Event) error
+}
+
+// TurnDriverResolver selects a driver from persisted chat metadata. Returning
+// nil means that the configured backend is currently unavailable.
+type TurnDriverResolver interface {
+	DriverForChat(domain.Chat) TurnDriver
+}
+
+// DriverTurn is the backend-neutral input to one turn.
+type DriverTurn struct {
+	Input                 domain.QueuedInput
+	Note                  string
+	EphemeralInstructions []provider.InstructionBlock
 }
 
 type enqueueCmd struct {
@@ -3331,11 +3352,12 @@ func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput
 	delete(r.queueNotes, item.ID)
 	delete(r.queueInstructions, item.ID)
 	r.mu.Unlock()
-	if r.deps.Model != nil {
-		r.runTurnLoop(ctx, turn, item, note, ephemeralInstructions)
+	driver := r.turnDriver()
+	if driver != nil {
+		r.runDriverTurn(ctx, turn, driver, DriverTurn{Input: item, Note: note, EphemeralInstructions: ephemeralInstructions})
 		return
 	}
-	err := fmt.Errorf("model service is not configured")
+	err := fmt.Errorf("chat backend %q is unavailable", r.Snapshot().Chat.EffectiveBackend())
 	r.mu.Lock()
 	r.active = false
 	r.cancel = nil
@@ -3347,30 +3369,24 @@ func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) runTurnLoop(ctx context.Context, turn uint64, item domain.QueuedInput, note string, ephemeralInstructions []provider.InstructionBlock) {
+func (r *Chat) turnDriver() TurnDriver {
+	chatRecord := r.Snapshot().Chat
+	if r.deps.Drivers != nil {
+		return r.deps.Drivers.DriverForChat(chatRecord)
+	}
+	if chatRecord.EffectiveBackend() == domain.ChatBackendKoder && r.deps.Model != nil {
+		return NativeTurnDriver{Model: r.deps.Model}
+	}
+	return nil
+}
+
+func (r *Chat) runDriverTurn(ctx context.Context, turn uint64, driver TurnDriver, input DriverTurn) {
 	out := make(chan domain.Event, 32)
 	r.startWorker(func() {
 		defer close(out)
-		var (
-			turnInstructions []provider.InstructionBlock
-			err              error
-		)
-		model := r.deps.Model
-		if model == nil {
-			r.handleTurnError(ctx, out, fmt.Errorf("model service is not configured"))
-			return
-		}
-		switch domain.DeliveryForQueuedInput(item) {
-		case domain.QueuedInputDeliveryContinue:
-			turnInstructions, err = model.PrepareContinueTurn(ctx, r, note, out)
-		default:
-			turnInstructions, err = model.PreparePromptTurn(ctx, r, item, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
-		}
-		if err != nil {
+		if err := driver.RunTurn(ctx, r, input, out); err != nil {
 			r.handleTurnError(ctx, out, err)
-			return
 		}
-		r.continueTurnLoop(ctx, turnInstructions, ephemeralInstructions, out)
 	})
 	r.forwardTurnEvents(turn, out)
 }
