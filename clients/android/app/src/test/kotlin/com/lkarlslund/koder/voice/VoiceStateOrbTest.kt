@@ -30,6 +30,24 @@ class VoiceStateOrbTest {
 	}
 
 	@Test
+	fun starsMoveForwardContinuouslyAndProcessingAddsWarpTrails() {
+		val listeningStart = voiceStarMotion(VoiceOrbMode.LISTENING, initialRadius = 0.2f, speed = 1f, travel = 0f)
+		val listeningLater = voiceStarMotion(VoiceOrbMode.LISTENING, initialRadius = 0.2f, speed = 1f, travel = voiceStarTravelRate(VoiceOrbMode.LISTENING))
+		val processingLater = voiceStarMotion(VoiceOrbMode.PROCESSING, initialRadius = 0.2f, speed = 1f, travel = voiceStarTravelRate(VoiceOrbMode.PROCESSING))
+		assertTrue(listeningLater.radius > listeningStart.radius)
+		assertEquals(0f, listeningLater.trailFraction)
+		assertTrue(voiceStarTravelRate(VoiceOrbMode.PROCESSING) > voiceStarTravelRate(VoiceOrbMode.LISTENING) * 10f)
+		assertTrue(processingLater.radius > listeningLater.radius)
+		assertTrue(processingLater.trailFraction > 0f)
+	}
+
+	@Test
+	fun orbUsesLargerResponsiveSize() {
+		assertEquals(300, voiceOrbSizeDp(fontScale = 1f))
+		assertEquals(232, voiceOrbSizeDp(fontScale = 1.3f))
+	}
+
+	@Test
 	fun pcmLevelsTrackInputAndOutputAmplitude() {
 		assertEquals(0f, pcmLevel(shortArrayOf()), 0f)
 		assertTrue(pcmLevel(shortArrayOf(16_000, -16_000)) > pcmLevel(shortArrayOf(1_000, -1_000)))

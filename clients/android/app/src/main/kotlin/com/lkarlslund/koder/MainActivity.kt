@@ -103,6 +103,7 @@ import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
 import com.lkarlslund.koder.voice.voiceOrbMode
+import com.lkarlslund.koder.voice.voiceOrbSizeDp
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -2037,7 +2038,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			gravity = Gravity.CENTER
 			voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
 				mode = voiceOrbMode(CallController.Stage.CONNECTING)
-			}.also { addView(it, centeredSquare(if (resources.configuration.fontScale >= 1.3f) 196 else 252, bottom = 22)) }
+			}.also { addView(it, centeredSquare(voiceOrbSizeDp(resources.configuration.fontScale), bottom = 22)) }
 			voiceOrbDetail = body(initialDetail).apply {
 				gravity = Gravity.CENTER
 				textSize = 17f

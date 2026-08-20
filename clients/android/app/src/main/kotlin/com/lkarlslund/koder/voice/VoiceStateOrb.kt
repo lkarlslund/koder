@@ -50,12 +50,14 @@ class VoiceStateOrbView @JvmOverloads constructor(
 	private data class Star(val angle: Float, val radius: Float, val size: Float, val speed: Float)
 
 	private val stars = Random(0x4b4f4445).let { random ->
-		List(72) { Star(random.nextFloat() * 2f * PI.toFloat(), random.nextFloat(), 0.7f + random.nextFloat() * 1.8f, 0.35f + random.nextFloat()) }
+		List(96) { Star(random.nextFloat() * 2f * PI.toFloat(), random.nextFloat(), 0.7f + random.nextFloat() * 1.8f, 0.35f + random.nextFloat()) }
 	}
 	private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 	private val wave = Path()
 	private val bounds = RectF()
-	private var startedAt = System.nanoTime()
+	private val startedAt = System.nanoTime()
+	private var lastFrameAt = startedAt
+	private var starTravel = 0f
 	private var level = 0.12f
 
 	init {
@@ -69,7 +71,7 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		set(value) {
 			if (field == value) return
 			field = value
-			startedAt = System.nanoTime()
+			lastFrameAt = System.nanoTime()
 			contentDescription = voiceOrbDescription(value)
 			invalidate()
 		}
@@ -91,8 +93,14 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		canvas.save()
 		canvas.clipPath(Path().apply { addCircle(cx, cy, radius, Path.Direction.CW) })
 		val animationsEnabled = ValueAnimator.areAnimatorsEnabled()
-		val seconds = if (animationsEnabled) (System.nanoTime() - startedAt) / 1_000_000_000f else 0f
-		drawStars(canvas, cx, cy, radius, seconds)
+		val now = System.nanoTime()
+		val seconds = if (animationsEnabled) (now - startedAt) / 1_000_000_000f else 0f
+		if (animationsEnabled && mode != VoiceOrbMode.IDLE) {
+			val elapsed = ((now - lastFrameAt) / 1_000_000_000f).coerceIn(0f, 0.1f)
+			starTravel += elapsed * voiceStarTravelRate(mode)
+		}
+		lastFrameAt = now
+		drawStars(canvas, cx, cy, radius, starTravel)
 		when (mode) {
 			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, radius, seconds, Color.rgb(44, 232, 255))
 			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, radius, seconds, Color.rgb(188, 104, 255))
@@ -112,21 +120,23 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		if (shouldAnimateVoiceOrb(mode, animationsEnabled, isShown)) postInvalidateOnAnimation()
 	}
 
-	private fun drawStars(canvas: Canvas, cx: Float, cy: Float, radius: Float, seconds: Float) {
+	private fun drawStars(canvas: Canvas, cx: Float, cy: Float, radius: Float, travel: Float) {
 		val warp = mode == VoiceOrbMode.PROCESSING
-		stars.forEachIndexed { index, star ->
-			val drift = if (warp) seconds * star.speed * 1.8f else seconds * star.speed * 0.055f
-			val radial = if (warp) (star.radius + drift) % 1f else star.radius
-			val angle = star.angle + if (warp) 0f else drift + index * 0.0007f
+		val density = resources.displayMetrics.density
+		stars.forEach { star ->
+			val motion = voiceStarMotion(mode, star.radius, star.speed, travel)
+			val radial = motion.radius
+			val angle = star.angle
 			val x = cx + cos(angle) * radial * radius
 			val y = cy + sin(angle) * radial * radius
 			val minimumAlpha = if (highContrastEnabled(context)) 175 else 110
 			paint.color = Color.argb((minimumAlpha + radial * (255 - minimumAlpha)).toInt(), 160, 205, 255)
-			paint.strokeWidth = star.size
+			paint.strokeWidth = star.size * density * (0.45f + radial * 1.25f)
+			paint.strokeCap = Paint.Cap.ROUND
 			if (warp) {
-				val tail = max(5f, radial * radius * 0.24f)
+				val tail = max(3f * density, radial * radius * motion.trailFraction)
 				canvas.drawLine(x - cos(angle) * tail, y - sin(angle) * tail, x, y, paint)
-			} else canvas.drawCircle(x, y, star.size, paint)
+			} else canvas.drawCircle(x, y, paint.strokeWidth, paint)
 		}
 	}
 
@@ -160,3 +170,18 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		canvas.drawArc(RectF(cx - spinner, cy - spinner, cx + spinner, cy + spinner), seconds * 190f, 255f, false, paint)
 	}
 }
+
+internal data class VoiceStarMotion(val radius: Float, val trailFraction: Float)
+
+// voiceStarMotion keeps the field moving toward the viewer in every active
+// state and increases speed and trails only while the model processes.
+internal fun voiceStarMotion(mode: VoiceOrbMode, initialRadius: Float, speed: Float, travel: Float): VoiceStarMotion {
+	val radius = (initialRadius + travel.coerceAtLeast(0f) * speed.coerceAtLeast(0f)) % 1f
+	val trail = if (mode == VoiceOrbMode.PROCESSING) 0.12f + radius * 0.24f else 0f
+	return VoiceStarMotion(radius, trail)
+}
+
+internal fun voiceStarTravelRate(mode: VoiceOrbMode): Float =
+	if (mode == VoiceOrbMode.PROCESSING) 0.58f else 0.032f
+
+internal fun voiceOrbSizeDp(fontScale: Float): Int = if (fontScale >= 1.3f) 232 else 300
