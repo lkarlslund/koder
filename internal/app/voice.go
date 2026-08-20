@@ -176,6 +176,12 @@ func (c *Controller) VoiceChatBackends(ctx context.Context) []voice.ChatBackendO
 		for _, model := range state.Models {
 			option.Models = append(option.Models, voice.ChatModelOption{ID: model.ID, Name: model.Name, Description: model.Description, Default: model.Default})
 		}
+		for _, profile := range state.PermissionProfiles {
+			option.PermissionProfiles = append(option.PermissionProfiles, voice.ChatPermissionOption{ID: profile.ID, Label: profile.Label, Description: profile.Description})
+		}
+		for _, tool := range state.AdditionalTools {
+			option.AdditionalTools = append(option.AdditionalTools, voice.ChatToolOption{ID: tool.ID, Label: tool.Label, Description: tool.Description})
+		}
 		out = append(out, option)
 	}
 	return out

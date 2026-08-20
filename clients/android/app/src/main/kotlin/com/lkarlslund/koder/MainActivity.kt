@@ -1882,22 +1882,41 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val permissionSpinner = Spinner(this)
 		val milestoneField = EditText(this).apply { hint = "Optional milestone key"; setSingleLine() }
 		val taskField = EditText(this).apply { hint = "Optional task reference"; setSingleLine() }
+		val toolContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+		val toolChecks = linkedMapOf<String, CheckBox>()
 		val roles = listOf("orchestrator", "planning", "execution", "standalone")
-		val permissions = listOf("Inherit session policy", "Read only", "Workspace write", "Full access")
 		backendSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, backends.map { it.label })
 		roleSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, roles.map { it.replaceFirstChar(Char::titlecase) })
-		permissionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, permissions)
-		fun updateModels(position: Int) {
-			val models = backends[position.coerceIn(backends.indices)].models
+		fun updateBackendOptions(position: Int) {
+			val backend = backends[position.coerceIn(backends.indices)]
+			val models = backend.models
 			modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Backend default") + models.map { it.name })
 			modelSpinner.isEnabled = models.isNotEmpty()
 			modelSpinner.setSelection((models.indexOfFirst { it.isDefault } + 1).coerceAtLeast(0))
+			permissionSpinner.adapter = ArrayAdapter(
+				this, android.R.layout.simple_spinner_dropdown_item,
+				listOf("Inherit session policy") + backend.permissionProfiles.map { profile ->
+					if (profile.description.isBlank()) profile.label else "${profile.label} — ${profile.description}"
+				},
+			)
+			toolContainer.removeAllViews()
+			toolChecks.clear()
+			backend.additionalTools.forEach { tool ->
+				val check = CheckBox(this).apply {
+					text = tool.label
+					contentDescription = if (tool.description.isBlank()) tool.label else "${tool.label}. ${tool.description}"
+					isChecked = true
+				}
+				toolChecks[tool.id] = check
+				toolContainer.addView(check)
+			}
+			toolContainer.visibility = if (backend.additionalTools.isEmpty()) View.GONE else View.VISIBLE
 		}
 		backendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-			override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateModels(position)
+			override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateBackendOptions(position)
 			override fun onNothingSelected(parent: AdapterView<*>?) = Unit
 		}
-		updateModels(0)
+		updateBackendOptions(0)
 		val fields = LinearLayout(this).apply {
 			orientation = LinearLayout.VERTICAL
 			setPadding(dp(20), dp(8), dp(20), dp(8))
@@ -1909,13 +1928,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			addView(label("Permission profile")); addView(permissionSpinner, spaced(bottom = 10))
 			addView(label("Execution scope")); addView(milestoneField); addView(taskField)
 			addView(helper("Choose a milestone or a task, not both. Scope is used by execution chats."), spaced(top = 4))
+			addView(label("Koder additions"), spaced(top = 12)); addView(toolContainer)
+			addView(helper("Codex keeps its native tools. These Koder capabilities can be disabled for this conversation."), spaced(top = 4))
 		}
 		AlertDialog.Builder(this).setTitle(dialogTitle).setView(ScrollView(this).apply { addView(fields) })
 			.setNegativeButton("Cancel", null)
 			.setPositiveButton("Create") { _, _ ->
 				val backend = backends[backendSpinner.selectedItemPosition.coerceIn(backends.indices)]
 				val modelIndex = modelSpinner.selectedItemPosition - 1
-				val permission = listOf("", "readonly", "workspace-write", "full-access")[permissionSpinner.selectedItemPosition]
+				val permission = backend.permissionProfiles.getOrNull(permissionSpinner.selectedItemPosition - 1)?.id.orEmpty()
 				val milestone = milestoneField.text.toString().trim()
 				val task = taskField.text.toString().trim()
 				if (milestone.isNotBlank() && task.isNotBlank()) {
@@ -1926,6 +1947,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					title = titleField.text.toString().trim().ifBlank { "Voice conversation" }, backend = backend.id,
 					workflowRole = roles[roleSpinner.selectedItemPosition], modelId = backend.models.getOrNull(modelIndex)?.id.orEmpty(),
 					permissionProfile = permission, milestoneKey = milestone, taskRef = task,
+					toolStates = toolChecks.mapValues { (_, check) -> check.isChecked },
 				))
 			}.show()
 	}

@@ -52,11 +52,13 @@ type Chat struct {
 
 // ChatBackendOption describes a live turn backend offered during chat creation.
 type ChatBackendOption struct {
-	ID        string            `json:"id"`
-	Label     string            `json:"label"`
-	Available bool              `json:"available"`
-	Detail    string            `json:"detail,omitempty"`
-	Models    []ChatModelOption `json:"models,omitempty"`
+	ID                 string                 `json:"id"`
+	Label              string                 `json:"label"`
+	Available          bool                   `json:"available"`
+	Detail             string                 `json:"detail,omitempty"`
+	Models             []ChatModelOption      `json:"models,omitempty"`
+	PermissionProfiles []ChatPermissionOption `json:"permission_profiles,omitempty"`
+	AdditionalTools    []ChatToolOption       `json:"additional_tools,omitempty"`
 }
 
 type ChatModelOption struct {
@@ -64,6 +66,18 @@ type ChatModelOption struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Default     bool   `json:"default,omitempty"`
+}
+
+type ChatPermissionOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type ChatToolOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // SessionUpdate changes user-managed voice conversation metadata.

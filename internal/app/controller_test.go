@@ -187,6 +187,33 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 	}
 }
 
+func TestChatBackendsExposeConfiguredCreationPolicy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Permissions.Profiles["careful"] = config.PermissionProfile{Network: false, Root: "readonly", Workspace: "readonly"}
+	controller := &Controller{cfg: cfg}
+	backends := controller.ChatBackends(context.Background())
+	if len(backends) != 2 {
+		t.Fatalf("expected two backend options, got %#v", backends)
+	}
+	var foundProfile bool
+	for _, profile := range backends[0].PermissionProfiles {
+		if profile.ID == "careful" && profile.Description != "" {
+			foundProfile = true
+		}
+	}
+	if !foundProfile {
+		t.Fatalf("custom permission profile missing from backend: %#v", backends[0].PermissionProfiles)
+	}
+	if len(backends[1].AdditionalTools) < 10 {
+		t.Fatalf("expected complete Codex addition catalog, got %#v", backends[1].AdditionalTools)
+	}
+	for _, tool := range backends[1].AdditionalTools {
+		if tool.ID == "" || tool.Label == "" {
+			t.Fatalf("tool option lacks usable metadata: %#v", tool)
+		}
+	}
+}
+
 func TestControllerSelectedStateHydratesAndKicksStoredChat(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.Defaults.ProviderID = "test"

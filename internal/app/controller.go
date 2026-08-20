@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/offeredfile"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -416,11 +417,25 @@ type SessionState struct {
 }
 
 type ChatBackendState struct {
-	ID        domain.ChatBackend `json:"id"`
-	Label     string             `json:"label"`
-	Available bool               `json:"available"`
-	Detail    string             `json:"detail,omitempty"`
-	Models    []CodexModelOption `json:"models,omitempty"`
+	ID                 domain.ChatBackend       `json:"id"`
+	Label              string                   `json:"label"`
+	Available          bool                     `json:"available"`
+	Detail             string                   `json:"detail,omitempty"`
+	Models             []CodexModelOption       `json:"models,omitempty"`
+	PermissionProfiles []ChatPermissionOption   `json:"permission_profiles,omitempty"`
+	AdditionalTools    []ChatCreationToolOption `json:"additional_tools,omitempty"`
+}
+
+type ChatPermissionOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type ChatCreationToolOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 type CodexModelOption struct {
@@ -492,8 +507,13 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 
 // ChatBackends reports runtime availability and models for chat creation.
 func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
-	states := []ChatBackendState{{ID: domain.ChatBackendKoder, Label: "Koder", Available: c != nil && c.agent != nil}}
-	codex := ChatBackendState{ID: domain.ChatBackendCodex, Label: "Codex"}
+	permissions := c.chatPermissionOptions()
+	states := []ChatBackendState{{ID: domain.ChatBackendKoder, Label: "Koder", Available: c != nil && c.agent != nil, PermissionProfiles: permissions}}
+	codex := ChatBackendState{ID: domain.ChatBackendCodex, Label: "Codex", PermissionProfiles: permissions}
+	for _, toolID := range agent.CodexAdditionalToolIDs() {
+		spec := tools.Info(toolID)
+		codex.AdditionalTools = append(codex.AdditionalTools, ChatCreationToolOption{ID: string(toolID), Label: spec.Title, Description: spec.Description})
+	}
 	if c == nil || !c.cfg.Codex.Enabled {
 		codex.Detail = "Disabled in Koder configuration"
 		return append(states, codex)
@@ -530,6 +550,20 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 		codex.Detail = "Codex returned no usable models"
 	}
 	return append(states, codex)
+}
+
+func (c *Controller) chatPermissionOptions() []ChatPermissionOption {
+	if c == nil {
+		return nil
+	}
+	names := permissionprofile.ProfileNames(c.cfg.Permissions)
+	options := make([]ChatPermissionOption, 0, len(names))
+	for _, name := range names {
+		options = append(options, ChatPermissionOption{
+			ID: name, Label: permissionprofile.DisplayName(name), Description: permissionprofile.Description(name, c.cfg.Permissions),
+		})
+	}
+	return options
 }
 
 // StateDir returns the process state directory for server-owned durable data.

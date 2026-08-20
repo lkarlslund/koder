@@ -50,6 +50,20 @@ data class VoiceChatBackendOption(
 	val available: Boolean,
 	val detail: String = "",
 	val models: List<VoiceChatModelOption> = emptyList(),
+	val permissionProfiles: List<VoiceChatPermissionOption> = emptyList(),
+	val additionalTools: List<VoiceChatToolOption> = emptyList(),
+)
+
+data class VoiceChatPermissionOption(
+	val id: String,
+	val label: String,
+	val description: String = "",
+)
+
+data class VoiceChatToolOption(
+	val id: String,
+	val label: String,
+	val description: String = "",
 )
 
 data class VoiceChatCreateSpec(
@@ -283,6 +297,12 @@ object VoiceProtocol {
 					available = backend.optBoolean("available"), detail = backend.optString("detail"),
 					models = backend.optJSONArray("models").mapObjects { model ->
 						VoiceChatModelOption(model.getString("id"), model.optString("name", model.getString("id")), model.optString("description"), model.optBoolean("default"))
+					},
+					permissionProfiles = backend.optJSONArray("permission_profiles").mapObjects { profile ->
+						VoiceChatPermissionOption(profile.getString("id"), profile.optString("label", profile.getString("id")), profile.optString("description"))
+					},
+					additionalTools = backend.optJSONArray("additional_tools").mapObjects { tool ->
+						VoiceChatToolOption(tool.getString("id"), tool.optString("label", tool.getString("id")), tool.optString("description"))
 					},
 				)
 			},

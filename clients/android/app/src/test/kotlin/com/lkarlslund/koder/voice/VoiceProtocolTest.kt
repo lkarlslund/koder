@@ -170,10 +170,12 @@ class VoiceProtocolTest {
 		assertFalse(request.getJSONObject("tool_states").getBoolean("session_start"))
 
 		val home = VoiceProtocol.parseHome(
-			"""{"protocol":"voice.v1","chat_backends":[{"id":"koder","label":"Koder","available":true},{"id":"codex","label":"Codex","available":true,"models":[{"id":"gpt-5.6-codex","name":"GPT-5.6 Codex","default":true}]}],"chats":[{"id":"chat-1","session_id":"session-1","title":"Milestone","role":"execution","backend":"codex","workflow_role":"execution","interaction_mode":"voice","model_id":"gpt-5.6-codex"}]}""",
+			"""{"protocol":"voice.v1","chat_backends":[{"id":"koder","label":"Koder","available":true},{"id":"codex","label":"Codex","available":true,"models":[{"id":"gpt-5.6-codex","name":"GPT-5.6 Codex","default":true}],"permission_profiles":[{"id":"careful","label":"Careful","description":"Read-only workspace"}],"additional_tools":[{"id":"chat_status","label":"Chat status","description":"Publish progress"}]}],"chats":[{"id":"chat-1","session_id":"session-1","title":"Milestone","role":"execution","backend":"codex","workflow_role":"execution","interaction_mode":"voice","model_id":"gpt-5.6-codex"}]}""",
 		)
 		assertEquals("codex", home.chatBackends.last().id)
 		assertTrue(home.chatBackends.last().models.single().isDefault)
+		assertEquals("careful", home.chatBackends.last().permissionProfiles.single().id)
+		assertEquals("chat_status", home.chatBackends.last().additionalTools.single().id)
 		assertTrue(home.chats.single().isVoiceChat)
 		assertEquals("execution", home.chats.single().workflowRole)
 	}

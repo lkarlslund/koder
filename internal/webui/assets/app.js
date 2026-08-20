@@ -4290,13 +4290,12 @@
           this.switchingChat = {active: false, id: '', title: '', startedAt: 0};
           this.reportClientStateSoon();
         },
-        openChatCreator() {
+		openChatCreator() {
 		  this.newChatMenuOpen = false;
-		  const toolStates = {};
-		  this.codexToolChoices().forEach(tool => { toolStates[tool.id] = true; });
-		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: toolStates}};
+		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
 		  this.rpc('chat_backends', {}).then(backends => {
 			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
+			(this.chatCreatorBackend('codex')?.additional_tools || []).forEach(tool => { this.chatCreator.draft.tool_states[tool.id] = true; });
 			this.chatCreator.loading = false;
 		  }).catch(err => { this.chatCreator.loading = false; this.chatCreator.error = err.message; });
 		},
@@ -4307,9 +4306,11 @@
 		  if (!backend || !backend.available) return;
 		  this.chatCreator.draft.backend = id;
 		  this.chatCreator.draft.model_id = id === 'codex' ? String((backend.models || []).find(model => model.default)?.id || backend.models?.[0]?.id || '') : '';
+		  (backend.additional_tools || []).forEach(tool => { if (!(tool.id in this.chatCreator.draft.tool_states)) this.chatCreator.draft.tool_states[tool.id] = true; });
 		},
 		chatCreatorRoleOptions() { return [{id: 'orchestrator', label: 'Orchestrator', help: 'Coordinates work and other chats'}, {id: 'planning', label: 'Planning', help: 'Plans milestones and tasks'}, {id: 'execution', label: 'Execution', help: 'Implements a focused objective'}, {id: 'general', label: 'General', help: 'A flexible conversation'}]; },
-		codexToolChoices() { return [{id:'chat_status', label:'Chat status'}, {id:'chat_list', label:'Chats'}, {id:'chat_start', label:'Start chats'}, {id:'chat_send', label:'Message chats'}, {id:'session_list', label:'Sessions'}, {id:'milestone_list', label:'Milestones'}, {id:'milestone_update', label:'Update milestones'}, {id:'task_list', label:'Tasks'}, {id:'task_update_item', label:'Update tasks'}, {id:'present', label:'Present media'}, {id:'phone_photos_search', label:'Phone photos'}]; },
+		chatCreatorPermissionProfiles() { return this.chatCreatorBackend()?.permission_profiles || []; },
+		codexToolChoices() { return this.chatCreatorBackend('codex')?.additional_tools || []; },
 		createChatFromDraft() {
 		  const draft = this.chatCreator.draft;
 		  const backend = this.chatCreatorBackend(draft.backend);

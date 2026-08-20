@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/codexdriver"
@@ -21,6 +22,19 @@ var codexAdditionalTools = map[tools.ID]struct{}{
 	tools.SessionList: {}, tools.SessionDelegate: {}, tools.SessionStart: {},
 	tools.Present: {}, tools.ShowMedia: {}, tools.ShowImage: {}, tools.OfferFile: {},
 	tools.PhonePhotosSearch: {}, tools.PhonePhotosThumbs: {}, tools.PhonePhotoView: {},
+}
+
+// CodexAdditionalToolIDs returns the Koder tools that may complement Codex's
+// native tool set. Availability for a particular role and interaction mode is
+// still enforced when the thread is started and when a call is executed.
+func CodexAdditionalToolIDs() []tools.ID {
+	ids := make([]tools.ID, 0, len(codexAdditionalTools))
+	for _, toolID := range tools.RegisteredIDs() {
+		if _, ok := codexAdditionalTools[toolID]; ok {
+			ids = append(ids, toolID)
+		}
+	}
+	return slices.Clone(ids)
 }
 
 func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]codexdriver.DynamicTool, error) {
