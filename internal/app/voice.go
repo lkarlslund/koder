@@ -137,30 +137,11 @@ func (c *Controller) ListVoiceSessions(ctx context.Context) ([]voice.Session, er
 		if !session.DeletedAt.IsZero() {
 			continue
 		}
-		summary := voice.Session{
-			ID:          string(session.ID),
-			Title:       voiceSessionTitle(session),
-			Kind:        session.Kind.String(),
-			LastMessage: session.LastMessage,
-			UpdatedAt:   session.UpdatedAt,
-			Archived:    session.Archived,
-			Pinned:      session.Pinned,
-			Favorite:    session.Favorite,
-			Deleted:     !session.DeletedAt.IsZero(),
-		}
 		owner, loadErr := c.agent.LoadSession(ctx, session.ID)
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		for _, chatRecord := range owner.Snapshot().Chats {
-			if chatRecord.Archived {
-				continue
-			}
-			summary.ChatCount++
-			if isVoiceInteraction(chatRecord) {
-				summary.VoiceChats++
-			}
-		}
+		summary := clientSessionSummary(session, owner.Snapshot().Chats)
 		out = append(out, summary)
 	}
 	return out, nil
@@ -508,6 +489,9 @@ func clientSessionSummary(session domain.Session, chats []domain.Chat) voice.Ses
 		UpdatedAt: session.UpdatedAt, Archived: session.Archived, Pinned: session.Pinned, Favorite: session.Favorite,
 	}
 	for _, item := range chats {
+		if item.UpdatedAt.After(summary.UpdatedAt) {
+			summary.UpdatedAt = item.UpdatedAt
+		}
 		if item.Archived {
 			continue
 		}

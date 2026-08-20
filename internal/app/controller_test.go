@@ -2619,6 +2619,20 @@ func TestVoiceChatLifecycleIsDurableAndSelectable(t *testing.T) {
 	}
 }
 
+func TestClientSessionSummaryUsesLatestChatActivity(t *testing.T) {
+	created := time.Now().UTC().Add(-2 * time.Hour)
+	latest := created.Add(90 * time.Minute)
+	summary := clientSessionSummary(domain.Session{
+		ID: "session-activity", Kind: domain.SessionKindRegular, Title: "Activity", CreatedAt: created, UpdatedAt: created,
+	}, []domain.Chat{
+		{ID: "chat-old", SessionID: "session-activity", UpdatedAt: created.Add(time.Minute)},
+		{ID: "chat-latest", SessionID: "session-activity", UpdatedAt: latest},
+	})
+	if !summary.UpdatedAt.Equal(latest) {
+		t.Fatalf("session summary updated_at = %s, want latest chat activity %s", summary.UpdatedAt, latest)
+	}
+}
+
 func TestVoiceChatOrganizationIsDurableAndDeletedChatsAreOmitted(t *testing.T) {
 	ctrl, _ := newPersistentTestControllerWithConfig(t, nil)
 	ctx := context.Background()
