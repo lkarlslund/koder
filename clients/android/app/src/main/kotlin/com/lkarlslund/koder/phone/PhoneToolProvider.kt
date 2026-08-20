@@ -58,6 +58,7 @@ class AndroidPhoneToolProvider(
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "koder-phone-tools").apply { isDaemon = true }
     },
+    private val intentLauncher: ((Intent) -> Unit)? = null,
 ) : PhoneToolProvider {
     override fun enabledActions(): Set<String> = actionPolicies().keys
 
@@ -122,6 +123,7 @@ class AndroidPhoneToolProvider(
         "send_sms" -> sendSMS(args)
         "compose_email" -> composeEmail(args)
         "create_contact" -> createContact(args)
+        "edit_contact" -> editContact(args)
         "create_calendar_event" -> createCalendarEvent(args)
         "open_map" -> openMap(args)
         "set_alarm" -> setAlarm(args)
@@ -301,6 +303,19 @@ class AndroidPhoneToolProvider(
         launch(intent); return PhoneToolResult("New contact screen opened for review")
     }
 
+    private fun editContact(args: Map<String, String>): PhoneToolResult {
+        val proposed = listOf("phone_number", "email", "address", "note").filter { !args[it].isNullOrBlank() }
+        if (proposed.isEmpty()) error("At least one proposed phone_number, email, address, or note is required")
+        val contact = resolveContact(args)
+        val intent = Intent(Intent.ACTION_EDIT).setDataAndType(contact.uri, ContactsContract.Contacts.CONTENT_ITEM_TYPE)
+            .putExtra(ContactsContract.Intents.Insert.PHONE, args["phone_number"].orEmpty())
+            .putExtra(ContactsContract.Intents.Insert.EMAIL, args["email"].orEmpty())
+            .putExtra(ContactsContract.Intents.Insert.POSTAL, args["address"].orEmpty())
+            .putExtra(ContactsContract.Intents.Insert.NOTES, args["note"].orEmpty())
+        launch(intent)
+        return PhoneToolResult("Opened ${contact.name} for review with proposed ${proposed.joinToString()}")
+    }
+
     private fun createCalendarEvent(args: Map<String, String>): PhoneToolResult {
         val start = parseTime(args["start_time"]) ?: error("start_time must be RFC 3339")
         val intent = Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
@@ -388,7 +403,7 @@ class AndroidPhoneToolProvider(
         activity.runOnUiThread {
             try {
                 if (intent.resolveActivity(activity.packageManager) == null) error("No app can handle this action")
-                activity.startActivity(intent)
+                intentLauncher?.invoke(intent) ?: activity.startActivity(intent)
             } catch (error: Throwable) {
                 failure.set(error)
             } finally {
@@ -426,6 +441,38 @@ class AndroidPhoneToolProvider(
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC",
         ).useCursor { cursor -> if (cursor.moveToFirst()) number = cursor.string(0) }
         return number.ifBlank { error("No phone number found for $name") }
+    }
+
+    private data class ResolvedContact(val name: String, val uri: Uri)
+
+    private fun resolveContact(args: Map<String, String>): ResolvedContact {
+        val requestedID = args["contact_id"]?.trim().orEmpty()
+        val requestedName = (args["contact_name"] ?: args["query"])?.trim().orEmpty()
+        if (requestedID.isBlank() && requestedName.isBlank()) error("contact_id or contact_name is required")
+        val selection: String
+        val selectionArgs: Array<String>
+        if (requestedID.isNotBlank()) {
+            selection = ContactsContract.Contacts._ID + " = ?"
+            selectionArgs = arrayOf(requestedID)
+        } else {
+            selection = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY + " LIKE ?"
+            selectionArgs = arrayOf("%$requestedName%")
+        }
+        val matches = mutableListOf<ResolvedContact>()
+        activity.contentResolver.query(
+            ContactsContract.Contacts.CONTENT_URI,
+            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.LOOKUP_KEY, ContactsContract.Contacts.DISPLAY_NAME_PRIMARY),
+            selection, selectionArgs, ContactsContract.Contacts.DISPLAY_NAME_PRIMARY + " ASC",
+        ).useCursor { cursor ->
+            while (cursor.moveToNext() && matches.size < 2) {
+                val id = cursor.getLong(0)
+                val uri = ContactsContract.Contacts.getLookupUri(id, cursor.string(1)) ?: continue
+                matches += ResolvedContact(cursor.string(2).ifBlank { requestedName.ifBlank { "contact" } }, uri)
+            }
+        }
+        if (matches.isEmpty()) error("No matching contact was found")
+        if (matches.size > 1) error("More than one contact matched; use search_contacts and pass contact_id")
+        return matches.single()
     }
 
     private fun humanAction(action: String) = action.replace('_', ' ')

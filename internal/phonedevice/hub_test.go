@@ -47,6 +47,8 @@ func TestHubAppliesPhoneConfirmationPolicies(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
+	releaseTurn := hub.BeginVoiceTurn("Open Spotify")
+	defer releaseTurn()
 	capabilities := hub.Capabilities()
 	got := make(map[Action]bool, len(capabilities))
 	for _, capability := range capabilities {
@@ -73,6 +75,18 @@ func TestCatalogPublishesCallHistoryAsReadOnlySearch(t *testing.T) {
 	}
 	if entry.Confirmation || !strings.Contains(entry.Arguments, "since_time") || !strings.Contains(entry.Summary, "missed calls") {
 		t.Fatalf("call history catalog entry = %#v", entry)
+	}
+}
+
+func TestCatalogPublishesContactEditAsReviewedMutation(t *testing.T) {
+	entry, ok := known[EditContact]
+	if !ok || !entry.Confirmation {
+		t.Fatalf("edit_contact catalog entry = %#v, exists=%v", entry, ok)
+	}
+	for _, required := range []string{"contact_id", "address", "note", "never save directly"} {
+		if !strings.Contains(entry.Arguments+" "+entry.Summary, required) {
+			t.Fatalf("edit_contact catalog entry lacks %q: %#v", required, entry)
+		}
 	}
 }
 
@@ -168,6 +182,61 @@ func TestExplicitlyRequestsMap(t *testing.T) {
 				t.Fatalf("explicitlyRequestsMap(%q) = %v, want %v", input, got, want)
 			}
 		})
+	}
+}
+
+func TestUserFacingPhoneActionsRequireMatchingExplicitRequest(t *testing.T) {
+	tests := []struct {
+		utterance string
+		want      []Action
+	}{
+		{"Check my email", nil},
+		{"What's on my calendar?", nil},
+		{"What is happening where I am?", nil},
+		{"Open this link in the browser", []Action{OpenURL}},
+		{"Open Spotify", []Action{OpenApp}},
+		{"Show me the route on a map", []Action{OpenMap}},
+		{"Write and send an email to Steen", []Action{ComposeEmail}},
+		{"Create a calendar appointment tomorrow", []Action{CreateCalendarEvent}},
+		{"Update Steen's phone number", []Action{EditContact}},
+		{"Add Steen to my contacts", []Action{CreateContact}},
+		{"Ring til Steen", []Action{PlaceCall}},
+	}
+	for _, test := range tests {
+		t.Run(test.utterance, func(t *testing.T) {
+			allowed := explicitlyRequestedUserFacingActions(test.utterance)
+			got := make([]Action, 0, len(allowed))
+			for _, entry := range catalog {
+				if allowed[entry.Action] {
+					got = append(got, entry.Action)
+				}
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("allowed actions = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHubDefaultDeniesAllUserFacingPhoneActions(t *testing.T) {
+	hub := &Hub{}
+	release, err := hub.Attach("call-1", []string{"device_status", "open_url", "open_app"}, func(context.Context, string, Action, map[string]string) (Result, error) {
+		return Result{Text: "done"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if got := capabilityActions(hub.Capabilities()); !slices.Equal(got, []Action{DeviceStatus}) {
+		t.Fatalf("between-turn capabilities = %v", got)
+	}
+	if _, err := hub.Execute(context.Background(), OpenURL, map[string]string{"url": "https://example.com"}); err == nil {
+		t.Fatal("open_url executed without a matching explicit request")
+	}
+	releaseTurn := hub.BeginVoiceTurn("Open this link in my browser")
+	defer releaseTurn()
+	if got := capabilityActions(hub.Capabilities()); !slices.Equal(got, []Action{DeviceStatus, OpenURL}) {
+		t.Fatalf("explicit URL capabilities = %v", got)
 	}
 }
 

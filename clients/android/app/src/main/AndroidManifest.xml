@@ -32,6 +32,7 @@
         <intent><action android:name="android.intent.action.SEND" /></intent>
         <intent><action android:name="android.intent.action.SENDTO" /></intent>
         <intent><action android:name="android.intent.action.INSERT" /></intent>
+        <intent><action android:name="android.intent.action.EDIT" /></intent>
     </queries>
 
     <application

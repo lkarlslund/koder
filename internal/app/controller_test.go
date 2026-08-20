@@ -2713,7 +2713,7 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 	for _, expected := range []string{
 		"delegate it with the resolved place name",
 		"Find notable public events happening in Aarhus today",
-		"open_map requires an explicit request in the current voice utterance",
+		"phone action open_map requires an explicit request for that user-facing action in the current voice utterance",
 	} {
 		if !strings.Contains(joinedRequests, expected) {
 			t.Fatalf("voice routing did not contain %q: %s", expected, joinedRequests)

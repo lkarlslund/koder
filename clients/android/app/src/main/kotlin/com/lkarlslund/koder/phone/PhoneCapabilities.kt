@@ -27,7 +27,7 @@ object PhoneCapabilities {
         PhoneCapability(
             "contacts", "Contacts",
             "Search names, phone numbers, and email addresses; prepare new contacts.",
-            setOf("search_contacts", "create_contact"),
+            setOf("search_contacts", "create_contact", "edit_contact"),
             arrayOf(Manifest.permission.READ_CONTACTS),
         ),
         PhoneCapability(

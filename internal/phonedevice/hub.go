@@ -26,6 +26,7 @@ const (
 	SendSMS             Action = "send_sms"
 	ComposeEmail        Action = "compose_email"
 	CreateContact       Action = "create_contact"
+	EditContact         Action = "edit_contact"
 	CreateCalendarEvent Action = "create_calendar_event"
 	OpenMap             Action = "open_map"
 	SetAlarm            Action = "set_alarm"
@@ -46,31 +47,35 @@ type CatalogEntry struct {
 	Summary      string
 	Arguments    string
 	Confirmation bool
+	// UserFacing marks actions that visibly or audibly affect the phone. They
+	// are withheld unless the current utterance explicitly requests the action.
+	UserFacing bool
 }
 
 var catalog = []CatalogEntry{
-	{DeviceStatus, "Read battery, charging, storage, network, locale, and time-zone status", "none", false},
-	{GetLocation, "Read and resolve the phone's current location for questions about where the user is or what is happening nearby; this does not display a map", "none", false},
-	{SearchContacts, "Search device contacts and return matching names, phone numbers, and email addresses", "query; optional limit", false},
-	{UpcomingCalendar, "Search calendar events in a time range", "optional query, start_time, end_time, limit", false},
-	{SearchSMS, "Search SMS messages stored on the phone", "optional query, phone_number, since_time, limit", false},
-	{SearchCallHistory, "Search recent incoming, outgoing, rejected, and missed calls stored on the phone", "optional query, phone_number, since_time, limit", false},
-	{RecentNotifications, "Search current notifications, including enabled email and messaging previews", "optional query, app, limit", false},
-	{PlaceCall, "Place a real phone call after confirmation on the phone", "phone_number or contact_name", true},
-	{SendSMS, "Send an SMS after confirmation on the phone", "phone_number or contact_name; message", true},
-	{ComposeEmail, "Open a prefilled email draft for the user to review and send", "optional to, subject, body", true},
-	{CreateContact, "Open a prefilled new-contact screen for the user to save", "name; optional phone_number, email", true},
-	{CreateCalendarEvent, "Create a calendar event after confirmation on the phone", "title, start_time; optional end_time, location, description", true},
-	{OpenMap, "Display a place or route in the phone's map app only when the user explicitly asks to see a map, open a place, or navigate; never use this merely to determine or describe where the user is", "query or latitude and longitude", true},
-	{SetAlarm, "Open a prefilled alarm on the phone", "hour, minute; optional label", true},
-	{SetTimer, "Open a prefilled timer on the phone", "duration_seconds; optional label", true},
-	{ReadClipboard, "Read the current clipboard while Koder Voice is in the foreground", "none", false},
-	{WriteClipboard, "Replace the phone clipboard after confirmation", "text", true},
-	{OpenURL, "Open an HTTPS URL on the phone", "url", true},
-	{MediaControl, "Control the active media session", "media_action: play, pause, toggle, next, or previous", true},
-	{ListApps, "Search launchable apps installed on the phone", "optional query, limit", false},
-	{OpenApp, "Open an installed app", "package_name", true},
-	{ShareText, "Open Android's share sheet with text", "text; optional title", true},
+	{DeviceStatus, "Read battery, charging, storage, network, locale, and time-zone status", "none", false, false},
+	{GetLocation, "Read and resolve the phone's current location for questions about where the user is or what is happening nearby; this does not display a map", "none", false, false},
+	{SearchContacts, "Search device contacts and return matching names, phone numbers, and email addresses", "query; optional limit", false, false},
+	{UpcomingCalendar, "Search calendar events in a time range", "optional query, start_time, end_time, limit", false, false},
+	{SearchSMS, "Search SMS messages stored on the phone", "optional query, phone_number, since_time, limit", false, false},
+	{SearchCallHistory, "Search recent incoming, outgoing, rejected, and missed calls stored on the phone", "optional query, phone_number, since_time, limit", false, false},
+	{RecentNotifications, "Search current notifications, including enabled email and messaging previews", "optional query, app, limit", false, false},
+	{PlaceCall, "Place a real phone call after confirmation on the phone", "phone_number or contact_name", true, true},
+	{SendSMS, "Send an SMS after confirmation on the phone", "phone_number or contact_name; message", true, true},
+	{ComposeEmail, "Open a prefilled email draft for the user to review and send", "optional to, subject, body", true, true},
+	{CreateContact, "Open a prefilled new-contact screen for the user to save", "name; optional phone_number, email", true, true},
+	{EditContact, "Open one existing contact with proposed changes for review; never save directly", "contact_id or contact_name; one or more of phone_number, email, address, note", true, true},
+	{CreateCalendarEvent, "Open a prefilled calendar event for the user to review and save", "title, start_time; optional end_time, location, description", true, true},
+	{OpenMap, "Display a place or route in the phone's map app only when the user explicitly asks to see a map, open a place, or navigate; never use this merely to determine or describe where the user is", "query or latitude and longitude", true, true},
+	{SetAlarm, "Open a prefilled alarm on the phone", "hour, minute; optional label", true, true},
+	{SetTimer, "Open a prefilled timer on the phone", "duration_seconds; optional label", true, true},
+	{ReadClipboard, "Read the current clipboard while Koder Voice is in the foreground", "none", false, false},
+	{WriteClipboard, "Replace the phone clipboard after confirmation", "text", true, true},
+	{OpenURL, "Open an HTTPS URL on the phone", "url", true, true},
+	{MediaControl, "Control the active media session", "media_action: play, pause, toggle, next, or previous", true, true},
+	{ListApps, "Search launchable apps installed on the phone", "optional query, limit", false, false},
+	{OpenApp, "Open an installed app", "package_name", true, true},
+	{ShareText, "Open Android's share sheet with text", "text; optional title", true, true},
 }
 
 var known = func() map[Action]CatalogEntry {
@@ -118,8 +123,8 @@ type Hub struct {
 }
 
 type voiceTurnPolicy struct {
-	generation   uint64
-	allowOpenMap bool
+	generation        uint64
+	allowedUserFacing map[Action]bool
 }
 
 // BeginVoiceTurn limits intent-sensitive phone actions to those explicitly
@@ -134,8 +139,8 @@ func (h *Hub) BeginVoiceTurn(userText string) func() {
 	h.turnGeneration++
 	generation := h.turnGeneration
 	h.turn = &voiceTurnPolicy{
-		generation:   generation,
-		allowOpenMap: explicitlyRequestsMap(userText),
+		generation:        generation,
+		allowedUserFacing: explicitlyRequestedUserFacingActions(userText),
 	}
 	h.mu.Unlock()
 	var once sync.Once
@@ -148,6 +153,60 @@ func (h *Hub) BeginVoiceTurn(userText string) func() {
 			}
 		})
 	}
+}
+
+func explicitlyRequestedUserFacingActions(text string) map[Action]bool {
+	normalized := strings.ToLower(text)
+	allowed := make(map[Action]bool)
+	containsAny := func(terms ...string) bool {
+		for _, term := range terms {
+			if strings.Contains(normalized, term) {
+				return true
+			}
+		}
+		return false
+	}
+	allow := func(action Action, terms ...string) {
+		if containsAny(terms...) {
+			allowed[action] = true
+		}
+	}
+	if explicitlyRequestsMap(text) {
+		allowed[OpenMap] = true
+	}
+	openVerb := containsAny("open ", "show ", "visit ", "go to ", "launch ", "start ", "åbn ", "vis ", "gå til ", "start ")
+	urlTarget := containsAny("url", "link", "website", "web page", "webpage", "browser", "hjemmeside", "webside", "http://", "https://", "www.")
+	if openVerb && urlTarget {
+		allowed[OpenURL] = true
+	}
+	if openVerb && !urlTarget && !allowed[OpenMap] {
+		allowed[OpenApp] = true
+	}
+	allow(ShareText, "share ", "share this", "del ", "del dette")
+	if containsAny("email", "e-mail", "mail ") && containsAny("compose", "write", "send", "draft", "skriv", "send", "kladde") {
+		allowed[ComposeEmail] = true
+	}
+	contactTarget := containsAny("contact", "contacts", "phone number", "email address", "kontakt", "kontakter", "telefonnummer", "mailadresse")
+	if contactTarget && containsAny("add", "create", "save", "tilføj", "opret", "gem") {
+		allowed[CreateContact] = true
+	}
+	if contactTarget && containsAny("edit", "update", "change", "correct", "rediger", "opdater", "ændr", "ret ") {
+		allowed[EditContact] = true
+	}
+	if containsAny("calendar", "appointment", "event", "meeting", "kalender", "aftale", "møde") && containsAny("add", "create", "schedule", "book", "make", "tilføj", "opret", "planlæg", "book", "lav") {
+		allowed[CreateCalendarEvent] = true
+	}
+	allow(PlaceCall, "call ", "phone call", "ring ", "dial ", "ring til", "ring op")
+	if containsAny("sms", "text message", "message", "besked") && containsAny("send", "write", "text ", "skriv") {
+		allowed[SendSMS] = true
+	}
+	allow(SetAlarm, "alarm", "vækkeur")
+	allow(SetTimer, "timer", "nedtælling")
+	if containsAny("clipboard", "udklipsholder", "copy ", "kopier ") && containsAny("write", "put", "save", "copy", "skriv", "sæt", "gem", "kopier") {
+		allowed[WriteClipboard] = true
+	}
+	allow(MediaControl, "play ", "pause ", "resume ", "next track", "previous track", "afspil ", "sæt på pause", "fortsæt ", "næste sang", "forrige sang")
+	return allowed
 }
 
 func explicitlyRequestsMap(text string) bool {
@@ -244,7 +303,7 @@ func (h *Hub) Capabilities() []CatalogEntry {
 	}
 	out := make([]CatalogEntry, 0, len(h.active.actions))
 	for _, entry := range catalog {
-		if entry.Action == OpenMap && (h.turn == nil || !h.turn.allowOpenMap) {
+		if entry.UserFacing && (h.turn == nil || !h.turn.allowedUserFacing[entry.Action]) {
 			continue
 		}
 		if h.active.actions[entry.Action] {
@@ -271,9 +330,10 @@ func (h *Hub) Execute(ctx context.Context, action Action, args map[string]string
 		h.mu.RUnlock()
 		return Result{}, fmt.Errorf("phone action %q is not enabled or the phone is disconnected", action)
 	}
-	if action == OpenMap && (h.turn == nil || !h.turn.allowOpenMap) {
+	entry, knownAction := known[action]
+	if knownAction && entry.UserFacing && (h.turn == nil || !h.turn.allowedUserFacing[action]) {
 		h.mu.RUnlock()
-		return Result{}, errors.New("phone action open_map requires an explicit request in the current voice utterance to view a map or navigate")
+		return Result{}, fmt.Errorf("phone action %s requires an explicit request for that user-facing action in the current voice utterance", action)
 	}
 	execute := active.execute
 	callID := active.callID

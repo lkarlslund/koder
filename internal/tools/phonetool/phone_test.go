@@ -64,6 +64,44 @@ func TestPhoneDefinitionKeepsLocalContextReadOnly(t *testing.T) {
 	}
 }
 
+func TestPhoneDefinitionIncludesReviewedContactEditArguments(t *testing.T) {
+	control := catalogControl{entries: []phonedevice.CatalogEntry{catalogEntry(t, phonedevice.EditContact)}}
+	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	if !enabled {
+		t.Fatal("phone definition is disabled")
+	}
+	parameters := string(definition.Function.Parameters)
+	for _, required := range []string{`"edit_contact"`, `"contact_id"`, `"address"`, `"note"`} {
+		if !strings.Contains(parameters, required) {
+			t.Fatalf("phone parameters lack %s: %s", required, parameters)
+		}
+	}
+}
+
+func TestPhoneDefinitionLabelsUserFacingActions(t *testing.T) {
+	control := catalogControl{entries: []phonedevice.CatalogEntry{
+		catalogEntry(t, phonedevice.GetLocation),
+		catalogEntry(t, phonedevice.OpenURL),
+	}}
+	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	if !enabled {
+		t.Fatal("phone definition is disabled")
+	}
+	description := definition.Function.Description
+	for _, required := range []string{
+		"open_url: Open an HTTPS URL",
+		"USER-FACING ACTION",
+		"current user utterance explicitly requests that exact action",
+		"never call one to gain knowledge",
+		"get_location: Read and resolve",
+		"without opening another app",
+	} {
+		if !strings.Contains(description, required) {
+			t.Fatalf("phone definition does not contain %q: %s", required, description)
+		}
+	}
+}
+
 func TestPhoneToolCallsInjectedControl(t *testing.T) {
 	control := &fakeControl{}
 	result, err := tools.Call(context.Background(), tools.Options{

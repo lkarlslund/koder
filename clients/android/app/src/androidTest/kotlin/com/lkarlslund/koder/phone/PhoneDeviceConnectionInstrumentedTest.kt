@@ -2,6 +2,14 @@ package com.lkarlslund.koder.phone
 
 import android.location.Address
 import android.location.Location
+import android.Manifest
+import android.content.ContentValues
+import android.content.Intent
+import android.provider.ContactsContract
+import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
+import com.lkarlslund.koder.MainActivity
+import com.lkarlslund.koder.SecureSettings
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -20,6 +28,73 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PhoneDeviceConnectionInstrumentedTest {
+	@Test
+	fun editContactResolvesExistingContactAndOpensProposedChangesForReview() {
+		val instrumentation = InstrumentationRegistry.getInstrumentation()
+		val context = instrumentation.targetContext
+		instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CONTACTS)
+		val rawContact = try {
+			context.contentResolver.insert(ContactsContract.RawContacts.CONTENT_URI, ContentValues())
+				?: error("Could not create test contact")
+		} finally {
+			instrumentation.uiAutomation.dropShellPermissionIdentity()
+		}
+		val rawID = rawContact.lastPathSegment?.toLongOrNull() ?: error("Missing raw contact id")
+		instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CONTACTS)
+		try {
+			context.contentResolver.insert(ContactsContract.Data.CONTENT_URI, ContentValues().apply {
+				put(ContactsContract.Data.RAW_CONTACT_ID, rawID)
+				put(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
+				put(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, "Steen Review Test")
+			}) ?: error("Could not name test contact")
+		} finally {
+			instrumentation.uiAutomation.dropShellPermissionIdentity()
+		}
+		instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CONTACTS)
+		val contactID = context.contentResolver.query(
+			ContactsContract.RawContacts.CONTENT_URI,
+			arrayOf(ContactsContract.RawContacts.CONTACT_ID),
+			ContactsContract.RawContacts._ID + " = ?", arrayOf(rawID.toString()), null,
+		)?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0).toString() else "" }.orEmpty()
+		assertTrue(contactID.isNotBlank())
+		val settings = SecureSettings(context).also { it.savePhoneActionPolicy("edit_contact", PhoneActionPolicy.ON) }
+		val completed = CountDownLatch(1)
+		val editorReceived = CountDownLatch(1)
+		var editorIntent: Intent? = null
+		var provider: AndroidPhoneToolProvider? = null
+		try {
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				scenario.onActivity { activity ->
+					provider = AndroidPhoneToolProvider(activity, settings, intentLauncher = { intent ->
+						editorIntent = intent
+						editorReceived.countDown()
+					})
+					provider?.execute("edit_contact", mapOf(
+						"contact_id" to contactID,
+						"phone_number" to "+45 12345678",
+						"note" to "Met at DHL Stafet",
+					)) { result ->
+						assertTrue(result.getOrThrow().text.contains("Steen Review Test"))
+						completed.countDown()
+					}
+				}
+				assertTrue(completed.await(5, TimeUnit.SECONDS))
+				assertTrue(editorReceived.await(5, TimeUnit.SECONDS))
+					assertTrue(editorIntent?.dataString.orEmpty().contains("contacts/lookup"))
+					assertEquals("+45 12345678", editorIntent?.getStringExtra(ContactsContract.Intents.Insert.PHONE))
+					assertEquals("Met at DHL Stafet", editorIntent?.getStringExtra(ContactsContract.Intents.Insert.NOTES))
+			}
+		} finally {
+			provider?.close()
+			instrumentation.uiAutomation.adoptShellPermissionIdentity(Manifest.permission.WRITE_CONTACTS)
+			try {
+				context.contentResolver.delete(rawContact, null, null)
+			} finally {
+				instrumentation.uiAutomation.dropShellPermissionIdentity()
+			}
+		}
+	}
+
 	@Test
 	fun locationResultIncludesHumanPlaceNameForLocalContextQuestions() {
 		val capturedAt = System.currentTimeMillis() - 2_000

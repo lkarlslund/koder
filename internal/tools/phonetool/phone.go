@@ -60,7 +60,11 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 		if capability.Confirmation {
 			confirmation = " The phone asks the user to confirm."
 		}
-		lines = append(lines, fmt.Sprintf("%s: %s. Arguments: %s.%s", action, capability.Summary, capability.Arguments, confirmation))
+		visibility := " Reads phone data without opening another app."
+		if capability.UserFacing {
+			visibility = " USER-FACING ACTION: visibly or audibly affects the phone; call only when the user explicitly requested this exact action, never to gather knowledge."
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s. Arguments: %s.%s%s", action, capability.Summary, capability.Arguments, visibility, confirmation))
 	}
 	slices.Sort(actions)
 	schema, err := json.Marshal(map[string]any{
@@ -71,6 +75,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			"limit":            map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
 			"phone_number":     map[string]any{"type": "string"},
 			"contact_name":     map[string]any{"type": "string"},
+			"contact_id":       map[string]any{"type": "string"},
 			"message":          map[string]any{"type": "string"},
 			"to":               map[string]any{"type": "string"},
 			"subject":          map[string]any{"type": "string"},
@@ -83,6 +88,8 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			"since_time":       map[string]any{"type": "string", "description": "RFC 3339 timestamp"},
 			"location":         map[string]any{"type": "string"},
 			"description":      map[string]any{"type": "string"},
+			"address":          map[string]any{"type": "string"},
+			"note":             map[string]any{"type": "string"},
 			"latitude":         map[string]any{"type": "number"},
 			"longitude":        map[string]any{"type": "number"},
 			"hour":             map[string]any{"type": "integer", "minimum": 0, "maximum": 23},
@@ -101,7 +108,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	if err != nil {
 		return tools.ToolSpec{}, false
 	}
-	spec.Usage = "Use only for an action on the currently connected phone. For current local information, first read get_location; if outside research is needed, delegate it with the resolved place name. Do not open another phone app unless the user asked to see or act on something there. Enabled actions:\n- " + strings.Join(lines, "\n- ")
+	spec.Usage = "Use only for an action on the currently connected phone. Actions marked USER-FACING ACTION open UI, cause sound, communicate, or change phone state. Call one only when the current user utterance explicitly requests that exact action; never call one to gain knowledge, perform research, or inspect its result. For current local information, first read get_location; if outside research is needed, delegate it with the resolved place name. Enabled actions:\n- " + strings.Join(lines, "\n- ")
 	spec.Parameters = string(schema)
 	return spec, true
 }
