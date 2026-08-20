@@ -5743,7 +5743,7 @@
 		},
 		modelCapabilityBadges(model) {
 		  const badges = [];
-		  if (model?.supports_chat !== false) badges.push('Chat');
+		  if (model?.capabilities_known && model?.supports_chat !== false) badges.push('Chat');
 		  if (model?.supports_tools) badges.push('Tools');
 		  if (model?.supports_images) badges.push('Vision');
 		  if (model?.supports_pdfs) badges.push('PDF');
