@@ -1875,7 +1875,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val backends = readinessHome?.chatBackends.orEmpty().filter { it.available }.ifEmpty {
 			listOf(VoiceChatBackendOption("koder", "Koder", true))
 		}
-		val titleField = EditText(this).apply { hint = "Conversation name"; contentDescription = "Conversation name"; setSingleLine() }
+		val titleField = EditText(this).apply {
+			hint = "Conversation name"
+			contentDescription = if (dialogTitle.contains("temporary", ignoreCase = true)) "Temporary conversation name" else "Conversation name"
+			setSingleLine()
+		}
 		val backendSpinner = Spinner(this)
 		val roleSpinner = Spinner(this)
 		val modelSpinner = Spinner(this)
@@ -1883,6 +1887,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val milestoneField = EditText(this).apply { hint = "Optional milestone key"; setSingleLine() }
 		val taskField = EditText(this).apply { hint = "Optional task reference"; setSingleLine() }
 		val toolContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+		val toolSection = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			addView(label("Koder additions"), spaced(top = 12))
+			addView(toolContainer)
+			addView(helper("Codex keeps its native tools. These Koder capabilities can be disabled for this conversation."), spaced(top = 4))
+		}
 		val toolChecks = linkedMapOf<String, CheckBox>()
 		val roles = listOf("orchestrator", "planning", "execution", "standalone")
 		backendSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, backends.map { it.label })
@@ -1910,7 +1920,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				toolChecks[tool.id] = check
 				toolContainer.addView(check)
 			}
-			toolContainer.visibility = if (backend.additionalTools.isEmpty()) View.GONE else View.VISIBLE
+			toolSection.visibility = if (backend.additionalTools.isEmpty()) View.GONE else View.VISIBLE
 		}
 		backendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
 			override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = updateBackendOptions(position)
@@ -1928,8 +1938,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			addView(label("Permission profile")); addView(permissionSpinner, spaced(bottom = 10))
 			addView(label("Execution scope")); addView(milestoneField); addView(taskField)
 			addView(helper("Choose a milestone or a task, not both. Scope is used by execution chats."), spaced(top = 4))
-			addView(label("Koder additions"), spaced(top = 12)); addView(toolContainer)
-			addView(helper("Codex keeps its native tools. These Koder capabilities can be disabled for this conversation."), spaced(top = 4))
+			addView(toolSection)
 		}
 		AlertDialog.Builder(this).setTitle(dialogTitle).setView(ScrollView(this).apply { addView(fields) })
 			.setNegativeButton("Cancel", null)
