@@ -604,7 +604,9 @@ class MainActivityInstrumentedTest {
                 onView(withContentDescription("Conversation list")).perform(swipeDown())
                 val labels = waitForText(scenario, "Newest")
                 assertTrue(labels.indexOf("Newest") < labels.indexOf("Older"))
-				assertEquals(2, labels.count { it.contains("ago") })
+				// DateUtils may render a recent timestamp as "Yesterday" rather
+				// than "1 day ago" depending on the emulator date and locale.
+				assertEquals(2, labels.count { it.startsWith("Session · 0 chats · 0 voice · ") })
                 assertTrue(waitForText(scenario, "Update Koder").any { it.contains("next-dev") })
             }
         } finally {
