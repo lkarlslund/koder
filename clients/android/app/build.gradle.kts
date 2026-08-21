@@ -226,7 +226,9 @@ tasks.named("preBuild").configure {
 
 dependencies {
 	implementation("com.plasmoverse:concentus:1.0.0")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("androidx.activity:activity-ktx:1.12.2")
+    implementation("androidx.fragment:fragment:1.9.0")
     implementation("androidx.core:core:1.17.0")
     implementation("androidx.core:core-telecom:1.0.1")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")

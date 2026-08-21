@@ -60,6 +60,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
@@ -164,6 +167,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var resumedOnce = false
 	private var updateCheckGeneration = 0L
 	private var conversationFilter = ConversationFilter.ACTIVE
+	private var setupManualExpanded = false
 
 	private var updateIndicator: TextView? = null
 	private var updateDialog: AlertDialog? = null
@@ -278,8 +282,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				} else if (screen == Screen.READINESS) {
 					readinessCheck?.close()
 					if (readinessReturnToSettings) showSettings() else readinessHome?.let(::showHome) ?: loadHome()
-                } else if (screen == Screen.SETUP && settings.server.isNotBlank()) {
-                    showSettings()
+                } else if (screen == Screen.SETUP) {
+					if (settings.server.isNotBlank()) showSettings()
+					else if (setupManualExpanded) showSetup(manual = false)
+					else {
+						isEnabled = false
+						onBackPressedDispatcher.onBackPressed()
+					}
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -334,6 +343,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun bindFromIntent(intent: Intent?): Boolean {
 		val uri = intent?.data ?: return false
 		if (uri.scheme != "koder" || uri.host != "bind") return false
+		bindPhone(uri)
+		return true
+	}
+
+	private fun bindPhone(uri: Uri) {
 		showBindingProgress()
 		bindingClient.bind(uri) { result ->
 			runOnUiThread {
@@ -348,7 +362,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				)
 			}
 		}
-		return true
+	}
+
+	private fun scanBindingQR() {
+		val options = GmsBarcodeScannerOptions.Builder()
+			.setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+			.enableAutoZoom()
+			.build()
+		GmsBarcodeScanning.getClient(this, options).startScan()
+			.addOnSuccessListener { barcode ->
+				val uri = barcode.rawValue?.let { runCatching { Uri.parse(it) }.getOrNull() }
+				if (uri?.scheme == "koder" && uri.host == "bind") bindPhone(uri)
+				else showSetup("That QR code is not a Koder phone-binding code.", manual = false)
+			}
+			.addOnFailureListener { failure ->
+				showSetup(
+					"Couldn’t open the QR scanner: ${failure.message ?: "Google Play services is unavailable"}",
+					manual = false,
+				)
+			}
 	}
 
 	private fun rememberResultIntent(intent: Intent?): Boolean {
@@ -520,14 +552,35 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-    private fun showSetup(error: String = "") {
+    private fun showSetup(error: String = "", manual: Boolean = settings.server.isNotBlank()) {
         screen = Screen.SETUP
+		setupManualExpanded = manual
         clearCallViews()
         val content = column()
         content.addView(logo(), centeredSquare(88, bottom = 18))
         content.addView(title("Welcome to Koder Voice"), matchWrap())
-		content.addView(body("Open Koder on your computer, tap the phone icon, and scan its Bind phone QR code with this phone's camera. Koder Voice will open and connect automatically."), spaced(bottom = 12))
-		content.addView(helper("You can also enter an existing server credential manually below."), spaced(bottom = 24))
+		if (!manual) {
+			content.addView(body("Open Koder on your computer, tap the phone icon, and choose Bind this phone. Then scan the one-time QR code."), spaced(bottom = 12))
+			content.addView(helper("The QR code securely supplies the server address and creates a private token for this phone."), spaced(bottom = 20))
+			if (error.isNotBlank()) content.addView(errorText(error), spaced(bottom = 12))
+			content.addView(Button(this).apply {
+				text = "Scan binding QR"
+				isAllCaps = false
+				contentDescription = "Scan Koder binding QR code"
+				setOnClickListener { scanBindingQR() }
+			}, matchWrap())
+			content.addView(helper("Scanning is handled privately on this phone and does not require Koder Voice to have camera permission."), spaced(top = 10, bottom = 18))
+			content.addView(Button(this).apply {
+				text = "Set up manually"
+				isAllCaps = false
+				contentDescription = "Set up Koder connection manually"
+				setOnClickListener { showSetup(manual = true) }
+			}, matchWrap())
+			showScrollable(content)
+			return
+		}
+
+		content.addView(body("Manual connection is an advanced fallback for a server that already has a reusable voice access token."), spaced(bottom = 20))
 
         content.addView(label("Server address"), matchWrap())
         val serverField = EditText(this).apply {
@@ -566,8 +619,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				settings = settings.copy(server = serverAddress, token = tokenField.text.toString())
                 secureSettings.save(settings.server, settings.token)
 				loadHome(offerReadiness = true)
-            }
+			}
         }, matchWrap())
+		content.addView(Button(this).apply {
+			text = "Back to QR scan"
+			isAllCaps = false
+			contentDescription = "Back to QR setup"
+			setOnClickListener { showSetup(manual = false) }
+		}, spaced(top = 8))
         showScrollable(content)
     }
 

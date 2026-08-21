@@ -266,16 +266,25 @@ class MainActivityInstrumentedTest {
 	}
 
     @Test
-    fun firstRunExplainsBothConnectionFields() {
+    fun firstRunOffersBindingQRBeforeManualCredentials() {
         clearSettings()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                val labels = activity.findViewById<View>(android.R.id.content).allText()
+                var labels = activity.findViewById<View>(android.R.id.content).allText()
                 assertTrue(labels.contains("Welcome to Koder Voice"))
+				assertTrue(labels.contains("Scan binding QR"))
+				assertTrue(labels.contains("Set up manually"))
+				assertFalse(labels.contains("Server address"))
+				assertFalse(labels.contains("Access token"))
+				activity.findViewById<View>(android.R.id.content)
+					.findByDescription("Set up Koder connection manually")
+					.performClick()
+				labels = activity.findViewById<View>(android.R.id.content).allText()
                 assertTrue(labels.contains("Server address"))
                 assertTrue(labels.contains("Access token"))
                 assertTrue(labels.any { it.contains("stored encrypted") })
                 assertTrue(labels.contains("Connect"))
+				assertTrue(labels.contains("Back to QR scan"))
                 assertFalse(labels.contains("Send"))
             }
         }
@@ -323,6 +332,9 @@ class MainActivityInstrumentedTest {
         SecureSettings(context).save("", "visible-secret")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
+				activity.findViewById<View>(android.R.id.content)
+					.findByDescription("Set up Koder connection manually")
+					.performClick()
                 val tokenField = activity.findViewById<View>(android.R.id.content)
                     .findByDescription("Access token") as EditText
                 assertTrue(tokenField.inputType and android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD != 0)

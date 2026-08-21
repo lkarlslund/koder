@@ -110,7 +110,15 @@ rolling-release workflow builds the official APK once, embeds the same signed
 bytes and metadata into both Linux binaries, and does not publish a standalone
 APK.
 
-Start Koder on the trusted LAN with its speech provider configured:
+Start Koder on the trusted LAN with its speech provider configured. On first
+launch, Koder Voice offers to scan a binding QR. In Koder's web UI, open the
+phone dialog and choose **Bind this phone**; scanning that one-time QR supplies
+the server address and creates a private per-device token automatically. The
+scanner runs through Google Play services, does not require camera permission,
+and adds minimal weight to the APK.
+
+Manual connection remains an advanced fallback for servers configured with a
+reusable voice token:
 
 ```sh
 openssl rand -hex 32
@@ -119,13 +127,13 @@ KODER_VOICE_TOKEN='<paste-the-generated-token>' \
 ```
 
 Enter the computer's LAN URL, for example `http://192.168.1.20:7979`, and the
-same token in the app. Do not use `localhost` on a physical phone. Cleartext
+same token under **Set up manually**. Do not use `localhost` on a physical phone. Cleartext
 HTTP is only appropriate on a trusted private network; use an HTTPS reverse
 proxy and enter its `https://` URL for `wss://` transport elsewhere.
 
-The welcome screen explains both fields; the access token is optional when the
-server has no voice token configured. The token is encrypted using Android
-Keystore. The app then connects without activating audio and presents existing
+The manual access token is optional when the server has no voice token
+configured. QR-issued and manual tokens are encrypted using Android Keystore.
+The app then connects without activating audio and presents existing
 voice conversations plus a New Conversation action. Conversations show their
 last-used time in newest-first order; pull down on the list to refresh it.
 Selecting a conversation opens its dedicated voice/text screen. On the first conversation, grant
