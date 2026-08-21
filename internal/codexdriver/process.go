@@ -130,7 +130,7 @@ func (f *sandboxProcessFactory) chatHome(chatID domain.ID) (string, error) {
 	}
 	stateDir := strings.TrimSpace(f.cfg.StateDir)
 	if stateDir == "" {
-		return "", errors.New("Codex state directory is required")
+		return "", errors.New("codex state directory is required")
 	}
 	return filepath.Join(stateDir, "codex", "chats", value), nil
 }
@@ -217,7 +217,7 @@ func copySeedFile(source, target string) error {
 	if err != nil {
 		return fmt.Errorf("open Codex configuration %s: %w", filepath.Base(source), err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	info, err := in.Stat()
 	if err != nil {
 		return fmt.Errorf("inspect Codex configuration %s: %w", filepath.Base(source), err)

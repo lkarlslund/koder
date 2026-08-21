@@ -78,7 +78,7 @@ func (m *Manager) Models(ctx context.Context) ([]codexapp.Model, error) {
 		return nil, err
 	}
 	client := codexapp.New(cfg)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	return client.Models(ctx)
 }
 
@@ -493,7 +493,7 @@ func (m *Manager) consumeTurn(ctx context.Context, client *codexapp.Client, rt *
 				}
 			case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
 				_ = client.Respond(msg.ID, map[string]string{"decision": "decline"}, nil)
-				return fmt.Errorf("Codex requested interactive approval despite Koder's externally enforced sandbox")
+				return fmt.Errorf("codex requested interactive approval despite Koder's externally enforced sandbox")
 			case "item/agentMessage/delta":
 				delta := stringField(msg.Params, "delta")
 				messageID := stringField(msg.Params, "itemId")
