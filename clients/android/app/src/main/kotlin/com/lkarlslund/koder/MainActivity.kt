@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private var pendingSession: VoiceSession? = null
 	private var selectedKoderSession: VoiceSession? = null
 	private var currentSessionChats: List<VoiceSession> = emptyList()
+	private var showArchivedSessionChats = false
 	private var lastRecoveryError = ""
 	private var lastTurnErrorId = ""
 	private var startAfterModelRecovery = false
@@ -1618,6 +1619,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun loadSession(session: VoiceSession) {
 		selectedKoderSession = session
+		showArchivedSessionChats = false
 		screen = Screen.LOADING
 		showContent(column(Gravity.CENTER_HORIZONTAL).apply {
 			gravity = Gravity.CENTER
@@ -1640,7 +1642,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun showSession(session: VoiceSession, home: VoiceHome) {
 		currentSessionChats = home.chats
 		if (pendingResultSessionId.isNotBlank() && pendingResultOwnerSessionId == session.id) {
-			home.chats.firstOrNull { it.id == pendingResultSessionId && it.isVoiceChat }?.let {
+			home.chats.firstOrNull { it.id == pendingResultSessionId && it.isVoiceChat && !it.archived }?.let {
 				selectedKoderSession = session
 				openChat(it)
 				return
@@ -1673,10 +1675,27 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}, spaced(bottom = 10))
 		root.addView(helper("Voice conversations can use this session’s workspace, tools, and other chats."), spaced(bottom = 12))
 		val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-		if (home.chats.isEmpty()) {
-			list.addView(helper("This session has no chats."), spaced(top = 12, bottom = 12))
+		val activeChats = home.chats.filterNot(VoiceSession::archived)
+		val archivedChats = home.chats.filter(VoiceSession::archived)
+		if (activeChats.isEmpty()) {
+			list.addView(helper("This session has no active chats."), spaced(top = 12, bottom = 12))
 		} else {
-			home.chats.forEach { chat -> list.addView(koderChatCard(session, chat), spaced(bottom = 5)) }
+			activeChats.forEach { chat -> list.addView(koderChatCard(session, chat), spaced(bottom = 5)) }
+		}
+		if (archivedChats.isNotEmpty()) {
+			list.addView(Button(this).apply {
+				text = if (showArchivedSessionChats) "Hide archived (${archivedChats.size})" else "Show archived (${archivedChats.size})"
+				isAllCaps = false
+				contentDescription = text
+				setOnClickListener {
+					showArchivedSessionChats = !showArchivedSessionChats
+					showSession(session, home)
+				}
+			}, spaced(top = 5, bottom = 8))
+			if (showArchivedSessionChats) {
+				list.addView(helper("Archived chats"), spaced(bottom = 6))
+				archivedChats.forEach { chat -> list.addView(koderChatCard(session, chat), spaced(bottom = 5)) }
+			}
 		}
 		root.addView(ScrollView(this).apply { addView(list, matchWrap()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 		root.addView(Button(this).apply {

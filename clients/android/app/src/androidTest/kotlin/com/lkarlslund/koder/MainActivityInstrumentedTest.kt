@@ -549,7 +549,7 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
-	fun sessionBrowserShowsEveryChatButOnlyVoiceChatsAreSelectable() {
+	fun sessionBrowserHidesArchivedChatsUntilRequestedAndOnlyVoiceChatsAreSelectable() {
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when (request.target) {
@@ -557,7 +557,7 @@ class MainActivityInstrumentedTest {
 					"""{"protocol":"voice.v1","sessions":[{"id":"session-1","title":"Laptop repair","kind":"regular","chat_count":3,"voice_chat_count":1}],"voice_sessions":[]}""",
 				).build()
 				"/voice/v1/sessions/session-1/chats" -> MockResponse.Builder().body(
-					"""{"protocol":"voice.v1","chats":[{"id":"work-1","session_id":"session-1","title":"BIOS investigation","role":"execution","status_text":"Checking firmware"},{"id":"plan-1","session_id":"session-1","title":"Repair plan","role":"planning"},{"id":"voice-1","session_id":"session-1","title":"Laptop conversation","role":"voice"}],"voice_sessions":[]}""",
+					"""{"protocol":"voice.v1","chats":[{"id":"work-1","session_id":"session-1","title":"BIOS investigation","role":"execution","status_text":"Checking firmware"},{"id":"plan-1","session_id":"session-1","title":"Repair plan","role":"planning"},{"id":"voice-1","session_id":"session-1","title":"Laptop conversation","role":"voice"},{"id":"archived-1","session_id":"session-1","title":"Old experiment","role":"execution","archived":true}],"voice_sessions":[]}""",
 				).build()
 				else -> MockResponse.Builder().code(404).build()
 			}
@@ -579,6 +579,10 @@ class MainActivityInstrumentedTest {
 				onView(withText("Cancel")).inRoot(isDialog()).perform(click())
 				onView(withContentDescription("Open Laptop repair. 3 chats · 1 voice")).perform(click())
 				val labels = waitForText(scenario, "Laptop conversation")
+				assertTrue(labels.none { it == "Old experiment" })
+				onView(withContentDescription("Show archived (1)")).perform(click())
+				waitForText(scenario, "Old experiment")
+				onView(withContentDescription("Hide archived (1)")).check(matches(isDisplayed()))
 				assertTrue(labels.contains("BIOS investigation"))
 				assertTrue(labels.any { it.contains("Checking firmware") })
 				onView(withContentDescription("BIOS investigation, execution chat, visible but not selectable")).check(matches(isDisplayed()))
