@@ -18,7 +18,7 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.random.Random
 
-enum class VoiceOrbMode { IDLE, CONNECTING, LISTENING, USER_SPEAKING, PROCESSING, WORKING, AI_SPEAKING }
+enum class VoiceOrbMode { IDLE, PAUSED, CONNECTING, LISTENING, USER_SPEAKING, PROCESSING, WORKING, AI_SPEAKING }
 
 fun voiceOrbMode(stage: CallController.Stage?): VoiceOrbMode = when (stage) {
 	CallController.Stage.RECORDING -> VoiceOrbMode.USER_SPEAKING
@@ -27,11 +27,13 @@ fun voiceOrbMode(stage: CallController.Stage?): VoiceOrbMode = when (stage) {
 	CallController.Stage.WORKING -> VoiceOrbMode.WORKING
 	CallController.Stage.SPEAKING -> VoiceOrbMode.AI_SPEAKING
 	CallController.Stage.LISTENING, CallController.Stage.MUTED -> VoiceOrbMode.LISTENING
+	CallController.Stage.DISCONNECTED, CallController.Stage.HELD, CallController.Stage.ERROR -> VoiceOrbMode.PAUSED
 	else -> VoiceOrbMode.IDLE
 }
 
 fun voiceOrbDescription(mode: VoiceOrbMode): String = when (mode) {
 	VoiceOrbMode.IDLE -> "Voice conversation inactive"
+	VoiceOrbMode.PAUSED -> "Voice conversation paused"
 	VoiceOrbMode.CONNECTING -> "Koder is connecting"
 	VoiceOrbMode.LISTENING -> "Koder is listening"
 	VoiceOrbMode.USER_SPEAKING -> "You are speaking"
@@ -41,7 +43,7 @@ fun voiceOrbDescription(mode: VoiceOrbMode): String = when (mode) {
 }
 
 fun shouldAnimateVoiceOrb(mode: VoiceOrbMode, systemAnimationsEnabled: Boolean, shown: Boolean): Boolean =
-	systemAnimationsEnabled && shown && mode != VoiceOrbMode.IDLE
+	systemAnimationsEnabled && shown && mode != VoiceOrbMode.IDLE && mode != VoiceOrbMode.PAUSED
 
 fun highContrastEnabled(context: Context): Boolean = runCatching {
 	Settings.Secure.getInt(context.contentResolver, "high_text_contrast_enabled", 0) == 1
@@ -127,7 +129,7 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		val animationsEnabled = ValueAnimator.areAnimatorsEnabled()
 		val now = System.nanoTime()
 		val seconds = if (animationsEnabled) (now - startedAt) / 1_000_000_000f else 0f
-		if (animationsEnabled && mode != VoiceOrbMode.IDLE) {
+		if (shouldAnimateVoiceOrb(mode, animationsEnabled, isShown)) {
 			val elapsed = ((now - lastFrameAt) / 1_000_000_000f).coerceIn(0f, 0.1f)
 			starTravel += elapsed * voiceStarTravelRate(mode)
 		}
@@ -137,12 +139,14 @@ class VoiceStateOrbView @JvmOverloads constructor(
 			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(44, 232, 255), now)
 			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(188, 104, 255), now)
 			VoiceOrbMode.WORKING -> drawSpinner(canvas, cx, cy, radius, seconds)
+			VoiceOrbMode.PAUSED -> drawResumeSymbol(canvas, cx, cy, radius)
 			else -> Unit
 		}
 		canvas.restore()
 		paint.style = Paint.Style.STROKE
 		paint.strokeWidth = rimWidth
 		paint.color = when (mode) {
+			VoiceOrbMode.PAUSED -> Color.rgb(112, 123, 145)
 			VoiceOrbMode.USER_SPEAKING -> Color.rgb(44, 232, 255)
 			VoiceOrbMode.AI_SPEAKING -> Color.rgb(188, 104, 255)
 			VoiceOrbMode.WORKING -> Color.rgb(255, 176, 66)
@@ -150,6 +154,18 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		}
 		canvas.drawCircle(cx, cy, radius - paint.strokeWidth, paint)
 		if (shouldAnimateVoiceOrb(mode, animationsEnabled, isShown)) postInvalidateOnAnimation()
+	}
+
+	private fun drawResumeSymbol(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
+		val triangle = Path().apply {
+			moveTo(cx - radius * 0.12f, cy - radius * 0.18f)
+			lineTo(cx + radius * 0.20f, cy)
+			lineTo(cx - radius * 0.12f, cy + radius * 0.18f)
+			close()
+		}
+		paint.style = Paint.Style.FILL
+		paint.color = Color.rgb(178, 190, 214)
+		canvas.drawPath(triangle, paint)
 	}
 
 	private fun drawStars(canvas: Canvas, cx: Float, cy: Float, radius: Float, travel: Float) {

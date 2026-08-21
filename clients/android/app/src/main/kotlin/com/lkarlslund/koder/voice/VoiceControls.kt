@@ -39,13 +39,6 @@ fun conversationStatusText(stage: CallController.Stage?, detail: String): String
 	ConversationAvailability.ONLINE -> detail
 }
 
-fun primaryVoiceControlLabel(stage: CallController.Stage?, currentlyActive: Boolean): String = when (stage) {
-	CallController.Stage.ERROR -> "Retry"
-	CallController.Stage.DISCONNECTED, CallController.Stage.HELD -> "Resume"
-	null -> if (currentlyActive) "Pause" else "Resume"
-	else -> "Pause"
-}
-
 fun reconnectStatus(reason: String): String = when {
 	reason.contains("HTTP 401", ignoreCase = true) || reason.contains("unauthorized", ignoreCase = true) ->
 		"Authorization failed · check Settings"

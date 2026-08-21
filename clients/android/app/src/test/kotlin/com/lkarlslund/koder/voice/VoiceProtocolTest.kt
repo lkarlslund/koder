@@ -77,18 +77,6 @@ class VoiceProtocolTest {
 	}
 
 	@Test
-	fun transcriptSearchEncodesQueryAndDecodesJumpContext() {
-		val request = JSONObject(VoiceProtocol.searchHistory("boots normally"))
-		assertEquals("search_history", request.getString("type"))
-		assertEquals("boots normally", request.getString("query"))
-		val frame = VoiceProtocol.parse(
-			"""{"type":"history_search","protocol":"voice.v1","search_results":[{"match":{"id":"m2","role":"assistant","text":"It boots normally."},"context":[{"id":"m1","role":"user","text":"Check it"},{"id":"m2","role":"assistant","text":"It boots normally."}]}]}""",
-		)
-		assertEquals("m2", frame.searchResults.single().match.id)
-		assertEquals(listOf("m1", "m2"), frame.searchResults.single().context.map { it.id })
-	}
-
-	@Test
 	fun messageCarriesDurableTranscriptIdentity() {
 		val frame = VoiceProtocol.parse(
 			"""{"type":"message","protocol":"voice.v1","message":{"spoken_text":"Done.","transcript_id":"assistant-42","parts":[]}}""",
@@ -136,11 +124,15 @@ class VoiceProtocolTest {
 		assertEquals(7, requireNotNull(PresentationDocuments.parse(presentation.data)).blocks.size)
 		assertEquals(
 			ConversationSurface.PRESENTATION,
-			conversationSurface(active = true, transcriptShown = false, presentationShown = true),
+			conversationSurface(transcriptShown = false, presentationShown = true),
 		)
 		assertEquals(
 			ConversationSurface.TRANSCRIPT,
-			conversationSurface(active = true, transcriptShown = true, presentationShown = true),
+			conversationSurface(transcriptShown = true, presentationShown = true),
+		)
+		assertEquals(
+			ConversationSurface.ACTIVE,
+			conversationSurface(transcriptShown = false, presentationShown = false),
 		)
 	}
 

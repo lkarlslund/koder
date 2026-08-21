@@ -6,15 +6,6 @@ import org.junit.Test
 
 class AudioRoutePreferenceTest {
 	@Test
-	fun routeChipAlwaysNamesTheCurrentEndpoint() {
-		assertEquals("Audio  ▾", audioRouteChipText(""))
-		assertEquals("Speaker  ▾", audioRouteChipText("Speaker"))
-		assertEquals("Earpiece  ▾", audioRouteChipText("Phone earpiece"))
-		assertEquals("Pixel Buds  ▾", audioRouteChipText("Bluetooth: Pixel Buds"))
-		assertEquals("USB headset  ▾", audioRouteChipText("Headset: USB headset"))
-	}
-
-	@Test
 	fun speakerIsTheDefaultBuiltInRoute() {
 		assertEquals(BuiltInAudioRoute.SPEAKER, BuiltInAudioRoute.fromStorage(null))
 		assertEquals(BuiltInAudioRoute.SPEAKER, BuiltInAudioRoute.fromStorage("invalid"))

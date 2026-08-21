@@ -95,7 +95,6 @@ import com.lkarlslund.koder.voice.VoiceSessionClient
 import com.lkarlslund.koder.voice.VoiceChatCreateSpec
 import com.lkarlslund.koder.voice.VoiceChatBackendOption
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
-import com.lkarlslund.koder.voice.VoiceTranscriptSearchResult
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceAudioFormat
 import com.lkarlslund.koder.voice.VoiceResponsePacing
@@ -108,7 +107,6 @@ import com.lkarlslund.koder.voice.VoiceHaptics
 import com.lkarlslund.koder.voice.VoiceStateOrbView
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
-import com.lkarlslund.koder.voice.audioRouteChipText
 import com.lkarlslund.koder.voice.conversationAvailability
 import com.lkarlslund.koder.voice.conversationSurface
 import com.lkarlslund.koder.voice.conversationStatusText
@@ -118,9 +116,9 @@ import com.lkarlslund.koder.voice.isVoiceChat
 import com.lkarlslund.koder.voice.highContrastEnabled
 import com.lkarlslund.koder.voice.latestConversationLabel
 import com.lkarlslund.koder.voice.markdownToHtml
-import com.lkarlslund.koder.voice.primaryVoiceControlLabel
 import com.lkarlslund.koder.voice.shouldNotifyCompletedWork
 import com.lkarlslund.koder.voice.voiceOrbMode
+import com.lkarlslund.koder.voice.voiceOrbDescription
 import com.lkarlslund.koder.voice.voiceOrbSizeDp
 import java.io.File
 import java.time.Duration
@@ -135,7 +133,7 @@ import kotlin.math.abs
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
 	private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, SESSION, CHAT }
-	private enum class ConversationFilter { ACTIVE, FAVORITES, ARCHIVED }
+	private enum class ConversationFilter { ACTIVE, ARCHIVED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
 
     private lateinit var controller: CallController
@@ -190,13 +188,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var speechAutomaticCheck: CheckBox? = null
 	private val phoneActionGroups = mutableMapOf<String, RadioGroup>()
 	private var composerView: View? = null
-	private var pauseButton: ImageButton? = null
 	private var transcriptButton: ImageButton? = null
 	private var muteButton: ImageButton? = null
-	private var audioButton: TextView? = null
-	private var searchButton: ImageButton? = null
-	private var savedButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
+	private var conversationListeningActive = false
 	private var transcriptShown = false
 	private var transcriptOpened = false
 	private var followConversationBottom = true
@@ -206,7 +201,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private val renderedHistoryIDs = linkedSetOf<String>()
 	private val renderedPartKeys = linkedSetOf<String>()
 	private var cachedConversationHistory = emptyList<VoiceTranscriptEntry>()
-	private var searchContextShown = false
+	private var focusedTranscriptContextShown = false
 	private var savedResponses: List<SavedVoiceResponse> = emptyList()
 	private var placeholderTitle: TextView? = null
 	private var placeholderDetail: TextView? = null
@@ -431,7 +426,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				Toast.makeText(this, snapshot.detail.ifBlank { "Voice request failed" }, Toast.LENGTH_LONG).show()
 			}
 			if (screen != Screen.CHAT) return@runOnUiThread
-			voiceOrb?.mode = voiceOrbMode(snapshot.stage)
+			voiceOrb?.apply {
+				mode = voiceOrbMode(snapshot.stage)
+				contentDescription = orbToggleDescription(snapshot.stage)
+			}
 			voiceOrbDetail?.apply {
 				text = snapshot.detail
 				contentDescription = snapshot.detail
@@ -455,13 +453,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				contentDescription = if (snapshot.microphoneMuted) "Unmute microphone" else "Mute microphone"
 				setImageResource(if (snapshot.microphoneMuted) R.drawable.ic_voice_mic_off else R.drawable.ic_voice_mic)
 				setActionAppearance(this, if (snapshot.microphoneMuted) ACTION_RED else ACTION_BLUE, snapshot.microphoneMuted)
-				ViewCompat.setTooltipText(this, contentDescription)
-			}
-			audioButton?.apply {
-				isEnabled = snapshot.audioEndpoints.isNotEmpty()
-				text = audioRouteChipText(snapshot.audioEndpointName)
-				contentDescription = "Audio route: ${snapshot.audioEndpointName.ifBlank { "loading" }}. Tap to switch"
-				setAudioRouteAppearance(this)
 				ViewCompat.setTooltipText(this, contentDescription)
 			}
             if (snapshot.appUpdate != null && snapshot.appUpdate != lastAppUpdate) {
@@ -540,17 +531,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			if (screen != Screen.CHAT) return@runOnUiThread
 			val expected = if (user) CallController.Stage.RECORDING else CallController.Stage.SPEAKING
 			if (latestCallSnapshot.stage == expected) voiceOrb?.setAudioWaveform(samples)
-		}
-	}
-
-	override fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) {
-		runOnUiThread {
-			if (screen != Screen.CHAT) return@runOnUiThread
-			if (error != null) {
-				Toast.makeText(this, error, Toast.LENGTH_LONG).show()
-				return@runOnUiThread
-			}
-			showTranscriptSearchResults(results)
 		}
 	}
 
@@ -872,7 +852,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val availableSessions = home.sessions.ifEmpty { home.voiceSessions }
 		val counts = mapOf(
 			ConversationFilter.ACTIVE to availableSessions.count { !it.archived },
-			ConversationFilter.FAVORITES to availableSessions.count { it.favorite && !it.archived },
 			ConversationFilter.ARCHIVED to availableSessions.count { it.archived },
 		)
 		root.addView(LinearLayout(this).apply {
@@ -880,7 +859,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			ConversationFilter.entries.forEach { filter ->
 				val label = when (filter) {
 					ConversationFilter.ACTIVE -> "Active"
-					ConversationFilter.FAVORITES -> "Starred"
 					ConversationFilter.ARCHIVED -> "Archived"
 				}
 				addView(TextView(this@MainActivity).apply {
@@ -907,7 +885,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val visibleSessions = availableSessions.filter { session ->
 			when (conversationFilter) {
 				ConversationFilter.ACTIVE -> !session.archived
-				ConversationFilter.FAVORITES -> session.favorite && !session.archived
 				ConversationFilter.ARCHIVED -> session.archived
 			}
 		}
@@ -1535,7 +1512,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val time = session.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty()
 		addView(LinearLayout(this@MainActivity).apply {
 			orientation = LinearLayout.VERTICAL
-			addView(label(if (session.favorite) "★  $titleText" else titleText).apply {
+			addView(label(titleText).apply {
 				setTypeface(typeface, Typeface.BOLD)
 				maxLines = 1
 				ellipsize = TextUtils.TruncateAt.END
@@ -1560,14 +1537,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun showKoderSessionMenu(anchor: View, session: VoiceSession) {
 		PopupMenu(this, anchor).apply {
-			menu.add(if (session.favorite) "Remove star" else "Add star")
 			menu.add("Rename")
 			menu.add(if (session.archived) "Restore from archive" else "Archive")
 			menu.add("Delete")
 			setOnMenuItemClickListener { item ->
 				when (item.title.toString()) {
-					"Add star" -> updateKoderSession(session, favorite = true)
-					"Remove star" -> updateKoderSession(session, favorite = false)
 					"Rename" -> showRenameKoderSessionDialog(session)
 					"Archive" -> showArchiveKoderSessionDialog(session)
 					"Restore from archive" -> updateKoderSession(session, archived = false)
@@ -1579,8 +1553,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun updateKoderSession(session: VoiceSession, title: String? = null, archived: Boolean? = null, favorite: Boolean? = null) {
-		sessionClient.update(settings.server, settings.token, session.id, title = title, archived = archived, favorite = favorite) { result ->
+	private fun updateKoderSession(session: VoiceSession, title: String? = null, archived: Boolean? = null) {
+		sessionClient.update(settings.server, settings.token, session.id, title = title, archived = archived) { result ->
 			runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = ::showManagementError) }
 		}
 	}
@@ -1898,10 +1872,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			orientation = LinearLayout.VERTICAL
 			gravity = Gravity.CENTER_VERTICAL
 			addView(TextView(this@MainActivity).apply {
-				val markers = buildString {
-					if (session.pinned) append("◆ ")
-					if (session.favorite) append("★ ")
-				}
+				val markers = if (session.pinned) "◆ " else ""
 				text = markers + titleText
 				textSize = 16f
 				setTypeface(typeface, Typeface.BOLD)
@@ -1952,7 +1923,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				else -> menu.add(if (session.pinned) "Unpin" else "Pin to top")
 			}
 			if (!session.deleted) {
-				menu.add(if (session.favorite) "Remove star" else "Add star")
 				if (!session.archived) menu.add("Archive")
 				menu.add("Rename")
 				menu.add("Delete")
@@ -1961,8 +1931,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				when (it.title.toString()) {
 					"Pin to top" -> updateVoiceSession(session, pinned = true)
 					"Unpin" -> updateVoiceSession(session, pinned = false)
-					"Add star" -> updateVoiceSession(session, favorite = true)
-					"Remove star" -> updateVoiceSession(session, favorite = false)
 					"Archive" -> showArchiveVoiceSessionDialog(session)
 					"Restore from archive" -> updateVoiceSession(session, archived = false)
 					"Undo delete" -> updateVoiceSession(session, deleted = false)
@@ -2011,13 +1979,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		session: VoiceSession,
 		archived: Boolean? = null,
 		pinned: Boolean? = null,
-		favorite: Boolean? = null,
 		deleted: Boolean? = null,
 		onSuccess: ((VoiceHome) -> Unit)? = null,
 	) {
 		sessionClient.update(
 			settings.server, settings.token, session.id,
-			archived = archived, pinned = pinned, favorite = favorite, deleted = deleted,
+			archived = archived, pinned = pinned, deleted = deleted,
 		) { result ->
 			runOnUiThread {
 				result.fold(onSuccess = onSuccess ?: ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() })
@@ -2056,7 +2023,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         addView(logo(), centeredSquare(58, bottom = 16))
 		val heading = when (filter) {
 			ConversationFilter.ACTIVE -> "Your conversations will live here."
-			ConversationFilter.FAVORITES -> "No starred conversations yet."
 			ConversationFilter.ARCHIVED -> "Nothing is archived."
 		}
 		addView(body(heading).apply {
@@ -2302,7 +2268,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		renderedHistoryIDs.clear()
 		renderedPartKeys.clear()
 		cachedConversationHistory = emptyList()
-		searchContextShown = false
+		focusedTranscriptContextShown = false
 		savedResponses = secureSettings.savedVoiceResponses(session.id)
         val root = column()
         val heading = LinearLayout(this).apply {
@@ -2322,19 +2288,25 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     marginStart = dp(10)
                 },
             )
-			pauseButton = iconActionButton(R.drawable.ic_voice_pause, "Pause voice conversation", ACTION_ORANGE).apply {
-				tag = "Pause"
-				contentDescription = "Pause voice conversation"
-				setOnClickListener {
-					if (tag == "Pause") controller.setPaused(true)
-					else if (latestCallSnapshot.stage == CallController.Stage.HELD) controller.setPaused(false)
-					else requestCallStart()
-				}
-			}.also { addView(it, actionLayout(start = 6)) }
 			muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
 					contentDescription = "Mute microphone"
 					setOnClickListener { controller.setMicrophoneMuted(!latestCallSnapshot.microphoneMuted) }
 				}.also { addView(it, actionLayout(start = 6)) }
+			addView(TextView(this@MainActivity).apply {
+				text = "⋮"
+				textSize = 30f
+				gravity = Gravity.CENTER
+				minWidth = dp(48)
+				minHeight = dp(48)
+				contentDescription = "Conversation options"
+				isClickable = true
+				isFocusable = true
+				val selectable = TypedValue()
+				if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
+					setBackgroundResource(selectable.resourceId)
+				}
+				setOnClickListener(::showConversationMenu)
+			}, actionLayout(start = 6))
 			}
         root.addView(heading, matchWrap())
 		status = helper(initialDetail).apply {
@@ -2367,16 +2339,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					updateConversationMode(null)
 				}
 			}.also { addView(it, actionLayout()) }
-			audioButton = audioRouteButton().apply {
-				isEnabled = false
-				setOnClickListener(::showAudioRouteMenu)
-			}.also { addView(it, routeActionLayout(start = 8)) }
-			searchButton = iconActionButton(R.drawable.ic_voice_search, "Search transcript", ACTION_BLUE).apply {
-				setOnClickListener { showTranscriptSearchDialog() }
-			}.also { addView(it, actionLayout(start = 8)) }
-			savedButton = iconActionButton(R.drawable.ic_voice_saved, "Saved responses", ACTION_ORANGE).apply {
-				setOnClickListener { showSavedResponses() }
-			}.also { addView(it, actionLayout(start = 8)) }
 		}
 		root.addView(modeActions, matchWrap())
 
@@ -2385,6 +2347,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			gravity = Gravity.CENTER
 			voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
 				mode = voiceOrbMode(CallController.Stage.CONNECTING)
+				contentDescription = orbToggleDescription(CallController.Stage.CONNECTING)
+				isClickable = true
+				isFocusable = true
+				setOnClickListener { toggleOrbListening() }
 			}.also { addView(it, centeredSquare(voiceOrbSizeDp(resources.configuration.fontScale), bottom = 22)) }
 			voiceOrbDetail = body(initialDetail).apply {
 				gravity = Gravity.CENTER
@@ -2441,7 +2407,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			visibility = View.GONE
 			contentDescription = "Jump to latest message"
 			setOnClickListener {
-				if (searchContextShown) renderHistory(
+				if (focusedTranscriptContextShown) renderHistory(
 					latestCallSnapshot.voiceSessionId,
 					latestCallSnapshot.history.ifEmpty { cachedConversationHistory },
 				)
@@ -2536,33 +2502,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
 	private fun updateConversationMode(stage: CallController.Stage?) {
-		val active = when (stage) {
-			null -> pauseButton?.tag == "Pause"
-			CallController.Stage.DISCONNECTED, CallController.Stage.HELD, CallController.Stage.ERROR -> false
-			else -> true
-		}
+		val active = isConversationListening(stage)
+		conversationListeningActive = active
 		if (active) {
 			window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 		} else {
 			window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 		}
-		pauseButton?.apply {
-			val label = primaryVoiceControlLabel(stage, active)
-			tag = label
-			setImageResource(when (label) {
-				"Pause" -> R.drawable.ic_voice_pause
-				"Retry" -> R.drawable.ic_voice_retry
-				else -> R.drawable.ic_voice_play
-			})
-			contentDescription = when (label) {
-				"Pause" -> "Pause voice conversation"
-				"Retry" -> "Retry voice connection"
-				else -> "Resume voice conversation"
-			}
-			setActionAppearance(this, if (label == "Retry") ACTION_RED else ACTION_ORANGE, label != "Pause")
-			ViewCompat.setTooltipText(this, contentDescription)
-		}
-		val surface = conversationSurface(active, transcriptShown, presentationShown)
+		voiceOrb?.contentDescription = orbToggleDescription(stage)
+		val surface = conversationSurface(transcriptShown, presentationShown)
 		status?.visibility = if (surface == ConversationSurface.ACTIVE) View.GONE else View.VISIBLE
 		activePanel?.visibility = if (surface == ConversationSurface.ACTIVE) View.VISIBLE else View.GONE
 		presentationPanel?.visibility = if (surface == ConversationSurface.PRESENTATION) View.VISIBLE else View.GONE
@@ -2574,14 +2522,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			scrollToBottom(force = true)
 		}
 		transcriptButton?.apply {
-			visibility = if (active) View.VISIBLE else View.GONE
+			visibility = View.VISIBLE
 			contentDescription = if (transcriptShown) "Hide transcript" else "Show transcript"
 			setActionAppearance(this, ACTION_BLUE, transcriptShown)
 			ViewCompat.setTooltipText(this, contentDescription)
 		}
-		audioButton?.visibility = if (active) View.VISIBLE else View.GONE
-		searchButton?.visibility = if (active) View.VISIBLE else View.GONE
-		savedButton?.visibility = View.VISIBLE
 		placeholderTitle?.text = when {
 			active -> "No transcript yet"
 			stage == CallController.Stage.ERROR -> "Conversation offline"
@@ -2596,20 +2541,48 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun showAudioRouteMenu(anchor: View) {
+	private fun toggleOrbListening() {
+		if (conversationListeningActive) {
+			controller.setPaused(true)
+		} else if (latestCallSnapshot.stage == CallController.Stage.HELD) {
+			controller.setPaused(false)
+		} else {
+			requestCallStart()
+		}
+	}
+
+	private fun isConversationListening(stage: CallController.Stage?): Boolean = when (stage) {
+		null -> conversationListeningActive
+		CallController.Stage.DISCONNECTED, CallController.Stage.HELD, CallController.Stage.ERROR -> false
+		else -> true
+	}
+
+	private fun orbToggleDescription(stage: CallController.Stage?): String = when {
+		isConversationListening(stage) -> "${voiceOrb?.mode?.let(::voiceOrbDescription) ?: "Voice conversation active"}. Tap to pause listening"
+		stage == CallController.Stage.ERROR -> "Voice connection offline. Tap to retry"
+		else -> "Voice conversation paused. Tap to resume listening"
+	}
+
+	private fun showConversationMenu(anchor: View) {
 		val endpoints = latestCallSnapshot.audioEndpoints
-		val diagnosticsId = endpoints.size
+		val currentRoute = latestCallSnapshot.audioEndpointName.ifBlank { "Connecting…" }
 		PopupMenu(this, anchor).apply {
+			menu.add(0, MENU_AUDIO_HEADER, 0, "Audio source · $currentRoute").isEnabled = false
 			endpoints.forEachIndexed { index, endpoint ->
-				menu.add(0, index, index, (if (endpoint.current) "✓  " else "") + endpoint.name)
+				menu.add(MENU_AUDIO_GROUP, MENU_AUDIO_ENDPOINT_START + index, index + 1, (if (endpoint.current) "✓  " else "") + endpoint.name)
 			}
-			menu.add(1, diagnosticsId, diagnosticsId, "Audio diagnostics…")
+			menu.add(0, MENU_AUDIO_DIAGNOSTICS, endpoints.size + 1, "Audio diagnostics…")
+			menu.add(0, MENU_SAVED_RESPONSES, endpoints.size + 2, "Saved responses")
 			setOnMenuItemClickListener { item ->
-				if (item.groupId == 1) {
+				if (item.itemId == MENU_AUDIO_DIAGNOSTICS) {
 					showAudioDiagnostics()
 					return@setOnMenuItemClickListener true
 				}
-				val endpoint = endpoints.getOrNull(item.itemId) ?: return@setOnMenuItemClickListener false
+				if (item.itemId == MENU_SAVED_RESPONSES) {
+					showSavedResponses()
+					return@setOnMenuItemClickListener true
+				}
+				val endpoint = endpoints.getOrNull(item.itemId - MENU_AUDIO_ENDPOINT_START) ?: return@setOnMenuItemClickListener false
 				when (endpoint.type) {
 					VoiceAudioEndpointType.EARPIECE -> rememberBuiltInAudioRoute(BuiltInAudioRoute.EARPIECE)
 					VoiceAudioEndpointType.SPEAKER -> rememberBuiltInAudioRoute(BuiltInAudioRoute.SPEAKER)
@@ -2622,40 +2595,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun showTranscriptSearchDialog() {
-		val query = EditText(this).apply {
-			hint = "Words in this conversation"
-			contentDescription = "Transcript search query"
-			setSingleLine()
-		}
-		AlertDialog.Builder(this)
-			.setTitle("Search transcript")
-			.setView(query)
-			.setNegativeButton("Cancel", null)
-			.setPositiveButton("Search") { _, _ ->
-				val text = query.text.toString().trim()
-				if (text.isNotBlank()) controller.searchHistory(text)
-			}
-			.show()
-	}
-
-	private fun showTranscriptSearchResults(results: List<VoiceTranscriptSearchResult>) {
-		if (results.isEmpty()) {
-			AlertDialog.Builder(this).setTitle("No matches").setMessage("Nothing in this conversation matched your search.").setPositiveButton("OK", null).show()
-			return
-		}
-		val labels = results.map { result ->
-			val speaker = if (result.match.role == "user") "You" else "Koder"
-			"$speaker · ${result.match.text.replace('\n', ' ').take(90)}"
-		}.toTypedArray()
-		AlertDialog.Builder(this)
-			.setTitle("Transcript matches")
-			.setItems(labels) { _, index -> showTranscriptSearchContext(results[index]) }
-			.setNegativeButton("Close", null)
-			.show()
-	}
-
-	private fun showTranscriptSearchContext(result: VoiceTranscriptSearchResult) {
+	private fun showTranscriptContext(match: VoiceTranscriptEntry, context: List<VoiceTranscriptEntry>) {
 		val targetFeed = feed ?: return
 		targetFeed.removeAllViews()
 		targetFeed.gravity = Gravity.NO_GRAVITY
@@ -2663,12 +2603,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		renderedHistoryIDs.clear()
 		renderedPartKeys.clear()
 		var target: View? = null
-		result.context.forEach { entry ->
+		context.forEach { entry ->
 			renderedHistoryIDs += entry.id
-			val first = appendTranscriptEntry(targetFeed, entry, entry.id == result.match.id)
-			if (entry.id == result.match.id) target = first
+			val first = appendTranscriptEntry(targetFeed, entry, entry.id == match.id)
+			if (entry.id == match.id) target = first
 		}
-		searchContextShown = true
+		focusedTranscriptContextShown = true
 		transcriptShown = true
 		presentationShown = false
 		updateConversationMode(latestCallSnapshot.stage)
@@ -2687,7 +2627,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun renderHistory(voiceSessionId: String, history: List<VoiceTranscriptEntry>) {
 		renderedHistorySession = voiceSessionId
 		if (history.isEmpty()) return
-		searchContextShown = false
+		focusedTranscriptContextShown = false
 		cachedConversationHistory = history
 		feed?.removeAllViews()
 		feedPlaceholder = null
@@ -3246,10 +3186,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			.setMessage(saved.text)
 			.setPositiveButton(action) { _, _ ->
 				if (saved.kind == SavedVoiceResponseKind.FOLLOW_UP) beginFollowUp(saved)
-				else showTranscriptSearchContext(VoiceTranscriptSearchResult(
-					match = VoiceTranscriptEntry(saved.messageId, "assistant", saved.text),
-					context = listOf(VoiceTranscriptEntry(saved.messageId, "assistant", saved.text)),
-				))
+				else VoiceTranscriptEntry(saved.messageId, "assistant", saved.text).let { showTranscriptContext(it, listOf(it)) }
 			}
 			.setNeutralButton("Remove") { _, _ -> toggleSavedResponse(null, saved.messageId, saved.text, saved.kind) }
 			.setNegativeButton("Close", null)
@@ -3388,37 +3325,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		button.alpha = if (button.isEnabled) 1f else 0.45f
 	}
 
-	private fun audioRouteButton(): TextView = TextView(this).apply {
-		text = audioRouteChipText("")
-		setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_voice_audio, 0, 0, 0)
-		compoundDrawablePadding = dp(6)
-		gravity = Gravity.CENTER
-		maxLines = 1
-		ellipsize = TextUtils.TruncateAt.END
-		textSize = 13f
-		setTypeface(typeface, Typeface.BOLD)
-		isFocusable = true
-		setPadding(dp(11), 0, dp(11), 0)
-		elevation = dp(2).toFloat()
-		setAudioRouteAppearance(this)
-	}
-
-	private fun setAudioRouteAppearance(button: TextView) {
-		button.setTextColor(ACTION_GREEN)
-		button.compoundDrawableTintList = ColorStateList.valueOf(ACTION_GREEN)
-		button.background = GradientDrawable().apply {
-			cornerRadius = dp(24).toFloat()
-			setColor(withAlpha(ACTION_GREEN, 28))
-			setStroke(dp(1), withAlpha(ACTION_GREEN, 100))
-		}
-		button.alpha = if (button.isEnabled) 1f else 0.45f
-	}
-
 	private fun actionLayout(start: Int = 0) = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
-		marginStart = dp(start)
-	}
-
-	private fun routeActionLayout(start: Int = 0) = LinearLayout.LayoutParams(dp(120), dp(48)).apply {
 		marginStart = dp(start)
 	}
 
@@ -3445,17 +3352,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		speechAutomaticCheck = null
 		phoneActionGroups.clear()
 		composerView = null
-		pauseButton = null
 		transcriptButton = null
 		muteButton = null
-		audioButton = null
-		searchButton = null
-		savedButton = null
+		conversationListeningActive = false
 		latestCallSnapshot = CallController.Snapshot()
 		latestButton = null
 		placeholderTitle = null
 		placeholderDetail = null
-		searchContextShown = false
+		focusedTranscriptContextShown = false
 		cachedConversationHistory = emptyList()
 		savedResponses = emptyList()
     }
@@ -3720,6 +3624,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     }
 
     companion object {
+		private const val MENU_AUDIO_HEADER = 1_000
+		private const val MENU_AUDIO_ENDPOINT_START = 1_100
+		private const val MENU_AUDIO_GROUP = 1
+		private const val MENU_AUDIO_DIAGNOSTICS = 1_200
+		private const val MENU_SAVED_RESPONSES = 1_201
 		private const val ACTION_BLUE = 0xff3867d6.toInt()
 		private const val ACTION_GREEN = 0xff16856b.toInt()
 		private const val ACTION_ORANGE = 0xffd97706.toInt()

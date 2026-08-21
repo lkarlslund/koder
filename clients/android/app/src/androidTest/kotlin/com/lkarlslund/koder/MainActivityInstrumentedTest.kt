@@ -519,20 +519,20 @@ class MainActivityInstrumentedTest {
 					waitForComposerAboveKeyboard(scenario)
 					closeSoftKeyboard()
 					onView(withContentDescription("Hide transcript")).perform(click())
-				scenario.onActivity { activity ->
-					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is connecting")
+					scenario.onActivity { activity ->
+					val orb = activity.findViewById<View>(android.R.id.content).findByDescription("Koder is connecting. Tap to pause listening")
 					assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
 				}
 				val orbStates = listOf(
-					com.lkarlslund.koder.voice.CallController.Stage.LISTENING to "Koder is listening",
-					com.lkarlslund.koder.voice.CallController.Stage.RECORDING to "You are speaking",
-					com.lkarlslund.koder.voice.CallController.Stage.PROCESSING to "Koder is thinking",
-					com.lkarlslund.koder.voice.CallController.Stage.WORKING to "Koder is using tools",
-					com.lkarlslund.koder.voice.CallController.Stage.SPEAKING to "Koder is speaking",
+					com.lkarlslund.koder.voice.CallController.Stage.LISTENING to "Koder is listening. Tap to pause listening",
+					com.lkarlslund.koder.voice.CallController.Stage.RECORDING to "You are speaking. Tap to pause listening",
+					com.lkarlslund.koder.voice.CallController.Stage.PROCESSING to "Koder is thinking. Tap to pause listening",
+					com.lkarlslund.koder.voice.CallController.Stage.WORKING to "Koder is using tools. Tap to pause listening",
+					com.lkarlslund.koder.voice.CallController.Stage.SPEAKING to "Koder is speaking. Tap to pause listening",
 				)
 				orbStates.forEach { (stage, description) ->
 					scenario.onActivity { activity ->
-						activity.onSnapshot(com.lkarlslund.koder.voice.CallController.Snapshot(stage = stage, detail = if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) "Working in Laptop repair…" else description))
+						activity.onSnapshot(com.lkarlslund.koder.voice.CallController.Snapshot(stage = stage, detail = if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) "Working in Laptop repair…" else description.substringBefore(". Tap")))
 						val orb = activity.findViewById<View>(android.R.id.content).findByDescription(description)
 						assertTrue(orb is com.lkarlslund.koder.voice.VoiceStateOrbView && orb.visibility == View.VISIBLE)
 						if (stage == com.lkarlslund.koder.voice.CallController.Stage.WORKING) {
@@ -569,7 +569,6 @@ class MainActivityInstrumentedTest {
 				val homeLabels = waitForText(scenario, "Laptop repair")
 				assertTrue(homeLabels.none { it.startsWith("Deleted ") })
 				onView(withContentDescription("Session options for Laptop repair")).perform(click())
-				onView(withText("Add star")).check(matches(isDisplayed()))
 				onView(withText("Archive")).perform(click())
 				onView(withText("Archive session?")).inRoot(isDialog()).check(matches(isDisplayed()))
 				onView(withText("Cancel")).inRoot(isDialog()).perform(click())
@@ -746,7 +745,7 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
-	fun transcriptSearchJumpsToServerSideMatch() {
+	fun orbTogglesListeningAndConversationMenuHoldsAudioAndSavedResponses() {
 		val instrumentation = InstrumentationRegistry.getInstrumentation()
 		val permissions = buildList {
 			add(Manifest.permission.RECORD_AUDIO)
@@ -770,13 +769,6 @@ class MainActivityInstrumentedTest {
 				)
 			}
 
-			override fun onMessage(webSocket: WebSocket, text: String) {
-				if (org.json.JSONObject(text).optString("type") == "search_history") {
-					webSocket.send(
-						"""{"type":"history_search","protocol":"voice.v1","search_results":[{"match":{"id":"match","role":"assistant","text":"BIOS gate found"},"context":[{"id":"before","role":"user","text":"What blocked it?"},{"id":"match","role":"assistant","text":"BIOS gate found"}]}]}""",
-					)
-				}
-			}
 		}).build())
 		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
 		try {
@@ -786,39 +778,33 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Open Search project. 1 chat · 1 voice")).perform(click())
 				waitForText(scenario, "Searchable")
 				onView(withContentDescription("Open voice conversation Searchable")).perform(click())
-				waitForText(scenario, "Speaker  ▾")
-				val notificationManager = context.getSystemService(NotificationManager::class.java)
+				waitForDisplayedDescription("Koder is listening. Tap to pause listening")
+				onView(withContentDescription("Koder is listening. Tap to pause listening")).perform(click())
+				waitForDisplayedDescription("Voice conversation paused. Tap to resume listening")
+				onView(withContentDescription("Voice conversation paused. Tap to resume listening")).perform(click())
+				waitForDisplayedDescription("Koder is listening. Tap to pause listening")
 				scenario.onActivity { activity ->
-					activity.findViewById<View>(android.R.id.content).findByDescription("Search transcript").performClick()
+					activity.onSnapshot(com.lkarlslund.koder.voice.CallController.Snapshot(
+						stage = com.lkarlslund.koder.voice.CallController.Stage.LISTENING,
+						detail = "Listening · Speaker",
+						audioEndpointName = "Speaker",
+						audioEndpoints = listOf(
+							com.lkarlslund.koder.voice.VoiceAudioEndpoint("speaker", "Speaker", com.lkarlslund.koder.voice.VoiceAudioEndpointType.SPEAKER, true),
+							com.lkarlslund.koder.voice.VoiceAudioEndpoint("earpiece", "Phone earpiece", com.lkarlslund.koder.voice.VoiceAudioEndpointType.EARPIECE, false),
+						),
+					))
+					val descriptions = activity.findViewById<View>(android.R.id.content).allViews().mapNotNull { it.contentDescription?.toString() }
+					assertFalse("Pause button should be removed", "Pause voice conversation" in descriptions)
+					assertFalse("Transcript search should be removed", "Search transcript" in descriptions)
 				}
-				onView(withContentDescription("Transcript search query")).perform(replaceText("BIOS"))
-				onView(withText("Search")).perform(click())
-				waitForDisplayedText("Transcript matches")
-				onView(withText("Koder · BIOS gate found")).perform(click())
-				val labels = waitForText(scenario, "BIOS gate found")
-				assertTrue(labels.contains("What blocked it?"))
-				assertTrue(labels.contains("Back to latest"))
-				onView(withText("Back to latest")).perform(click())
-				assertTrue(waitForText(scenario, "Newest answer").contains("Newest answer"))
-				onView(withContentDescription("Koder message: Newest answer. Long press for actions")).perform(longClick())
-				onView(withText("Bookmark")).perform(click())
-				waitForDisplayedText("★ Bookmarked")
-				Thread.sleep(350) // Let the native action dialog's dim layer disappear.
-				onView(withContentDescription("Koder message: Newest answer. Long press for actions")).perform(longClick())
-				onView(withText("Follow up later")).perform(click())
-				// AlertDialog's dim layer outlives its item click briefly on API 36;
-				// wait for that native dismissal animation so it cannot reject the
-				// next real tap as an occluded/untrusted touch.
-				Thread.sleep(350)
-				onView(withContentDescription("Saved responses")).perform(click())
+				onView(withContentDescription("Conversation options")).perform(click())
+				onView(withText("Audio source · Speaker")).check(matches(isDisplayed()))
+				onView(withText("✓  Speaker")).check(matches(isDisplayed()))
+				onView(withText("Phone earpiece")).check(matches(isDisplayed()))
+				onView(withText("Audio diagnostics…")).check(matches(isDisplayed()))
+				onView(withText("Saved responses")).perform(click())
 				waitForDisplayedText("Saved responses")
-				onView(withText("↗ Newest answer")).inRoot(isDialog()).perform(scrollTo(), click())
-				waitForDisplayedText("Remove")
-				onView(withId(android.R.id.button1)).inRoot(isDialog()).perform(click())
-				assertTrue(waitForText(scenario, "Following up on your earlier response").any { it.contains("Newest answer") })
-				waitForVoiceNotification(notificationManager) { it.hasAction("End") }.action("End").actionIntent.send()
-				waitForNoVoiceNotification(notificationManager)
-				waitForText(scenario, "Conversation paused")
+				onView(withText("OK")).inRoot(isDialog()).perform(click())
 			}
 		} finally {
 			voiceSocket?.close(1000, "test complete")

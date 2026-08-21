@@ -17,6 +17,7 @@ class VoiceStateOrbTest {
 		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.PROCESSING, systemAnimationsEnabled = false, shown = true))
 		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.LISTENING, systemAnimationsEnabled = true, shown = false))
 		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.IDLE, systemAnimationsEnabled = true, shown = true))
+		assertFalse(shouldAnimateVoiceOrb(VoiceOrbMode.PAUSED, systemAnimationsEnabled = true, shown = true))
 		assertTrue(shouldAnimateVoiceOrb(VoiceOrbMode.AI_SPEAKING, systemAnimationsEnabled = true, shown = true))
 	}
 	@Test
@@ -28,6 +29,8 @@ class VoiceStateOrbTest {
 		assertEquals(VoiceOrbMode.PROCESSING, voiceOrbMode(CallController.Stage.PROCESSING))
 		assertEquals(VoiceOrbMode.WORKING, voiceOrbMode(CallController.Stage.WORKING))
 		assertEquals(VoiceOrbMode.AI_SPEAKING, voiceOrbMode(CallController.Stage.SPEAKING))
+		assertEquals(VoiceOrbMode.PAUSED, voiceOrbMode(CallController.Stage.HELD))
+		assertEquals(VoiceOrbMode.PAUSED, voiceOrbMode(CallController.Stage.ERROR))
 	}
 
 	@Test

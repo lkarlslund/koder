@@ -54,7 +54,6 @@ class CallController(
         fun onAssistantMessage(message: VoiceMessage)
 		fun onRender(parts: List<VoicePart>) = Unit
 		fun onHistoryPage(entries: List<VoiceTranscriptEntry>) = Unit
-		fun onHistorySearch(results: List<VoiceTranscriptSearchResult>, error: String?) = Unit
 		fun onAudioLevel(level: Float, user: Boolean) = Unit
 		fun onAudioWaveform(samples: FloatArray, user: Boolean) = Unit
     }
@@ -280,15 +279,6 @@ class CallController(
 		}
 	}
 
-	fun searchHistory(query: String) {
-		if (!running || query.isBlank()) return
-		try {
-			connection.searchHistory(query)
-		} catch (error: Exception) {
-			listener.onHistorySearch(emptyList(), error.message ?: "Could not search transcript")
-		}
-	}
-
 	fun audioDiagnostics(): AudioDiagnostics = diagnostics.snapshot(running, audioEndpoint, audioConfig)
 
 	fun refreshAudioDiagnostics() = connection.sendPing()
@@ -473,7 +463,6 @@ class CallController(
 				listener.onHistoryPage(older)
 				publish()
 			}
-			"history_search" -> listener.onHistorySearch(frame.searchResults, frame.error.takeIf(String::isNotBlank))
 			"render" -> if (frame.parts.isNotEmpty()) listener.onRender(frame.parts)
             "message" -> frame.message?.let(listener::onAssistantMessage)
             "tts_start" -> {

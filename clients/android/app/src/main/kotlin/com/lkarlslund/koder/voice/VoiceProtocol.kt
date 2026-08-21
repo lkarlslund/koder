@@ -99,8 +99,8 @@ data class VoicePart(
 
 enum class ConversationSurface { ACTIVE, PRESENTATION, TRANSCRIPT }
 
-fun conversationSurface(active: Boolean, transcriptShown: Boolean, presentationShown: Boolean): ConversationSurface = when {
-	!active || transcriptShown -> ConversationSurface.TRANSCRIPT
+fun conversationSurface(transcriptShown: Boolean, presentationShown: Boolean): ConversationSurface = when {
+	transcriptShown -> ConversationSurface.TRANSCRIPT
 	presentationShown -> ConversationSurface.PRESENTATION
 	else -> ConversationSurface.ACTIVE
 }
@@ -125,11 +125,6 @@ data class VoiceTranscriptEntry(
 	val text: String,
 	val createdAt: Instant? = null,
 	val parts: List<VoicePart> = emptyList(),
-)
-
-data class VoiceTranscriptSearchResult(
-	val match: VoiceTranscriptEntry,
-	val context: List<VoiceTranscriptEntry>,
 )
 
 data class VoiceCallState(
@@ -252,7 +247,6 @@ data class VoiceServerFrame(
 	val transcript: String = "",
 	val history: List<VoiceTranscriptEntry> = emptyList(),
 	val historyHasMore: Boolean = false,
-	val searchResults: List<VoiceTranscriptSearchResult> = emptyList(),
     val message: VoiceMessage? = null,
 	val parts: List<VoicePart> = emptyList(),
     val appUpdate: AppUpdate? = null,
@@ -393,13 +387,6 @@ object VoiceProtocol {
 		.put("limit", limit)
 		.toString()
 
-	fun searchHistory(query: String, limit: Int = 20): String = JSONObject()
-		.put("type", "search_history")
-		.put("protocol", VOICE_PROTOCOL)
-		.put("query", query.trim())
-		.put("limit", limit)
-		.toString()
-
     fun utterance(id: String, text: String, sessionId: String = ""): String = JSONObject()
         .put("type", "utterance")
         .put("protocol", VOICE_PROTOCOL)
@@ -502,12 +489,6 @@ object VoiceProtocol {
 			transcript = root.optString("transcript"),
 			history = root.optJSONArray("history").mapObjects { it.toTranscriptEntry() },
 			historyHasMore = root.optBoolean("has_more"),
-			searchResults = root.optJSONArray("search_results").mapObjects { result ->
-				VoiceTranscriptSearchResult(
-					match = result.getJSONObject("match").toTranscriptEntry(),
-					context = result.optJSONArray("context").mapObjects { it.toTranscriptEntry() },
-				)
-			},
             message = root.optJSONObject("message")?.toVoiceMessage(),
 			parts = root.optJSONArray("parts").mapObjects { it.toVoicePart() },
             appUpdate = root.optJSONObject("app_update")?.toAppUpdate(),
