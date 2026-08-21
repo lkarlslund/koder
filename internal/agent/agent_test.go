@@ -6754,6 +6754,10 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session.TitleUserDefined = false
+	if err := modeltest.PutSession(context.Background(), st, session); err != nil {
+		t.Fatal(err)
+	}
 
 	events := runLivePromptDefault(t, engine, st, session, "hello")
 
@@ -6781,6 +6785,117 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	got := parts[last.ID]
 	if len(got) == 0 || got[0].Kind != domain.PartKindText || got[0].Body != "done" {
 		t.Fatalf("expected stored assistant text, got %#v", got)
+	}
+}
+
+func TestRunPromptNeverReplacesUserDefinedSessionTitle(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "Fairphone 6", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"first", "second", "third"} {
+		events := runLivePromptDefault(t, engine, st, session, prompt)
+		for _, event := range events {
+			if event.Kind == domain.EventKindSessionTitle {
+				t.Fatalf("user-defined session title was replaced with %q", event.Text)
+			}
+		}
+	}
+	updated, err := modeltest.GetSession(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "Fairphone 6" || !updated.TitleUserDefined {
+		t.Fatalf("session title ownership changed: %#v", updated)
+	}
+	if requests != 3 {
+		t.Fatalf("provider requests = %d, want only three chat turns", requests)
+	}
+}
+
+func TestRunPromptGeneratesBlankSessionTitleOnce(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		content := "done"
+		if requests == 2 {
+			content = "Calendar appointment"
+		}
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q}}],"usage":{"total_tokens":1}}`, content)
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "New Session", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.TitleUserDefined = false
+	if err := modeltest.PutSession(context.Background(), st, session); err != nil {
+		t.Fatal(err)
+	}
+	events := runLivePromptDefault(t, engine, st, session, "I have an appointment tomorrow at ten")
+	var generated string
+	for _, event := range events {
+		if event.Kind == domain.EventKindSessionTitle {
+			generated = event.Text
+		}
+	}
+	if generated != "Calendar appointment" {
+		t.Fatalf("generated session title = %q", generated)
+	}
+	updated, err := modeltest.GetSession(context.Background(), st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != generated || updated.TitleUserDefined || updated.TitleRefreshCount != 1 {
+		t.Fatalf("generated session metadata = %#v", updated)
+	}
+	for _, event := range runLivePromptDefault(t, engine, st, updated, "Move it to eleven") {
+		if event.Kind == domain.EventKindSessionTitle {
+			t.Fatalf("generated session title was replaced with %q", event.Text)
+		}
+	}
+	if requests != 3 {
+		t.Fatalf("provider requests = %d, want two turns plus one title generation", requests)
 	}
 }
 
@@ -6837,6 +6952,9 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 	}
 	if updated.Title != want {
 		t.Fatalf("expected stored chat title %q, got %q", want, updated.Title)
+	}
+	if updated.TitleUserDefined {
+		t.Fatal("generated chat title was marked as user-defined")
 	}
 	if requests != 1 {
 		t.Fatalf("expected no extra provider request for chat title, got %d", requests)

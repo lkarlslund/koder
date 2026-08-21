@@ -79,28 +79,30 @@ func LegacyTaskCollection(st *store.Store) store.Collection[planning.LegacyTask]
 func CreateSession(ctx context.Context, st *store.Store, title, providerID, modelID string, parentID *id.ID) (domain.Session, error) {
 	now := time.Now().UTC()
 	session := domain.Session{
-		ID:              id.NewAt(now),
-		ParentID:        parentID,
-		Title:           strings.TrimSpace(title),
-		ToolStates:      map[domain.ToolKind]bool{},
-		AccessSettings:  accesssettings.Default(),
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		PermissionRules: nil,
+		ID:               id.NewAt(now),
+		ParentID:         parentID,
+		Title:            strings.TrimSpace(title),
+		TitleUserDefined: strings.TrimSpace(title) != "",
+		ToolStates:       map[domain.ToolKind]bool{},
+		AccessSettings:   accesssettings.Default(),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		PermissionRules:  nil,
 	}
 	if session.Title == "" {
 		session.Title = "test"
 	}
 	chat := domain.Chat{
-		ID:           id.NewAt(now),
-		SessionID:    session.ID,
-		Title:        "Main",
-		WorkflowRole: chatrole.Orchestrator,
-		ProviderID:   providerID,
-		ModelID:      modelID,
-		ToolStates:   map[domain.ToolKind]bool{},
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:               id.NewAt(now),
+		SessionID:        session.ID,
+		Title:            "Main",
+		TitleUserDefined: false,
+		WorkflowRole:     chatrole.Orchestrator,
+		ProviderID:       providerID,
+		ModelID:          modelID,
+		ToolStates:       map[domain.ToolKind]bool{},
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := SessionCollection(st).Put(ctx, session); err != nil {
 		return domain.Session{}, err
@@ -163,7 +165,7 @@ func CreateChat(ctx context.Context, st *store.Store, sessionID id.ID, title str
 		return domain.Chat{}, err
 	}
 	now := time.Now().UTC()
-	chat := domain.Chat{ID: id.NewAt(now), SessionID: sessionID, ParentChatID: parentID, Title: title, WorkflowRole: role, Position: len(chats), CreatedAt: now, UpdatedAt: now}
+	chat := domain.Chat{ID: id.NewAt(now), SessionID: sessionID, ParentChatID: parentID, Title: title, TitleUserDefined: strings.TrimSpace(title) != "", WorkflowRole: role, Position: len(chats), CreatedAt: now, UpdatedAt: now}
 	if chat.Title == "" {
 		chat.Title = "New Chat"
 	}

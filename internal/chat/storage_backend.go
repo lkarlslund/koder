@@ -246,6 +246,7 @@ func defaultRecord(ctx context.Context, st *store.Store, sessionID id.ID) (domai
 type CreateRecordRequest struct {
 	Session           domain.Session
 	Title             string
+	TitleUserDefined  bool
 	Role              domain.WorkflowRole
 	Backend           domain.ChatBackend
 	InteractionMode   domain.InteractionMode
@@ -278,6 +279,7 @@ func createRecord(ctx context.Context, st *store.Store, req CreateRecordRequest)
 		SessionID:          session.ID,
 		ParentChatID:       req.ParentID,
 		Title:              strings.TrimSpace(req.Title),
+		TitleUserDefined:   req.TitleUserDefined,
 		WorkflowRole:       req.Role,
 		Backend:            req.Backend,
 		InteractionMode:    req.InteractionMode,
@@ -369,6 +371,7 @@ func forkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sour
 		SessionID:             source.SessionID,
 		ParentChatID:          &parentID,
 		Title:                 strings.TrimSpace(title),
+		TitleUserDefined:      strings.TrimSpace(title) != "",
 		WorkflowRole:          source.WorkflowRole,
 		Backend:               source.EffectiveBackend(),
 		InteractionMode:       source.EffectiveInteractionMode(),

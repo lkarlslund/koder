@@ -2122,7 +2122,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			listOf(VoiceChatBackendOption("koder", "Koder", true))
 		}
 		val titleField = EditText(this).apply {
-			hint = "Conversation name"
+			hint = "Optional · set from first conversation"
 			contentDescription = if (dialogTitle.contains("temporary", ignoreCase = true)) "Temporary conversation name" else "Conversation name"
 			setSingleLine()
 		}
@@ -2211,7 +2211,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					return@setPositiveButton
 				}
 				create(VoiceChatCreateSpec(
-					title = titleField.text.toString().trim().ifBlank { "Voice conversation" }, backend = backend.id,
+					title = titleField.text.toString().trim(), backend = backend.id,
 					workflowRole = roles[roleSpinner.selectedItemPosition],
 					providerId = backend.models.getOrNull(modelIndex)?.providerId.orEmpty(),
 					modelId = backend.models.getOrNull(modelIndex)?.id.orEmpty(),
@@ -2241,7 +2241,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun createTemporaryConversation(spec: VoiceChatCreateSpec) {
 		showConversationCreationProgress("Creating temporary conversation…")
 		val generation = ++requestGeneration
-		sessionClient.createTemporary(settings.server, settings.token, spec.copy(title = spec.title.ifBlank { "Temporary conversation" })) { result ->
+		sessionClient.createTemporary(settings.server, settings.token, spec) { result ->
 			runOnUiThread {
 				if (generation != requestGeneration || isFinishing || isDestroyed) return@runOnUiThread
 				result.fold(

@@ -2908,6 +2908,18 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if message.TranscriptID == "" {
 		t.Fatalf("voice response omitted durable transcript id: %#v", message)
 	}
+	owner, err := ctrl.agent.LoadSession(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterTurn := owner.Snapshot()
+	if afterTurn.Session.Title != "Laptop repair" || !afterTurn.Session.TitleUserDefined {
+		t.Fatalf("voice turn changed user-defined session title: %#v", afterTurn.Session)
+	}
+	voiceIndex := slices.IndexFunc(afterTurn.Chats, func(chat domain.Chat) bool { return string(chat.ID) == voiceChat.ID })
+	if voiceIndex < 0 || afterTurn.Chats[voiceIndex].Title != "Phone assistant" || !afterTurn.Chats[voiceIndex].TitleUserDefined {
+		t.Fatalf("voice turn changed user-defined chat title: %#v", afterTurn.Chats)
+	}
 	if working.ID != targetChatID || working.Kind != "chat" {
 		t.Fatalf("working target = %#v", working)
 	}

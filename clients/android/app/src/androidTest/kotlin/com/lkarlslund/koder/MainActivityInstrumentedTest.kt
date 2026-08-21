@@ -472,10 +472,12 @@ class MainActivityInstrumentedTest {
 			if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
 		}.forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
 		val allowCreateResponse = CountDownLatch(1)
+		var createBody = ""
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when {
 				request.method == "POST" && request.target == "/voice/v1/sessions/temporary" -> {
+					createBody = request.body?.utf8().orEmpty()
 					allowCreateResponse.await()
 					MockResponse.Builder().code(201).body(
 						"""{"protocol":"voice.v1","session":{"id":"session-new","title":"Trip planning","kind":"quick","chat_count":1,"voice_chat_count":1},"chat":{"id":"voice-new","session_id":"session-new","title":"Trip planning","role":"voice"},"chats":[{"id":"voice-new","session_id":"session-new","title":"Trip planning","role":"voice"}],"voice_sessions":[]}""",
@@ -492,12 +494,12 @@ class MainActivityInstrumentedTest {
 			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
 				waitForText(scenario, "Personal")
 				onView(withContentDescription("Create a new voice conversation")).perform(click())
-				onView(withContentDescription("Temporary conversation name")).perform(replaceText("Trip planning"))
 				onView(withText("Create")).perform(click())
 				waitForDisplayedText("Creating temporary conversation…")
 				allowCreateResponse.countDown()
 				val labels = waitForText(scenario, "Trip planning")
 				assertTrue(labels.contains("Trip planning"))
+				assertTrue(createBody.contains("\"title\":\"\""))
 				onView(withContentDescription("Show transcript")).perform(click())
 				onView(withContentDescription("Send message")).check(matches(isDisplayed()))
 					scenario.onActivity { activity ->

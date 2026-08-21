@@ -42,8 +42,9 @@ type QueueItem struct {
 }
 
 type MetadataUpdate struct {
-	Archived *bool
-	Title    string
+	Archived       *bool
+	Title          string
+	GeneratedTitle bool
 }
 
 // SetChatActivity persists model-authored descriptive work status.
@@ -1709,6 +1710,7 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 	}
 	if title != "" {
 		r.chat.Title = title
+		r.chat.TitleUserDefined = !update.GeneratedTitle
 	}
 	r.chat.UpdatedAt = time.Now().UTC()
 	if r.state != nil {
@@ -1718,6 +1720,7 @@ func (r *Chat) UpdateMetadata(ctx context.Context, update MetadataUpdate) (domai
 			}
 			if title != "" {
 				chat.Title = title
+				chat.TitleUserDefined = !update.GeneratedTitle
 			}
 			chat.UpdatedAt = r.chat.UpdatedAt
 		})
@@ -3039,10 +3042,12 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 		title := strings.TrimSpace(evt.Text)
 		if title != "" {
 			r.chat.Title = title
+			r.chat.TitleUserDefined = false
 			metadataChanged = true
 			if r.state != nil {
 				r.state.UpdateChat(func(chat *domain.Chat) {
 					chat.Title = title
+					chat.TitleUserDefined = false
 				})
 				contextChanged = true
 			}

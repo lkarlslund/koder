@@ -4317,7 +4317,7 @@
         },
 		openChatCreator() {
 		  this.newChatMenuOpen = false;
-		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
+		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: '', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
 		  this.rpc('chat_backends', {}).then(backends => {
 			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
 			this.configureChatCreatorInheritedModel();
@@ -4381,9 +4381,8 @@
 		  const draft = this.chatCreator.draft;
 		  const backend = this.chatCreatorBackend(draft.backend);
 		  if (!backend?.available) { this.chatCreator.error = backend?.detail || 'Selected backend is unavailable'; return; }
-		  if (!String(draft.title || '').trim()) { this.chatCreator.error = 'Title is required'; return; }
 		  this.chatCreator.busy = true; this.chatCreator.error = '';
-		  const payload = {...draft, title: String(draft.title).trim()};
+		  const payload = {...draft, title: String(draft.title || '').trim()};
 		  if (draft.workflow_role !== 'execution') { payload.milestone_key = ''; payload.task_ref = ''; }
 		  if (draft.backend !== 'codex') payload.tool_states = {};
 		  this.rpc('new_chat', payload).then(s => { this.chatCreator.open = false; this.chatCreator.busy = false; this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.chatCreator.busy = false; this.chatCreator.error = err.message; });
@@ -5281,8 +5280,9 @@
           }).catch(err => this.showToast(err.message));
         },
         saveSessionEditor() {
-          const title = String(this.sessionDraft.title || '').trim() || 'New Session';
+          let title = String(this.sessionDraft.title || '').trim();
           if (this.sessionEditorMode === 'edit') {
+            if (!title) title = 'New Session';
             const id = this.sessionDraft.id;
             if (!id) return;
             this.rpc('rename_session', {session_id: id, title}).then(s => {

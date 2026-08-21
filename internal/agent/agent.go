@@ -527,7 +527,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if err != nil {
 		return "", err
 	}
-	if !shouldRefreshSessionTitle(session, timeline, now) {
+	if !shouldRefreshSessionTitle(session, timeline) {
 		return "", nil
 	}
 	resp, err := client.CompleteChat(ctx, e.chatRequest(session, chat, prompt, false))
@@ -538,15 +538,15 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if title == "" {
 		return "", nil
 	}
-	refreshCount, _ := sessionTitleRefreshState(session)
 	owner, err := e.LoadSession(ctx, session.ID)
 	if err != nil {
 		return "", err
 	}
 	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
 		session.Title = title
+		session.TitleUserDefined = false
 		session.TitleGeneratedAt = now
-		session.TitleRefreshCount = refreshCount + 1
+		session.TitleRefreshCount = 1
 	}); err != nil {
 		return "", err
 	}
@@ -678,18 +678,11 @@ func (e *Engine) reasoningReplay(chat domain.Chat) string {
 	return provider.ReasoningReplay(model.Provider, model.Model, e.modelOverlays)
 }
 
-func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {
-	refreshCount, generatedAt := sessionTitleRefreshState(session)
-	if refreshCount == 0 {
-		return hasCompletedUserAssistantExchange(timeline)
+func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem) bool {
+	if session.TitleUserDefined || session.TitleRefreshCount != 0 || hasCustomSessionTitle(session.Title) {
+		return false
 	}
-	if refreshCount == 1 && len(timeline) > 5 {
-		if generatedAt.IsZero() {
-			return true
-		}
-		return now.Sub(generatedAt) >= time.Minute
-	}
-	return false
+	return hasCompletedUserAssistantExchange(timeline)
 }
 
 func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string, error) {
@@ -715,14 +708,14 @@ func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string
 	if title == "" {
 		return "", nil
 	}
-	if _, err := rt.UpdateMetadata(ctx, chatpkg.MetadataUpdate{Title: title}); err != nil {
+	if _, err := rt.UpdateMetadata(ctx, chatpkg.MetadataUpdate{Title: title, GeneratedTitle: true}); err != nil {
 		return "", err
 	}
 	return title, nil
 }
 
 func shouldRefreshChatTitle(chat domain.Chat, timeline []domain.TimelineItem) bool {
-	return isGeneratedChatTitle(chat.Title) && hasCompletedUserAssistantExchange(timeline)
+	return !chat.TitleUserDefined && isGeneratedChatTitle(chat.Title) && hasCompletedUserAssistantExchange(timeline)
 }
 
 func isGeneratedChatTitle(title string) bool {
@@ -754,20 +747,6 @@ func titleFromTimeline(timeline []domain.TimelineItem) string {
 		}
 	}
 	return ""
-}
-
-func sessionTitleRefreshState(session domain.Session) (int, time.Time) {
-	if session.TitleRefreshCount > 0 {
-		return session.TitleRefreshCount, session.TitleGeneratedAt
-	}
-	if hasCustomSessionTitle(session.Title) {
-		generatedAt := session.TitleGeneratedAt
-		if generatedAt.IsZero() {
-			generatedAt = session.UpdatedAt
-		}
-		return 1, generatedAt
-	}
-	return 0, time.Time{}
 }
 
 func hasCompletedUserAssistantExchange(timeline []domain.TimelineItem) bool {

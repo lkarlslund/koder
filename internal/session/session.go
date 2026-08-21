@@ -581,6 +581,7 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 		return nil, fmt.Errorf("interaction mode %q is not supported", interactionMode)
 	}
 	title := strings.TrimSpace(spec.Title)
+	titleUserDefined := title != ""
 	if title == "" {
 		title = "Chat"
 	}
@@ -641,6 +642,7 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 		SessionID:          session.ID,
 		ParentChatID:       parentChatID,
 		Title:              title,
+		TitleUserDefined:   titleUserDefined,
 		WorkflowRole:       role,
 		Backend:            backend,
 		InteractionMode:    interactionMode,
@@ -1083,6 +1085,7 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	}
 	updated, err := s.UpdateSessionMetadata(ctx, func(session *domain.Session) {
 		session.Title = strings.TrimSpace(title)
+		session.TitleUserDefined = true
 		session.TitleGeneratedAt = time.Time{}
 		session.TitleRefreshCount = 0
 	})

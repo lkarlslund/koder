@@ -44,6 +44,9 @@ func TestCreateQuickSessionOwnsOneStandaloneChat(t *testing.T) {
 	if len(snapshot.Chats) != 1 || snapshot.Chats[0].WorkflowRole != chatrole.Standalone {
 		t.Fatalf("unexpected quick chats: %#v", snapshot.Chats)
 	}
+	if snapshot.Session.TitleUserDefined || snapshot.Chats[0].TitleUserDefined {
+		t.Fatalf("placeholder titles must remain eligible for automatic naming: session=%#v chat=%#v", snapshot.Session, snapshot.Chats[0])
+	}
 	if info, err := os.Stat(snapshot.Session.ProjectRoot); err != nil || !info.IsDir() {
 		t.Fatalf("managed project root is missing: %v", err)
 	}
@@ -91,6 +94,9 @@ func TestCreateQuickSessionWithSpecPersistsAllChatDimensions(t *testing.T) {
 		t.Fatalf("quick chats = %#v", snapshot.Chats)
 	}
 	chatRecord := snapshot.Chats[0]
+	if !snapshot.Session.TitleUserDefined || chatRecord.TitleUserDefined {
+		t.Fatalf("explicit session title and placeholder chat title have wrong ownership: session=%#v chat=%#v", snapshot.Session, chatRecord)
+	}
 	if chatRecord.Backend != domain.ChatBackendCodex || chatRecord.WorkflowRole != domain.WorkflowRoleExecution || chatRecord.InteractionMode != domain.InteractionModeVoice || chatRecord.ModelID != "gpt-test" || chatRecord.PermissionProfile != "readonly" || chatRecord.ActiveMilestoneKey != "M004" || chatRecord.ToolStates[domain.ToolKindChatStart] {
 		t.Fatalf("quick chat dimensions = %#v", chatRecord)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
@@ -25,7 +26,7 @@ func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 
 func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID, permissionProfile string, parentID *id.ID) (domain.Session, error) {
 	return createSessionRecordWithOptions(ctx, st, chatsSrc, createSessionOptions{
-		Title: title, ProviderID: providerID, ModelID: modelID, PermissionProfile: permissionProfile, ParentID: parentID,
+		Title: title, TitleUserDefined: strings.TrimSpace(title) != "", ProviderID: providerID, ModelID: modelID, PermissionProfile: permissionProfile, ParentID: parentID,
 		InitialChatRole: chatrole.Orchestrator,
 	})
 }
@@ -33,6 +34,7 @@ func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg
 type createSessionOptions struct {
 	ID                     id.ID
 	Title                  string
+	TitleUserDefined       bool
 	ProviderID             string
 	ModelID                string
 	PermissionProfile      string
@@ -63,6 +65,7 @@ func createSessionRecordWithOptions(ctx context.Context, st *store.Store, chatsS
 		ParentID:           opts.ParentID,
 		Kind:               opts.Kind,
 		Title:              opts.Title,
+		TitleUserDefined:   opts.TitleUserDefined,
 		PermissionProfile:  opts.PermissionProfile,
 		PermissionRules:    nil,
 		ToolStates:         map[domain.ToolKind]bool{},
@@ -81,6 +84,7 @@ func createSessionRecordWithOptions(ctx context.Context, st *store.Store, chatsS
 	if _, err := chatsSrc.CreateRecord(ctx, chatpkg.CreateRecordRequest{
 		Session:           session,
 		Title:             "Main",
+		TitleUserDefined:  false,
 		Role:              role,
 		Backend:           opts.InitialChatBackend,
 		InteractionMode:   opts.InitialInteractionMode,

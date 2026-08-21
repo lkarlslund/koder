@@ -97,6 +97,9 @@ func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := owner.Snapshot().Chats[0]
+	if !sessionRecord.TitleUserDefined || original.TitleUserDefined {
+		t.Fatalf("initial title ownership: session=%v chat=%v", sessionRecord.TitleUserDefined, original.TitleUserDefined)
+	}
 	created, err := owner.NewRootChat(ctx, "Voice", chatrole.Voice)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +110,9 @@ func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
 	}
 	if chatRecord.ProviderID != original.ProviderID || chatRecord.ModelID != original.ModelID || chatRecord.PermissionProfile != original.PermissionProfile {
 		t.Fatalf("voice chat did not inherit settings: original=%#v created=%#v", original, chatRecord)
+	}
+	if !chatRecord.TitleUserDefined {
+		t.Fatal("explicit voice chat title was not marked as user-defined")
 	}
 }
 

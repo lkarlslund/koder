@@ -329,6 +329,7 @@ type Session struct {
 	ParentID           *ID
 	Kind               SessionKind
 	Title              string
+	TitleUserDefined   bool // Prevents automatic title generation from replacing a user-supplied title.
 	TitleGeneratedAt   time.Time
 	TitleRefreshCount  int
 	PermissionProfile  string
@@ -441,6 +442,7 @@ type Chat struct {
 	SessionID              ID
 	ParentChatID           *ID
 	Title                  string
+	TitleUserDefined       bool // Prevents automatic title generation from replacing a user-supplied title.
 	WorkflowRole           WorkflowRole
 	Backend                ChatBackend
 	InteractionMode        InteractionMode

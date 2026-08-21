@@ -251,9 +251,6 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID str
 		return voice.Chat{}, err
 	}
 	spec.Title = truncateVoiceText(spec.Title, 80)
-	if spec.Title == "" {
-		spec.Title = "Voice conversation"
-	}
 	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
 		return voice.Chat{}, fmt.Errorf("codex backend is disabled")
 	}
@@ -383,6 +380,7 @@ func (c *Controller) UpdateClientSession(ctx context.Context, sessionID string, 
 	updated, err := owner.UpdateSessionMetadata(ctx, func(session *domain.Session) {
 		if title != nil {
 			session.Title = *title
+			session.TitleUserDefined = true
 			session.TitleGeneratedAt = time.Time{}
 			session.TitleRefreshCount = 0
 		}
@@ -608,6 +606,7 @@ func (c *Controller) UpdateVoiceSession(ctx context.Context, sessionID string, u
 	updated, err := owner.UpdateSessionMetadata(ctx, func(session *domain.Session) {
 		if title != nil {
 			session.Title = *title
+			session.TitleUserDefined = true
 			session.TitleGeneratedAt = time.Time{}
 			session.TitleRefreshCount = 0
 		}

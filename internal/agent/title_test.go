@@ -2,13 +2,15 @@ package agent
 
 import (
 	"testing"
-	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
 func TestShouldRefreshSessionTitle(t *testing.T) {
-	now := time.Date(2026, 4, 28, 20, 0, 0, 0, time.UTC)
+	completed := []domain.TimelineItem{
+		{Content: domain.UserMessage{}},
+		{Content: domain.AssistantMessage{}},
+	}
 	cases := []struct {
 		name     string
 		session  domain.Session
@@ -16,12 +18,33 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 		want     bool
 	}{
 		{
-			name: "first completed exchange generates title",
-			timeline: []domain.TimelineItem{
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-			},
-			want: true,
+			name:     "first completed exchange generates title",
+			timeline: completed,
+			want:     true,
+		},
+		{
+			name:     "legacy placeholder generates title",
+			session:  domain.Session{Title: "New Session"},
+			timeline: completed,
+			want:     true,
+		},
+		{
+			name:     "user title is never replaced",
+			session:  domain.Session{Title: "Fairphone 6", TitleUserDefined: true},
+			timeline: append(completed, completed...),
+			want:     false,
+		},
+		{
+			name:     "legacy custom title is treated as user owned",
+			session:  domain.Session{Title: "Laptop repair"},
+			timeline: append(completed, completed...),
+			want:     false,
+		},
+		{
+			name:     "explicit placeholder wording is still user owned",
+			session:  domain.Session{Title: "New Session", TitleUserDefined: true},
+			timeline: completed,
+			want:     false,
 		},
 		{
 			name: "no assistant yet does not generate title",
@@ -31,76 +54,18 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "second refresh waits for enough messages and time",
+			name: "generated title is never refreshed",
 			session: domain.Session{
 				Title:             "Existing Title",
 				TitleRefreshCount: 1,
-				TitleGeneratedAt:  now.Add(-59 * time.Second),
 			},
-			timeline: []domain.TimelineItem{
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-			},
-			want: false,
-		},
-		{
-			name: "second refresh triggers after one minute with enough messages",
-			session: domain.Session{
-				Title:             "Existing Title",
-				TitleRefreshCount: 1,
-				TitleGeneratedAt:  now.Add(-time.Minute),
-			},
-			timeline: []domain.TimelineItem{
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-			},
-			want: true,
-		},
-		{
-			name: "no third refresh",
-			session: domain.Session{
-				Title:             "Existing Title",
-				TitleRefreshCount: 2,
-				TitleGeneratedAt:  now.Add(-2 * time.Minute),
-			},
-			timeline: []domain.TimelineItem{
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-			},
-			want: false,
-		},
-		{
-			name: "backward compatible existing custom title counts as first refresh",
-			session: domain.Session{
-				Title:     "Already Generated",
-				UpdatedAt: now.Add(-2 * time.Minute),
-			},
-			timeline: []domain.TimelineItem{
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-				{Content: domain.UserMessage{}},
-				{Content: domain.AssistantMessage{}},
-			},
-			want: true,
+			timeline: append(completed, completed...),
+			want:     false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldRefreshSessionTitle(tc.session, tc.timeline, now); got != tc.want {
+			if got := shouldRefreshSessionTitle(tc.session, tc.timeline); got != tc.want {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
@@ -125,6 +90,9 @@ func TestShouldRefreshChatTitle(t *testing.T) {
 	}
 	if !shouldRefreshChatTitle(domain.Chat{Title: "Main"}, timeline) {
 		t.Fatal("expected main chat title to refresh")
+	}
+	if shouldRefreshChatTitle(domain.Chat{Title: "Main", TitleUserDefined: true}, timeline) {
+		t.Fatal("did not expect an explicitly named Main chat to refresh")
 	}
 	if shouldRefreshChatTitle(domain.Chat{Title: "hand picked title"}, timeline) {
 		t.Fatal("did not expect custom chat title to refresh")

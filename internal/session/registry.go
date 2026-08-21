@@ -213,7 +213,7 @@ func (r *Registry) createQuick(ctx context.Context, sessionID id.ID, projectRoot
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	return r.create(ctx, "New Session", projectRoot, false, sessionID, domain.SessionKindQuick, true, role)
+	return r.create(ctx, "", projectRoot, false, sessionID, domain.SessionKindQuick, true, role)
 }
 
 // CreateVoice creates a durable one-chat voice coordination session.
@@ -240,6 +240,7 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 		spec = spec.Normalized()
 	}
 	title = strings.TrimSpace(title)
+	titleUserDefined := title != ""
 	if title == "" {
 		title = "New Session"
 	}
@@ -286,6 +287,7 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	session, err := createSessionRecordWithOptions(ctx, r.store, r.chatsSrc, createSessionOptions{
 		ID:                     sessionID,
 		Title:                  title,
+		TitleUserDefined:       titleUserDefined,
 		ProviderID:             providerID,
 		ModelID:                modelID,
 		PermissionProfile:      permissionProfile,
