@@ -2173,12 +2173,18 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
 		!strings.Contains(fullPage, `scheduleTimelineRenderWindowRecalculation`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowPending`) ||
+		!strings.Contains(fullPage, `transcriptBottomScrollPending`) ||
 		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
 		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
 		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `timeline-spacer`) {
 		t.Fatalf("expected browser to track transcript render windows")
+	}
+	if strings.Contains(fullPage, `timelineAverageItemHeight`) ||
+		!strings.Contains(fullPage, `return measured > 0 ? measured : estimatedTimelineItemHeight`) ||
+		!strings.Contains(fullPage, `overflow-anchor: none`) {
+		t.Fatalf("expected unmeasured transcript spacers and browser scroll anchoring to remain stable")
 	}
 	if !strings.Contains(fullPage, `rollback_chat`) ||
 		!strings.Contains(fullPage, `this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(s =>`) ||

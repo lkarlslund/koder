@@ -1051,7 +1051,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineAverageItemHeight: estimatedTimelineItemHeight, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1924,10 +1924,15 @@
           this.setTranscriptStickToBottom(true);
           this.transcriptProgrammaticScroll = true;
           this.recalculateTimelineRenderWindow();
-          el.scrollTop = el.scrollHeight;
+          if (this.transcriptBottomScrollPending) return;
+          this.transcriptBottomScrollPending = true;
           requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight;
-            setTimeout(() => { this.transcriptProgrammaticScroll = false; }, 0);
+            this.transcriptBottomScrollPending = false;
+            const current = this.transcriptElement();
+            if (current && this.transcriptStickToBottom) current.scrollTop = current.scrollHeight;
+            setTimeout(() => {
+              if (!this.transcriptBottomScrollPending) this.transcriptProgrammaticScroll = false;
+            }, 0);
           });
         },
         restoreTranscriptTop(top) {
@@ -2098,14 +2103,6 @@
                 this.measureRenderedTimelineItems();
                 this.observeLastTranscriptItem();
                 fn();
-                requestAnimationFrame(() => {
-                  this.observeLastTranscriptItem();
-                  fn();
-                });
-                setTimeout(() => {
-                  this.observeLastTranscriptItem();
-                  fn();
-                }, 0);
               };
               if (options.renderDiagrams === false) {
                 run();
@@ -2114,16 +2111,11 @@
               const rendered = this.renderDiagrams(this.timelineItemElement(options.itemID));
               run();
               Promise.resolve(rendered).then(() => {
-                this.observeLastTranscriptItem();
-                fn();
                 requestAnimationFrame(() => {
+                  this.measureRenderedTimelineItems();
                   this.observeLastTranscriptItem();
                   fn();
                 });
-                setTimeout(() => {
-                  this.observeLastTranscriptItem();
-                  fn();
-                }, 0);
               });
             });
           });
@@ -2700,7 +2692,7 @@
         timelineItemHeight(item) {
           const key = this.timelineHeightKey(item);
           const measured = key ? Number(this.timelineItemHeights[key] || 0) : 0;
-          return measured > 0 ? measured : Math.max(1, Number(this.timelineAverageItemHeight || estimatedTimelineItemHeight));
+          return measured > 0 ? measured : estimatedTimelineItemHeight;
         },
         timelineSpacerHeight(items) {
           if (!Array.isArray(items) || items.length === 0) return 0;
@@ -2725,8 +2717,6 @@
           if (!chatID) return;
           const next = {...(this.timelineItemHeights || {})};
           let changed = false;
-          let total = 0;
-          let count = 0;
           root.querySelectorAll('.transcript-turn[data-timeline-item-id]').forEach(row => {
             const itemID = String(row.dataset.timelineItemId || '').trim();
             if (!itemID) return;
@@ -2736,19 +2726,11 @@
             const marginBottom = Number.parseFloat(styles.marginBottom || '0') || 0;
             const height = Math.max(1, Math.ceil(rect.height + marginTop + marginBottom));
             const key = chatID + ':' + itemID;
-            total += height;
-            count++;
             if (next[key] !== height) {
               next[key] = height;
               changed = true;
             }
           });
-          if (count > 0) {
-            const average = Math.max(1, Math.round(total / count));
-            if (this.timelineAverageItemHeight !== average) {
-              this.timelineAverageItemHeight = average;
-            }
-          }
           if (changed) this.timelineItemHeights = next;
         },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
