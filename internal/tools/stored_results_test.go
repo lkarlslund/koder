@@ -220,6 +220,33 @@ func TestDisplayTextForPartIncludesChatQueuedInputs(t *testing.T) {
 	}
 }
 
+func TestModelTextForPartIncludesSealedChatResponse(t *testing.T) {
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindChatSend, tools.StoredResultStatusOK, "legacy display text", tools.ChatListStoredResult{
+		Items: []tools.ChatStoredItem{{
+			ID:         "chat-1",
+			Title:      "Codex execution",
+			State:      "idle",
+			StatusText: "Idle",
+			Response:   "ACP is the Agent Client Protocol.",
+		}},
+	}), "")
+	if !ok {
+		t.Fatal("expected model text")
+	}
+	if !strings.Contains(text, "Target chat response:\nACP is the Agent Client Protocol.") {
+		t.Fatalf("sealed child response missing from model text: %q", text)
+	}
+}
+
+func TestModelTextForPartRestoresLegacySealedChatResponse(t *testing.T) {
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindChatSend, tools.StoredResultStatusOK, "#chat-1 Codex execution {idle}\n\nTarget chat response:\nACP is the Agent Client Protocol.", tools.ChatListStoredResult{
+		Items: []tools.ChatStoredItem{{ID: "chat-1", Title: "Codex execution", State: "idle"}},
+	}), "")
+	if !ok || !strings.Contains(text, "Target chat response:\nACP is the Agent Client Protocol.") {
+		t.Fatalf("legacy sealed child response missing from model text: %q, %v", text, ok)
+	}
+}
+
 func TestPlanningStoredResultsEmitMilestoneKeysOnly(t *testing.T) {
 	plan := planning.Plan{Milestones: []planning.Milestone{{
 		Key:          "M001",

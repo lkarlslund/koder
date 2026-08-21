@@ -233,9 +233,10 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		Role:       chatrole.Execution,
 		State:      RunStateRunning,
 		StatusText: "Running",
+		Response:   "The child found the firmware gate.",
 	}}}
 
-	_, err := (sendTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
+	result, err := (sendTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatSend,
 		Args: map[string]string{"chat_id": "child-chat", "message": "Use jadx output", "steer": "true"},
 	}})
@@ -244,6 +245,13 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 	}
 	if control.lastOwnerChatID != "chat-20" || control.lastChatID != "child-chat" || control.lastUpdate.Message != "Use jadx output" || !control.lastUpdate.Steer {
 		t.Fatalf("unexpected send request: %#v", control)
+	}
+	if strings.Count(result.Output, "Target chat response:") != 1 || !strings.Contains(result.Output, "The child found the firmware gate.") {
+		t.Fatalf("sealed child response missing or duplicated: %q", result.Output)
+	}
+	stored, ok := result.Stored.(tools.ChatListStoredResult)
+	if !ok || len(stored.Items) != 1 || stored.Items[0].Response != "The child found the firmware gate." {
+		t.Fatalf("sealed child response missing from stored result: %#v", result.Stored)
 	}
 
 	_, err = (cancelTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
@@ -268,7 +276,7 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		t.Fatalf("unexpected archive request: %#v", control)
 	}
 
-	result, err := (renameTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
+	result, err = (renameTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatRename,
 		Args: map[string]string{"chat_id": "child-chat", "title": "Renamed"},
 	}})

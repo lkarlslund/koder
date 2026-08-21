@@ -232,6 +232,7 @@ type ChatStoredItem struct {
 	ActiveMilestoneKey string `json:"active_milestone_key,omitempty"`
 	AssignedTaskRef    string `json:"assigned_task_ref,omitempty"`
 	StatusText         string `json:"status_text,omitempty"`
+	Response           string `json:"response,omitempty"`
 }
 
 type ChatListStoredResult struct {
@@ -803,6 +804,9 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 		if err != nil {
 			return storedResultEnvelope{}, false
 		}
+		if payload.Tool == ChatSend {
+			raw = restoreLegacyChatResponse(raw, payload.Text)
+		}
 		return storedResultEnvelope{
 			Version:  2,
 			PartKind: domain.PartKindToolOutput,
@@ -841,6 +845,25 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 	default:
 		return storedResultEnvelope{}, false
 	}
+}
+
+func restoreLegacyChatResponse(raw []byte, text string) []byte {
+	var result ChatListStoredResult
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Items) != 1 || strings.TrimSpace(result.Items[0].Response) != "" {
+		return raw
+	}
+	const marker = "Target chat response:"
+	_, response, found := strings.Cut(text, marker)
+	response = strings.TrimSpace(response)
+	if !found || response == "" {
+		return raw
+	}
+	result.Items[0].Response = response
+	restored, err := json.Marshal(result)
+	if err != nil {
+		return raw
+	}
+	return restored
 }
 
 func formatStoredResultForPart(env storedResultEnvelope) (string, bool) {
@@ -1318,6 +1341,9 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 		}
 		if status := strings.TrimSpace(item.StatusText); status != "" {
 			lines = append(lines, status)
+		}
+		if response := strings.TrimSpace(item.Response); response != "" {
+			lines = append(lines, "", "Target chat response:", response)
 		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))

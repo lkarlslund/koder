@@ -2851,6 +2851,9 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		requestsMu.Unlock()
 		switch {
 		case strings.Contains(requestBody, "voice orchestrator") && strings.Contains(requestBody, `"role":"tool"`):
+			if !strings.Contains(requestBody, "The laptop now boots normally after the firmware fix.") {
+				t.Errorf("voice continuation omitted delegated chat response: %s", requestBody)
+			}
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"We found that the laptop now boots normally."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		case strings.Contains(requestBody, "voice orchestrator"):
 			arguments := fmt.Sprintf(`{"chat_id":%q,"message":"Check whether the laptop fix still works","wait":true}`, targetChatID)

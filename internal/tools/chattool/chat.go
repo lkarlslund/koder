@@ -165,6 +165,7 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 			ActiveMilestoneKey: status.ActiveMilestoneKey,
 			AssignedTaskRef:    status.AssignedTaskRef,
 			StatusText:         status.StatusText,
+			Response:           status.Response,
 		})
 	}
 	return tools.ChatListStoredResult{Items: items}
@@ -585,9 +586,6 @@ func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, u
 func chatResult(tool tools.ID, status Status) (tools.Result, error) {
 	stored := storedResult([]Status{status})
 	output := tools.DisplayTextForStored(tool, stored)
-	if response := strings.TrimSpace(status.Response); response != "" {
-		output += "\n\nTarget chat response:\n" + response
-	}
 	return tools.Result{
 		Output: output,
 		Stored: stored,
