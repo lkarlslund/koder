@@ -29,7 +29,7 @@ func NewOpusEncoder(sampleRate, channels, bitrate int) (*OpusEncoder, error) {
 		return nil, err
 	}
 	if bitrate <= 0 {
-		return nil, errors.New("Opus bitrate must be positive")
+		return nil, errors.New("opus bitrate must be positive")
 	}
 	codec, err := gopus.NewEncoder(gopus.EncoderConfig{
 		SampleRate:  sampleRate,
@@ -65,10 +65,10 @@ func (e *OpusEncoder) FrameBytes() int {
 // Encode converts one exact 20 ms PCM16LE frame into a caller-owned packet.
 func (e *OpusEncoder) Encode(pcm []byte) ([]byte, error) {
 	if e == nil || e.codec == nil {
-		return nil, errors.New("Opus encoder is not initialized")
+		return nil, errors.New("opus encoder is not initialized")
 	}
 	if len(pcm) != e.frameBytes {
-		return nil, fmt.Errorf("Opus PCM frame has %d bytes; expected %d", len(pcm), e.frameBytes)
+		return nil, fmt.Errorf("opus PCM frame has %d bytes; expected %d", len(pcm), e.frameBytes)
 	}
 	for index := range e.pcm {
 		e.pcm[index] = int16(binary.LittleEndian.Uint16(pcm[index*2:]))
@@ -109,10 +109,10 @@ func NewOpusDecoder(sampleRate, channels int) (*OpusDecoder, error) {
 // Decode converts one Opus packet into caller-owned PCM16LE bytes.
 func (d *OpusDecoder) Decode(packet []byte) ([]byte, error) {
 	if d == nil || d.codec == nil {
-		return nil, errors.New("Opus decoder is not initialized")
+		return nil, errors.New("opus decoder is not initialized")
 	}
 	if len(packet) == 0 || len(packet) > MaxPacketBytes {
-		return nil, fmt.Errorf("Opus packet size %d is outside 1..%d bytes", len(packet), MaxPacketBytes)
+		return nil, fmt.Errorf("opus packet size %d is outside 1..%d bytes", len(packet), MaxPacketBytes)
 	}
 	samplesPerChannel, err := d.codec.DecodeInt16(packet, d.pcm)
 	if err != nil {
