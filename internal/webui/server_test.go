@@ -2220,6 +2220,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'connecting'`) {
 		t.Fatalf("expected connection badge to show connecting instead of offline during reconnect")
 	}
+	if !strings.Contains(fullPage, `const version = String(build.version || build.Version || '').trim()`) ||
+		!strings.Contains(fullPage, `return version || built || this.shortBuildCommit(build)`) {
+		t.Fatalf("expected the top bar to show the canonical rNNNN build version with a commit fallback")
+	}
 	if !strings.Contains(fullPage, `const id = String(raw || '').trim()`) {
 		t.Fatalf("expected selected chat restore to keep UUID chat ids as strings")
 	}

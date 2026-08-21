@@ -1459,10 +1459,10 @@
         },
         currentBuildLabel() {
           const build = this.currentBuildInfo();
-          const commit = this.shortBuildCommit(build);
+          const version = String(build.version || build.Version || '').trim();
           const built = this.formatBuildTimestamp(build.build_time || build.BuildTime);
-          if (commit && built) return commit + ' · ' + built;
-          return commit || built;
+          if (version && built) return version + ' · ' + built;
+          return version || built || this.shortBuildCommit(build);
         },
         currentBuildTitle() {
           const build = this.currentBuildInfo();
