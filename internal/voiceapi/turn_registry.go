@@ -264,15 +264,16 @@ func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing vo
 }
 
 func (h *Handler) cacheSpeech(ctx context.Context, turn *cachedTurn, text string, outputTransport voice.AudioFormat) error {
-	format := h.Backend.VoiceAudioConfig().Output
-	packetEncoder, err := newAudioPacketEncoder(outputTransport)
+	serviceFormat := h.Backend.VoiceAudioConfig().Output
+	format := playbackFormat(outputTransport)
+	packetEncoder, err := newAudioPacketEncoder(serviceFormat, outputTransport)
 	if err != nil {
 		return err
 	}
 	turn.appendState("speaking", nil)
 	turn.startAudio(format)
 	var sequence uint32
-	maxBytes := int64(h.Backend.VoiceAudioConfig().MaxUtteranceSeconds) * int64(format.SampleRate) * int64(format.Channels) * 2
+	maxBytes := int64(h.Backend.VoiceAudioConfig().MaxUtteranceSeconds) * int64(serviceFormat.SampleRate) * int64(serviceFormat.Channels) * 2
 	var total int64
 	emit := func(kind voice.AudioFrameKind, payload []byte) error {
 		encoded, err := voice.EncodeAudioFrame(voice.AudioFrame{Kind: kind, Sequence: sequence, Payload: payload})

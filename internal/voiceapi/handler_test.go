@@ -1074,6 +1074,40 @@ func TestHandlerNegotiatesAndTranscodesOpus(t *testing.T) {
 	readType(t, ctx, conn, "ready")
 }
 
+func TestHandlerNegotiatesIndependentAudioCompressionPreferences(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, ""))
+	defer server.Close()
+	ctx := t.Context()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	readType(t, ctx, conn, "ready")
+	input := &voice.AudioTransportPreference{Encoding: voice.PCM16LE}
+	output := &voice.AudioTransportPreference{Encoding: voice.Opus, Bitrate: 16_000}
+	if err := writeClientFrame(ctx, conn, clientFrame{
+		Type:            "hello",
+		AudioEncodings:  []string{voice.PCM16LE, voice.Opus},
+		InputTransport:  input,
+		OutputTransport: output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ready := readType(t, ctx, conn, "ready")
+	if ready.AudioConfig == nil {
+		t.Fatal("ready omitted audio config")
+	}
+	if got := selectedInputFormat(*ready.AudioConfig); got.Encoding != voice.PCM16LE || got.Bitrate != 0 {
+		t.Fatalf("input transport = %#v, want PCM", got)
+	}
+	if got := selectedOutputFormat(*ready.AudioConfig); got.Encoding != voice.Opus || got.Bitrate != 16_000 {
+		t.Fatalf("output transport = %#v, want 16 kbit/s Opus", got)
+	}
+}
+
 func TestReadinessExercisesSpeechWithoutTakingConversationLease(t *testing.T) {
 	backend := &fakeBackend{}
 	handler := NewHandler(backend, "secret")

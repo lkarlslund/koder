@@ -150,13 +150,14 @@ Automatic for unrestricted detection, choose one language for the strongest
 hint, or choose several languages you actually speak to bias detection away
 from unrelated languages. Changes apply on the next conversation connection.
 
-Android runs on-device Silero VAD over local PCM, then streams 20 ms Opus
-packets to Koder and decodes Koder's Opus reply before playback. Each direction
-is negotiated independently, so a TTS service using a non-Opus sample rate such
-as 44.1 kHz safely falls back to PCM without disabling Opus microphone upload.
-The protocol also falls back to PCM with older servers and clients. A bundled
-pure-Java codec keeps this path compatible with Android 9 without native ABI
-libraries. The app also displays text, images, and generic MIME
+Android runs on-device Silero VAD over local PCM. Voice Adjustments lets the
+user independently select PCM or 64, 40, 24, or 16 kbit/s Opus for microphone
+upload and speech playback. Koder resamples output such as 44.1 kHz TTS PCM to
+an Opus-supported rate while streaming; PCM remains available as the
+uncompressed diagnostic and maximum-fidelity choice. The protocol falls back
+safely with older servers and clients. A bundled pure-Java codec keeps this
+path compatible with Android 9 without native ABI libraries. The app also
+displays text, images, and generic MIME
 attachments. Koder—not Android—calls the configured remote STT and TTS
 endpoints. While voice is active, ordinary transcript text stays hidden. A
 deliberate visual response automatically opens a separate presentation panel;

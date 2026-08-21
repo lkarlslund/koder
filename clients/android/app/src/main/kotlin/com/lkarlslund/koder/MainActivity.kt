@@ -74,6 +74,7 @@ import com.lkarlslund.koder.phone.PhoneIdentity
 import com.lkarlslund.koder.phone.permissionAvailability
 import com.lkarlslund.koder.presentation.ZoomableImageView
 import com.lkarlslund.koder.voice.AppUpdate
+import com.lkarlslund.koder.voice.AudioCompression
 import com.lkarlslund.koder.voice.AudioDiagnostics
 import com.lkarlslund.koder.voice.CallController
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
@@ -659,19 +660,19 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		screen = Screen.READINESS
 		readinessHome = home
 		readinessReturnToSettings = fromSettings
-		readinessStep = step.coerceIn(0, 3)
+		readinessStep = step.coerceIn(0, 4)
 		readinessCheck?.close()
 		readinessCheck = null
 		clearCallViews()
 		val content = column(Gravity.CENTER_HORIZONTAL)
 		content.addView(logo(), centeredSquare(82, bottom = 14))
 		content.addView(title("Voice adjustments").apply { gravity = Gravity.CENTER }, matchWrap())
-		content.addView(helper("Step ${readinessStep + 1} of 4").apply { gravity = Gravity.CENTER }, spaced(top = 5, bottom = 8))
+		content.addView(helper("Step ${readinessStep + 1} of 5").apply { gravity = Gravity.CENTER }, spaced(top = 5, bottom = 8))
 		content.addView(body(if (fromSettings) "Tune how Koder recognizes and answers you, then rerun the complete voice check." else "Let’s tune voice recognition and response style before your first conversation.").apply { gravity = Gravity.CENTER }, spaced(bottom = 22))
-		if (readinessStep < 3) {
+		if (readinessStep < 4) {
 			addVoiceAdjustmentStep(content, readinessStep)
 		} else {
-			content.addView(title("4. Live voice check").apply { textSize = 24f }, spaced(bottom = 6))
+			content.addView(title("5. Live voice check").apply { textSize = 24f }, spaced(bottom = 6))
 			content.addView(body("This does not create a conversation. Say a sentence; Koder will recognize it and speak a confirmation over the current audio route."), spaced(bottom = 14))
 			content.addView(readinessRow("✓", "Server and authentication", "Connected to Koder"), matchWrap())
 			content.addView(readinessRow("○", "Microphone", "Waiting to test"), spaced(top = 7))
@@ -697,7 +698,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				isAllCaps = false
 				setOnClickListener { showReadiness(home, fromSettings = fromSettings, step = readinessStep - 1) }
 			}, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-			if (readinessStep < 3) addView(Button(this@MainActivity).apply {
+			if (readinessStep < 4) addView(Button(this@MainActivity).apply {
 				text = "Continue"
 				contentDescription = "Continue voice adjustments"
 				isAllCaps = false
@@ -768,7 +769,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}
 			}
 		})
-		readinessCheck?.start(settings.server, settings.token, settings.speechLanguages, settings.vadSensitivityPercent, settings.vadSilenceMilliseconds)
+		readinessCheck?.start(
+			settings.server,
+			settings.token,
+			settings.speechLanguages,
+			settings.vadSensitivityPercent,
+			settings.vadSilenceMilliseconds,
+			settings.inputCompression,
+			settings.outputCompression,
+		)
 	}
 
 	private fun showReadinessSuccess(home: VoiceHome, heard: String) {
@@ -1104,7 +1113,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         }, spaced(top = 8, bottom = 24))
 
 		content.addView(title("Voice").apply { textSize = 24f }, matchWrap())
-		content.addView(body("Adjust recognition languages, answer length, voice detection sensitivity, and end-of-speech timing. You can also rerun the microphone, STT, TTS, and playback check."), spaced(top = 6, bottom = 10))
+		content.addView(body("Adjust recognition languages, answer length, input and output compression, voice detection sensitivity, and end-of-speech timing. You can also rerun the microphone, STT, TTS, and playback check."), spaced(top = 6, bottom = 10))
 		content.addView(Button(this).apply {
 			text = "Voice adjustments & readiness"
 			isAllCaps = false
@@ -1152,10 +1161,32 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}, matchWrap())
 			}
 		}, spaced(bottom = 24))
-		return
+			return
 		}
 
-		content.addView(title("3. Voice detection").apply { textSize = 24f }, matchWrap())
+		if (step == 2) {
+			content.addView(title("3. Audio compression").apply { textSize = 24f }, matchWrap())
+			content.addView(body("Choose microphone upload and Koder playback independently. PCM is lossless but large; stronger Opus compression saves bandwidth at the cost of some speech detail."), spaced(top = 6, bottom = 14))
+			content.addView(audioCompressionGroup(
+				"Microphone → Koder",
+				settings.inputCompression,
+				"microphone upload",
+			) { compression ->
+				settings = settings.copy(inputCompression = compression)
+				secureSettings.saveInputCompression(compression)
+			}, matchWrap())
+			content.addView(audioCompressionGroup(
+				"Koder → phone",
+				settings.outputCompression,
+				"speech playback",
+			) { compression ->
+				settings = settings.copy(outputCompression = compression)
+				secureSettings.saveOutputCompression(compression)
+			}, spaced(top = 16, bottom = 24))
+			return
+		}
+
+		content.addView(title("4. Voice detection").apply { textSize = 24f }, matchWrap())
 		val sensitivityValue = helper("Sensitivity · ${settings.vadSensitivityPercent}%").apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
 		content.addView(body("Increase this if your voice is missed. Reduce it when background noise starts conversations."), spaced(top = 6, bottom = 10))
 		content.addView(sensitivityValue, matchWrap())
@@ -1195,6 +1226,29 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
 			})
 		}, spaced(height = dp(48), bottom = 24))
+	}
+
+	private fun audioCompressionGroup(
+		heading: String,
+		selected: AudioCompression,
+		directionDescription: String,
+		onSelected: (AudioCompression) -> Unit,
+	) = LinearLayout(this).apply {
+		orientation = LinearLayout.VERTICAL
+		addView(label(heading), spaced(bottom = 5))
+		addView(RadioGroup(this@MainActivity).apply {
+			orientation = RadioGroup.VERTICAL
+			AudioCompression.entries.forEach { compression ->
+				addView(RadioButton(this@MainActivity).apply {
+					id = View.generateViewId()
+					text = "${compression.title}\n${compression.description}"
+					contentDescription = "Use ${compression.title} for $directionDescription. ${compression.description}"
+					isChecked = compression == selected
+					minHeight = dp(48)
+					setOnClickListener { onSelected(compression) }
+				}, matchWrap())
+			}
+		}, matchWrap())
 	}
 
 	private fun speechAutomaticRow() = CheckBox(this).apply {
@@ -2757,6 +2811,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			settings.vadSilenceMilliseconds,
 			settings.builtInAudioRoute,
 			settings.responsePacing,
+			settings.inputCompression,
+			settings.outputCompression,
 		)
     }
 

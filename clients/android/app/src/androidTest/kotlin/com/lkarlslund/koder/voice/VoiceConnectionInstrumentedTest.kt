@@ -125,6 +125,9 @@ class VoiceConnectionInstrumentedTest {
 		var historyCursor = ""
 		var searchQuery = ""
 		var responsePacing = ""
+		var inputEncoding = ""
+		var inputBitrate = 0
+		var outputEncoding = ""
 		var roundTripMillis = -1L
 
         server.enqueue(
@@ -145,7 +148,12 @@ class VoiceConnectionInstrumentedTest {
 					if (message.getString("type") == "ping") {
 						webSocket.send("""{"type":"pong","protocol":"voice.v1","server_time":"2026-08-20T00:00:00Z"}""")
 					}
-					if (message.getString("type") == "hello") responsePacing = message.getString("response_pacing")
+					if (message.getString("type") == "hello") {
+						responsePacing = message.getString("response_pacing")
+						inputEncoding = message.getJSONObject("input_transport_preference").getString("encoding")
+						inputBitrate = message.getJSONObject("input_transport_preference").optInt("bitrate")
+						outputEncoding = message.getJSONObject("output_transport_preference").getString("encoding")
+					}
                     if (message.getString("type") == "utterance") {
                         utteranceText = message.getString("text")
                         serverReceivedUtterance.countDown()
@@ -204,7 +212,13 @@ class VoiceConnectionInstrumentedTest {
 			}
             override fun onDisconnected(reason: String) = Unit
         }).use { connection ->
-            connection.connect(server.url("/").toString(), "test-token", responsePacing = VoiceResponsePacing.DETAILED)
+			connection.connect(
+				server.url("/").toString(),
+				"test-token",
+				responsePacing = VoiceResponsePacing.DETAILED,
+				inputCompression = AudioCompression.OPUS_HIGHEST,
+				outputCompression = AudioCompression.PCM,
+			)
             assertTrue("client did not receive ready", clientReady.await(5, TimeUnit.SECONDS))
 			connection.sendPing()
 			assertTrue("client did not measure protocol round trip", clientReceivedPong.await(5, TimeUnit.SECONDS))
@@ -234,6 +248,9 @@ class VoiceConnectionInstrumentedTest {
 		assertEquals("boots", searchQuery)
 		assertEquals("Phone work", voiceTitle)
 		assertEquals("detailed", responsePacing)
+		assertEquals("opus", inputEncoding)
+		assertEquals(16_000, inputBitrate)
+		assertEquals("pcm_s16le", outputEncoding)
 		assertTrue(roundTripMillis >= 0)
     }
 

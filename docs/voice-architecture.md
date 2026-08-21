@@ -57,11 +57,13 @@ There is no separate stateless router or summarizer model call.
 ## Mobile audio transport
 
 `voice.v1` capability-negotiates sequence-numbered, raw 20 ms mono Opus
-packets. Android offers `opus` and `pcm_s16le` in `hello`; Koder selects Opus at
-18 kbit/s constrained VBR upstream (16 kHz) and 32 kbit/s downstream (24 kHz).
-Clients that omit the offer continue using the original PCM frames, which cost
-roughly 256 kbit/s upstream and 384 kbit/s downstream before WebSocket/TLS
-overhead.
+packets independently in each direction. Android sends
+`input_transport_preference` and `output_transport_preference` in `hello`.
+Each may select uncompressed PCM or speech-tuned constrained-VBR Opus at 64,
+40, 24, or 16 kbit/s. New installations default to PCM upstream so recognition
+keeps the original microphone detail, and balanced 40 kbit/s Opus downstream.
+Clients using the earlier `audio_encodings` offer retain its legacy negotiation,
+and clients that send neither continue using PCM.
 
 The advertised `input` and `output` fields remain the local speech-service PCM
 formats. Separate `input_transport` and `output_transport` fields describe the
@@ -70,7 +72,10 @@ to pretend compressed bytes are PCM. Koder uses a pure-Go Opus codec and
 Android bundles the pure-Java Concentus codec. There is no host `libopus`, NDK,
 or ABI dependency, and the same path runs on the supported Android 9/API 28
 minimum. Go/Kotlin cross-codec fixtures and managed API 28/API 36 tests protect
-interoperability. TCP/WebSocket still has head-of-line blocking; a future
+interoperability. When TTS PCM uses a rate Opus cannot represent directly—most
+notably 44.1 kHz—Koder linearly resamples the outgoing stream to the nearest
+Opus rate and advertises the decoded playback rate to Android. TCP/WebSocket
+still has head-of-line blocking; a future
 loss-tolerant transport remains a separate WebRTC or QUIC decision.
 
 Android retains every encoded frame for the current bounded utterance before

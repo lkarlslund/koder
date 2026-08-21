@@ -148,6 +148,12 @@ data class VoiceAudioFormat(
     val encoding: String,
     val sampleRate: Int,
     val channels: Int,
+	val bitrate: Int = 0,
+)
+
+data class VoiceAudioTransportPreference(
+	val encoding: String,
+	val bitrate: Int = 0,
 )
 
 data class VoiceAudioConfig(
@@ -362,11 +368,17 @@ object VoiceProtocol {
         )
     }
 
-    fun hello(responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL): String = JSONObject()
+    fun hello(
+		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
+		inputCompression: AudioCompression = AudioCompression.PCM,
+		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+	): String = JSONObject()
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)
 		.put("response_pacing", responsePacing.wireValue)
-		.put("audio_encodings", JSONArray(listOf(OPUS_ENCODING, PCM16_ENCODING)))
+		.put("audio_encodings", JSONArray(if (inputCompression == AudioCompression.PCM) listOf(PCM16_ENCODING, OPUS_ENCODING) else listOf(OPUS_ENCODING, PCM16_ENCODING)))
+		.put("input_transport_preference", inputCompression.preference().toJSON())
+		.put("output_transport_preference", outputCompression.preference().toJSON())
         .toString()
 
 	fun ping(): String = JSONObject()
@@ -610,11 +622,17 @@ object VoiceProtocol {
 		.put("encoding", encoding)
 		.put("sample_rate", sampleRate)
 		.put("channels", channels)
+		.apply { if (bitrate > 0) put("bitrate", bitrate) }
+
+	private fun VoiceAudioTransportPreference.toJSON(): JSONObject = JSONObject()
+		.put("encoding", encoding)
+		.apply { if (bitrate > 0) put("bitrate", bitrate) }
 
 	private fun JSONObject.toAudioFormat(): VoiceAudioFormat = VoiceAudioFormat(
 		encoding = getString("encoding"),
 		sampleRate = getInt("sample_rate"),
 		channels = getInt("channels"),
+		bitrate = optInt("bitrate"),
 	)
 
 	private fun JSONObject.toAudioConfig(): VoiceAudioConfig = VoiceAudioConfig(

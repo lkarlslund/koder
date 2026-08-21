@@ -65,6 +65,8 @@ class VoiceConnection(
 	private var chatId = ""
 	private var callId = ""
 	private var responsePacing = VoiceResponsePacing.NORMAL
+	private var inputCompression = AudioCompression.PCM
+	private var outputCompression = AudioCompression.OPUS_BALANCED
 	private var desired = false
 	private var generation = 0L
 	private var reconnectAttempt = 0
@@ -79,7 +81,15 @@ class VoiceConnection(
 	}
 
 	@Synchronized
-	fun connect(server: String, bearerToken: String, sessionId: String = "", chatId: String = "", responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL) {
+	fun connect(
+		server: String,
+		bearerToken: String,
+		sessionId: String = "",
+		chatId: String = "",
+		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
+		inputCompression: AudioCompression = AudioCompression.PCM,
+		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+	) {
 		stopSocket("new call")
         token = bearerToken.trim()
         this.server = server.trim()
@@ -87,6 +97,8 @@ class VoiceConnection(
 		this.chatId = chatId.trim()
 		this.voiceSessionId = ""
 		this.responsePacing = responsePacing
+		this.inputCompression = inputCompression
+		this.outputCompression = outputCompression
 		callId = UUID.randomUUID().toString()
 		pendingTurn = null
 		activeOutputUtteranceId = ""
@@ -135,7 +147,7 @@ class VoiceConnection(
 					}
 					reconnectAttempt = 0
 				}
-				webSocket.send(VoiceProtocol.hello(responsePacing))
+				webSocket.send(VoiceProtocol.hello(responsePacing, inputCompression, outputCompression))
                 listener.onCallIdentity(callId)
                 listener.onConnected()
             }

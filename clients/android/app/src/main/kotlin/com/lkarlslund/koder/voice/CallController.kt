@@ -95,6 +95,7 @@ class CallController(
 			phoneDevice.close()
 			acceptingOutput = false
 			outputOpusDecoder = null
+			outputPlaybackFormat = null
 			playback.stop()
 			diagnostics.recordReconnect()
 			if (running) {
@@ -164,6 +165,7 @@ class CallController(
 	private var inputOpusEncoder: OpusAudioEncoder? = null
     private var outputSequence = 0L
 	private var outputOpusDecoder: OpusAudioDecoder? = null
+	private var outputPlaybackFormat: VoiceAudioFormat? = null
 	private var outputUtteranceId = ""
 	    @Volatile private var acceptingOutput = false
 		private var listeningEndpointConfig = EndpointConfig(sampleRate = endpointSampleRate, frameSamples = endpointFrameSamples)
@@ -185,6 +187,8 @@ class CallController(
 		vadSilenceMilliseconds: Int = 600,
 		builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
 		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
+		inputCompression: AudioCompression = AudioCompression.PCM,
+		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
 	) {
         if (running) end()
         running = true
@@ -194,6 +198,8 @@ class CallController(
         audioConfig = null
 		inputOpusEncoder = null
 		outputOpusDecoder = null
+		outputPlaybackFormat = null
+		outputPlaybackFormat = null
 		connectedServer = server
 		connectedToken = token
 			speechLanguages = languages.toSet()
@@ -220,7 +226,7 @@ class CallController(
         appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
         telecom.start()
         try {
-			connection.connect(server, token, sessionId, chatId, responsePacing)
+			connection.connect(server, token, sessionId, chatId, responsePacing, inputCompression, outputCompression)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Connection failed")
         }
@@ -485,6 +491,7 @@ class CallController(
 						VoiceProtocol.OPUS_ENCODING -> OpusAudioDecoder(audioConfig!!.selectedOutputTransport())
 						else -> null
 					}
+					outputPlaybackFormat = format
 					configureEndpointForOutput(true)
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
@@ -501,6 +508,7 @@ class CallController(
 							outputUtteranceId = ""
 							outputSequence = 0
 							outputOpusDecoder = null
+							outputPlaybackFormat = null
 							configureEndpointForOutput(false)
 							maybeListen(force = true)
 						}
@@ -509,6 +517,7 @@ class CallController(
 					outputUtteranceId = ""
 					outputSequence = 0
 					outputOpusDecoder = null
+					outputPlaybackFormat = null
 				}
             }
             "error" -> {
@@ -516,6 +525,7 @@ class CallController(
 				outputUtteranceId = ""
 				outputSequence = 0
 				outputOpusDecoder = null
+				outputPlaybackFormat = null
                 playback.stop()
 				configureEndpointForOutput(false)
 				val message = frame.error.ifBlank { "Voice request failed" }
@@ -560,7 +570,7 @@ class CallController(
 			}
 			return
 		}
-		diagnostics.recordOutput(frame, config.output, pcm.size)
+		diagnostics.recordOutput(frame, outputPlaybackFormat ?: config.output, pcm.size)
 		listener.onAudioLevel(pcmLevel(pcm), false)
 		listener.onAudioWaveform(pcmWaveform(pcm), false)
         outputSequence++
@@ -637,7 +647,7 @@ class CallController(
 						}
 						val transport = audioConfig?.selectedInputTransport() ?: format
 						inputOpusEncoder = if (transport.encoding == VoiceProtocol.OPUS_ENCODING) {
-							OpusAudioEncoder(transport, INPUT_OPUS_BITRATE)
+							OpusAudioEncoder(transport, transport.bitrate.takeIf { it > 0 } ?: INPUT_OPUS_BITRATE)
 						} else null
 						utteranceId = connection.startAudio(
 							transport,

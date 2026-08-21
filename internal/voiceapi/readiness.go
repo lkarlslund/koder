@@ -32,7 +32,7 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var writeMu sync.Mutex
 	baseConfig := h.Backend.VoiceAudioConfig()
-	config := negotiatedAudioConfig(baseConfig, nil)
+	config := negotiatedAudioConfig(baseConfig, nil, nil, nil)
 	advertised := advertisedAudioConfig(baseConfig)
 	if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "readiness_ready", AudioConfig: &advertised, State: "listening"}); err != nil {
 		return
@@ -64,7 +64,7 @@ func (h *Handler) serveReadiness(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.TrimSpace(frame.Type) {
 		case "hello":
-			config = negotiatedAudioConfig(baseConfig, frame.AudioEncodings)
+			config = negotiatedAudioConfig(baseConfig, frame.AudioEncodings, frame.InputTransport, frame.OutputTransport)
 			if writeFrame(ctx, conn, &writeMu, serverFrame{Type: "readiness_ready", AudioConfig: &config, State: "listening"}) != nil {
 				return
 			}

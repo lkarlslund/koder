@@ -55,7 +55,15 @@ class VoiceReadinessCheck(
 	private var captureStarted = false
 
 	@Synchronized
-	fun start(server: String, token: String, languages: Set<String>, sensitivity: Int, silenceMilliseconds: Int) {
+	fun start(
+		server: String,
+		token: String,
+		languages: Set<String>,
+		sensitivity: Int,
+		silenceMilliseconds: Int,
+		inputCompression: AudioCompression = AudioCompression.PCM,
+		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+	) {
 		stopResources()
 		finished = false
 		serverComplete = false
@@ -87,13 +95,17 @@ class VoiceReadinessCheck(
 		val request = Request.Builder().also(identity::applyTo).url(requestURL)
 			.apply { if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}") }
 			.build()
-		socket = client.newWebSocket(request, socketListener(languages))
+		socket = client.newWebSocket(request, socketListener(languages, inputCompression, outputCompression))
 		timeout = scheduler.schedule({ fail("Readiness check timed out. Try speaking closer to the microphone.") }, 45, TimeUnit.SECONDS)
 	}
 
-	private fun socketListener(languages: Set<String>) = object : WebSocketListener() {
+	private fun socketListener(
+		languages: Set<String>,
+		inputCompression: AudioCompression,
+		outputCompression: AudioCompression,
+	) = object : WebSocketListener() {
 		override fun onOpen(webSocket: WebSocket, response: Response) {
-			webSocket.send(VoiceProtocol.hello())
+			webSocket.send(VoiceProtocol.hello(inputCompression = inputCompression, outputCompression = outputCompression))
 			listener.onProgress(Step.SERVER, "Connected and authorized")
 		}
 
@@ -179,7 +191,7 @@ class VoiceReadinessCheck(
 							sequence = 0
 							val transport = audioConfig?.selectedInputTransport() ?: format
 							inputOpusEncoder = if (transport.encoding == VoiceProtocol.OPUS_ENCODING) {
-								OpusAudioEncoder(transport, INPUT_OPUS_BITRATE)
+								OpusAudioEncoder(transport, transport.bitrate.takeIf { it > 0 } ?: INPUT_OPUS_BITRATE)
 							} else null
 							socket?.send(VoiceProtocol.audioStart(utteranceId, transport, languages))
 							event.frames.forEach(::sendAudio)

@@ -109,29 +109,31 @@ func NewHandler(backend backend, token string) *Handler {
 }
 
 type clientFrame struct {
-	Type              string              `json:"type"`
-	Protocol          string              `json:"protocol,omitempty"`
-	UtteranceID       string              `json:"utterance_id,omitempty"`
-	Text              string              `json:"text,omitempty"`
-	SessionID         string              `json:"session_id,omitempty"`
-	ChatID            string              `json:"chat_id,omitempty"`
-	VoiceSessionID    string              `json:"voice_session_id,omitempty"`
-	Title             string              `json:"title,omitempty"`
-	AudioFormat       *voice.AudioFormat  `json:"audio_format,omitempty"`
-	Languages         []string            `json:"languages,omitempty"`
-	BeforeID          string              `json:"before_id,omitempty"`
-	Limit             int                 `json:"limit,omitempty"`
-	Query             string              `json:"query,omitempty"`
-	ResponsePacing    string              `json:"response_pacing,omitempty"`
-	AudioEncodings    []string            `json:"audio_encodings,omitempty"`
-	Backend           domain.ChatBackend  `json:"backend,omitempty"`
-	WorkflowRole      domain.WorkflowRole `json:"workflow_role,omitempty"`
-	ProviderID        string              `json:"provider_id,omitempty"`
-	ModelID           string              `json:"model_id,omitempty"`
-	PermissionProfile string              `json:"permission_profile,omitempty"`
-	MilestoneKey      string              `json:"milestone_key,omitempty"`
-	TaskRef           string              `json:"task_ref,omitempty"`
-	ToolStates        domain.ToolStates   `json:"tool_states,omitempty"`
+	Type              string                          `json:"type"`
+	Protocol          string                          `json:"protocol,omitempty"`
+	UtteranceID       string                          `json:"utterance_id,omitempty"`
+	Text              string                          `json:"text,omitempty"`
+	SessionID         string                          `json:"session_id,omitempty"`
+	ChatID            string                          `json:"chat_id,omitempty"`
+	VoiceSessionID    string                          `json:"voice_session_id,omitempty"`
+	Title             string                          `json:"title,omitempty"`
+	AudioFormat       *voice.AudioFormat              `json:"audio_format,omitempty"`
+	Languages         []string                        `json:"languages,omitempty"`
+	BeforeID          string                          `json:"before_id,omitempty"`
+	Limit             int                             `json:"limit,omitempty"`
+	Query             string                          `json:"query,omitempty"`
+	ResponsePacing    string                          `json:"response_pacing,omitempty"`
+	AudioEncodings    []string                        `json:"audio_encodings,omitempty"`
+	InputTransport    *voice.AudioTransportPreference `json:"input_transport_preference,omitempty"`
+	OutputTransport   *voice.AudioTransportPreference `json:"output_transport_preference,omitempty"`
+	Backend           domain.ChatBackend              `json:"backend,omitempty"`
+	WorkflowRole      domain.WorkflowRole             `json:"workflow_role,omitempty"`
+	ProviderID        string                          `json:"provider_id,omitempty"`
+	ModelID           string                          `json:"model_id,omitempty"`
+	PermissionProfile string                          `json:"permission_profile,omitempty"`
+	MilestoneKey      string                          `json:"milestone_key,omitempty"`
+	TaskRef           string                          `json:"task_ref,omitempty"`
+	ToolStates        domain.ToolStates               `json:"tool_states,omitempty"`
 }
 
 type serverFrame struct {
@@ -426,7 +428,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var audio *incomingAudio
 	responsePacing := voice.ResponsePacingNormal
 	baseAudioConfig := h.Backend.VoiceAudioConfig()
-	connectionAudioConfig := negotiatedAudioConfig(baseAudioConfig, nil)
+	connectionAudioConfig := negotiatedAudioConfig(baseAudioConfig, nil, nil, nil)
 	var writeMu sync.Mutex
 	if err := writeReady(ctx, conn, &writeMu, call, advertisedAudioConfig(baseAudioConfig), h.Updates); err != nil {
 		return
@@ -481,7 +483,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			responsePacing = parsedPacing
-			connectionAudioConfig = negotiatedAudioConfig(baseAudioConfig, frame.AudioEncodings)
+			connectionAudioConfig = negotiatedAudioConfig(baseAudioConfig, frame.AudioEncodings, frame.InputTransport, frame.OutputTransport)
 			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
 			}
@@ -1319,8 +1321,9 @@ func clientErrorCode(err error) string {
 }
 
 func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, transport voice.AudioFormat, utteranceID, text string) error {
-	format := speech.VoiceAudioConfig().Output
-	packetEncoder, err := newAudioPacketEncoder(transport)
+	serviceFormat := speech.VoiceAudioConfig().Output
+	format := playbackFormat(transport)
+	packetEncoder, err := newAudioPacketEncoder(serviceFormat, transport)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.lkarlslund.koder.voice.BuiltInAudioRoute
+import com.lkarlslund.koder.voice.AudioCompression
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.SavedVoiceResponse
 import com.lkarlslund.koder.voice.SavedVoiceResponseKind
@@ -29,6 +30,8 @@ class SecureSettings(context: Context) {
 		val vadSilenceMilliseconds: Int = 600,
 		val builtInAudioRoute: BuiltInAudioRoute = BuiltInAudioRoute.SPEAKER,
 		val responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
+		val inputCompression: AudioCompression = AudioCompression.PCM,
+		val outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -74,6 +77,8 @@ class SecureSettings(context: Context) {
 			preferences.getInt(VAD_SILENCE, 600).coerceIn(300, 1_200),
 			BuiltInAudioRoute.fromStorage(preferences.getString(AUDIO_ROUTE, null)),
 			VoiceResponsePacing.fromStorage(preferences.getString(RESPONSE_PACING, null)),
+			AudioCompression.fromStorage(preferences.getString(INPUT_COMPRESSION, null), AudioCompression.PCM),
+			AudioCompression.fromStorage(preferences.getString(OUTPUT_COMPRESSION, null), AudioCompression.OPUS_BALANCED),
 		)
     }
 
@@ -128,6 +133,14 @@ class SecureSettings(context: Context) {
 
 	fun saveResponsePacing(pacing: VoiceResponsePacing) {
 		preferences.edit().putString(RESPONSE_PACING, pacing.wireValue).apply()
+	}
+
+	fun saveInputCompression(compression: AudioCompression) {
+		preferences.edit().putString(INPUT_COMPRESSION, compression.storageValue).apply()
+	}
+
+	fun saveOutputCompression(compression: AudioCompression) {
+		preferences.edit().putString(OUTPUT_COMPRESSION, compression.storageValue).apply()
 	}
 
 	fun readinessComplete(server: String): Boolean = preferences.getString(READINESS_SERVER, "") == server.trim()
@@ -271,6 +284,8 @@ class SecureSettings(context: Context) {
 		const val VAD_SILENCE = "vad_silence"
 		const val AUDIO_ROUTE = "audio_route"
 		const val RESPONSE_PACING = "response_pacing"
+		const val INPUT_COMPRESSION = "input_compression"
+		const val OUTPUT_COMPRESSION = "output_compression"
 		const val PHONE_ACTION_USES = "phone_action_uses"
 		const val SAVED_RESPONSES = "saved_responses"
 		const val VOICE_READ_COUNTS = "voice_read_counts"

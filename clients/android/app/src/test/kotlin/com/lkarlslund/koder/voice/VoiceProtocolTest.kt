@@ -26,23 +26,41 @@ class VoiceProtocolTest {
 	}
 
 	@Test
-	fun helloCarriesResponsePacingWithoutAddingAChatMessage() {
-		val hello = JSONObject(VoiceProtocol.hello(VoiceResponsePacing.CONCISE))
+	fun helloCarriesIndependentCompressionAndResponsePacingWithoutAddingAChatMessage() {
+		val hello = JSONObject(VoiceProtocol.hello(
+			VoiceResponsePacing.CONCISE,
+			AudioCompression.OPUS_HIGH,
+			AudioCompression.PCM,
+		))
 		assertEquals("hello", hello.getString("type"))
 		assertEquals("concise", hello.getString("response_pacing"))
 		assertEquals(listOf("opus", "pcm_s16le"), List(hello.getJSONArray("audio_encodings").length()) { hello.getJSONArray("audio_encodings").getString(it) })
+		assertEquals("opus", hello.getJSONObject("input_transport_preference").getString("encoding"))
+		assertEquals(24_000, hello.getJSONObject("input_transport_preference").getInt("bitrate"))
+		assertEquals("pcm_s16le", hello.getJSONObject("output_transport_preference").getString("encoding"))
+		assertFalse(hello.getJSONObject("output_transport_preference").has("bitrate"))
 		assertFalse(hello.has("text"))
+	}
+
+	@Test
+	fun defaultHelloUsesLosslessMicrophoneAndBalancedPlayback() {
+		val hello = JSONObject(VoiceProtocol.hello())
+		assertEquals(listOf("pcm_s16le", "opus"), List(hello.getJSONArray("audio_encodings").length()) { hello.getJSONArray("audio_encodings").getString(it) })
+		assertEquals("pcm_s16le", hello.getJSONObject("input_transport_preference").getString("encoding"))
+		assertEquals(40_000, hello.getJSONObject("output_transport_preference").getInt("bitrate"))
 	}
 
 	@Test
 	fun parsesNegotiatedTransportWithoutChangingLocalPcmFormats() {
 		val frame = VoiceProtocol.parse(
-			"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"transport_encodings":["opus","pcm_s16le"],"input_transport":{"encoding":"opus","sample_rate":16000,"channels":1},"output_transport":{"encoding":"opus","sample_rate":24000,"channels":1},"max_utterance_seconds":60}}""",
+			"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"transport_encodings":["opus","pcm_s16le"],"input_transport":{"encoding":"opus","sample_rate":16000,"channels":1,"bitrate":24000},"output_transport":{"encoding":"opus","sample_rate":24000,"channels":1,"bitrate":40000},"max_utterance_seconds":60}}""",
 		)
 		val config = checkNotNull(frame.audioConfig)
 		assertEquals("pcm_s16le", config.input.encoding)
 		assertEquals("opus", config.selectedInputTransport().encoding)
 		assertEquals("opus", config.selectedOutputTransport().encoding)
+		assertEquals(24_000, config.selectedInputTransport().bitrate)
+		assertEquals(40_000, config.selectedOutputTransport().bitrate)
 		assertTrue(config.transportSelected())
 	}
 

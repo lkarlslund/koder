@@ -306,7 +306,7 @@ class MainActivityInstrumentedTest {
 			val launch = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(bindingURI)
 			ActivityScenario.launch<MainActivity>(launch).use { scenario ->
 				val readiness = waitForText(scenario, "Voice adjustments")
-				assertTrue(readiness.contains("Step 1 of 4"))
+					assertTrue(readiness.contains("Step 1 of 5"))
 				assertTrue(readiness.contains("1. Recognition languages"))
 				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Skip voice adjustments for now").performClick() }
 				val labels = waitForText(scenario, "Bound conversation")
@@ -421,9 +421,15 @@ class MainActivityInstrumentedTest {
 				}
 				assertEquals(com.lkarlslund.koder.voice.VoiceResponsePacing.DETAILED, SecureSettings(context).load().responsePacing)
 				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
-				waitForText(scenario, "3. Voice detection")
+				waitForText(scenario, "3. Audio compression")
+				onView(withContentDescription(org.hamcrest.Matchers.startsWith("Use Opus · highest compression for microphone upload"))).perform(scrollTo(), click())
+				onView(withContentDescription(org.hamcrest.Matchers.startsWith("Use Opus · low compression for speech playback"))).perform(scrollTo(), click())
+				assertEquals(com.lkarlslund.koder.voice.AudioCompression.OPUS_HIGHEST, SecureSettings(context).load().inputCompression)
+				assertEquals(com.lkarlslund.koder.voice.AudioCompression.OPUS_LOW, SecureSettings(context).load().outputCompression)
 				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
-				waitForText(scenario, "4. Live voice check")
+				waitForText(scenario, "4. Voice detection")
+				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Continue voice adjustments").performClick() }
+				waitForText(scenario, "5. Live voice check")
 				scenario.onActivity { activity -> activity.findViewById<View>(android.R.id.content).findByDescription("Exit voice adjustments to settings").performClick() }
 				waitForText(scenario, "Phone tools")
 				var scrollBefore = 0

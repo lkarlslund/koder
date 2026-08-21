@@ -125,6 +125,14 @@ type AudioFormat struct {
 	Encoding   string `json:"encoding"`
 	SampleRate int    `json:"sample_rate"`
 	Channels   int    `json:"channels"`
+	Bitrate    int    `json:"bitrate,omitempty"`
+}
+
+// AudioTransportPreference is a client's independent transport choice for one
+// direction. Bitrate applies only to Opus; PCM always uses the service format.
+type AudioTransportPreference struct {
+	Encoding string `json:"encoding"`
+	Bitrate  int    `json:"bitrate,omitempty"`
 }
 
 // AudioConfig is the server-owned voice transport contract.
