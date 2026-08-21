@@ -14,6 +14,12 @@ const (
 	MaxPacketBytes            = 1275
 )
 
+// SupportsFormat reports whether raw Opus can represent the PCM format
+// without resampling or remixing it.
+func SupportsFormat(sampleRate, channels int) bool {
+	return validateFormat(sampleRate, channels) == nil
+}
+
 // OpusEncoder converts exact 20 ms PCM16LE frames into raw Opus packets.
 // It owns state and must not be used concurrently.
 type OpusEncoder struct {

@@ -47,6 +47,18 @@ class VoiceProtocolTest {
 	}
 
 	@Test
+	fun parsesIndependentInputOpusAndOutputPcmTransports() {
+		val frame = VoiceProtocol.parse(
+			"""{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":44100,"channels":1},"transport_encodings":["opus","pcm_s16le"],"input_transport":{"encoding":"opus","sample_rate":16000,"channels":1},"output_transport":{"encoding":"pcm_s16le","sample_rate":44100,"channels":1},"max_utterance_seconds":60}}""",
+		)
+		val config = checkNotNull(frame.audioConfig)
+		assertEquals("opus", config.selectedInputTransport().encoding)
+		assertEquals("pcm_s16le", config.selectedOutputTransport().encoding)
+		assertEquals(44_100, config.selectedOutputTransport().sampleRate)
+		assertTrue(config.transportSelected())
+	}
+
+	@Test
 	fun transcriptSearchEncodesQueryAndDecodesJumpContext() {
 		val request = JSONObject(VoiceProtocol.searchHistory("boots normally"))
 		assertEquals("search_history", request.getString("type"))

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -1289,6 +1290,18 @@ func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 	}
 	if strings.TrimSpace(message.SpokenText) != "" {
 		if err := writeSpeech(ctx, conn, writeMu, backend, selectedOutputFormat(audioConfig), utteranceID, message.SpokenText); err != nil {
+			serviceFormat := backend.VoiceAudioConfig().Output
+			transportFormat := selectedOutputFormat(audioConfig)
+			slog.Warn("voice speech synthesis failed",
+				"utterance_id", utteranceID,
+				"service_encoding", serviceFormat.Encoding,
+				"service_sample_rate", serviceFormat.SampleRate,
+				"service_channels", serviceFormat.Channels,
+				"transport_encoding", transportFormat.Encoding,
+				"transport_sample_rate", transportFormat.SampleRate,
+				"transport_channels", transportFormat.Channels,
+				"error", err,
+			)
 			if writeErr := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: "speech synthesis: " + err.Error()}); writeErr != nil {
 				return writeErr
 			}

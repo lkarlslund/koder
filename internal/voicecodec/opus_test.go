@@ -7,6 +7,26 @@ import (
 	"testing"
 )
 
+func TestSupportsFormat(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		sampleRate int
+		channels   int
+		want       bool
+	}{
+		{name: "phone microphone", sampleRate: 16_000, channels: 1, want: true},
+		{name: "Opus speech output", sampleRate: 48_000, channels: 2, want: true},
+		{name: "CD sample rate", sampleRate: 44_100, channels: 1, want: false},
+		{name: "surround channels", sampleRate: 48_000, channels: 6, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SupportsFormat(test.sampleRate, test.channels); got != test.want {
+				t.Fatalf("SupportsFormat(%d, %d) = %t, want %t", test.sampleRate, test.channels, got, test.want)
+			}
+		})
+	}
+}
+
 func TestOpusDecoderAcceptsConcentusPacket(t *testing.T) {
 	packet, err := base64.StdEncoding.DecodeString("SIKIQFJfcb0AAACmGGAMKu3f+EXrVlamUlGH5rhZQ1KVz6MR3JE0agIoHLrFV4vtl4PF0FZZNBBISoeilA2o3Oett2SnKxaA")
 	if err != nil {

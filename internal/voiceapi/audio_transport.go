@@ -21,21 +21,28 @@ func advertisedAudioConfig(base voice.AudioConfig) voice.AudioConfig {
 }
 
 func negotiatedAudioConfig(base voice.AudioConfig, offered []string) voice.AudioConfig {
-	encoding := voice.PCM16LE
-	for _, candidate := range offered {
-		if candidate == voice.Opus || candidate == voice.PCM16LE {
-			encoding = candidate
-			break
-		}
-	}
-	input := base.Input
-	input.Encoding = encoding
-	output := base.Output
-	output.Encoding = encoding
+	input := negotiatedTransportFormat(base.Input, offered)
+	output := negotiatedTransportFormat(base.Output, offered)
 	base.TransportEncodings = []string{voice.Opus, voice.PCM16LE}
 	base.InputTransport = &input
 	base.OutputTransport = &output
 	return base
+}
+
+func negotiatedTransportFormat(format voice.AudioFormat, offered []string) voice.AudioFormat {
+	format.Encoding = voice.PCM16LE
+	for _, candidate := range offered {
+		switch candidate {
+		case voice.Opus:
+			if voicecodec.SupportsFormat(format.SampleRate, format.Channels) {
+				format.Encoding = voice.Opus
+				return format
+			}
+		case voice.PCM16LE:
+			return format
+		}
+	}
+	return format
 }
 
 func selectedInputFormat(config voice.AudioConfig) voice.AudioFormat {
