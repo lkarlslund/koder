@@ -20,8 +20,9 @@ import (
 type fakeToolBridge struct{ called bool }
 
 type fixedProcessFactory struct {
-	cfg     codexapp.Config
-	removed []domain.ID
+	cfg         codexapp.Config
+	fingerprint string
+	removed     []domain.ID
 }
 
 func (f *fixedProcessFactory) DiscoveryConfig(context.Context) (codexapp.Config, error) {
@@ -29,7 +30,11 @@ func (f *fixedProcessFactory) DiscoveryConfig(context.Context) (codexapp.Config,
 }
 
 func (f *fixedProcessFactory) ChatConfig(_ context.Context, _ domain.Session, chatRecord domain.Chat, _ string) (ChatProcessConfig, error) {
-	return ChatProcessConfig{Client: f.cfg, Fingerprint: string(chatRecord.ID), Network: true}, nil
+	fingerprint := f.fingerprint
+	if fingerprint == "" {
+		fingerprint = string(chatRecord.ID)
+	}
+	return ChatProcessConfig{Client: f.cfg, Fingerprint: fingerprint, Network: true}, nil
 }
 
 func (f *fixedProcessFactory) RemoveChat(chatID domain.ID) error {
@@ -189,6 +194,78 @@ func TestManagerRunsOneCodexProcessPerChat(t *testing.T) {
 	manager.processMu.Unlock()
 	if processCount != 2 {
 		t.Fatalf("process count = %d, want 2", processCount)
+	}
+}
+
+func TestManagerRestartsChatProcessWhenPolicyFingerprintChanges(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	factory := &fixedProcessFactory{
+		cfg: codexapp.Config{
+			Executable: os.Args[0],
+			Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
+			Env:        []string{"KODER_CODEX_DRIVER_HELPER=1"},
+		},
+		fingerprint: "policy-a",
+	}
+	manager := New(factory, st, nil)
+	t.Cleanup(func() { _ = manager.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionRecord := domain.Session{ID: "session-policy-restart", ProjectRoot: t.TempDir()}
+	chatRecord := domain.Chat{ID: "chat-policy-restart"}
+	first, _, releaseFirst, err := manager.acquireProcess(ctx, sessionRecord, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseFirst()
+	factory.fingerprint = "policy-b"
+	second, _, releaseSecond, err := manager.acquireProcess(ctx, sessionRecord, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseSecond()
+	if first == second {
+		t.Fatal("policy change reused stale Codex app-server client")
+	}
+}
+
+func TestManagerArchiveStopsRunningChatProcess(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	factory := &fixedProcessFactory{cfg: codexapp.Config{
+		Executable: os.Args[0],
+		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
+		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1"},
+	}}
+	manager := New(factory, st, nil)
+	t.Cleanup(func() { _ = manager.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	chatRecord := domain.Chat{ID: "chat-archive-process", Backend: domain.ChatBackendCodex}
+	if err := manager.bindings.put(ctx, Binding{ChatID: chatRecord.ID, ThreadID: "thread-archive-process"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, release, err := manager.acquireProcess(ctx, domain.Session{ID: "session-archive-process", ProjectRoot: t.TempDir()}, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	archived := true
+	if err := manager.UpdateChat(ctx, chatRecord, "", &archived); err != nil {
+		t.Fatal(err)
+	}
+	manager.processMu.Lock()
+	_, running := manager.processes[chatRecord.ID]
+	manager.processMu.Unlock()
+	if running {
+		t.Fatal("archived chat retained its Codex app-server process")
 	}
 }
 
