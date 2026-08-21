@@ -134,7 +134,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 | Native shared browser automation | Drive one visible authenticated Chrome profile with chat-owned tabs, snapshots, interactions, screenshots, console and network inspection. Screenshots flow directly into model vision and the UI without Node.js or workspace temp files. |
 | Local model diagnostics | Detect `llama.cpp` context/slot behavior, show prompt-progress/cache signals, and expose provider HTTP traces when cache reuse or streaming looks wrong. |
 | Custom model variants | Create derived models with custom request JSON, defaults, TTS settings, thinking settings, and compaction choices without changing the backing provider. |
-| Session-scoped safety controls | Permissions, sandboxing, network policy, workspace access, mounts, approvals, and model choices belong to the session instead of a hidden global state. |
+| Explicit sandbox safety controls | Permissions, network policy, workspace access, and model choices remain session-scoped; a separate global folder allowlist can expose narrowly selected caches or SDKs to every sandbox. |
 | Inspectable persistence and debug API | Local transcripts, tool output, approvals, planning data, events, and HTTP traces remain available for review and troubleshooting after long runs. |
 
 ## Requirements
@@ -146,6 +146,8 @@ The model sees a structured tool surface instead of a vague shell-only environme
 - `bwrap` is currently required for sandboxed shell command execution on Linux.
 - Chrome or Chromium and `bwrap` are required for native browser automation. Node.js and Playwright are not runtime dependencies.
 - macOS and Windows can run the web UI and non-shell features, but shell sandboxing is currently Linux-oriented.
+
+Folders such as `~/.cache` or `~/go/pkg/mod` can be shared without exposing the rest of the home directory under **Settings → Access → Folders shared with every session**. Each grant is independently read-only or read-write, applies to existing and new Koder and Codex chats, and can also be configured with `[[global_mounts]]` entries in `config.toml`.
 
 ## Useful Commands
 

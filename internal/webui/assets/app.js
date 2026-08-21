@@ -4733,6 +4733,7 @@
         },
         activeAccessSettings() { return this.state.access?.settings || this.state.Access?.Settings || {}; },
         accessPresets() { return this.state.access?.presets || this.state.Access?.Presets || []; },
+        globalAccessMounts() { return this.state.access?.global_mounts || this.state.Access?.GlobalMounts || []; },
         accessSummary(settings) {
           settings = settings || {};
           return (settings.network ? 'net on' : 'net off') + ', project ' + (settings.project || 'readwrite');
@@ -4763,6 +4764,15 @@
         deleteAccessMount(settings, index) {
           if (!settings?.mounts) return;
           settings.mounts.splice(index, 1);
+        },
+        addGlobalAccessMount() {
+          if (!this.settings?.access) return;
+          if (!Array.isArray(this.settings.access.global_mounts)) this.settings.access.global_mounts = [];
+          this.settings.access.global_mounts.push({path: '', mode: 'readonly'});
+        },
+        deleteGlobalAccessMount(index) {
+          if (!this.settings?.access?.global_mounts) return;
+          this.settings.access.global_mounts.splice(index, 1);
         },
         saveAccessSettings() {
           this.rpc('set_access_settings', this.accessDraft).then(() => { this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
@@ -5517,6 +5527,8 @@
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
 		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32};
 		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
+		  if (!this.settings.access) this.settings.access = {settings: this.cloneAccessSettings({}), presets: [], global_mounts: []};
+		  if (!Array.isArray(this.settings.access.global_mounts)) this.settings.access.global_mounts = [];
 		  this.browserStatus = this.settings.browser_runtime || this.browserStatus;
 		  delete this.settings.browser_runtime;
           this.applyTTSSettings(this.settings.ui.tts);

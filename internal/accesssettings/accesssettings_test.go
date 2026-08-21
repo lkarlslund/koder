@@ -1,6 +1,7 @@
 package accesssettings
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -67,6 +68,49 @@ func TestValidateRejectsRelativeMount(t *testing.T) {
 
 	if err := Validate(settings); err == nil {
 		t.Fatal("expected relative mount to be rejected")
+	}
+}
+
+func TestNormalizeMountsExpandsHomeShortcut(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := NormalizeMounts([]Mount{{Path: "~/.cache", Mode: ModeReadWrite}})
+	if len(mounts) != 1 || mounts[0].Path != filepath.Join(home, ".cache") {
+		t.Fatalf("normalized mounts = %#v", mounts)
+	}
+}
+
+func TestWithInheritedMountsCombinesGlobalAndSessionRules(t *testing.T) {
+	home := t.TempDir()
+	cache := filepath.Join(home, ".cache")
+	privateCache := filepath.Join(cache, "private")
+	settings := LockedDown()
+	settings.Mounts = []Mount{{Path: privateCache, Mode: ModeReadOnly}}
+
+	got := WithInheritedMounts(settings, []Mount{
+		{Path: cache, Mode: ModeReadWrite},
+		{Path: filepath.Join(home, "sdk"), Mode: ModeReadOnly},
+	})
+	if len(got.Mounts) != 3 {
+		t.Fatalf("effective mounts = %#v", got.Mounts)
+	}
+	if err := Allows(got, Request{Kind: AccessWrite, Path: filepath.Join(cache, "build.bin")}); err != nil {
+		t.Fatalf("global writable cache was not inherited: %v", err)
+	}
+	if err := Allows(got, Request{Kind: AccessWrite, Path: filepath.Join(privateCache, "secret")}); err == nil {
+		t.Fatal("more-specific session rule did not override global parent")
+	}
+}
+
+func TestWithInheritedMountsSessionRuleOverridesSameGlobalPath(t *testing.T) {
+	shared := t.TempDir()
+	settings := Default()
+	settings.Mounts = []Mount{{Path: shared, Mode: ModeReadOnly}}
+	got := WithInheritedMounts(settings, []Mount{{Path: shared, Mode: ModeReadWrite}})
+	if len(got.Mounts) != 1 || got.Mounts[0].Mode != ModeReadOnly {
+		t.Fatalf("effective mounts = %#v", got.Mounts)
 	}
 }
 

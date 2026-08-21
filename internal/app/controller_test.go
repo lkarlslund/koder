@@ -1667,6 +1667,36 @@ func TestControllerAccessPresetsAreExposed(t *testing.T) {
 	}
 }
 
+func TestControllerGlobalMountPreferencesApplyToAllSessions(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {BaseURL: "https://example.invalid/v1"},
+		}
+	})
+	ctx := context.Background()
+	shared := t.TempDir()
+	prefs, err := ctrl.Preferences(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefs.Access.GlobalMounts = []accesssettings.Mount{{Path: shared, Mode: accesssettings.ModeReadWrite}}
+	saved, err := ctrl.SavePreferences(ctx, prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Access.GlobalMounts) != 1 || saved.Access.GlobalMounts[0].Path != shared {
+		t.Fatalf("saved global mounts = %#v", saved.Access.GlobalMounts)
+	}
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Access.GlobalMounts) != 1 || state.Access.GlobalMounts[0].Path != shared {
+		t.Fatalf("session state global mounts = %#v", state.Access.GlobalMounts)
+	}
+}
+
 func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 	workdir := t.TempDir()
 	cfg := config.Default().WithStateDir(t.TempDir())

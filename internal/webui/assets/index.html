@@ -1045,6 +1045,20 @@
             </div>
           </template>
         </div>
+        <div class="settings-list-header mt-4" x-show="globalAccessMounts().length > 0">
+          <div>
+            <div class="fw-semibold">Folders shared by Koder</div>
+            <div class="small text-secondary">Inherited from system settings and available in every session.</div>
+          </div>
+        </div>
+        <div class="settings-rule-list" x-show="globalAccessMounts().length > 0">
+          <template x-for="mount in globalAccessMounts()" :key="mount.path">
+            <div class="settings-rule-row">
+              <code class="text-break" x-text="mount.path"></code>
+              <span class="badge text-bg-secondary" x-text="mount.mode"></span>
+            </div>
+          </template>
+        </div>
       </div>
     </section>
   </div>
@@ -1546,6 +1560,28 @@
               <div x-show="settingsTab === 'access'">
                 <div class="settings-list-header">
                   <div>
+                    <div class="fw-semibold">Folders shared with every session</div>
+                    <div class="small text-secondary">Host folders inherited by existing and new Koder and Codex sandboxes. Prefer read-only unless a cache or tool must write.</div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-primary" title="Add global folder" aria-label="Add global folder" @click="addGlobalAccessMount()"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="settings-rule-list mb-4">
+                  <template x-if="(settings?.access?.global_mounts || []).length === 0">
+                    <div class="settings-empty">No folders shared globally</div>
+                  </template>
+                  <template x-for="(mount, idx) in settings?.access?.global_mounts || []" :key="idx">
+                    <div class="settings-rule-row">
+                      <input class="form-control form-control-sm" x-model="mount.path" placeholder="~/.cache or /path/to/folder" autocomplete="off">
+                      <select class="form-select form-select-sm" x-model="mount.mode">
+                        <option value="readonly">readonly</option>
+                        <option value="readwrite">readwrite</option>
+                      </select>
+                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete global folder" @click="deleteGlobalAccessMount(idx)"><i class="bi bi-trash"></i></button>
+                    </div>
+                  </template>
+                </div>
+                <div class="settings-list-header">
+                  <div>
                     <div class="fw-semibold">Access defaults</div>
                     <div class="small text-secondary">Used when creating new sessions</div>
                   </div>
@@ -1565,7 +1601,10 @@
                       <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-access-root">System root</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-access-root" class="form-select" x-model="settings.access.settings.root"><option value="readonly">readonly</option><option value="readwrite">readwrite</option></select></div></div>
                     </div>
                     <div class="settings-list-header">
-                      <div class="fw-semibold">Extra folders</div>
+                      <div>
+                        <div class="fw-semibold">Extra folders for new sessions</div>
+                        <div class="small text-secondary">Copied into each new session and editable per session.</div>
+                      </div>
                       <button type="button" class="btn btn-sm btn-outline-primary" title="Add extra folder" aria-label="Add extra folder" @click="addAccessMount(settings.access.settings)"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <div class="settings-rule-list">

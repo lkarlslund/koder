@@ -50,6 +50,22 @@ func TestAccessUsesSessionOverride(t *testing.T) {
 	}
 }
 
+func TestAccessInheritsGlobalMountsForExistingSession(t *testing.T) {
+	cfg := config.Default()
+	shared := t.TempDir()
+	cfg.GlobalMounts = []accesssettings.Mount{{Path: shared, Mode: accesssettings.ModeReadWrite}}
+	store := New(cfg)
+	session := domain.Session{AccessSettings: accesssettings.LockedDown()}
+
+	got := store.Access(session)
+	if len(got.Mounts) != 1 || got.Mounts[0].Path != shared || got.Mounts[0].Mode != accesssettings.ModeReadWrite {
+		t.Fatalf("effective access did not inherit global mount: %#v", got)
+	}
+	if defaults := store.NewSessionDefaults().Access; len(defaults.Mounts) != 0 {
+		t.Fatalf("global mounts must not be copied into session defaults: %#v", defaults.Mounts)
+	}
+}
+
 func TestModelResolvesCustomSource(t *testing.T) {
 	cfg := config.Default()
 	cfg.Providers["local"] = config.Provider{BaseURL: "http://127.0.0.1:8080/v1"}

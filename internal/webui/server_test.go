@@ -2770,7 +2770,10 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
-		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) {
+		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||
+		!strings.Contains(fullPage, `addGlobalAccessMount()`) ||
+		!strings.Contains(document, `Folders shared with every session`) ||
+		!strings.Contains(fullPage, `globalAccessMounts()`) {
 		t.Fatalf("expected access settings to use structured controls")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'tools'`) ||

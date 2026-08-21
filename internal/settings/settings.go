@@ -100,7 +100,7 @@ func (s *Store) Access(session domain.Session) accesssettings.Settings {
 	if accesssettings.IsZero(settings) {
 		settings = cfg.Access
 	}
-	return accesssettings.Normalize(settings)
+	return accesssettings.WithInheritedMounts(settings, cfg.GlobalMounts)
 }
 
 func (s *Store) Tools(_ domain.Session) ToolSettings {

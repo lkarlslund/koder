@@ -169,3 +169,47 @@ func TestBwrapEnforcesWorkspaceMode(t *testing.T) {
 		t.Fatal("expected workspace readonly to block write")
 	}
 }
+
+func TestBwrapExposesExplicitFolderInsideHiddenHome(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	t.Setenv(envDisableNetUnshare, "1")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.MkdirTemp(home, ".koder-sandbox-mount-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	shared := filepath.Join(base, "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "input"), []byte("visible"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "private"), []byte("hidden"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := accesssettings.LockedDown()
+	settings.Mounts = []accesssettings.Mount{{Path: shared, Mode: accesssettings.ModeReadWrite}}
+	executable, args, err := WrapCommand(Command{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", `test "$(cat "$1/input")" = visible && test ! -e "$2" && printf writable > "$1/output"`, "sh", shared, filepath.Join(base, "private")},
+		Workdir:    t.TempDir(),
+		Settings:   settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(executable, args...).CombinedOutput(); err != nil {
+		t.Fatalf("run sandbox with explicit home mount: %v: %s", err, output)
+	}
+	got, err := os.ReadFile(filepath.Join(shared, "output"))
+	if err != nil || string(got) != "writable" {
+		t.Fatalf("mounted folder output = %q, %v", got, err)
+	}
+}

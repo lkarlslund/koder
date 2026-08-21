@@ -1211,7 +1211,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		ModelOverlays:  modeloverlay.Load(c.cfg.ManagedAssetsDir()),
 		MCPServers:     mcpPreferencesFromConfig(c.cfg.MCPServers),
 		MCPRuntime:     mcpRuntimeState(c.agent),
-		Access:         accessPreferencesFromConfig(c.cfg.Access),
+		Access:         accessPreferencesFromConfig(c.cfg.Access, c.cfg.GlobalMounts),
 		ToolDefaults:   toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
 		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
@@ -1716,10 +1716,11 @@ func mcpRuntimeStateFromServers(states []mcp.ServerState) []MCPRuntimeState {
 	return out
 }
 
-func accessPreferencesFromConfig(src accesssettings.Settings) AccessPreferences {
+func accessPreferencesFromConfig(src accesssettings.Settings, globalMounts []accesssettings.Mount) AccessPreferences {
 	return AccessPreferences{
-		Settings: accesssettings.Normalize(src),
-		Presets:  accesssettings.Presets(),
+		Settings:     accesssettings.Normalize(src),
+		Presets:      accesssettings.Presets(),
+		GlobalMounts: accesssettings.NormalizeMounts(globalMounts),
 	}
 }
 
@@ -2131,7 +2132,12 @@ func applyAccessPreferences(cfg *config.Config, prefs AccessPreferences) error {
 	if err := accesssettings.Validate(settings); err != nil {
 		return err
 	}
+	globalMounts := accesssettings.NormalizeMounts(prefs.GlobalMounts)
+	if err := accesssettings.ValidateMounts(globalMounts); err != nil {
+		return fmt.Errorf("global mount: %w", err)
+	}
 	cfg.Access = settings
+	cfg.GlobalMounts = globalMounts
 	return nil
 }
 

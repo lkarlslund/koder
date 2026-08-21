@@ -163,6 +163,7 @@ type Config struct {
 	MCPServers       map[string]MCPServer    `toml:"mcp_servers"`
 	Permissions      PermissionRules         `toml:"permissions"`
 	Access           accesssettings.Settings `toml:"access"`
+	GlobalMounts     []accesssettings.Mount  `toml:"global_mounts"`
 	Store            Store                   `toml:"store"`
 	UI               UI                      `toml:"ui"`
 	Voice            Voice                   `toml:"voice"`
@@ -422,6 +423,7 @@ func (c *Config) applyDefaults() {
 		c.Access = def.Access
 	}
 	c.Access = accesssettings.Normalize(c.Access)
+	c.GlobalMounts = accesssettings.NormalizeMounts(c.GlobalMounts)
 	if c.Store.Backend == "" {
 		c.Store.Backend = def.Store.Backend
 	}

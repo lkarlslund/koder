@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/domain"
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -166,6 +167,34 @@ func TestThinkingPreferencesRoundTrip(t *testing.T) {
 	}
 	if !loaded.Thinking.CavemanEnabled || loaded.Thinking.CavemanProviderID != "test" || loaded.Thinking.CavemanModelID != "model" || loaded.Thinking.CavemanPrompt != "rewrite:\n{{thinking}}" || loaded.Thinking.CavemanParallelism != 3 || loaded.Thinking.CavemanMinTokens != 128 {
 		t.Fatalf("expected thinking settings to round-trip, got %#v", loaded.Thinking)
+	}
+}
+
+func TestGlobalMountsRoundTripAndExpandHome(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.GlobalMounts = []accesssettings.Mount{
+		{Path: "~/.cache", Mode: accesssettings.ModeReadWrite},
+		{Path: filepath.Join(home, "go", "pkg", "mod"), Mode: accesssettings.ModeReadOnly},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.GlobalMounts) != 2 || loaded.GlobalMounts[0].Path != filepath.Join(home, ".cache") || loaded.GlobalMounts[0].Mode != accesssettings.ModeReadWrite {
+		t.Fatalf("global mounts did not round-trip: %#v", loaded.GlobalMounts)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -115,22 +116,37 @@ func Normalize(settings Settings) Settings {
 		settings.Root = ModeReadOnly
 	}
 	settings.Tmp = normalizeTmp(settings.Tmp)
-	out := make([]Mount, 0, len(settings.Mounts))
-	for _, mount := range settings.Mounts {
-		mount.Path = strings.TrimSpace(mount.Path)
-		if mount.Path == "" {
-			continue
-		}
-		mount.Mode = normalizeMode(mount.Mode, ModeReadOnly)
-		out = append(out, mount)
-	}
-	settings.Mounts = out
+	settings.Mounts = NormalizeMounts(settings.Mounts)
 	return settings
 }
 
 func Validate(settings Settings) error {
 	settings = Normalize(settings)
-	for _, mount := range settings.Mounts {
+	return ValidateMounts(settings.Mounts)
+}
+
+// NormalizeMounts canonicalizes explicit host folder grants. A leading ~/ is
+// expanded for configuration and UI convenience; other shell expansions are
+// deliberately unsupported.
+func NormalizeMounts(mounts []Mount) []Mount {
+	out := make([]Mount, 0, len(mounts))
+	for _, mount := range mounts {
+		mount.Path = expandHome(strings.TrimSpace(mount.Path))
+		if mount.Path == "" {
+			continue
+		}
+		if filepath.IsAbs(mount.Path) {
+			mount.Path = filepath.Clean(mount.Path)
+		}
+		mount.Mode = normalizeMode(mount.Mode, ModeReadOnly)
+		out = append(out, mount)
+	}
+	return out
+}
+
+// ValidateMounts verifies a standalone list of host folder grants.
+func ValidateMounts(mounts []Mount) error {
+	for _, mount := range NormalizeMounts(mounts) {
 		if !filepath.IsAbs(mount.Path) {
 			return fmt.Errorf("mount path %q must be absolute", mount.Path)
 		}
@@ -139,6 +155,38 @@ func Validate(settings Settings) error {
 		}
 	}
 	return nil
+}
+
+// WithInheritedMounts returns the effective settings for a session. Global
+// grants are applied first, then session-specific grants. More specific paths
+// are mounted later so they can safely narrow or widen a parent folder.
+func WithInheritedMounts(settings Settings, inherited []Mount) Settings {
+	settings = Normalize(settings)
+	mounts := append(NormalizeMounts(inherited), settings.Mounts...)
+	if len(mounts) == 0 {
+		return settings
+	}
+
+	// A session-specific entry for the exact same path overrides the inherited
+	// entry because it appears later in the combined list.
+	byPath := make(map[string]Mount, len(mounts))
+	order := make(map[string]int, len(mounts))
+	for idx, mount := range mounts {
+		byPath[mount.Path] = mount
+		order[mount.Path] = idx
+	}
+	mounts = mounts[:0]
+	for _, mount := range byPath {
+		mounts = append(mounts, mount)
+	}
+	slices.SortStableFunc(mounts, func(a, b Mount) int {
+		if depth := mountDepth(a.Path) - mountDepth(b.Path); depth != 0 {
+			return depth
+		}
+		return order[a.Path] - order[b.Path]
+	})
+	settings.Mounts = mounts
+	return settings
 }
 
 func Allows(settings Settings, req Request) error {
@@ -255,6 +303,24 @@ func pathContains(root string, path string) bool {
 	path = filepath.Clean(path)
 	rel, err := filepath.Rel(root, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return path
+	}
+	if path == "~" {
+		return filepath.Clean(home)
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~"+string(filepath.Separator)))
+}
+
+func mountDepth(path string) int {
+	return strings.Count(filepath.Clean(path), string(filepath.Separator))
 }
 
 func normalizeMode(mode Mode, fallback Mode) Mode {

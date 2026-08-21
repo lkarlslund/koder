@@ -182,8 +182,9 @@ type TTSSpeech struct {
 
 // AccessState describes the active session sandbox access settings.
 type AccessState struct {
-	Settings accesssettings.Settings `json:"settings"`
-	Presets  []accesssettings.Preset `json:"presets"`
+	Settings     accesssettings.Settings `json:"settings"`
+	Presets      []accesssettings.Preset `json:"presets"`
+	GlobalMounts []accesssettings.Mount  `json:"global_mounts"`
 }
 
 // ProviderState describes configured and available provider templates.
@@ -399,8 +400,9 @@ type MCPRuntimeState struct {
 
 // AccessPreferences is the default sandbox access settings for new sessions.
 type AccessPreferences struct {
-	Settings accesssettings.Settings `json:"settings"`
-	Presets  []accesssettings.Preset `json:"presets"`
+	Settings     accesssettings.Settings `json:"settings"`
+	Presets      []accesssettings.Preset `json:"presets"`
+	GlobalMounts []accesssettings.Mount  `json:"global_mounts"`
 }
 
 // ToolDefaultPreference is one default per-session tool enabled toggle.
@@ -2643,14 +2645,16 @@ func (c *Controller) resolveSelectedChatWithTouch(ctx context.Context, selection
 
 func (c *Controller) accessStateForSession(session domain.Session) AccessState {
 	settings := session.AccessSettings
+	c.mu.RLock()
 	if accesssettings.IsZero(settings) {
-		c.mu.RLock()
 		settings = c.cfg.Access
-		c.mu.RUnlock()
 	}
+	globalMounts := accesssettings.NormalizeMounts(c.cfg.GlobalMounts)
+	c.mu.RUnlock()
 	return AccessState{
-		Settings: accesssettings.Normalize(settings),
-		Presets:  accesssettings.Presets(),
+		Settings:     accesssettings.Normalize(settings),
+		Presets:      accesssettings.Presets(),
+		GlobalMounts: globalMounts,
 	}
 }
 
