@@ -939,6 +939,7 @@ func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
 func TestRefreshSessionAgentsDoesNotChangeSessionProjectRoot(t *testing.T) {
 	ctx := context.Background()
 	cfg := testConfig(t)
+	cfg.Providers["test"] = config.Provider{BaseURL: "http://127.0.0.1:1/v1"}
 	cfg.Defaults.ProviderID = "test"
 	cfg.Defaults.ModelID = "model"
 	st, err := store.Open(t.TempDir())
