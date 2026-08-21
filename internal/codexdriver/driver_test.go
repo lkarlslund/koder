@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/codexapp"
@@ -16,6 +18,24 @@ import (
 )
 
 type fakeToolBridge struct{ called bool }
+
+type fixedProcessFactory struct {
+	cfg     codexapp.Config
+	removed []domain.ID
+}
+
+func (f *fixedProcessFactory) DiscoveryConfig(context.Context) (codexapp.Config, error) {
+	return f.cfg, nil
+}
+
+func (f *fixedProcessFactory) ChatConfig(_ context.Context, _ domain.Session, chatRecord domain.Chat, _ string) (ChatProcessConfig, error) {
+	return ChatProcessConfig{Client: f.cfg, Fingerprint: string(chatRecord.ID), Network: true}, nil
+}
+
+func (f *fixedProcessFactory) RemoveChat(chatID domain.ID) error {
+	f.removed = append(f.removed, chatID)
+	return nil
+}
 
 func (b *fakeToolBridge) Definitions(context.Context, *chat.Chat) ([]DynamicTool, error) {
 	return []DynamicTool{{Type: "function", Name: "milestone_list", Description: "List milestones", InputSchema: json.RawMessage(`{"type":"object"}`)}}, nil
@@ -32,12 +52,12 @@ func TestManagerPersistsCodexTurnInKoderTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	client := codexapp.New(codexapp.Config{
+	factory := &fixedProcessFactory{cfg: codexapp.Config{
 		Executable: os.Args[0],
 		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
 		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_MODEL=codex-test"},
-	})
-	manager := New(client, st, func(domain.Session, domain.Chat) string { return "Be concise." })
+	}}
+	manager := New(factory, st, func(domain.Session, domain.Chat) string { return "Be concise." })
 	bridge := &fakeToolBridge{}
 	manager.SetToolBridge(bridge)
 	t.Cleanup(func() { _ = manager.Close() })
@@ -85,12 +105,12 @@ func TestManagerPreservesMessagesAroundCodexToolCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	client := codexapp.New(codexapp.Config{
+	factory := &fixedProcessFactory{cfg: codexapp.Config{
 		Executable: os.Args[0],
 		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
 		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_MULTI_MESSAGE=1"},
-	})
-	manager := New(client, st, nil)
+	}}
+	manager := New(factory, st, nil)
 	manager.SetToolBridge(&fakeToolBridge{})
 	t.Cleanup(func() { _ = manager.Close() })
 	sessionRecord := domain.Session{ID: "session-messages", ProjectRoot: t.TempDir()}
@@ -126,20 +146,70 @@ func TestManagerPreservesMessagesAroundCodexToolCall(t *testing.T) {
 	}
 }
 
-func TestCodexSandboxUsesAppServerProtocolValues(t *testing.T) {
-	tests := []struct {
-		profile string
-		want    string
-	}{
-		{profile: "readonly", want: "read-only"},
-		{profile: "default", want: "workspace-write"},
-		{profile: "full-access", want: "danger-full-access"},
+func TestExternalSandboxPolicyDescribesNetworkBoundary(t *testing.T) {
+	if got := externalSandboxPolicy(true); got["type"] != "externalSandbox" || got["networkAccess"] != "enabled" {
+		t.Fatalf("enabled policy = %#v", got)
 	}
-	for _, test := range tests {
-		chatRecord := domain.Chat{PermissionProfile: test.profile}
-		if got := codexSandbox(domain.Session{}, chatRecord); got != test.want {
-			t.Fatalf("profile %q sandbox = %q, want %q", test.profile, got, test.want)
+	if got := externalSandboxPolicy(false); got["networkAccess"] != "restricted" {
+		t.Fatalf("locked-down policy = %#v", got)
+	}
+}
+
+func TestManagerRunsOneCodexProcessPerChat(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	factory := &fixedProcessFactory{cfg: codexapp.Config{
+		Executable: os.Args[0],
+		Args:       []string{"-test.run=TestCodexDriverHelperProcess"},
+		Env:        []string{"KODER_CODEX_DRIVER_HELPER=1"},
+	}}
+	manager := New(factory, st, nil)
+	t.Cleanup(func() { _ = manager.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionRecord := domain.Session{ID: "session-processes", ProjectRoot: t.TempDir()}
+	first, _, releaseFirst, err := manager.acquireProcess(ctx, sessionRecord, domain.Chat{ID: "chat-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseFirst()
+	second, _, releaseSecond, err := manager.acquireProcess(ctx, sessionRecord, domain.Chat{ID: "chat-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseSecond()
+	if first == second {
+		t.Fatal("two Codex chats shared one app-server client")
+	}
+	manager.processMu.Lock()
+	processCount := len(manager.processes)
+	manager.processMu.Unlock()
+	if processCount != 2 {
+		t.Fatalf("process count = %d, want 2", processCount)
+	}
+}
+
+func TestCodexToolFailurePreservesOutputAndExitCode(t *testing.T) {
+	exitCode := 128
+	message := codexToolFailure(json.RawMessage(`{"message":"git failed"}`), "fatal: unable to access repository", &exitCode)
+	for _, want := range []string{"git failed", "fatal: unable to access repository", "Exit code: 128"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("failure %q does not contain %q", message, want)
 		}
+	}
+}
+
+func TestTruncateCodexToolOutputPreservesHeadTailAndUTF8(t *testing.T) {
+	input := "start-" + strings.Repeat("ø", maxCodexToolOutputBytes) + "-end"
+	output, truncated := truncateCodexToolOutput(input)
+	if !truncated || !strings.HasPrefix(output, "start-") || !strings.HasSuffix(output, "-end") || !strings.Contains(output, "output truncated") {
+		t.Fatalf("truncated output shape = %q...%q", output[:20], output[len(output)-20:])
+	}
+	if !utf8.ValidString(output) || len(output) > maxCodexToolOutputBytes {
+		t.Fatalf("truncated output bytes = %d, valid utf8 = %v", len(output), utf8.ValidString(output))
 	}
 }
 
@@ -149,8 +219,8 @@ func TestManagerMirrorsCodexChatLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	client := codexapp.New(codexapp.Config{Executable: os.Args[0], Args: []string{"-test.run=TestCodexDriverHelperProcess"}, Env: []string{"KODER_CODEX_DRIVER_HELPER=1"}})
-	manager := New(client, st, nil)
+	factory := &fixedProcessFactory{cfg: codexapp.Config{Executable: os.Args[0], Args: []string{"-test.run=TestCodexDriverHelperProcess"}, Env: []string{"KODER_CODEX_DRIVER_HELPER=1"}}}
+	manager := New(factory, st, nil)
 	t.Cleanup(func() { _ = manager.Close() })
 	chatRecord := domain.Chat{ID: "chat-lifecycle", Title: "Before", Backend: domain.ChatBackendCodex}
 	if err := manager.bindings.put(context.Background(), Binding{ChatID: chatRecord.ID, ThreadID: "thread-lifecycle"}); err != nil {
@@ -173,16 +243,19 @@ func TestManagerMirrorsCodexChatLifecycle(t *testing.T) {
 	if _, ok, err := manager.bindings.find(ctx, chatRecord.ID); err != nil || ok {
 		t.Fatalf("binding survived delete: ok=%v err=%v", ok, err)
 	}
+	if len(factory.removed) != 1 || factory.removed[0] != chatRecord.ID {
+		t.Fatalf("removed homes = %#v", factory.removed)
+	}
 }
 
-func TestManagerBridgesCodexApprovalIntoKoderTimeline(t *testing.T) {
+func TestManagerRejectsUnexpectedCodexApproval(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	client := codexapp.New(codexapp.Config{Executable: os.Args[0], Args: []string{"-test.run=TestCodexDriverHelperProcess"}, Env: []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_APPROVAL=1"}})
-	manager := New(client, st, nil)
+	factory := &fixedProcessFactory{cfg: codexapp.Config{Executable: os.Args[0], Args: []string{"-test.run=TestCodexDriverHelperProcess"}, Env: []string{"KODER_CODEX_DRIVER_HELPER=1", "KODER_CODEX_DRIVER_APPROVAL=1"}}}
+	manager := New(factory, st, nil)
 	t.Cleanup(func() { _ = manager.Close() })
 	sessionRecord := domain.Session{ID: "session-approval", ProjectRoot: t.TempDir(), PermissionProfile: "default"}
 	chatRecord := domain.Chat{ID: "chat-approval", SessionID: sessionRecord.ID, Title: "Approval", Backend: domain.ChatBackendCodex}
@@ -197,36 +270,16 @@ func TestManagerBridgesCodexApprovalIntoKoderTimeline(t *testing.T) {
 	t.Cleanup(runtime.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- manager.RunTurn(ctx, runtime, chat.DriverTurn{Input: domain.QueuedInput{ID: "input-approval", Text: "Run it"}}, make(chan domain.Event, 32))
-	}()
-	for {
-		approvals, pendingErr := runtime.PendingApprovals(ctx)
-		if pendingErr != nil {
-			t.Fatal(pendingErr)
-		}
-		if len(approvals) == 1 {
-			if handled, resolveErr := manager.ResolveTurnApproval(ctx, runtime, approvals[0].ToolCallID, true, nil); resolveErr != nil || !handled {
-				t.Fatalf("resolve approval: handled=%v err=%v", handled, resolveErr)
-			}
-			break
-		}
-		select {
-		case runErr := <-done:
-			t.Fatalf("turn ended before approval: %v", runErr)
-		case <-ctx.Done():
-			t.Fatal("approval was not published")
-		case <-time.After(5 * time.Millisecond):
-		}
+	err = manager.RunTurn(ctx, runtime, chat.DriverTurn{Input: domain.QueuedInput{ID: "input-approval", Text: "Run it"}}, make(chan domain.Event, 32))
+	if err == nil || !strings.Contains(err.Error(), "requested interactive approval") {
+		t.Fatalf("approval error = %v", err)
 	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	approvals, pendingErr := runtime.PendingApprovals(ctx)
+	if pendingErr != nil {
+		t.Fatal(pendingErr)
 	}
-	timeline := runtime.SnapshotTimeline()
-	toolMessage, ok := timeline[1].Content.(domain.AssistantMessage)
-	if !ok || len(toolMessage.Tools) != 1 || toolMessage.Tools[0].Tool != domain.ToolKindExecCommand || toolMessage.Tools[0].Status != domain.ToolStatusDone {
-		t.Fatalf("approval tool transcript = %#v", timeline)
+	if len(approvals) != 0 {
+		t.Fatalf("unexpected Koder approval records: %#v", approvals)
 	}
 }
 
@@ -247,16 +300,11 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 		case "initialized":
 		case "thread/start":
 			var params map[string]any
-			if json.Unmarshal(msg.Params, &params) != nil || params["sandbox"] != "workspace-write" {
+			if json.Unmarshal(msg.Params, &params) != nil || params["sandbox"] != "danger-full-access" || params["approvalPolicy"] != "never" {
 				os.Exit(4)
 			}
 			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" && params["model"] != expected {
 				os.Exit(6)
-			}
-			if os.Getenv("KODER_CODEX_DRIVER_APPROVAL") == "1" {
-				if json.Unmarshal(msg.Params, &params) != nil || params["approvalPolicy"] != "on-request" {
-					os.Exit(4)
-				}
 			}
 			responseModel := "fake"
 			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" {
@@ -265,7 +313,14 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]any{"thread": map[string]string{"id": "thread-1"}, "model": responseModel}})
 		case "turn/start":
 			var params map[string]any
-			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" && (json.Unmarshal(msg.Params, &params) != nil || params["model"] != expected) {
+			if json.Unmarshal(msg.Params, &params) != nil || params["approvalPolicy"] != "never" {
+				os.Exit(4)
+			}
+			sandboxPolicy, _ := params["sandboxPolicy"].(map[string]any)
+			if sandboxPolicy["type"] != "externalSandbox" {
+				os.Exit(4)
+			}
+			if expected := os.Getenv("KODER_CODEX_DRIVER_MODEL"); expected != "" && params["model"] != expected {
 				os.Exit(6)
 			}
 			_ = enc.Encode(map[string]any{"id": json.RawMessage(msg.ID), "result": map[string]any{"turn": map[string]string{"id": "turn-1"}}})
@@ -295,12 +350,9 @@ func TestCodexDriverHelperProcess(t *testing.T) {
 				var result struct {
 					Decision string `json:"decision"`
 				}
-				if json.Unmarshal(msg.Result, &result) != nil || result.Decision != "accept" {
+				if json.Unmarshal(msg.Result, &result) != nil || result.Decision != "decline" {
 					os.Exit(5)
 				}
-				_ = enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "command-1", "type": "commandExecution", "status": "completed", "aggregatedOutput": "created", "exitCode": 0}}})
-				_ = enc.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "thread-1", "turnId": "turn-1", "itemId": "message-1", "delta": "Done."}})
-				_ = enc.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed"}}})
 				continue
 			}
 			if string(msg.ID) == "99" {

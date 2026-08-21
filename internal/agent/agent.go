@@ -114,9 +114,13 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		retryPause:    modelruntime.DefaultRetryPause,
 	}
 	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
-	e.codex = codexdriver.New(codexapp.New(codexapp.Config{
-		Executable: cfg.Codex.Executable,
-		CodexHome:  cfg.Codex.Home,
+	e.codex = codexdriver.New(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
+		Client: codexapp.Config{
+			Executable: cfg.Codex.Executable,
+			CodexHome:  cfg.Codex.Home,
+		},
+		StateDir: cfg.StateDir(),
+		Access:   settingsStore.Access,
 	}), st, func(_ domain.Session, chatRecord domain.Chat) string {
 		parts := []string{
 			strings.TrimSpace(chatrole.SystemPrompt(chatRecord.EffectiveWorkflowRole())),
@@ -192,6 +196,16 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	}
 	if e.browser != nil {
 		e.browser.UpdateConfig(cfg.Browser)
+	}
+	if e.codex != nil {
+		_ = e.codex.UpdateProcessFactory(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
+			Client: codexapp.Config{
+				Executable: cfg.Codex.Executable,
+				CodexHome:  cfg.Codex.Home,
+			},
+			StateDir: cfg.StateDir(),
+			Access:   e.settings.Access,
+		}))
 	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)

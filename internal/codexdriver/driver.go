@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -31,19 +30,23 @@ type ToolBridge interface {
 	Call(context.Context, *chat.Chat, string, string, json.RawMessage) (domain.ToolResult, error)
 }
 
-type pendingApproval struct {
-	requestID json.RawMessage
-	method    string
-}
-
 type Manager struct {
-	client       *codexapp.Client
+	factoryMu    sync.RWMutex
+	factory      ProcessFactory
 	bindings     bindingStore
 	instructions Instructions
 	tools        ToolBridge
-	threadMu     sync.Mutex
-	approvalMu   sync.Mutex
-	approvals    map[string]pendingApproval
+	processMu    sync.Mutex
+	processes    map[domain.ID]*chatProcess
+	idleTimeout  time.Duration
+}
+
+type chatProcess struct {
+	client      *codexapp.Client
+	fingerprint string
+	network     bool
+	active      int
+	idle        *time.Timer
 }
 
 func (m *Manager) SetToolBridge(bridge ToolBridge) {
@@ -52,39 +55,89 @@ func (m *Manager) SetToolBridge(bridge ToolBridge) {
 	}
 }
 
-func New(client *codexapp.Client, st *store.Store, instructions Instructions) *Manager {
-	return &Manager{client: client, bindings: newBindingStore(st), instructions: instructions, approvals: map[string]pendingApproval{}}
+func New(factory ProcessFactory, st *store.Store, instructions Instructions) *Manager {
+	return &Manager{
+		factory:      factory,
+		bindings:     newBindingStore(st),
+		instructions: instructions,
+		processes:    map[domain.ID]*chatProcess{},
+		idleTimeout:  10 * time.Minute,
+	}
 }
 
 func (m *Manager) Models(ctx context.Context) ([]codexapp.Model, error) {
-	if m == nil || m.client == nil {
+	if m == nil {
 		return nil, fmt.Errorf("codex backend is not configured")
 	}
-	return m.client.Models(ctx)
+	factory := m.processFactory()
+	if factory == nil {
+		return nil, fmt.Errorf("codex backend is not configured")
+	}
+	cfg, err := factory.DiscoveryConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client := codexapp.New(cfg)
+	defer client.Close()
+	return client.Models(ctx)
 }
 
 func (m *Manager) Close() error {
-	if m == nil || m.client == nil {
+	if m == nil {
 		return nil
 	}
-	return m.client.Close()
+	m.processMu.Lock()
+	processes := m.processes
+	m.processes = map[domain.ID]*chatProcess{}
+	m.processMu.Unlock()
+	errs := make([]error, 0, len(processes))
+	for _, process := range processes {
+		if process.idle != nil {
+			process.idle.Stop()
+		}
+		errs = append(errs, process.client.Close())
+	}
+	return errors.Join(errs...)
+}
+
+// UpdateProcessFactory applies executable, authentication-home, and access
+// resolver changes to future processes. Existing processes are stopped so no
+// chat can continue under a stale sandbox policy.
+func (m *Manager) UpdateProcessFactory(factory ProcessFactory) error {
+	if m == nil {
+		return nil
+	}
+	m.factoryMu.Lock()
+	m.factory = factory
+	m.factoryMu.Unlock()
+	return m.Close()
+}
+
+func (m *Manager) processFactory() ProcessFactory {
+	m.factoryMu.RLock()
+	defer m.factoryMu.RUnlock()
+	return m.factory
 }
 
 // UpdateChat mirrors user-facing chat metadata into an existing Codex thread.
 // Chats that have never run have no thread yet and require no remote action.
 func (m *Manager) UpdateChat(ctx context.Context, before domain.Chat, title string, archived *bool) error {
-	if m == nil || m.client == nil || before.EffectiveBackend() != domain.ChatBackendCodex {
+	if m == nil || before.EffectiveBackend() != domain.ChatBackendCodex {
 		return nil
 	}
 	binding, ok, err := m.bindings.find(ctx, before.ID)
 	if err != nil || !ok || binding.ThreadID == "" {
 		return err
 	}
-	if err := m.client.Start(ctx); err != nil {
-		return err
+	client, release := m.acquireRunningClient(before.ID)
+	// Koder owns the canonical title/archive state. A stopped disposable
+	// process does not need to be restarted solely to mirror metadata.
+	if client == nil {
+		return nil
 	}
+	defer release()
 	if nextTitle := strings.TrimSpace(title); nextTitle != "" && nextTitle != strings.TrimSpace(before.Title) {
-		if err := m.client.Call(ctx, "thread/name/set", map[string]string{"threadId": binding.ThreadID, "name": nextTitle}, nil); err != nil {
+		if err := client.Call(ctx, "thread/name/set", map[string]string{"threadId": binding.ThreadID, "name": nextTitle}, nil); err != nil {
 			return fmt.Errorf("rename Codex thread: %w", err)
 		}
 	}
@@ -93,44 +146,58 @@ func (m *Manager) UpdateChat(ctx context.Context, before domain.Chat, title stri
 		if !*archived {
 			method = "thread/unarchive"
 		}
-		if err := m.client.Call(ctx, method, map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
+		if err := client.Call(ctx, method, map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
 			return fmt.Errorf("update Codex thread archive state: %w", err)
+		}
+		if *archived {
+			return m.closeChatProcess(before.ID)
 		}
 	}
 	return nil
 }
 
 func (m *Manager) DeleteChat(ctx context.Context, chatRecord domain.Chat) error {
-	if m == nil || m.client == nil || chatRecord.EffectiveBackend() != domain.ChatBackendCodex {
+	if m == nil || chatRecord.EffectiveBackend() != domain.ChatBackendCodex {
 		return nil
 	}
 	binding, ok, err := m.bindings.find(ctx, chatRecord.ID)
-	if err != nil || !ok || binding.ThreadID == "" {
+	if err != nil {
 		return err
 	}
-	if err := m.client.Start(ctx); err != nil {
-		return err
+	client, release := m.acquireRunningClient(chatRecord.ID)
+	if client != nil {
+		defer release()
 	}
-	if err := m.client.Call(ctx, "thread/delete", map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
-		return fmt.Errorf("delete Codex thread: %w", err)
+	if client != nil && ok && binding.ThreadID != "" {
+		if err := client.Call(ctx, "thread/delete", map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
+			return fmt.Errorf("delete Codex thread: %w", err)
+		}
 	}
-	return m.bindings.delete(ctx, chatRecord.ID)
+	closeErr := m.closeChatProcess(chatRecord.ID)
+	bindingErr := m.bindings.delete(ctx, chatRecord.ID)
+	var removeErr error
+	if factory := m.processFactory(); factory != nil {
+		removeErr = factory.RemoveChat(chatRecord.ID)
+	}
+	return errors.Join(closeErr, bindingErr, removeErr)
 }
 
 func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTurn, out chan<- domain.Event) error {
-	if m == nil || m.client == nil {
+	if m == nil {
 		return fmt.Errorf("codex backend is not configured")
 	}
 	if rt == nil {
 		return fmt.Errorf("chat runtime is required")
 	}
-	if err := m.client.Start(ctx); err != nil {
-		return err
-	}
 	snapshot := rt.Snapshot()
 	if snapshot.Chat.EffectiveBackend() != domain.ChatBackendCodex {
 		return fmt.Errorf("codex driver cannot run backend %q", snapshot.Chat.EffectiveBackend())
 	}
+	client, network, release, err := m.acquireProcess(ctx, snapshot.Session, snapshot.Chat)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	text := strings.TrimSpace(turn.Input.Text)
 	if domain.DeliveryForQueuedInput(turn.Input) == domain.QueuedInputDeliveryContinue && text == "" {
@@ -145,9 +212,9 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 	}
 	out <- domain.Event{Kind: domain.EventKindMessageDone, Item: userItem}
 
-	events, unsubscribe := m.client.Subscribe(1024)
+	events, unsubscribe := client.Subscribe(1024)
 	defer unsubscribe()
-	threadID, err := m.ensureThread(ctx, rt, snapshot.Session, snapshot.Chat)
+	threadID, err := m.ensureThread(ctx, client, rt, snapshot.Session, snapshot.Chat)
 	if err != nil {
 		return err
 	}
@@ -163,13 +230,15 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 		} `json:"turn"`
 	}
 	params := map[string]any{
-		"threadId": threadID,
-		"input":    []map[string]any{{"type": "text", "text": inputText}},
+		"threadId":       threadID,
+		"input":          []map[string]any{{"type": "text", "text": inputText}},
+		"approvalPolicy": "never",
+		"sandboxPolicy":  externalSandboxPolicy(network),
 	}
 	if model := strings.TrimSpace(snapshot.Chat.ModelID); model != "" {
 		params["model"] = model
 	}
-	if err := m.client.Call(ctx, "turn/start", params, &started); err != nil {
+	if err := client.Call(ctx, "turn/start", params, &started); err != nil {
 		return fmt.Errorf("start Codex turn with model %q: %w", strings.TrimSpace(snapshot.Chat.ModelID), err)
 	}
 	slog.Debug("codex turn started", "chat_id", snapshot.Chat.ID, "thread_id", threadID, "turn_id", started.Turn.ID, "model", strings.TrimSpace(snapshot.Chat.ModelID))
@@ -177,12 +246,10 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 		return fmt.Errorf("codex turn/start returned no turn id")
 	}
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Codex is working"}
-	return m.consumeTurn(ctx, rt, threadID, started.Turn.ID, events, out)
+	return m.consumeTurn(ctx, client, rt, threadID, started.Turn.ID, events, out)
 }
 
-func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domain.Session, chatRecord domain.Chat) (string, error) {
-	m.threadMu.Lock()
-	defer m.threadMu.Unlock()
+func (m *Manager) ensureThread(ctx context.Context, client *codexapp.Client, rt *chat.Chat, session domain.Session, chatRecord domain.Chat) (string, error) {
 	var dynamicTools []DynamicTool
 	if m.tools != nil {
 		var err error
@@ -199,20 +266,26 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 				ID string `json:"id"`
 			} `json:"thread"`
 		}
-		resumeParams := map[string]any{"threadId": binding.ThreadID}
+		resumeParams := map[string]any{
+			"threadId":       binding.ThreadID,
+			"approvalPolicy": "never",
+			"sandbox":        "danger-full-access",
+		}
 		if len(dynamicTools) > 0 {
 			resumeParams["dynamicTools"] = dynamicTools
 		}
-		if err := m.client.Call(ctx, "thread/resume", resumeParams, &resumed); err == nil {
+		if err := client.Call(ctx, "thread/resume", resumeParams, &resumed); err == nil {
 			slog.Debug("codex thread resumed", "chat_id", chatRecord.ID, "thread_id", binding.ThreadID, "binding_model", binding.Model, "requested_model", chatRecord.ModelID)
 			return binding.ThreadID, nil
 		}
 	}
 	params := map[string]any{
 		"cwd":            session.ProjectRoot,
-		"approvalPolicy": codexApprovalPolicy(session, chatRecord),
-		"sandbox":        codexSandbox(session, chatRecord),
-		"ephemeral":      false,
+		"approvalPolicy": "never",
+		// Codex must not apply a second, conflicting sandbox. The entire
+		// app-server is already confined by Koder's bubblewrap process.
+		"sandbox":   "danger-full-access",
+		"ephemeral": false,
 	}
 	if len(dynamicTools) > 0 {
 		params["dynamicTools"] = dynamicTools
@@ -232,65 +305,160 @@ func (m *Manager) ensureThread(ctx context.Context, rt *chat.Chat, session domai
 		} `json:"thread"`
 		Model string `json:"model"`
 	}
-	if err := m.client.Call(ctx, "thread/start", params, &started); err != nil {
+	if err := client.Call(ctx, "thread/start", params, &started); err != nil {
 		return "", fmt.Errorf("start Codex thread with model %q: %w", requestedModel, err)
 	}
 	if started.Thread.ID == "" {
 		return "", fmt.Errorf("codex thread/start returned no thread id")
 	}
 	if actualModel := strings.TrimSpace(started.Model); requestedModel != "" && actualModel != "" && actualModel != requestedModel {
-		m.deleteThreadBestEffort(started.Thread.ID)
+		m.deleteThreadBestEffort(client, started.Thread.ID)
 		return "", fmt.Errorf("codex thread started with model %q, requested %q", actualModel, requestedModel)
 	}
 	slog.Debug("codex thread started", "chat_id", chatRecord.ID, "thread_id", started.Thread.ID, "requested_model", requestedModel, "actual_model", started.Model)
 	if title := strings.TrimSpace(chatRecord.Title); title != "" {
-		if err := m.client.Call(ctx, "thread/name/set", map[string]string{"threadId": started.Thread.ID, "name": title}, nil); err != nil {
-			m.deleteThreadBestEffort(started.Thread.ID)
+		if err := client.Call(ctx, "thread/name/set", map[string]string{"threadId": started.Thread.ID, "name": title}, nil); err != nil {
+			m.deleteThreadBestEffort(client, started.Thread.ID)
 			return "", fmt.Errorf("name Codex thread: %w", err)
 		}
 	}
 	if err := m.bindings.put(ctx, Binding{ChatID: chatRecord.ID, ThreadID: started.Thread.ID, Model: started.Model}); err != nil {
-		m.deleteThreadBestEffort(started.Thread.ID)
+		m.deleteThreadBestEffort(client, started.Thread.ID)
 		return "", err
 	}
 	return started.Thread.ID, nil
 }
 
-func (m *Manager) deleteThreadBestEffort(threadID string) {
+func (m *Manager) deleteThreadBestEffort(client *codexapp.Client, threadID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
 	defer cancel()
-	_ = m.client.Call(ctx, "thread/delete", map[string]string{"threadId": threadID}, nil)
+	_ = client.Call(ctx, "thread/delete", map[string]string{"threadId": threadID}, nil)
 }
 
-func codexApprovalPolicy(session domain.Session, chatRecord domain.Chat) string {
-	profile := strings.TrimSpace(chatRecord.PermissionProfile)
-	if profile == "" {
-		profile = strings.TrimSpace(session.PermissionProfile)
+func externalSandboxPolicy(network bool) map[string]any {
+	access := "restricted"
+	if network {
+		access = "enabled"
 	}
-	if profile == "full-access" {
-		return "never"
-	}
-	return "on-request"
+	return map[string]any{"type": "externalSandbox", "networkAccess": access}
 }
 
-func codexSandbox(session domain.Session, chatRecord domain.Chat) string {
-	profile := strings.TrimSpace(chatRecord.PermissionProfile)
-	if profile == "" {
-		profile = strings.TrimSpace(session.PermissionProfile)
+func (m *Manager) acquireProcess(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*codexapp.Client, bool, func(), error) {
+	factory := m.processFactory()
+	if factory == nil {
+		return nil, false, nil, fmt.Errorf("codex backend is not configured")
 	}
-	switch profile {
-	case "readonly":
-		return "read-only"
-	case "full-access":
-		return "danger-full-access"
-	default:
-		return "workspace-write"
+	threadID := ""
+	if binding, ok, err := m.bindings.find(ctx, chatRecord.ID); err != nil {
+		return nil, false, nil, err
+	} else if ok {
+		threadID = binding.ThreadID
 	}
+	cfg, err := factory.ChatConfig(ctx, session, chatRecord, threadID)
+	if err != nil {
+		return nil, false, nil, err
+	}
+
+	m.processMu.Lock()
+	process := m.processes[chatRecord.ID]
+	var stale *chatProcess
+	if process != nil && process.fingerprint != cfg.Fingerprint {
+		stale = process
+		delete(m.processes, chatRecord.ID)
+		if process.idle != nil {
+			process.idle.Stop()
+		}
+		process = nil
+	}
+	if process == nil {
+		process = &chatProcess{client: codexapp.New(cfg.Client), fingerprint: cfg.Fingerprint, network: cfg.Network}
+		m.processes[chatRecord.ID] = process
+	}
+	if process.idle != nil {
+		process.idle.Stop()
+		process.idle = nil
+	}
+	process.active++
+	m.processMu.Unlock()
+
+	// A stale process is closed outside the manager lock so process teardown
+	// cannot block an unrelated Codex chat.
+	if stale != nil {
+		_ = stale.client.Close()
+	}
+	if err := process.client.Start(ctx); err != nil {
+		m.releaseProcess(chatRecord.ID, process)
+		return nil, false, nil, err
+	}
+	var once sync.Once
+	release := func() { once.Do(func() { m.releaseProcess(chatRecord.ID, process) }) }
+	return process.client, process.network, release, nil
 }
 
-func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turnID string, events <-chan codexapp.Message, out chan<- domain.Event) error {
-	chatID := rt.Snapshot().Chat.ID
-	defer m.clearApprovals(chatID)
+func (m *Manager) releaseProcess(chatID domain.ID, process *chatProcess) {
+	m.processMu.Lock()
+	defer m.processMu.Unlock()
+	if m.processes[chatID] != process {
+		return
+	}
+	if process.active > 0 {
+		process.active--
+	}
+	if process.active != 0 || process.idle != nil {
+		return
+	}
+	timeout := m.idleTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	process.idle = time.AfterFunc(timeout, func() {
+		_ = m.closeIdleProcess(chatID, process)
+	})
+}
+
+func (m *Manager) closeIdleProcess(chatID domain.ID, process *chatProcess) error {
+	m.processMu.Lock()
+	if m.processes[chatID] != process || process.active != 0 {
+		m.processMu.Unlock()
+		return nil
+	}
+	delete(m.processes, chatID)
+	m.processMu.Unlock()
+	return process.client.Close()
+}
+
+func (m *Manager) acquireRunningClient(chatID domain.ID) (*codexapp.Client, func()) {
+	m.processMu.Lock()
+	process := m.processes[chatID]
+	if process == nil {
+		m.processMu.Unlock()
+		return nil, func() {}
+	}
+	if process.idle != nil {
+		process.idle.Stop()
+		process.idle = nil
+	}
+	process.active++
+	m.processMu.Unlock()
+	var once sync.Once
+	return process.client, func() { once.Do(func() { m.releaseProcess(chatID, process) }) }
+}
+
+func (m *Manager) closeChatProcess(chatID domain.ID) error {
+	m.processMu.Lock()
+	process := m.processes[chatID]
+	delete(m.processes, chatID)
+	if process != nil && process.idle != nil {
+		process.idle.Stop()
+	}
+	m.processMu.Unlock()
+	if process == nil {
+		return nil
+	}
+	return process.client.Close()
+}
+
+func (m *Manager) consumeTurn(ctx context.Context, client *codexapp.Client, rt *chat.Chat, threadID, turnID string, events <-chan codexapp.Message, out chan<- domain.Event) error {
 	var assistantItem domain.TimelineItem
 	ensureAssistantItem := func() {
 		if assistantItem.ID == "" {
@@ -328,7 +496,7 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 		case <-ctx.Done():
 			interruptCtx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
 			defer cancel()
-			_ = m.client.Call(interruptCtx, "turn/interrupt", map[string]string{"threadId": threadID, "turnId": turnID}, nil)
+			_ = client.Call(interruptCtx, "turn/interrupt", map[string]string{"threadId": threadID, "turnId": turnID}, nil)
 			return ctx.Err()
 		case msg := <-events:
 			if msg.TransportErr != nil {
@@ -339,13 +507,12 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 			}
 			switch msg.Method {
 			case "item/tool/call":
-				if err := m.handleDynamicTool(ctx, rt, msg); err != nil {
+				if err := m.handleDynamicTool(ctx, client, rt, msg); err != nil {
 					return err
 				}
-			case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
-				if err := m.handleApprovalRequest(ctx, rt, msg, out); err != nil {
-					return err
-				}
+			case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+				_ = client.Respond(msg.ID, map[string]string{"decision": "decline"}, nil)
+				return fmt.Errorf("Codex requested interactive approval despite Koder's externally enforced sandbox")
 			case "item/agentMessage/delta":
 				delta := stringField(msg.Params, "delta")
 				messageID := stringField(msg.Params, "itemId")
@@ -425,7 +592,7 @@ func (m *Manager) consumeTurn(ctx context.Context, rt *chat.Chat, threadID, turn
 	}
 }
 
-func (m *Manager) handleDynamicTool(ctx context.Context, rt *chat.Chat, msg codexapp.Message) error {
+func (m *Manager) handleDynamicTool(ctx context.Context, client *codexapp.Client, rt *chat.Chat, msg codexapp.Message) error {
 	if m.tools == nil {
 		var request struct {
 			CallID string `json:"callId"`
@@ -434,7 +601,7 @@ func (m *Manager) handleDynamicTool(ctx context.Context, rt *chat.Chat, msg code
 		if request.CallID != "" {
 			_, _ = rt.AttachToolError(ctx, request.CallID, domain.ToolError{Message: "Koder tool bridge is unavailable"})
 		}
-		return m.client.Respond(msg.ID, map[string]any{
+		return client.Respond(msg.ID, map[string]any{
 			"contentItems": []map[string]string{{"type": "inputText", "text": "Koder tool bridge is unavailable"}},
 			"success":      false,
 		}, nil)
@@ -445,7 +612,7 @@ func (m *Manager) handleDynamicTool(ctx context.Context, rt *chat.Chat, msg code
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := json.Unmarshal(msg.Params, &request); err != nil {
-		return m.client.Respond(msg.ID, nil, &codexapp.RPCError{Code: -32602, Message: err.Error()})
+		return client.Respond(msg.ID, nil, &codexapp.RPCError{Code: -32602, Message: err.Error()})
 	}
 	result, err := m.tools.Call(ctx, rt, request.Tool, request.CallID, request.Arguments)
 	success := err == nil
@@ -471,91 +638,10 @@ func (m *Manager) handleDynamicTool(ctx context.Context, rt *chat.Chat, msg code
 			return attachErr
 		}
 	}
-	return m.client.Respond(msg.ID, map[string]any{
+	return client.Respond(msg.ID, map[string]any{
 		"contentItems": []map[string]string{{"type": "inputText", "text": output}},
 		"success":      success,
 	}, nil)
-}
-
-func (m *Manager) handleApprovalRequest(ctx context.Context, rt *chat.Chat, msg codexapp.Message, out chan<- domain.Event) error {
-	var request struct {
-		ItemID  string `json:"itemId"`
-		Reason  string `json:"reason"`
-		Command string `json:"command"`
-		CWD     string `json:"cwd"`
-	}
-	if err := json.Unmarshal(msg.Params, &request); err != nil {
-		return err
-	}
-	if request.ItemID == "" {
-		return fmt.Errorf("codex approval request omitted item id")
-	}
-	body := strings.TrimSpace(request.Reason)
-	if body == "" {
-		body = strings.TrimSpace(strings.Join([]string{request.Command, request.CWD}, " "))
-	}
-	if body == "" {
-		body = "Codex requests permission to continue this operation."
-	}
-	key := approvalKey(rt.Snapshot().Chat.ID, request.ItemID)
-	m.approvalMu.Lock()
-	m.approvals[key] = pendingApproval{requestID: append(json.RawMessage(nil), msg.ID...), method: msg.Method}
-	m.approvalMu.Unlock()
-	if _, err := rt.AttachToolApproval(ctx, request.ItemID, domain.ApprovalRequest{ID: domain.ID(request.ItemID), Status: domain.ApprovalStatusPending, Body: body}); err != nil {
-		m.approvalMu.Lock()
-		delete(m.approvals, key)
-		m.approvalMu.Unlock()
-		return err
-	}
-	out <- domain.Event{Kind: domain.EventKindApprovalAsk, ToolCallID: request.ItemID, Text: body, Meta: map[string]string{"approval_driver": "external"}}
-	return nil
-}
-
-func (m *Manager) ResolveTurnApproval(ctx context.Context, rt *chat.Chat, toolCallID string, approved bool, rule *accesssettings.PermissionOverride) (bool, error) {
-	if m == nil || rt == nil {
-		return false, nil
-	}
-	key := approvalKey(rt.Snapshot().Chat.ID, toolCallID)
-	m.approvalMu.Lock()
-	pending, ok := m.approvals[key]
-	if ok {
-		delete(m.approvals, key)
-	}
-	m.approvalMu.Unlock()
-	if !ok {
-		return false, nil
-	}
-	decision := "decline"
-	if approved {
-		decision = "accept"
-		if rule != nil {
-			decision = "acceptForSession"
-		}
-	}
-	if err := m.client.Respond(pending.requestID, map[string]string{"decision": decision}, nil); err != nil {
-		return true, err
-	}
-	if approved {
-		_, err := rt.MarkToolRunning(ctx, toolCallID)
-		return true, err
-	}
-	_, err := rt.AttachToolResult(ctx, toolCallID, domain.ToolResult{Text: "Declined by user", Status: domain.ToolResultStatusDenied})
-	return true, err
-}
-
-func approvalKey(chatID domain.ID, toolCallID string) string {
-	return string(chatID) + "\x00" + strings.TrimSpace(toolCallID)
-}
-
-func (m *Manager) clearApprovals(chatID domain.ID) {
-	prefix := string(chatID) + "\x00"
-	m.approvalMu.Lock()
-	for key := range m.approvals {
-		if strings.HasPrefix(key, prefix) {
-			delete(m.approvals, key)
-		}
-	}
-	m.approvalMu.Unlock()
 }
 
 const defaultInterruptTimeout = 3 * time.Second
@@ -686,10 +772,7 @@ func completeCodexTool(ctx context.Context, rt *chat.Chat, raw json.RawMessage, 
 		return err
 	}
 	if value.Item.Status == "failed" {
-		message := strings.TrimSpace(string(value.Item.Error))
-		if message == "" || message == "null" {
-			message = "Codex tool failed"
-		}
+		message := codexToolFailure(value.Item.Error, value.Item.AggregatedOutput, value.Item.ExitCode)
 		_, err := rt.AttachToolError(ctx, itemID, domain.ToolError{Message: message})
 		return err
 	}
@@ -707,8 +790,63 @@ func completeCodexTool(ctx context.Context, rt *chat.Chat, raw json.RawMessage, 
 	if len(value.Item.Result) > 0 && string(value.Item.Result) != "null" {
 		data["result"] = json.RawMessage(value.Item.Result)
 	}
-	_, err := rt.AttachToolResult(ctx, itemID, domain.ToolResult{Text: value.Item.AggregatedOutput, Status: status, Data: data})
+	output, truncated := truncateCodexToolOutput(value.Item.AggregatedOutput)
+	if truncated {
+		data["output_truncated"] = true
+	}
+	_, err := rt.AttachToolResult(ctx, itemID, domain.ToolResult{Text: output, Status: status, Data: data})
 	return err
+}
+
+const maxCodexToolOutputBytes = 64 * 1024
+
+func codexToolFailure(raw json.RawMessage, output string, exitCode *int) string {
+	message := ""
+	if len(raw) > 0 && string(raw) != "null" {
+		var structured struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &structured) == nil {
+			message = strings.TrimSpace(structured.Message)
+		}
+		if message == "" {
+			var plain string
+			if json.Unmarshal(raw, &plain) == nil {
+				message = strings.TrimSpace(plain)
+			}
+		}
+	}
+	output, _ = truncateCodexToolOutput(output)
+	if strings.TrimSpace(output) != "" && !strings.Contains(message, strings.TrimSpace(output)) {
+		if message != "" {
+			message += "\n\n"
+		}
+		message += strings.TrimSpace(output)
+	}
+	if message == "" {
+		message = "Codex tool failed"
+	}
+	if exitCode != nil {
+		message = fmt.Sprintf("%s\n\nExit code: %d", message, *exitCode)
+	}
+	return message
+}
+
+func truncateCodexToolOutput(value string) (string, bool) {
+	if len(value) <= maxCodexToolOutputBytes {
+		return value, false
+	}
+	marker := "\n\n... output truncated ...\n\n"
+	half := (maxCodexToolOutputBytes - len(marker)) / 2
+	headEnd := half
+	for headEnd > 0 && value[headEnd]&0xc0 == 0x80 {
+		headEnd--
+	}
+	tailStart := len(value) - half
+	for tailStart < len(value) && value[tailStart]&0xc0 == 0x80 {
+		tailStart++
+	}
+	return value[:headEnd] + marker + value[tailStart:], true
 }
 
 func turnCompletion(raw json.RawMessage) (string, string) {
