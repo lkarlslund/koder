@@ -1926,6 +1926,7 @@
           this.recalculateTimelineRenderWindow();
           if (this.transcriptBottomScrollPending) return;
           this.transcriptBottomScrollPending = true;
+          el.scrollTop = el.scrollHeight;
           requestAnimationFrame(() => {
             this.transcriptBottomScrollPending = false;
             const current = this.transcriptElement();
