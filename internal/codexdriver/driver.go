@@ -141,17 +141,11 @@ func (m *Manager) UpdateChat(ctx context.Context, before domain.Chat, title stri
 			return fmt.Errorf("rename Codex thread: %w", err)
 		}
 	}
-	if archived != nil && *archived != before.Archived {
-		method := "thread/archive"
-		if !*archived {
-			method = "thread/unarchive"
-		}
-		if err := client.Call(ctx, method, map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
-			return fmt.Errorf("update Codex thread archive state: %w", err)
-		}
-		if *archived {
-			return m.closeChatProcess(before.ID)
-		}
+	// Koder owns archive state. Archiving the underlying Codex thread would
+	// move its rollout and make a later lazy restore unable to resume it
+	// without launching a process during the metadata update.
+	if archived != nil && *archived && *archived != before.Archived {
+		return m.closeChatProcess(before.ID)
 	}
 	return nil
 }
@@ -159,19 +153,6 @@ func (m *Manager) UpdateChat(ctx context.Context, before domain.Chat, title stri
 func (m *Manager) DeleteChat(ctx context.Context, chatRecord domain.Chat) error {
 	if m == nil || chatRecord.EffectiveBackend() != domain.ChatBackendCodex {
 		return nil
-	}
-	binding, ok, err := m.bindings.find(ctx, chatRecord.ID)
-	if err != nil {
-		return err
-	}
-	client, release := m.acquireRunningClient(chatRecord.ID)
-	if client != nil {
-		defer release()
-	}
-	if client != nil && ok && binding.ThreadID != "" {
-		if err := client.Call(ctx, "thread/delete", map[string]string{"threadId": binding.ThreadID}, nil); err != nil {
-			return fmt.Errorf("delete Codex thread: %w", err)
-		}
 	}
 	closeErr := m.closeChatProcess(chatRecord.ID)
 	bindingErr := m.bindings.delete(ctx, chatRecord.ID)

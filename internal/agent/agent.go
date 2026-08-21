@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -198,14 +199,16 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 		e.browser.UpdateConfig(cfg.Browser)
 	}
 	if e.codex != nil {
-		_ = e.codex.UpdateProcessFactory(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
+		if err := e.codex.UpdateProcessFactory(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
 			Client: codexapp.Config{
 				Executable: cfg.Codex.Executable,
 				CodexHome:  cfg.Codex.Home,
 			},
 			StateDir: cfg.StateDir(),
 			Access:   e.settings.Access,
-		}))
+		})); err != nil {
+			slog.Warn("stop stale Codex chat processes after configuration change", "error", err)
+		}
 	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)

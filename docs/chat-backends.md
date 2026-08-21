@@ -32,7 +32,9 @@ orchestrator workflow role plus voice interaction mode when loaded.
 ## Turn-driver boundary
 
 The normal chat actor still owns identity, the input queue, cancellation,
-runtime state, history, approvals, persistence, subscriptions, and rendering.
+runtime state, history, persistence, subscriptions, and rendering. Native
+Koder turns can use the existing approval machinery; externally sandboxed
+agent backends do not expose per-command approvals.
 At the start of a turn it resolves the chat's backend to a turn driver:
 
 ```text
@@ -49,10 +51,9 @@ Koder native driver     Codex app-server driver
 ```
 
 `NativeTurnDriver` adapts the existing Koder provider/tool loop. The Codex
-driver supervises one process-wide `codex app-server --stdio` process and
-multiplexes durable Codex threads by Koder chat ID. Adding another backend
-requires a driver and backend discovery option; it does not require a new
-session type, transcript format, or client protocol.
+driver supervises one `codex app-server --stdio` process per hydrated Codex
+chat. Adding another backend requires a driver and backend discovery option;
+it does not require a new session type, transcript format, or client protocol.
 
 The driver emits the same domain events used by native turns. Consequently
 both backends share queueing, busy/idle state, cancellation, `chat_status`,
@@ -66,15 +67,15 @@ root, then stores the chat-to-thread binding. Later hydration resumes that
 thread. A stopped app-server is restarted on demand and an interrupted turn
 fails visibly instead of leaving the chat busy forever.
 
-Koder mirrors chat lifecycle operations to the bound thread:
-
-- rename -> `thread/name/set`;
-- archive/restore -> `thread/archive` / `thread/unarchive`;
-- delete -> `thread/delete` and removal of the local binding.
+Koder owns chat lifecycle state. It mirrors a rename into a currently running
+Codex thread, stops the process on archive, and removes the process, private
+home, and local binding on delete. It deliberately does not archive the
+underlying Codex rollout, so restoring a lazily stopped Koder chat can resume
+the same thread without starting a process merely to update metadata.
 
 Codex agent messages, reasoning, native command/file/MCP/web tool calls, Koder
-dynamic tool calls, results, errors, and approvals are converted to canonical
-Koder timeline items. This is what makes history, generic presentations,
+dynamic tool calls, results, and errors are converted to canonical Koder
+timeline items. This is what makes history, generic presentations,
 `show_media`, and voice rendering work without Codex-specific UI code.
 
 Codex retains its native coding tools. Koder supplies complementary dynamic
@@ -83,6 +84,37 @@ photos. The server publishes the complete addition catalog and configured
 permission profiles to both chat creators. Users can disable additions per
 chat, and Koder rechecks role, interaction, and permission policy when a call
 executes.
+
+## External-agent isolation
+
+Koder treats an external agent process as untrusted execution even when that
+agent may operate autonomously. Each Codex chat therefore has:
+
+- its own app-server process and private `CODEX_HOME`;
+- the session project root as its working directory;
+- the session's filesystem, `/tmp`, mount, and network access settings enforced
+  around the entire process with bubblewrap;
+- Codex `approvalPolicy=never` and `externalSandbox`, making bubblewrap the hard
+  boundary instead of relying on per-command approval prompts;
+- a policy fingerprint that restarts the process before the next turn whenever
+  effective access settings change.
+
+Processes start lazily, stop after an idle period, and are stopped immediately
+when a chat is archived or deleted, Koder shuts down, or Codex configuration is
+changed. Deleting a chat also removes its private Codex home. Koder uses a
+short-lived discovery process for the model catalog; it is not shared with a
+chat.
+
+Existing Codex chats created before per-chat isolation keep their durable
+thread. On first hydration Koder copies only that thread's rollout from the
+configured account-level Codex home into the chat's private home. It does not
+copy other Codex conversations.
+
+Network access is one boundary today: disabling it removes networking from the
+whole app-server, including model transport. Supporting a remote Codex backend
+while denying network only to its child commands requires a separate
+backend-transport proxy; Koder does not silently weaken a network-disabled
+session in the meantime.
 
 Koder never creates branches or applies a special branching policy. A user or
 orchestrator may ask a Codex chat to create or use a branch; that remains work

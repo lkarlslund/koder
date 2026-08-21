@@ -86,9 +86,9 @@ type Browser struct {
 	MaxTabsGlobal    int           `toml:"max_tabs_global"`
 }
 
-// Codex configures the process-wide Codex app-server turn backend. Authentication
-// and model configuration belong to the OS account running Koder unless Home is
-// explicitly set to a dedicated CODEX_HOME directory.
+// Codex configures the per-chat Codex app-server turn backend. Authentication
+// and model configuration are seeded from the OS account running Koder unless
+// Home explicitly selects another source CODEX_HOME directory.
 type Codex struct {
 	Enabled    bool   `toml:"enabled"`
 	Executable string `toml:"executable"`
