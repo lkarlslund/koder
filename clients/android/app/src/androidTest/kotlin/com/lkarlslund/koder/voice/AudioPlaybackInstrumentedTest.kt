@@ -15,12 +15,16 @@ class AudioPlaybackInstrumentedTest {
 		val durationMilliseconds = 400L
 		val pcm = ByteArray((sampleRate * durationMilliseconds / 1_000L * 2L).toInt())
 		val completed = CountDownLatch(1)
+		val visualized = CountDownLatch(1)
 		val startedAt = System.nanoTime()
 
-		AndroidStreamingAudioPlayback { throw AssertionError(it) }.use { playback ->
+		AndroidStreamingAudioPlayback(onPlaybackChunkQueued = { chunk ->
+			if (chunk.size == pcm.size) visualized.countDown()
+		}) { throw AssertionError(it) }.use { playback ->
 			playback.start(VoiceAudioFormat("pcm_s16le", sampleRate, 1))
 			playback.write(pcm)
 			playback.finish(completed::countDown)
+			assertTrue("playback waveform was not driven by the AudioTrack feed", visualized.await(3, TimeUnit.SECONDS))
 			assertTrue("playback did not complete", completed.await(3, TimeUnit.SECONDS))
 		}
 

@@ -65,4 +65,19 @@ class VoiceStateOrbTest {
 		assertEquals(1f, output[0], 0.001f)
 		assertEquals(-1f, output[1], 0.001f)
 	}
+
+	@Test
+	fun waveformGainLiftsQuietSpeechWithoutChangingStrongSpeech() {
+		assertEquals(1f, voiceOrbWaveformGain(0f), 0f)
+		assertEquals(1f, voiceOrbWaveformGain(0.9f), 0f)
+		assertTrue(voiceOrbWaveformGain(0.08f) > 5f)
+		assertEquals(10f, voiceOrbWaveformGain(0.01f), 0f)
+	}
+
+	@Test
+	fun staleWaveformDecaysInsteadOfFreezing() {
+		assertEquals(1f, voiceOrbWaveformDecay(90), 0f)
+		assertTrue(voiceOrbWaveformDecay(300) < 0.3f)
+		assertTrue(voiceOrbWaveformDecay(1_000) < 0.01f)
+	}
 }

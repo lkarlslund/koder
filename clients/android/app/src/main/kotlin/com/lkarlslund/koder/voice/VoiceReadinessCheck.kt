@@ -37,7 +37,7 @@ class VoiceReadinessCheck(
 	private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
 		Thread(runnable, "koder-readiness-timeout").apply { isDaemon = true }
 	}
-	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback(::fail)
+	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback(onError = ::fail)
 	private var socket: WebSocket? = null
 	private var endpoint: VadEndpointPipeline? = null
 	private var utteranceId = ""

@@ -16,6 +16,7 @@ interface StreamingAudioPlayback : AutoCloseable {
 }
 
 class AndroidStreamingAudioPlayback(
+	private val onPlaybackChunkQueued: (ByteArray) -> Unit = {},
     private val onError: (String) -> Unit,
 ) : StreamingAudioPlayback {
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -79,6 +80,7 @@ class AndroidStreamingAudioPlayback(
                 offset += written
 				bytesWritten += written
             }
+			if (generation.get() == currentGeneration && track === audioTrack) onPlaybackChunkQueued(copy)
         }
     }
 
@@ -111,12 +113,19 @@ class AndroidStreamingAudioPlayback(
 		if (targetFrames <= 0 || rate <= 0 || audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) return
 		val startedAt = System.nanoTime()
 		val initialHead = audioTrack.playbackHeadPosition.toLong() and UINT32_MASK
+		var previousHead = initialHead
+		var lastProgressAt = startedAt
 		val remaining = (targetFrames - initialHead).coerceAtLeast(0)
 		val timeoutNanos = ((remaining * NANOS_PER_SECOND) / rate + DRAIN_GRACE_NANOS).coerceAtMost(MAX_DRAIN_NANOS)
 		while (audioTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
 			if (!current()) return
 			val played = audioTrack.playbackHeadPosition.toLong() and UINT32_MASK
-			if (played >= targetFrames || System.nanoTime() - startedAt >= timeoutNanos) return
+			val now = System.nanoTime()
+			if (played > previousHead) {
+				previousHead = played
+				lastProgressAt = now
+			}
+			if (played >= targetFrames || now - startedAt >= timeoutNanos || playbackDrainStalled(now, lastProgressAt)) return
 			val remainingMillis = ((targetFrames - played).coerceAtLeast(1) * 1_000L / rate).coerceAtLeast(1)
 			try {
 				Thread.sleep(min(10L, remainingMillis))
@@ -155,3 +164,8 @@ class AndroidStreamingAudioPlayback(
 		const val MAX_DRAIN_NANOS = 60_000_000_000L
 	}
 }
+
+internal fun playbackDrainStalled(nowNanos: Long, lastProgressNanos: Long): Boolean =
+	nowNanos - lastProgressNanos >= PLAYBACK_DRAIN_STALL_NANOS
+
+private const val PLAYBACK_DRAIN_STALL_NANOS = 1_500_000_000L

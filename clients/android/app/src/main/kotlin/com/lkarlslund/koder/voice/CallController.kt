@@ -72,7 +72,10 @@ class CallController(
 	private val delayedProcessingSound = Runnable {
 		if (snapshot.stage == Stage.PROCESSING) workingSound.start()
 	}
-	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback { message ->
+	private val playback = audioPlayback ?: AndroidStreamingAudioPlayback(onPlaybackChunkQueued = { pcm ->
+		listener.onAudioLevel(pcmLevel(pcm), false)
+		listener.onAudioWaveform(pcmWaveform(pcm), false)
+	}) { message ->
 		onMain { update(Stage.ERROR, message) }
 	}
 	private val endpointSampleRate = detector.sampleRate
@@ -571,8 +574,6 @@ class CallController(
 			return
 		}
 		diagnostics.recordOutput(frame, outputPlaybackFormat ?: config.output, pcm.size)
-		listener.onAudioLevel(pcmLevel(pcm), false)
-		listener.onAudioWaveform(pcmWaveform(pcm), false)
         outputSequence++
 		playback.write(pcm)
     }

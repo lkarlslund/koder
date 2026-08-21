@@ -31,7 +31,7 @@ class AndroidConnectionSound : ConnectionSound {
 	override fun disconnected() {
 		if (offline) return
 		offline = true
-		handler.post(offlinePulse)
+		handler.postDelayed(offlinePulse, DISCONNECT_SOUND_GRACE_MILLIS)
 	}
 
 	override fun ready() {
@@ -63,3 +63,5 @@ class AndroidConnectionSound : ConnectionSound {
 		const val OFFLINE_REPEAT_MILLIS = 3_200L
 	}
 }
+
+private const val DISCONNECT_SOUND_GRACE_MILLIS = 1_200L

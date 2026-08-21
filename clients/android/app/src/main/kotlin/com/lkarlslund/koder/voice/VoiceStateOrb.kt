@@ -11,7 +11,9 @@ import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.random.Random
@@ -62,6 +64,8 @@ class VoiceStateOrbView @JvmOverloads constructor(
 	private var starTravel = 0f
 	private var level = 0.12f
 	private var audioWaveform = FloatArray(65)
+	private var waveformGain = 1f
+	private var lastWaveformAt = 0L
 
 	init {
 		setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -73,8 +77,10 @@ class VoiceStateOrbView @JvmOverloads constructor(
 	var mode: VoiceOrbMode = VoiceOrbMode.IDLE
 		set(value) {
 			if (field == value) return
+			val previous = field
 			field = value
 			lastFrameAt = System.nanoTime()
+			if (value in SPEAKING_MODES && previous != value) resetWaveform()
 			contentDescription = voiceOrbDescription(value)
 			invalidate()
 		}
@@ -86,10 +92,22 @@ class VoiceStateOrbView @JvmOverloads constructor(
 	fun setAudioWaveform(values: FloatArray) {
 		if (values.isEmpty()) return
 		if (audioWaveform.size != values.size) audioWaveform = FloatArray(values.size)
+		val peak = values.maxOf { abs(it) }.coerceIn(0f, 1f)
+		val targetGain = voiceOrbWaveformGain(peak)
+		val gainBlend = if (targetGain > waveformGain) 0.75f else 0.18f
+		waveformGain += (targetGain - waveformGain) * gainBlend
 		values.forEachIndexed { index, value ->
-			audioWaveform[index] = audioWaveform[index] * 0.25f + value.coerceIn(-1f, 1f) * 0.75f
+			val normalized = (value.coerceIn(-1f, 1f) * waveformGain).coerceIn(-1f, 1f)
+			audioWaveform[index] = audioWaveform[index] * 0.20f + normalized * 0.80f
 		}
+		lastWaveformAt = System.nanoTime()
 		invalidate()
+	}
+
+	private fun resetWaveform() {
+		audioWaveform.fill(0f)
+		waveformGain = 1f
+		lastWaveformAt = 0L
 	}
 
 	override fun onDraw(canvas: Canvas) {
@@ -116,8 +134,8 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		lastFrameAt = now
 		drawStars(canvas, cx, cy, contentRadius, starTravel)
 		when (mode) {
-			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(44, 232, 255))
-			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(188, 104, 255))
+			VoiceOrbMode.USER_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(44, 232, 255), now)
+			VoiceOrbMode.AI_SPEAKING -> drawWave(canvas, cx, cy, contentRadius, Color.rgb(188, 104, 255), now)
 			VoiceOrbMode.WORKING -> drawSpinner(canvas, cx, cy, radius, seconds)
 			else -> Unit
 		}
@@ -154,15 +172,17 @@ class VoiceStateOrbView @JvmOverloads constructor(
 		}
 	}
 
-	private fun drawWave(canvas: Canvas, cx: Float, cy: Float, radius: Float, color: Int) {
+	private fun drawWave(canvas: Canvas, cx: Float, cy: Float, radius: Float, color: Int, now: Long) {
 		wave.reset()
 		val amplitude = radius * (0.28f + level * 0.32f)
+		val ageMillis = if (lastWaveformAt == 0L) Long.MAX_VALUE else ((now - lastWaveformAt).coerceAtLeast(0L) / 1_000_000L)
+		val decay = voiceOrbWaveformDecay(ageMillis)
 		val left = cx - radius * 0.78f
 		val width = radius * 1.56f
 		audioWaveform.forEachIndexed { index, sample ->
 			val fraction = index / (audioWaveform.size - 1).coerceAtLeast(1).toFloat()
 			val envelope = sin(fraction * PI).toFloat()
-			val y = cy + sample * amplitude * envelope
+			val y = cy + sample * decay * amplitude * envelope
 			val x = left + width * fraction
 			if (index == 0) wave.moveTo(x, y) else wave.lineTo(x, y)
 		}
@@ -198,4 +218,19 @@ internal fun voiceStarMotion(mode: VoiceOrbMode, initialRadius: Float, speed: Fl
 internal fun voiceStarTravelRate(mode: VoiceOrbMode): Float =
 	if (mode == VoiceOrbMode.PROCESSING) 0.58f else 0.075f
 
+internal fun voiceOrbWaveformGain(peak: Float): Float {
+	val boundedPeak = peak.coerceIn(0f, 1f)
+	if (boundedPeak < 0.004f) return 1f
+	return (0.78f / boundedPeak).coerceIn(1f, 10f)
+}
+
+internal fun voiceOrbWaveformDecay(ageMillis: Long): Float {
+	if (ageMillis <= WAVEFORM_HOLD_MILLIS) return 1f
+	val decaySeconds = (ageMillis - WAVEFORM_HOLD_MILLIS) / 1_000f
+	return exp(-decaySeconds * 7f).coerceIn(0f, 1f)
+}
+
 internal fun voiceOrbSizeDp(fontScale: Float): Int = if (fontScale >= 1.3f) 232 else 300
+
+private val SPEAKING_MODES = setOf(VoiceOrbMode.USER_SPEAKING, VoiceOrbMode.AI_SPEAKING)
+private const val WAVEFORM_HOLD_MILLIS = 90L
