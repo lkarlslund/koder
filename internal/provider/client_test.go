@@ -46,7 +46,7 @@ func TestListModels(t *testing.T) {
 
 func TestListModelsMapsAdvertisedSpeechTasks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"koder-stt","task":"asr"},{"id":"koder-tts","task":"tts"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"koder-stt","task":"asr","architecture":{"output_modalities":["text"]}},{"id":"koder-tts","task":"tts"}]}`))
 	}))
 	defer server.Close()
 

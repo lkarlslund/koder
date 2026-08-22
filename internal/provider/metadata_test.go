@@ -16,7 +16,7 @@ func TestListModelsParsesCompatibleMetadataSuperset(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"model-a","owned_by":"vendor","context_length":131072,"top_provider":{"context_length":65536,"max_completion_tokens":8192},"architecture":{"input_modalities":["text","image"]},"supported_parameters":["tools","structured_outputs","reasoning"]}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a","owned_by":"vendor","context_length":131072,"top_provider":{"context_length":65536,"max_completion_tokens":8192},"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"supported_parameters":["tools","structured_outputs","reasoning"]}]}`))
 	}))
 	defer server.Close()
 
@@ -35,7 +35,7 @@ func TestListModelsParsesCompatibleMetadataSuperset(t *testing.T) {
 	if model.ContextWindow != 65536 || model.MaxContextWindow != 65536 || model.MaxOutputTokens != 8192 {
 		t.Fatalf("unexpected limits: %#v", model)
 	}
-	if !model.SupportsImages || !model.SupportsTools || !model.SupportsJSON || !model.SupportsReasoning || !model.CapabilitiesKnown {
+	if !model.SupportsChat || !model.SupportsImages || !model.SupportsTools || !model.SupportsJSON || !model.SupportsReasoning || !model.CapabilitiesKnown {
 		t.Fatalf("unexpected capabilities: %#v", model)
 	}
 }

@@ -611,6 +611,11 @@ func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
 	if model == nil {
 		return
 	}
+	// A generic OpenAI-compatible /models entry describes a chat-capable model
+	// unless it explicitly advertises a non-chat task below. Richer listings
+	// commonly add architecture metadata; that must not turn the permissive
+	// unknown-capability fallback into an explicit "not chat capable" result.
+	model.SupportsChat = true
 	switch strings.ToLower(strings.TrimSpace(item.Task)) {
 	case "asr", "stt", "speech-to-text", "transcription":
 		model.SupportsChat = false
