@@ -472,6 +472,7 @@ body {
   inset: 0;
   z-index: 1;
   opacity: 0;
+  touch-action: none;
   transition: opacity 160ms ease;
 }
 
@@ -583,7 +584,7 @@ body {
 .knowledge-graph-stage[data-presentation="table"][data-graph-state="ready"] .knowledge-graph-table:not([hidden]),
 .knowledge-graph-stage[data-presentation="table"][data-graph-state="truncated"] .knowledge-graph-table:not([hidden]) { display: flex; }
 .knowledge-graph-table-summary { flex: 0 0 auto; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--knowledge-pane-border); color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); font-size: 0.68rem; }
-.knowledge-graph-table-viewport { flex: 1 1 auto; min-height: 0; overflow: auto; outline: none; }
+.knowledge-graph-table-viewport { flex: 1 1 auto; min-height: 0; overflow: auto; outline: none; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .knowledge-graph-table-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--knowledge-cyan); }
 .knowledge-graph-table table { width: 100%; min-width: 42rem; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 0.72rem; }
 .knowledge-graph-table thead { position: sticky; z-index: 2; top: 0; }
@@ -1105,6 +1106,7 @@ body {
     color: var(--bs-secondary-color);
     background: transparent;
     font-size: .78rem;
+    touch-action: manipulation;
   }
 
   .knowledge-mobile-tabs button::after {
@@ -1148,6 +1150,12 @@ body {
   .knowledge-constellation {
     width: min(18rem, 68vw);
   }
+
+  .knowledge-pane-body { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .knowledge-result-card { min-height: 3.25rem; touch-action: manipulation; }
+  .knowledge-graph-toolbar-actions .knowledge-icon-button { width: 2.75rem; height: 2.75rem; flex: 0 0 2.75rem; touch-action: manipulation; }
+  .knowledge-saved-views select { height: 2.75rem; }
+  .knowledge-table-action { min-width: 2.75rem; min-height: 2.75rem; touch-action: manipulation; }
 }
 
 @media (prefers-reduced-motion: reduce) {
