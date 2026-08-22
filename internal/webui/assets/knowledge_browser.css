@@ -479,6 +479,24 @@ body {
 .knowledge-graph-stage[data-graph-state="truncated"] .knowledge-constellation,
 .knowledge-graph-stage[data-graph-state="truncated"] .knowledge-graph-message { display: none; }
 
+.knowledge-graph-fallback {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-width: 28rem;
+  padding: 2rem;
+  color: var(--bs-secondary-color);
+  text-align: center;
+}
+.knowledge-graph-fallback[hidden] { display: none; }
+
+.knowledge-graph-fallback strong { color: var(--bs-body-color); }
+.knowledge-graph-stage[data-graph-state="fallback"] .knowledge-constellation,
+.knowledge-graph-stage[data-graph-state="fallback"] .knowledge-graph-message { display: none; }
+
 .knowledge-graph-legend {
   position: absolute;
   z-index: 5;
@@ -870,6 +888,15 @@ body {
 
   .knowledge-constellation {
     width: min(18rem, 68vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-shell *, .knowledge-shell *::before, .knowledge-shell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
 

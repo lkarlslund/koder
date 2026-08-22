@@ -103,6 +103,11 @@
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
           <div class="knowledge-graph-canvas" data-knowledge-graph-canvas aria-hidden="true"></div>
+          <div class="knowledge-graph-fallback" data-knowledge-graph-fallback role="status" hidden>
+            <span class="knowledge-empty-icon"><i class="bi bi-list-nested" aria-hidden="true"></i></span>
+            <strong>Graph canvas disabled</strong>
+            <span data-knowledge-graph-fallback-detail>Browse the same knowledge through Knowledge and Inspector.</span>
+          </div>
           <div class="knowledge-state-banner" data-knowledge-banner hidden></div>
           <div class="knowledge-graph-legend" data-knowledge-legend aria-label="Visible relationship types" hidden></div>
           <div class="knowledge-constellation" aria-hidden="true">

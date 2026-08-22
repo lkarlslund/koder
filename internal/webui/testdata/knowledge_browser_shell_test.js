@@ -51,6 +51,11 @@ assert.strictEqual(browser.graphSnapshotRequest('link', 'link-1'), null);
 assert.strictEqual(browser.graphSnapshotRequest('entry', '../secret'), null);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
+const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};
+assert.strictEqual(browser.supportsWebGL(webglDocument), true);
+assert.deepStrictEqual(browser.graphEnvironment(webglDocument, () => ({matches: false})), {available: true, reason: ''});
+assert.deepStrictEqual(browser.graphEnvironment(webglDocument, () => ({matches: true})), {available: false, reason: 'reduced_motion'});
+assert.deepStrictEqual(browser.graphEnvironment({createElement: () => ({getContext: () => null})}, () => ({matches: false})), {available: false, reason: 'webgl_unavailable'});
 let sanitizeOptions;
 const sanitized = browser.sanitizedMarkdownHTML('unsafe', {parse: () => '<script>bad</script><p>safe</p>'}, {
   sanitize: (html, options) => { sanitizeOptions = options; return html.replace('<script>bad</script>', ''); },

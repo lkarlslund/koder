@@ -148,6 +148,22 @@
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
 
+  function supportsWebGL(document) {
+    try {
+      const canvas = document && document.createElement && document.createElement('canvas');
+      return !!(canvas && (canvas.getContext('webgl2') || canvas.getContext('webgl')));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function graphEnvironment(document, matchMedia) {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return {available: false, reason: 'reduced_motion'};
+    }
+    return supportsWebGL(document) ? {available: true, reason: ''} : {available: false, reason: 'webgl_unavailable'};
+  }
+
   function sanitizedMarkdownHTML(value, markedAPI, purifyAPI) {
     if (!markedAPI || typeof markedAPI.parse !== 'function' || !purifyAPI || typeof purifyAPI.sanitize !== 'function') return '';
     const rendered = markedAPI.parse(String(value || ''), {gfm: true, breaks: false});
@@ -751,8 +767,22 @@
       const runtime = {};
       const canvas = shell.querySelector('[data-knowledge-graph-canvas]');
       const graphDebug = graphDebugEnabled(globalThis.location && globalThis.location.search);
+      const environment = graphEnvironment(document, globalThis.matchMedia && globalThis.matchMedia.bind(globalThis));
+      const fallback = shell.querySelector('[data-knowledge-graph-fallback]');
+      if (!environment.available) {
+        const stage = shell.querySelector('#knowledge-graph');
+        if (stage) stage.dataset.graphState = 'fallback';
+        shell.dataset.graphFallback = environment.reason;
+        if (fallback) {
+          fallback.hidden = false;
+          const detail = fallback.querySelector('[data-knowledge-graph-fallback-detail]');
+          if (detail) detail.textContent = environment.reason === 'reduced_motion'
+            ? 'Reduced motion is enabled. Browse Knowledge and Inspector without the animated canvas.'
+            : 'WebGL is unavailable. Browse the same knowledge through Knowledge and Inspector.';
+        }
+      }
       if (canvas && globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter &&
-          globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
+          environment.available && globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
         const graphStore = new globalThis.KoderKnowledgeGraph.Store();
         runtime.graphAdapter = new globalThis.KoderKnowledgeGraphAdapter.Adapter(graphStore);
         runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
@@ -789,5 +819,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphDebugEnabled, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
