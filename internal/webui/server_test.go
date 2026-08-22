@@ -2026,6 +2026,16 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
+	for _, canonicalRenderer := range []string{
+		`kind === 'present' && toolAction(tool) === 'media'`,
+		`kind === 'present' && toolAction(tool) === 'file'`,
+		`kind === 'browser_capture' && (toolAction(tool) === 'screenshot'`,
+		`kind === 'chats' && toolAction(tool) === 'send'`,
+	} {
+		if !strings.Contains(fullPage, canonicalRenderer) {
+			t.Fatalf("expected canonical action renderer %q", canonicalRenderer)
+		}
+	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
 		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
 		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args)`) ||

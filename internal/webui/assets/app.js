@@ -862,6 +862,13 @@
     function chatSendMessage(args) {
       return String(firstValue(args || {}, ['message', 'Message']) || '').trim();
     }
+    function toolAction(tool) {
+      return String(firstValue(toolArgs(tool), ['action', 'Action']) || '').trim();
+    }
+    function actionLabel(action) {
+      const value = String(action || '').replaceAll('_', ' ').trim();
+      return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+    }
     function compactCommandLabel(command) {
       const text = String(command || '').replace(/\s+/g, ' ').trim();
       if (!text) return '';
@@ -887,6 +894,7 @@
           const label = comment || compactCommandLabel(command);
           return label ? 'Start exec ' + label : 'Start exec';
         }
+        case 'exec_session': return actionLabel(toolAction(tool)) + ' exec session';
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
         case 'exec_write_stdin': return 'Write exec stdin';
@@ -900,6 +908,26 @@
 		case 'show_media': return path ? 'Show media ' + path : 'Show media';
 		case 'show_image': return path ? 'Show image ' + path : 'Show image';
 		case 'offer_file': return path ? 'Offer file ' + path : 'Offer file';
+        case 'present': {
+          const action = toolAction(tool) || 'content';
+          if (action === 'media') return path ? 'Show media ' + path : 'Show media';
+          if (action === 'file') return path ? 'Offer file ' + path : 'Offer file';
+          return firstValue(args, ['title']) ? 'Present ' + firstValue(args, ['title']) : 'Present content';
+        }
+        case 'chats': {
+          const action = toolAction(tool);
+          if (action === 'send') return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
+          return actionLabel(action) + ' chat';
+        }
+        case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
+        case 'tasks': return actionLabel(toolAction(tool)) + ' task';
+        case 'browser_tabs':
+        case 'browser_navigation':
+        case 'browser_page':
+        case 'browser_interact':
+        case 'browser_capture':
+        case 'browser_network':
+        case 'browser_downloads': return actionLabel(toolAction(tool)) + ' ' + kind.replaceAll('_', ' ');
         case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
         default: return kind || 'Tool';
       }
@@ -909,6 +937,7 @@
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
+      if (String((tool && tool.tool) || '') === 'chats' && toolAction(tool) === 'send') return chatSendMessage(args);
       if (String((tool && tool.tool) || '') === 'exec_command' && args.comment) return '';
       const values = [];
       if (args.command) values.push(compactCommandLabel(args.command));
@@ -1007,12 +1036,16 @@
         return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
       }
       if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
+      if (kind === 'chats' && toolAction(tool) === 'send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
 	  if (kind === 'show_media' || kind === 'show_image') return renderShowMediaBlock(data, toolResultText(tool));
 	  if (kind === 'offer_file') return renderOfferFileBlock(data, toolResultText(tool));
+	  if (kind === 'present' && toolAction(tool) === 'media') return renderShowMediaBlock(data, toolResultText(tool));
+	  if (kind === 'present' && toolAction(tool) === 'file') return renderOfferFileBlock(data, toolResultText(tool));
 	  if (kind === 'browser_screenshot' || kind === 'browser_image') return renderImagePreviewBlock('Browser image', data, toolResultText(tool), false);
+	  if (kind === 'browser_capture' && (toolAction(tool) === 'screenshot' || toolAction(tool) === 'image')) return renderImagePreviewBlock('Browser image', data, toolResultText(tool), false);
 	  if (kind.startsWith('browser_')) return renderCompactBlock(firstValue(data, ['summary', 'Summary']) || kind.replaceAll('_', ' '), firstValue(data, ['text', 'Text']) || toolResultText(tool), 'tool-result-body-mono');
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
     }
@@ -3779,6 +3812,10 @@
 		  if (kind === 'show_media') return 'bi-play-btn';
 		  if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
 		  if (kind === 'offer_file') return 'bi-file-earmark-arrow-down';
+		  if (kind === 'present') return 'bi-display';
+		  if (String(kind || '').startsWith('browser_')) return 'bi-window';
+		  if (kind === 'chats') return 'bi-chat-left-text';
+		  if (kind === 'milestones' || kind === 'tasks') return 'bi-list-check';
           return 'bi-wrench-adjustable';
         },
         toolTitle(tool) { return toolTitleText(tool); },
