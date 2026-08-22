@@ -6,6 +6,8 @@ architectural domain and storage decisions are recorded in
 [ADR 0002](decisions/0002-knowledge-storage-boundary.md).
 Backup, restore, and maintenance procedures live in
 [Knowledge operations](knowledge-operations.md).
+For day-to-day search, editing, provenance, lifecycle, packages, privacy, and recovery,
+start with [Using Koder Knowledge](knowledge-user-guide.md).
 
 This document defines the vocabulary used by domain records, tools, APIs, packages, and
 user interfaces. Wire values use lowercase `snake_case` and must not be given different
