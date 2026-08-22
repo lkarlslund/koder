@@ -55,6 +55,25 @@ func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
 		t.Fatalf("search status=%d response=%#v", response.StatusCode, search)
 	}
 
+	neighborRequest := knowledgeapi.NeighborRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)}, Limit: 1,
+	}
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.NeighborPath, token, neighborRequest)
+	var firstNeighbors knowledgeapi.NeighborResponse
+	decodeKnowledgeResponse(t, response, &firstNeighbors)
+	if response.StatusCode != http.StatusOK || len(firstNeighbors.Neighbors) != 1 || firstNeighbors.Page.NextCursor == "" ||
+		firstNeighbors.Neighbors[0].Object.Entry == nil {
+		t.Fatalf("first neighbors status=%d response=%#v", response.StatusCode, firstNeighbors)
+	}
+	neighborRequest.Cursor = firstNeighbors.Page.NextCursor
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.NeighborPath, token, neighborRequest)
+	var secondNeighbors knowledgeapi.NeighborResponse
+	decodeKnowledgeResponse(t, response, &secondNeighbors)
+	if response.StatusCode != http.StatusOK || len(secondNeighbors.Neighbors) != 1 || secondNeighbors.Page.NextCursor != "" ||
+		secondNeighbors.Neighbors[0].Link.ID == firstNeighbors.Neighbors[0].Link.ID {
+		t.Fatalf("second neighbors status=%d response=%#v", response.StatusCode, secondNeighbors)
+	}
+
 	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.GraphSnapshotPath, token, knowledgeapi.GraphSnapshotRequest{
 		Root:     knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)},
 		MaxDepth: 1, MaxNodes: 2, MaxEdges: 1, TimeLimitMS: 1000,
@@ -78,6 +97,13 @@ func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
 	decodeKnowledgeResponse(t, response, &invalid)
 	if response.StatusCode != http.StatusBadRequest || invalid.Error == nil || invalid.Error.Code != knowledgeService.ErrorCodeInvalid {
 		t.Fatalf("oversized graph status=%d response=%#v", response.StatusCode, invalid)
+	}
+	neighborRequest.Limit = 101
+	neighborRequest.Cursor = ""
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.NeighborPath, token, neighborRequest)
+	decodeKnowledgeResponse(t, response, &invalid)
+	if response.StatusCode != http.StatusBadRequest || invalid.Error == nil || invalid.Error.Code != knowledgeService.ErrorCodeInvalid {
+		t.Fatalf("oversized neighbors status=%d response=%#v", response.StatusCode, invalid)
 	}
 }
 

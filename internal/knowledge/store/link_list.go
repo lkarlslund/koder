@@ -94,13 +94,16 @@ func NormalizeAdjacentLinkListRequest(request AdjacentLinkListRequest) (Adjacent
 	switch request.Filter.Direction {
 	case LinkDirectionOutgoing, LinkDirectionIncoming, LinkDirectionBoth:
 	default:
-		return AdjacentLinkListRequest{}, fmt.Errorf("invalid link direction %q", request.Filter.Direction)
+		return AdjacentLinkListRequest{}, fmt.Errorf("%w: invalid link direction %q", knowledge.ErrInvalidRecord, request.Filter.Direction)
+	}
+	if request.Limit < 0 {
+		return AdjacentLinkListRequest{}, fmt.Errorf("%w: adjacent link page limit cannot be negative", knowledge.ErrInvalidRecord)
 	}
 	if request.Limit <= 0 {
 		request.Limit = 25
 	}
 	if request.Limit > 100 {
-		return AdjacentLinkListRequest{}, fmt.Errorf("adjacent link page limit must not exceed 100")
+		return AdjacentLinkListRequest{}, fmt.Errorf("%w: adjacent link page limit must not exceed 100", knowledge.ErrInvalidRecord)
 	}
 	request.Filter.Kinds = slices.Clone(request.Filter.Kinds)
 	slices.Sort(request.Filter.Kinds)
@@ -110,12 +113,12 @@ func NormalizeAdjacentLinkListRequest(request AdjacentLinkListRequest) (Adjacent
 	request.Filter.States = slices.Compact(request.Filter.States)
 	for _, kind := range request.Filter.Kinds {
 		if kind == knowledge.LinkKindUnspecified || !kind.IsALinkKind() {
-			return AdjacentLinkListRequest{}, fmt.Errorf("invalid link kind filter")
+			return AdjacentLinkListRequest{}, fmt.Errorf("%w: invalid link kind filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	for _, state := range request.Filter.States {
 		if state == knowledge.LinkStateUnspecified || !state.IsALinkState() {
-			return AdjacentLinkListRequest{}, fmt.Errorf("invalid link state filter")
+			return AdjacentLinkListRequest{}, fmt.Errorf("%w: invalid link state filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	return request, nil

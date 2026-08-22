@@ -22,6 +22,7 @@ const (
 	LinkCollectionPath  = RoutePrefix + "/links"
 	SearchPath          = RoutePrefix + "/search"
 	GraphSnapshotPath   = RoutePrefix + "/graph/snapshot"
+	NeighborPath        = RoutePrefix + "/neighbors"
 	ExplorerURL         = "/knowledge"
 )
 

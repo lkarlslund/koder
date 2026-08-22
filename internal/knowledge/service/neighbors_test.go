@@ -70,9 +70,20 @@ func TestNeighborsEnforcesTraversalPolicyOnRootAndResult(t *testing.T) {
 	secondCandidate.Title = "Second"
 	second, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: secondCandidate})
 	root := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(first.Chunk.ID)}
+	firstVisibleCandidate := testChunkCandidate()
+	firstVisibleCandidate.Title = "First visible"
+	firstVisible, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: firstVisibleCandidate})
+	firstVisibleLink, _ := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: root, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(firstVisible.Chunk.ID)},
+		Kind: knowledge.LinkKindRelatedTo,
+	}})
 	_, _ = service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
 		Source: root, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(second.Chunk.ID)},
 		Kind: knowledge.LinkKindRelatedTo,
+	}})
+	_, _ = service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: root, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(second.Chunk.ID)},
+		Kind: knowledge.LinkKindRequires,
 	}})
 	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
 		if action == ChunkPolicyTraverse && chunk.ID == second.Chunk.ID {
@@ -80,7 +91,44 @@ func TestNeighborsEnforcesTraversalPolicyOnRootAndResult(t *testing.T) {
 		}
 		return nil
 	})
+	page, err := service.Neighbors(ctx, NeighborRequest{Endpoint: root, Limit: 1})
+	if err != nil || len(page.Neighbors) != 1 || page.Neighbors[0].Link.ID != firstVisibleLink.Link.ID || page.NextCursor != "" {
+		t.Fatalf("Neighbors(policy-filtered first) = %#v, %v", page, err)
+	}
+	service.chunkPolicy = denyChunkAction(ChunkPolicyTraverse)
 	if _, err := service.Neighbors(ctx, NeighborRequest{Endpoint: root}); !errors.Is(err, ErrChunkPolicyDenied) {
-		t.Fatalf("Neighbors(denied result) error = %v, want ErrChunkPolicyDenied", err)
+		t.Fatalf("Neighbors(denied root) error = %v, want ErrChunkPolicyDenied", err)
+	}
+}
+
+func TestNeighborsSkipsDeniedLinksBeforeVisiblePageResults(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	rootChunk, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	hiddenCandidate := testChunkCandidate()
+	hiddenCandidate.Title = "Hidden"
+	hidden, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: hiddenCandidate})
+	visibleCandidate := testChunkCandidate()
+	visibleCandidate.Title = "Visible"
+	visible, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: visibleCandidate})
+	root := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(rootChunk.Chunk.ID)}
+	_, _ = service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: root, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(hidden.Chunk.ID)}, Kind: knowledge.LinkKindRelatedTo,
+	}})
+	visibleLink, _ := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: root, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(visible.Chunk.ID)}, Kind: knowledge.LinkKindRelatedTo,
+	}})
+	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+		if action == ChunkPolicyTraverse && chunk.ID == hidden.Chunk.ID {
+			return errors.New("denied")
+		}
+		return nil
+	})
+	page, err := service.Neighbors(ctx, NeighborRequest{Endpoint: root, Limit: 1})
+	if err != nil || len(page.Neighbors) != 1 || page.Neighbors[0].Link.ID != visibleLink.Link.ID || page.NextCursor != "" {
+		t.Fatalf("Neighbors(policy-filtered) = %#v, %v", page, err)
 	}
 }
