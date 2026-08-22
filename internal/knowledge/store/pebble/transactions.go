@@ -52,7 +52,7 @@ func (s *Store) View(ctx context.Context, fn func(knowledgeStore.ReadTx) error) 
 	}
 	snapshot := s.db.NewSnapshot()
 	defer func() { _ = snapshot.Close() }()
-	tx := &transaction{reader: snapshot, active: true}
+	tx := &transaction{reader: snapshot, active: true, indexGeneration: s.meta.IndexGeneration}
 	err := func() error {
 		defer func() { tx.active = false }()
 		return fn(tx)
@@ -200,6 +200,59 @@ func (tx *transaction) Evidence(ctx context.Context, id knowledge.EvidenceID) (k
 		return knowledge.Evidence{}, err
 	}
 	return readRecord[knowledge.Evidence](tx.reader, evidenceKey(string(id)), "evidence", string(id))
+}
+
+func (tx *transaction) EvidenceBySource(ctx context.Context, sourceID, contentHash string) (knowledge.Evidence, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledge.Evidence{}, err
+	}
+	sourceID, contentHash = knowledge.NormalizeEvidenceIdentity(sourceID, contentHash)
+	prefix := indexKey(tx.indexGeneration, evidenceSourceIndex, encodeIndexTuple(sourceID, contentHash))
+	lower, upper := prefixBounds(prefix)
+	iter, err := tx.reader.NewIter(&cockroachpebble.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return knowledge.Evidence{}, fmt.Errorf("find evidence by source/hash: %w", err)
+	}
+	if iter.First() {
+		evidenceID := knowledge.EvidenceID(string(iter.Value()))
+		if iter.Next() {
+			_ = iter.Close()
+			return knowledge.Evidence{}, fmt.Errorf("%w: duplicate evidence source/hash index", knowledgeStore.ErrIncompatible)
+		}
+		if err := iter.Error(); err != nil {
+			_ = iter.Close()
+			return knowledge.Evidence{}, fmt.Errorf("find evidence by source/hash: %w", err)
+		}
+		_ = iter.Close()
+		return tx.Evidence(ctx, evidenceID)
+	}
+	if err := iter.Error(); err != nil {
+		_ = iter.Close()
+		return knowledge.Evidence{}, fmt.Errorf("find evidence by source/hash: %w", err)
+	}
+	_ = iter.Close()
+	var found knowledge.Evidence
+	foundMatch := false
+	if _, err := scanCanonical(ctx, tx.reader, func(record knowledgeStore.CanonicalRecord) error {
+		if record.Kind != knowledgeStore.RecordKindEvidence {
+			return nil
+		}
+		candidateSource, candidateHash := knowledge.NormalizeEvidenceIdentity(record.Evidence.Source.ID, record.Evidence.Source.ContentHash)
+		if candidateSource == sourceID && candidateHash == contentHash {
+			if foundMatch {
+				return fmt.Errorf("%w: duplicate canonical evidence source/hash", knowledgeStore.ErrIncompatible)
+			}
+			found = *record.Evidence
+			foundMatch = true
+		}
+		return nil
+	}); err != nil {
+		return knowledge.Evidence{}, err
+	}
+	if foundMatch {
+		return found, nil
+	}
+	return knowledge.Evidence{}, fmt.Errorf("%w: evidence source %q hash %q", knowledgeStore.ErrNotFound, sourceID, contentHash)
 }
 
 func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expectedRevision uint64) error {
@@ -480,12 +533,20 @@ func (tx *transaction) PutEvidence(ctx context.Context, value knowledge.Evidence
 	case !errors.Is(err, knowledgeStore.ErrNotFound):
 		return err
 	}
+	if existing, err := tx.EvidenceBySource(ctx, value.Source.ID, value.Source.ContentHash); err == nil {
+		return fmt.Errorf("%w: evidence source/hash already exists as %s", knowledgeStore.ErrConflict, existing.ID)
+	} else if !errors.Is(err, knowledgeStore.ErrNotFound) {
+		return err
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode evidence %s: %w", value.ID, err)
 	}
 	if err := tx.batch.Set(evidenceKey(string(value.ID)), encoded, nil); err != nil {
 		return fmt.Errorf("put evidence %s: %w", value.ID, err)
+	}
+	if err := tx.replaceEvidenceIndexes(ctx, nil, &value); err != nil {
+		return err
 	}
 	tx.derivedDirty = true
 	return nil
@@ -495,13 +556,47 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 	if err := tx.check(ctx, true); err != nil {
 		return err
 	}
-	if _, err := tx.Evidence(ctx, id); err != nil {
+	current, err := tx.Evidence(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := tx.replaceEvidenceIndexes(ctx, &current, nil); err != nil {
 		return err
 	}
 	if err := tx.batch.Delete(evidenceKey(string(id)), nil); err != nil {
 		return fmt.Errorf("delete evidence %s: %w", id, err)
 	}
 	tx.derivedDirty = true
+	return nil
+}
+
+func (tx *transaction) replaceEvidenceIndexes(ctx context.Context, old, next *knowledge.Evidence) error {
+	if old != nil {
+		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *old)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, item := range values {
+				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, item.Suffix), nil); err != nil {
+					return fmt.Errorf("delete knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	if next != nil {
+		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *next)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, item := range values {
+				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, item.Suffix), item.Value, nil); err != nil {
+					return fmt.Errorf("put knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
 	return nil
 }
 

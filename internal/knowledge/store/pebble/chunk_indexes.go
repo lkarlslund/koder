@@ -64,7 +64,8 @@ func defaultIndexDefinitions() []indexDefinition {
 			return []string{indexTime(chunk.LastUsedAt)}
 		}),
 	}
-	return append(definitions, defaultEntryIndexDefinitions()...)
+	definitions = append(definitions, defaultEntryIndexDefinitions()...)
+	return append(definitions, defaultEvidenceIndexDefinitions()...)
 }
 
 func chunkSingleIndex(name string, components func(knowledge.Chunk) []string) indexDefinition {

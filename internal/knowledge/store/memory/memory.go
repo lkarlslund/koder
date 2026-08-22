@@ -4,6 +4,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -289,6 +290,20 @@ func (tx *transaction) Evidence(ctx context.Context, id knowledge.EvidenceID) (k
 	return value, nil
 }
 
+func (tx *transaction) EvidenceBySource(ctx context.Context, sourceID, contentHash string) (knowledge.Evidence, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledge.Evidence{}, err
+	}
+	sourceID, contentHash = knowledge.NormalizeEvidenceIdentity(sourceID, contentHash)
+	for _, value := range tx.data.evidence {
+		candidateSource, candidateHash := knowledge.NormalizeEvidenceIdentity(value.Source.ID, value.Source.ContentHash)
+		if candidateSource == sourceID && candidateHash == contentHash {
+			return value, nil
+		}
+	}
+	return knowledge.Evidence{}, fmt.Errorf("%w: evidence source %q hash %q", knowledgeStore.ErrNotFound, sourceID, contentHash)
+}
+
 func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expectedRevision uint64) error {
 	if err := tx.check(ctx, true); err != nil {
 		return err
@@ -454,6 +469,11 @@ func (tx *transaction) PutEvidence(ctx context.Context, value knowledge.Evidence
 	}
 	if _, exists := tx.data.evidence[value.ID]; exists {
 		return fmt.Errorf("%w: evidence %s already exists", knowledgeStore.ErrConflict, value.ID)
+	}
+	if existing, err := tx.EvidenceBySource(ctx, value.Source.ID, value.Source.ContentHash); err == nil {
+		return fmt.Errorf("%w: evidence source/hash already exists as %s", knowledgeStore.ErrConflict, existing.ID)
+	} else if !errors.Is(err, knowledgeStore.ErrNotFound) {
+		return err
 	}
 	tx.data.evidence[value.ID] = value
 	tx.derivedDirty = true

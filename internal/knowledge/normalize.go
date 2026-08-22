@@ -24,6 +24,13 @@ func NormalizeComparisonKey(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
+// NormalizeEvidenceIdentity canonicalizes the stable source/hash pair used to deduplicate
+// immutable evidence snapshots. Source IDs retain case because some source namespaces are
+// case-sensitive; conventional content hashes are case-insensitive.
+func NormalizeEvidenceIdentity(sourceID, contentHash string) (string, string) {
+	return strings.TrimSpace(sourceID), strings.ToLower(strings.TrimSpace(contentHash))
+}
+
 // NormalizeAliases canonicalizes aliases, removes empty/title-equivalent values, and
 // deduplicates them case-insensitively while preserving first-seen display order.
 func NormalizeAliases(title string, values []string) []string {
