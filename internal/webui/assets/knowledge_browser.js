@@ -167,6 +167,7 @@
       this.client = client;
       this.graphAdapter = options.graphAdapter || null;
       this.graphRenderer = options.graphRenderer || null;
+      this.graphViewport = options.graphViewport || null;
       this.chunks = [];
       this.matches = [];
       this.page = null;
@@ -183,6 +184,8 @@
       this.searchClear = shell.querySelector('[data-knowledge-search-clear]');
       this.resultList = shell.querySelector('[data-knowledge-results]');
       this.loadMoreButton = shell.querySelector('[data-knowledge-load-more]');
+      this.graphFitButton = shell.querySelector('[data-knowledge-graph-fit]');
+      this.graphCenterButton = shell.querySelector('[data-knowledge-graph-center]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -215,6 +218,11 @@
       });
       for (const input of Object.values(this.filters)) input.addEventListener('change', () => this.applyControlState({replace: false}));
       if (this.loadMoreButton) this.loadMoreButton.addEventListener('click', () => this.loadMore());
+      if (this.graphFitButton) this.graphFitButton.addEventListener('click', () => this.graphViewport && this.graphViewport.fit());
+      if (this.graphCenterButton) this.graphCenterButton.addEventListener('click', () => {
+        const key = this.urlState.objectKind && this.urlState.id ? `${this.urlState.objectKind}:${this.urlState.id}` : '';
+        if (this.graphViewport && key) this.graphViewport.centerNode(key);
+      });
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -222,6 +230,12 @@
         this.refresh();
       };
       globalThis.addEventListener('popstate', this.onPopState);
+      this.onGraphPane = event => {
+        if (event && event.detail && event.detail.pane === 'graph' && this.graphViewport) {
+          setTimeout(() => this.graphViewport && this.graphViewport.fit({animate: false}), 0);
+        }
+      };
+      this.shell.addEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphAdapter) {
         this.graphUnsubscribe = this.graphAdapter.subscribe(event => {
           if (event.type !== 'refetch' || this.graphRefetchTimer) return;
@@ -547,6 +561,7 @@
         const truncated = !!(response && response.page && response.page.truncated);
         const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
         this.setGraphState(truncated ? 'truncated' : 'ready', detail);
+        if (this.graphViewport) this.graphViewport.fit({animate: false});
       } catch (error) {
         if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
         const requestID = String(error && error.requestID || '');
@@ -654,7 +669,9 @@
       clearTimeout(this.searchTimer);
       clearTimeout(this.graphRefetchTimer);
       globalThis.removeEventListener('popstate', this.onPopState);
+      this.shell.removeEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphUnsubscribe) this.graphUnsubscribe();
+      if (this.graphViewport) this.graphViewport.destroy();
       if (this.graphRenderer) this.graphRenderer.destroy();
       if (this.graphAdapter) this.graphAdapter.destroy();
       this.client.cancelAll();
@@ -678,6 +695,7 @@
         tab.tabIndex = selected ? 0 : -1;
         if (selected && options && options.focus) tab.focus();
       }
+      shell.dispatchEvent(new CustomEvent('koder:knowledge-pane', {detail: {pane}}));
     }
 
     for (const tab of tabs) {
@@ -708,13 +726,24 @@
       const runtime = {};
       const canvas = shell.querySelector('[data-knowledge-graph-canvas]');
       if (canvas && globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter &&
-          globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.Sigma) {
+          globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
         const graphStore = new globalThis.KoderKnowledgeGraph.Store();
         runtime.graphAdapter = new globalThis.KoderKnowledgeGraphAdapter.Adapter(graphStore);
         runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
           store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
           legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
           SigmaAPI: globalThis.Sigma,
+        });
+        runtime.graphViewport = new globalThis.KoderKnowledgeGraphViewport.Viewport({
+          renderer: runtime.graphRenderer.sigma, container: canvas,
+          getInsets: () => {
+            const style = globalThis.getComputedStyle(canvas);
+            const read = name => Number.parseFloat(style.getPropertyValue(name)) || 0;
+            return {
+              top: read('--knowledge-viewport-inset-top'), right: read('--knowledge-viewport-inset-right'),
+              bottom: read('--knowledge-viewport-inset-bottom'), left: read('--knowledge-viewport-inset-left'),
+            };
+          },
         });
       }
       const app = new BrowserApp(shell, client, runtime);

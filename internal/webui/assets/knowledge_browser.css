@@ -435,6 +435,9 @@ body {
   font-size: .76rem;
 }
 
+.knowledge-graph-toolbar-actions { display: flex; align-items: center; gap: 0.42rem; }
+.knowledge-graph-toolbar-actions .knowledge-icon-button { width: 2rem; height: 2rem; }
+
 .knowledge-stage-status .spinner-grow {
   color: var(--knowledge-cyan);
 }

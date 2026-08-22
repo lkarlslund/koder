@@ -24,6 +24,7 @@
   <script defer src="/assets/knowledge_graph.js"></script>
   <script defer src="/assets/knowledge_graph_rendering.js"></script>
   <script defer src="/assets/knowledge_graph_renderer.js"></script>
+  <script defer src="/assets/knowledge_graph_viewport.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
@@ -93,7 +94,11 @@
             <span class="knowledge-eyebrow">Explore</span>
             <h1 id="knowledge-graph-title">Graph</h1>
           </div>
-          <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
+          <div class="knowledge-graph-toolbar-actions">
+            <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
+            <button type="button" class="knowledge-icon-button" data-knowledge-graph-center title="Center selected node"><i class="bi bi-crosshair" aria-hidden="true"></i><span class="visually-hidden">Center selected node</span></button>
+            <button type="button" class="knowledge-icon-button" data-knowledge-graph-fit title="Fit graph to view"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i><span class="visually-hidden">Fit graph to view</span></button>
+          </div>
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
           <div class="knowledge-graph-canvas" data-knowledge-graph-canvas aria-hidden="true"></div>
