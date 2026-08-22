@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	cockroachpebble "github.com/cockroachdb/pebble"
 
+	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -125,6 +129,110 @@ func TestFailedIndexRebuildDoesNotActivateTargetGeneration(t *testing.T) {
 			_ = closer.Close()
 		}
 		t.Fatalf("failed target data survived retry: %v", err)
+	}
+}
+
+func TestRebuildIndexesKeepsReadsAndWritesOnlineAndReplaysMutations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openSeededMaintenanceStore(t, ctx)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	s.indexes = append(s.indexes, indexDefinition{
+		name: "blocking-online-test",
+		build: func(ctx context.Context, record knowledgeStore.CanonicalRecord) ([]indexEntry, error) {
+			if record.Kind != knowledgeStore.RecordKindChunk {
+				return nil, nil
+			}
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return []indexEntry{{Suffix: []byte(record.ID()), Value: []byte(record.ID())}}, nil
+		},
+	})
+
+	rebuildDone := make(chan error, 1)
+	go func() { rebuildDone <- s.RebuildIndexes(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("index rebuild did not reach blocking builder")
+	}
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := s.ListEntries(ctx, knowledgeStore.EntryListRequest{})
+		readDone <- err
+	}()
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("ListEntries() during rebuild error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("read blocked while inactive index generation was building")
+	}
+
+	updated := txEntry()
+	updated.Title = "Online journal record"
+	updated.Body = "onlinejournalterm"
+	updated.Revision = txRevision(2)
+	updated.UpdatedAt = txTime.Add(time.Second)
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+			return tx.PutEntry(ctx, updated, 1)
+		})
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("Update() during rebuild error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("write blocked while inactive index generation was building")
+	}
+
+	unblock()
+	if err := <-rebuildDone; err != nil {
+		t.Fatalf("RebuildIndexes() error = %v", err)
+	}
+	health, err := s.Health(ctx)
+	if err != nil || health.IndexGeneration != initialIndexGeneration+1 {
+		t.Fatalf("Health() after rebuild = %#v, %v", health, err)
+	}
+	assertLexicalEntryIDs(t, s, []string{"onlinejournalterm"}, txEntryID)
+	assertLexicalEntryIDs(t, s, []string{"entry"})
+	if _, closer, err := s.db.Get(indexKey(initialIndexGeneration, entryLexicalIndex, encodeIndexTuple("entry", string(txEntryID)))); !errors.Is(err, cockroachpebble.ErrNotFound) {
+		if err == nil {
+			_ = closer.Close()
+		}
+		t.Fatalf("retired lexical generation lookup error = %v, want ErrNotFound", err)
+	}
+}
+
+func assertLexicalEntryIDs(t *testing.T, s *Store, terms []string, want ...knowledge.EntryID) {
+	t.Helper()
+	page, err := s.LookupLexicalPostings(context.Background(), knowledgeStore.LexicalPostingRequest{Terms: terms})
+	if err != nil {
+		t.Fatalf("LookupLexicalPostings(%v) error = %v", terms, err)
+	}
+	got := make([]knowledge.EntryID, 0, len(page.Postings))
+	for _, posting := range page.Postings {
+		got = append(got, posting.EntryID)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("LookupLexicalPostings(%v) entries = %v, want %v", terms, got, want)
 	}
 }
 

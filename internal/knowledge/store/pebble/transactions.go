@@ -29,6 +29,12 @@ type transaction struct {
 	indexGeneration uint64
 	indexes         []indexDefinition
 	derivedDirty    bool
+	indexMutations  []indexMutation
+}
+
+type indexMutation struct {
+	delete map[string][]indexEntry
+	put    map[string][]indexEntry
 }
 
 var _ knowledgeStore.Store = (*Store)(nil)
@@ -108,7 +114,21 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	if err := batch.Commit(cockroachpebble.Sync); err != nil {
 		return fmt.Errorf("commit knowledge transaction: %w", err)
 	}
+	s.appendRebuildMutations(tx.indexMutations)
 	return nil
+}
+
+const maxRebuildJournalMutations = 100000
+
+func (s *Store) appendRebuildMutations(mutations []indexMutation) {
+	if s.rebuildTarget == 0 || len(mutations) == 0 || s.rebuildJournalOverflow {
+		return
+	}
+	if len(s.rebuildJournal) > maxRebuildJournalMutations-len(mutations) {
+		s.rebuildJournalOverflow = true
+		return
+	}
+	s.rebuildJournal = append(s.rebuildJournal, mutations...)
 }
 
 func (tx *transaction) check(ctx context.Context, write bool) error {
@@ -415,6 +435,7 @@ func optionalChunk(chunk knowledge.Chunk, exists bool) *knowledge.Chunk {
 }
 
 func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *knowledge.Chunk) error {
+	mutation := indexMutation{}
 	if old != nil {
 		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *old)
 		if err != nil {
@@ -427,6 +448,7 @@ func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *knowl
 				}
 			}
 		}
+		mutation.delete = entries
 	}
 	if next != nil {
 		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *next)
@@ -440,7 +462,9 @@ func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *knowl
 				}
 			}
 		}
+		mutation.put = entries
 	}
+	tx.indexMutations = append(tx.indexMutations, mutation)
 	return nil
 }
 
@@ -498,6 +522,7 @@ func optionalEntry(entry knowledge.Entry, exists bool) *knowledge.Entry {
 }
 
 func (tx *transaction) replaceEntryIndexes(ctx context.Context, old, next *knowledge.Entry) error {
+	mutation := indexMutation{}
 	if old != nil {
 		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *old)
 		if err != nil {
@@ -510,6 +535,7 @@ func (tx *transaction) replaceEntryIndexes(ctx context.Context, old, next *knowl
 				}
 			}
 		}
+		mutation.delete = entries
 	}
 	if next != nil {
 		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *next)
@@ -523,7 +549,9 @@ func (tx *transaction) replaceEntryIndexes(ctx context.Context, old, next *knowl
 				}
 			}
 		}
+		mutation.put = entries
 	}
+	tx.indexMutations = append(tx.indexMutations, mutation)
 	return nil
 }
 
@@ -579,6 +607,7 @@ func optionalLink(value knowledge.Link, exists bool) *knowledge.Link {
 }
 
 func (tx *transaction) updateLinkIndexes(ctx context.Context, old, next *knowledge.Link) error {
+	mutation := indexMutation{}
 	if old != nil {
 		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *old)
 		if err != nil {
@@ -591,6 +620,7 @@ func (tx *transaction) updateLinkIndexes(ctx context.Context, old, next *knowled
 				}
 			}
 		}
+		mutation.delete = entries
 	}
 	if next != nil {
 		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *next)
@@ -604,7 +634,9 @@ func (tx *transaction) updateLinkIndexes(ctx context.Context, old, next *knowled
 				}
 			}
 		}
+		mutation.put = entries
 	}
+	tx.indexMutations = append(tx.indexMutations, mutation)
 	return nil
 }
 
@@ -660,6 +692,7 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 }
 
 func (tx *transaction) replaceEvidenceIndexes(ctx context.Context, old, next *knowledge.Evidence) error {
+	mutation := indexMutation{}
 	if old != nil {
 		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *old)
 		if err != nil {
@@ -672,6 +705,7 @@ func (tx *transaction) replaceEvidenceIndexes(ctx context.Context, old, next *kn
 				}
 			}
 		}
+		mutation.delete = entries
 	}
 	if next != nil {
 		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *next)
@@ -685,7 +719,9 @@ func (tx *transaction) replaceEvidenceIndexes(ctx context.Context, old, next *kn
 				}
 			}
 		}
+		mutation.put = entries
 	}
+	tx.indexMutations = append(tx.indexMutations, mutation)
 	return nil
 }
 

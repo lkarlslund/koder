@@ -20,15 +20,18 @@ const directoryName = "knowledge-pebble-v1"
 
 // Store owns the independent Pebble database used by Koder Knowledge.
 type Store struct {
-	mu            sync.RWMutex
-	db            *cockroachpebble.DB
-	dir           string
-	meta          metadata
-	closed        bool
-	indexes       []indexDefinition
-	rebuildMu     sync.Mutex
-	rebuildStatus knowledgeStore.IndexRebuildStatus
-	statusMu      sync.RWMutex
+	mu                     sync.RWMutex
+	db                     *cockroachpebble.DB
+	dir                    string
+	meta                   metadata
+	closed                 bool
+	indexes                []indexDefinition
+	rebuildMu              sync.Mutex
+	rebuildStatus          knowledgeStore.IndexRebuildStatus
+	statusMu               sync.RWMutex
+	rebuildTarget          uint64
+	rebuildJournal         []indexMutation
+	rebuildJournalOverflow bool
 }
 
 // Open creates or opens the Knowledge database below stateDir. It never opens or shares
@@ -79,6 +82,8 @@ func (s *Store) Health(ctx context.Context) (knowledgeStore.Health, error) {
 
 // Close releases the Knowledge database without affecting Koder's main store.
 func (s *Store) Close() error {
+	s.rebuildMu.Lock()
+	defer s.rebuildMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
