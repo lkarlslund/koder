@@ -985,6 +985,25 @@ body {
 .knowledge-relation-preview p { margin: 0; color: var(--bs-secondary-color); font-size: 0.69rem; line-height: 1.45; }
 .knowledge-relation-preview.is-invalid { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
 .knowledge-relation-preview.is-invalid > span { color: var(--bs-danger-text-emphasis); }
+.knowledge-delete-body { display: grid; gap: 0.75rem; padding: 1rem; overflow: auto; }
+.knowledge-delete-body p { margin: 0; color: var(--bs-secondary-color); font-size: 0.72rem; line-height: 1.5; }
+.knowledge-delete-object { display: flex; align-items: center; gap: 0.7rem; }
+.knowledge-delete-object .knowledge-empty-icon { flex: 0 0 auto; width: 2.7rem; height: 2.7rem; margin: 0; color: var(--bs-danger-text-emphasis); }
+.knowledge-delete-object > div { display: grid; min-width: 0; gap: 0.15rem; }
+.knowledge-delete-object strong { overflow: hidden; font-size: 0.86rem; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-delete-object code { overflow: hidden; color: var(--bs-secondary-color); font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-delete-blockers { padding: 0.72rem; border: 1px solid var(--bs-warning-border-subtle); border-radius: 0.62rem; background: var(--bs-warning-bg-subtle); }
+.knowledge-delete-blockers[hidden] { display: none; }
+.knowledge-delete-blockers > strong { color: var(--bs-warning-text-emphasis); font-size: 0.75rem; }
+.knowledge-delete-blockers > p { margin-top: 0.18rem; }
+.knowledge-delete-blocker-group { display: grid; gap: 0.25rem; margin-top: 0.55rem; }
+.knowledge-delete-blocker-group > span { font-size: 0.68rem; font-weight: 650; }
+.knowledge-delete-blocker-ids { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.knowledge-delete-blocker-ids button,
+.knowledge-delete-blocker-ids code { max-width: 100%; padding: 0.14rem 0.32rem; overflow: hidden; border: 1px solid var(--knowledge-pane-border); border-radius: 0.35rem; color: var(--bs-info-text-emphasis); background: var(--bs-body-bg); font-size: 0.58rem; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-delete-retention { padding-top: 0.65rem; border-top: 1px solid var(--knowledge-pane-border); }
+.knowledge-delete-ack { display: flex; align-items: center; gap: 0.5rem; color: var(--bs-body-color); font-size: 0.72rem; font-weight: 600; }
+.knowledge-delete-ack input { width: auto; }
 
 .knowledge-inspector-actions span {
   color: var(--bs-secondary-color);

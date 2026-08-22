@@ -45,6 +45,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`data-knowledge-link-create`, `data-knowledge-link-dialog`, `data-knowledge-link-form`, `data-knowledge-link-unlink`, `data-knowledge-link-preview`,
 		`data-knowledge-chunk-conflict`, `data-knowledge-chunk-conflict-reload`, `data-knowledge-entry-conflict`, `data-knowledge-entry-conflict-rebase`,
 		`data-knowledge-inspector-history`, `data-knowledge-history-list`, `data-knowledge-history-more`,
+		`data-knowledge-delete-dialog`, `data-knowledge-delete-form`, `data-knowledge-delete-blockers`, `data-knowledge-delete-submit`,
 		`data-knowledge-expand-actions`, `data-knowledge-expand-incoming`, `data-knowledge-expand-outgoing`, `data-knowledge-expand-status`,
 		`data-knowledge-send-chat`, `data-knowledge-send-status`,
 		`/assets/vendor/marked/marked.umd.js`, `/assets/vendor/dompurify/purify.min.js`,

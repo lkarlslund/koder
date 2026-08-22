@@ -108,6 +108,15 @@ assert.deepStrictEqual(history[0].changedFields, ['summary', 'title']);
 assert.strictEqual(history[0].evidence[0].source.title, 'User statement');
 assert.strictEqual(history[1].isCreation, true);
 assert.strictEqual(browser.historyTimeline([historyRevisions[1]], 'entry', [], {hasOlder: true})[0].isCreation, false);
+assert.deepStrictEqual(browser.deletionAssessment('chunk', {counts: {entries: 2, links: 1}, dependency_ids: ['chunk-dependency']}).groups, [
+  {label: 'Contained entries', kind: 'entry', ids: [], count: 2},
+  {label: 'Touching relationships', kind: 'link', ids: [], count: 1},
+  {label: 'Chunk dependencies', kind: 'chunk', ids: ['chunk-dependency'], count: 1},
+]);
+assert.deepStrictEqual(browser.deletionAssessment('entry', {}, {entry_blockers: {link_ids: ['link-1'], superseded_entry_ids: ['entry-old']}}).groups, [
+  {label: 'Touching relationships', kind: 'link', ids: ['link-1'], count: 1},
+  {label: 'Superseded entries using this replacement', kind: 'entry', ids: ['entry-old'], count: 1},
+]);
 assert.strictEqual(browser.relationshipShapeError('contradicts', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), '');
 assert.match(browser.relationshipShapeError('contradicts', {kind: 'chunk', id: 'one'}, {kind: 'entry', id: 'two'}), /two entries/);
 assert.match(browser.relationshipShapeError('part_of', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), /point to a chunk/);

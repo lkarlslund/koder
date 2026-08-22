@@ -439,6 +439,35 @@
     });
   }
 
+  function deletionAssessment(objectKind, record, details) {
+    record = record || {};
+    details = details || {};
+    const groups = [];
+    const add = (label, kind, ids, count) => {
+      ids = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))];
+      count = Math.max(ids.length, Number(count) || 0);
+      if (count) groups.push({label, kind, ids, count});
+    };
+    if (objectKind === 'chunk') {
+      const blockers = details.chunk_blockers || {};
+      const counts = blockers.reported_counts || record.counts || {};
+      add('Contained entries', 'entry', blockers.entry_ids, counts.entries);
+      add('Touching relationships', 'link', blockers.link_ids, counts.links);
+      add('Exclusively owned evidence', 'evidence', blockers.evidence_ids, counts.evidence);
+      add('Chunk dependencies', 'chunk', blockers.dependency_ids || record.dependency_ids);
+      add('Chunks depending on this one', 'chunk', blockers.dependent_chunk_ids);
+    } else if (objectKind === 'entry') {
+      const blockers = details.entry_blockers || {};
+      add('Touching relationships', 'link', blockers.link_ids);
+      add('Superseded entries using this replacement', 'entry', blockers.superseded_entry_ids);
+    }
+    const noun = objectKind === 'entry' ? 'entry' : 'chunk';
+    return {
+      blocked: groups.length > 0, groups,
+      explanation: `Deleting this ${noun} permanently removes its current content and all stored revisions. Archive is reversible; deletion is not.`,
+    };
+  }
+
   const relationshipKinds = new Set(['related_to', 'part_of', 'requires', 'alternative_to', 'applies_to', 'supersedes', 'contradicts', 'caused_by', 'supported_by', 'derived_from']);
   const symmetricRelationshipKinds = new Set(['related_to', 'alternative_to', 'contradicts']);
 
@@ -615,6 +644,16 @@
       this.linkUnlinkButton = shell.querySelector('[data-knowledge-link-unlink]');
       this.linkRestoreButton = shell.querySelector('[data-knowledge-link-restore]');
       this.linkMutationStatus = shell.querySelector('[data-knowledge-link-mutation-status]');
+      this.deleteDialog = shell.querySelector('[data-knowledge-delete-dialog]');
+      this.deleteForm = shell.querySelector('[data-knowledge-delete-form]');
+      this.deleteDialogTitle = shell.querySelector('[data-knowledge-delete-dialog-title]');
+      this.deleteObjectTitle = shell.querySelector('[data-knowledge-delete-object-title]');
+      this.deleteObjectRef = shell.querySelector('[data-knowledge-delete-object-ref]');
+      this.deleteExplanation = shell.querySelector('[data-knowledge-delete-explanation]');
+      this.deleteBlockers = shell.querySelector('[data-knowledge-delete-blockers]');
+      this.deleteBlockerList = shell.querySelector('[data-knowledge-delete-blocker-list]');
+      this.deleteError = shell.querySelector('[data-knowledge-delete-error]');
+      this.deleteSubmitButton = shell.querySelector('[data-knowledge-delete-submit]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -723,6 +762,11 @@
       }
       if (this.linkUnlinkButton) this.linkUnlinkButton.addEventListener('click', () => this.changeLinkLifecycle('unlink'));
       if (this.linkRestoreButton) this.linkRestoreButton.addEventListener('click', () => this.changeLinkLifecycle('restore'));
+      for (const button of shell.querySelectorAll('[data-knowledge-delete-cancel]')) button.addEventListener('click', () => this.closeDeleteDialog());
+      if (this.deleteForm) {
+        this.deleteForm.addEventListener('submit', event => { event.preventDefault(); this.confirmKnowledgeDelete(); });
+        this.deleteForm.elements.namedItem('acknowledge').addEventListener('change', () => this.syncDeleteConfirmation());
+      }
       if (this.inspector.historyMore) this.inspector.historyMore.addEventListener('click', () => this.loadOlderHistory());
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
@@ -1855,10 +1899,7 @@
     async deleteInspectedChunk() {
       const chunk = this.inspectedRecord;
       if (!chunk || chunk.state !== 'archived' || !this.inspectedObject || this.inspectedObject.kind !== 'chunk') return false;
-      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete “${chunk.title}”? This erases it and cannot be undone.`)) return false;
-      return this.runChunkMutation(() => this.client.deleteChunk(chunk.id, {
-        expected_revision: chunk.revision.number, confirmed: true, cascade: false,
-      }, {channel: 'chunk-mutation'}), 'delete');
+      return this.openDeleteDialog('chunk', chunk);
     }
 
     async runChunkMutation(operation, action) {
@@ -2041,10 +2082,7 @@
     async deleteInspectedEntry() {
       const entry = this.inspectedRecord;
       if (!entry || entry.state !== 'archived' || !this.inspectedObject || this.inspectedObject.kind !== 'entry') return false;
-      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete “${entry.title}”? This erases it and cannot be undone.`)) return false;
-      return this.runEntryMutation(() => this.client.deleteEntry(entry.id, {
-        expected_revision: entry.revision.number, confirmed: true,
-      }, {channel: 'entry-mutation'}), 'delete', entry.chunk_id);
+      return this.openDeleteDialog('entry', entry);
     }
 
     async runEntryMutation(operation, action, parentChunkID) {
@@ -2065,6 +2103,116 @@
         return false;
       } finally {
         for (const button of buttons) if (button) button.disabled = false;
+      }
+    }
+
+    openDeleteDialog(objectKind, record) {
+      if (!this.deleteDialog || !this.deleteForm || !['chunk', 'entry'].includes(objectKind) || !record || record.state !== 'archived') return false;
+      this.deleteTarget = {objectKind, record};
+      this.deleteAssessment = deletionAssessment(objectKind, record);
+      this.deleteForm.reset();
+      if (this.deleteError) { this.deleteError.hidden = true; this.deleteError.textContent = ''; }
+      if (this.deleteDialogTitle) this.deleteDialogTitle.textContent = `Delete ${objectKind}`;
+      if (this.deleteObjectTitle) this.deleteObjectTitle.textContent = String(record.title || record.id);
+      if (this.deleteObjectRef) this.deleteObjectRef.textContent = `${objectKind}:${record.id}`;
+      if (this.deleteExplanation) this.deleteExplanation.textContent = this.deleteAssessment.explanation;
+      this.renderDeleteBlockers();
+      this.syncDeleteConfirmation();
+      if (typeof this.deleteDialog.showModal === 'function') this.deleteDialog.showModal();
+      else this.deleteDialog.setAttribute('open', '');
+      return true;
+    }
+
+    closeDeleteDialog() {
+      if (this.client && typeof this.client.cancel === 'function') this.client.cancel('delete-mutation');
+      if (this.deleteDialog) {
+        if (typeof this.deleteDialog.close === 'function') this.deleteDialog.close();
+        else this.deleteDialog.removeAttribute('open');
+      }
+      this.deleteTarget = null;
+      this.deleteAssessment = null;
+    }
+
+    renderDeleteBlockers() {
+      const assessment = this.deleteAssessment || {blocked: false, groups: []};
+      if (this.deleteBlockers) this.deleteBlockers.hidden = !assessment.blocked;
+      if (!this.deleteBlockerList) return;
+      this.deleteBlockerList.replaceChildren();
+      for (const group of assessment.groups) {
+        const section = this.shell.ownerDocument.createElement('section');
+        section.className = 'knowledge-delete-blocker-group';
+        const heading = this.shell.ownerDocument.createElement('span');
+        heading.textContent = `${group.label}: ${group.count}`;
+        section.appendChild(heading);
+        if (group.ids.length) {
+          const identifiers = this.shell.ownerDocument.createElement('div');
+          identifiers.className = 'knowledge-delete-blocker-ids';
+          for (const id of group.ids.slice(0, 50)) {
+            const inspectable = ['chunk', 'entry', 'link'].includes(group.kind);
+            const item = this.shell.ownerDocument.createElement(inspectable ? 'button' : 'code');
+            if (inspectable) {
+              item.type = 'button';
+              item.title = `Inspect ${group.kind}`;
+              item.addEventListener('click', () => {
+                this.closeDeleteDialog();
+                this.selectObject(group.kind, id, {title: id});
+              });
+            }
+            item.textContent = id;
+            identifiers.appendChild(item);
+          }
+          if (group.ids.length > 50) {
+            const remainder = this.shell.ownerDocument.createElement('code');
+            remainder.textContent = `+${group.ids.length - 50} more`;
+            identifiers.appendChild(remainder);
+          }
+          section.appendChild(identifiers);
+        }
+        this.deleteBlockerList.appendChild(section);
+      }
+    }
+
+    syncDeleteConfirmation() {
+      if (!this.deleteForm || !this.deleteSubmitButton) return false;
+      const acknowledged = !!this.deleteForm.elements.namedItem('acknowledge').checked;
+      const blocked = !!(this.deleteAssessment && this.deleteAssessment.blocked);
+      this.deleteSubmitButton.disabled = !acknowledged || blocked || !!this.deleteInFlight;
+      return !this.deleteSubmitButton.disabled;
+    }
+
+    async confirmKnowledgeDelete() {
+      const target = this.deleteTarget;
+      if (!target || !this.syncDeleteConfirmation() || !this.client) return false;
+      const {objectKind, record} = target;
+      this.deleteInFlight = true;
+      this.syncDeleteConfirmation();
+      if (this.deleteError) { this.deleteError.hidden = true; this.deleteError.textContent = ''; }
+      try {
+        if (objectKind === 'chunk') {
+          await this.client.deleteChunk(record.id, {expected_revision: record.revision.number, confirmed: true, cascade: false}, {channel: 'delete-mutation'});
+        } else {
+          await this.client.deleteEntry(record.id, {expected_revision: record.revision.number, confirmed: true}, {channel: 'delete-mutation'});
+        }
+        const parentChunkID = objectKind === 'entry' ? String(record.chunk_id || '') : '';
+        this.closeDeleteDialog();
+        this.writeURLState({...this.urlState, objectKind: parentChunkID ? 'chunk' : '', id: parentChunkID}, false);
+        await this.refresh();
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        if (error && error.code === 'dependency') {
+          this.deleteAssessment = deletionAssessment(objectKind, record, error.details);
+          this.renderDeleteBlockers();
+          this.deleteForm.elements.namedItem('acknowledge').checked = false;
+        }
+        const message = error && error.code === 'dependency'
+          ? 'Deletion was refused because dependent knowledge must be handled first.'
+          : String(error && error.message || `Knowledge could not delete this ${objectKind}.`);
+        if (this.deleteError) { this.deleteError.hidden = false; this.deleteError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        this.deleteInFlight = false;
+        this.syncDeleteConfirmation();
       }
     }
 
@@ -2398,5 +2546,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
