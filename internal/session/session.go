@@ -61,6 +61,7 @@ type Session struct {
 	chats       []domain.Chat
 	runtimes    map[id.ID]*chatpkg.Chat
 	unsubs      map[id.ID]func()
+	deleting    map[id.ID]struct{}
 	plan        planning.Plan
 	tasksByKey  map[string][]planning.Task
 	legacyTasks []planning.LegacyTask
@@ -794,6 +795,10 @@ func (s *Session) forwardRuntime(chatID id.ID, updates <-chan chatpkg.Update) {
 			update.Snapshot.Chat.ID = chatID
 		}
 		s.mu.Lock()
+		if _, deleting := s.deleting[chatID]; deleting {
+			s.mu.Unlock()
+			continue
+		}
 		sessionID := s.session.ID
 		chatRecord := update.Snapshot.Chat
 		if chatRecord.ID == "" {
@@ -801,7 +806,13 @@ func (s *Session) forwardRuntime(chatID id.ID, updates <-chan chatpkg.Update) {
 			update.Snapshot.Chat = chatRecord
 		}
 		if chatRecord.ID != "" {
-			if existing, ok := chatByID(s.chats, chatRecord.ID); ok && strings.TrimSpace(chatRecord.Title) == "" {
+			if existing, ok := chatByID(s.chats, chatRecord.ID); !ok {
+				// A buffered runtime update can outlive permanent deletion. A
+				// runtime is only tracked after its chat is inserted, so absence
+				// here is a tombstone rather than a newly discovered chat.
+				s.mu.Unlock()
+				continue
+			} else if strings.TrimSpace(chatRecord.Title) == "" {
 				chatRecord = existing
 				update.Snapshot.Chat = existing
 			}
@@ -978,24 +989,37 @@ func (s *Session) DeleteChat(ctx context.Context, chatID id.ID) error {
 	if chatID == "" {
 		return fmt.Errorf("chat id is required")
 	}
-	s.mu.RLock()
+	s.mu.Lock()
 	target, ok := chatByID(s.chats, chatID)
 	if !ok {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return fmt.Errorf("chat %s not found", chatID)
 	}
 	if !target.Archived {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return fmt.Errorf("archive chat %s before deleting it", chatID)
 	}
 	for _, item := range s.chats {
 		if item.ParentChatID != nil && *item.ParentChatID == chatID {
-			s.mu.RUnlock()
+			s.mu.Unlock()
 			return fmt.Errorf("cannot delete chat %s while it has child chats", chatID)
 		}
 	}
+	if s.deleting == nil {
+		s.deleting = make(map[id.ID]struct{})
+	}
+	if _, deleting := s.deleting[chatID]; deleting {
+		s.mu.Unlock()
+		return fmt.Errorf("chat %s is already being deleted", chatID)
+	}
+	s.deleting[chatID] = struct{}{}
 	runtime := s.runtimes[chatID]
-	s.mu.RUnlock()
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.deleting, chatID)
+		s.mu.Unlock()
+	}()
 	if beforeDelete := s.configSnapshot().BeforeChatDelete; beforeDelete != nil {
 		if err := beforeDelete(ctx, target); err != nil {
 			return err
