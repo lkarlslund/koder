@@ -106,6 +106,9 @@ func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Knowledge.Required = true
+	cfg.Knowledge.TrustedPublishers = []KnowledgeTrustedPublisher{{
+		ID: "publisher:example", Name: "Example", Keys: map[string]string{"example:key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+	}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +116,7 @@ func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Knowledge.Enabled || !loaded.Knowledge.Required {
+	if !loaded.Knowledge.Enabled || !loaded.Knowledge.Required || len(loaded.Knowledge.TrustedPublishers) != 1 || loaded.Knowledge.TrustedPublishers[0].Keys["example:key"] == "" {
 		t.Fatalf("knowledge configuration did not round-trip: %#v", loaded.Knowledge)
 	}
 }

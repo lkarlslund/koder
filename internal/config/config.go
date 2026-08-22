@@ -56,8 +56,17 @@ type Store struct {
 // opening it. Required=true turns an open failure into a process startup failure instead
 // of degrading Koder without Knowledge.
 type Knowledge struct {
-	Enabled  bool `toml:"enabled"`
-	Required bool `toml:"required"`
+	Enabled           bool                        `toml:"enabled"`
+	Required          bool                        `toml:"required"`
+	TrustedPublishers []KnowledgeTrustedPublisher `toml:"trusted_publishers"`
+}
+
+// KnowledgeTrustedPublisher binds one package publisher identity to explicitly
+// configured Ed25519 public keys. It is trust metadata only, not authority.
+type KnowledgeTrustedPublisher struct {
+	ID   string            `toml:"id"`
+	Name string            `toml:"name"`
+	Keys map[string]string `toml:"keys"`
 }
 
 type Thinking struct {

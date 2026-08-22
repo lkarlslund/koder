@@ -350,6 +350,23 @@ boundary, and canonical unpacked example live under
 metadata and signatures describe provenance; they never grant runtime authority or widen
 the importer's visibility and scope policy.
 
+Deployments may label known signing identities with a narrow trusted-publisher registry.
+Keys are Base64-encoded Ed25519 public keys indexed by the key ID used in the package:
+
+```toml
+[[knowledge.trusted_publishers]]
+id = "publisher:example"
+name = "Example publisher"
+
+[knowledge.trusted_publishers.keys]
+"example:2026" = "BASE64_ED25519_PUBLIC_KEY"
+```
+
+The import preview distinguishes a verified registered publisher from unsigned,
+unknown-key, and publisher/key-mismatch packages. “Trusted” means only that the package
+signature matches this local identity binding. It does not bypass classification,
+authorization, conflict review, import limits, or any tool/runtime policy.
+
 ## Origin of personal knowledge
 
 Personal entries additionally record how they arose:

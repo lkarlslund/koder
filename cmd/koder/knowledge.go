@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -54,8 +57,21 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 	subsystem.Enabled = true
 	subsystem.Required = cfg.Required
 	if subsystem.OpenError == nil && subsystem.Store != nil {
+		publishers, registryErr := configuredPublisherRegistry(cfg.TrustedPublishers)
+		if registryErr != nil {
+			_ = subsystem.Store.Close()
+			subsystem.Store = nil
+			subsystem.OpenError = registryErr
+		}
+		if subsystem.OpenError != nil {
+			if cfg.Required {
+				return subsystem, fmt.Errorf("required knowledge store unavailable: %w", subsystem.OpenError)
+			}
+			return subsystem, nil
+		}
 		service, err := knowledgeService.New(knowledgeService.Config{
-			Store: subsystem.Store,
+			Store:             subsystem.Store,
+			PublisherRegistry: publishers,
 			Actor: knowledgeService.ContextActorSource(knowledge.Actor{
 				Kind: knowledge.ActorKindSystem, ID: "system:koder",
 			}),
@@ -75,6 +91,26 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 		return subsystem, fmt.Errorf("required knowledge store unavailable: %w", subsystem.OpenError)
 	}
 	return subsystem, nil
+}
+
+func configuredPublisherRegistry(values []config.KnowledgeTrustedPublisher) (*knowledgeService.PublisherRegistry, error) {
+	publishers := make([]knowledgeService.TrustedPublisher, 0, len(values))
+	for _, value := range values {
+		keys := make(map[string]ed25519.PublicKey, len(value.Keys))
+		for keyID, encoded := range value.Keys {
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+			if err != nil || len(decoded) != ed25519.PublicKeySize {
+				return nil, fmt.Errorf("decode trusted Knowledge publisher %q key %q: invalid Ed25519 public key", value.ID, keyID)
+			}
+			keys[keyID] = ed25519.PublicKey(decoded)
+		}
+		publishers = append(publishers, knowledgeService.TrustedPublisher{ID: value.ID, Name: value.Name, Keys: keys})
+	}
+	registry, err := knowledgeService.NewPublisherRegistry(publishers)
+	if err != nil {
+		return nil, fmt.Errorf("configure trusted Knowledge publishers: %w", err)
+	}
+	return registry, nil
 }
 
 func openConfiguredDefaultKnowledgeStore(stateDir string, cfg config.Knowledge) (optionalKnowledgeStore, error) {

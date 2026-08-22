@@ -66,6 +66,7 @@ type ImportPreview struct {
 	ChunkID        knowledge.ChunkID              `json:"chunk_id"`
 	ChunkTitle     string                         `json:"chunk_title"`
 	SignatureState kpackage.SignatureState        `json:"signature_state"`
+	PublisherTrust PublisherTrust                 `json:"publisher_trust"`
 	Classification knowledge.ClassificationResult `json:"classification"`
 	Impacts        []ImportImpact                 `json:"impacts"`
 	Summary        ImportImpactSummary            `json:"summary"`
@@ -84,6 +85,7 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 		Package: pkg.Manifest.Package, Publisher: pkg.Manifest.Publisher, License: pkg.Manifest.License,
 		ChunkID:    knowledge.ChunkID(pkg.Manifest.Chunk.ID),
 		ChunkTitle: pkg.Manifest.Chunk.Title, SignatureState: pkg.SignatureState,
+		PublisherTrust: s.publishers.Assess(pkg.Manifest, pkg.SignatureState),
 		Classification: knowledge.ClassificationResult{Decision: report.Decision, Findings: slices.Clone(report.Findings)},
 		ReviewRequired: report.Decision == knowledge.ClassificationDecisionReview,
 	}

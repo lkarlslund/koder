@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -90,6 +92,56 @@ func TestConfiguredRequiredKnowledgeOpensAndCloses(t *testing.T) {
 	}
 	if err := subsystem.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestConfiguredPublisherRegistryDecodesEd25519Keys(t *testing.T) {
+	t.Parallel()
+	public, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := configuredPublisherRegistry([]config.KnowledgeTrustedPublisher{{
+		ID: "publisher:example", Name: "Example", Keys: map[string]string{
+			"example:key": base64.StdEncoding.EncodeToString(public),
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.VerificationKeys()["example:key"]; !ed25519.PublicKey(got).Equal(public) {
+		t.Fatalf("decoded public key = %x, want %x", got, public)
+	}
+}
+
+func TestConfiguredPublisherRegistryFailureFollowsKnowledgeAvailabilityPolicy(t *testing.T) {
+	t.Parallel()
+	invalid := []config.KnowledgeTrustedPublisher{{
+		ID: "publisher:example", Keys: map[string]string{"example:key": "not-base64"},
+	}}
+	for _, test := range []struct {
+		name     string
+		required bool
+		wantErr  bool
+	}{
+		{name: "optional degrades"},
+		{name: "required fails startup", required: true, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := memory.New()
+			subsystem, err := openConfiguredKnowledgeStore("unused", config.Knowledge{
+				Enabled: true, Required: test.required, TrustedPublishers: invalid,
+			}, func(string) (knowledgeStore.Store, error) { return store, nil })
+			if (err != nil) != test.wantErr {
+				t.Fatalf("openConfiguredKnowledgeStore() error = %v, want error %v", err, test.wantErr)
+			}
+			if subsystem.Store != nil || subsystem.Service != nil || subsystem.OpenError == nil {
+				t.Fatalf("openConfiguredKnowledgeStore() = %#v, want unavailable subsystem", subsystem)
+			}
+			if health, healthErr := store.Health(context.Background()); healthErr != nil || health.Open {
+				t.Fatalf("store health after registry failure = %#v, %v; want closed", health, healthErr)
+			}
+		})
 	}
 }
 

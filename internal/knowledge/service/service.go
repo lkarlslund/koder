@@ -3,8 +3,10 @@ package service
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -23,19 +25,20 @@ type ActorSource func(context.Context) (knowledge.Actor, error)
 type IDSource func() string
 
 type Config struct {
-	Store            knowledgeStore.Store
-	Classifier       knowledge.Classifier
-	ChunkPolicy      ChunkPolicy
-	ToolPolicy       ToolOfferPolicy
-	Actor            ActorSource
-	Now              func() time.Time
-	NewID            IDSource
-	RankSignals      RankingSignalSource
-	Semantic         SemanticIndexProvider
-	ScoreBlender     SearchScoreBlender
-	Operational      OperationalPolicy
-	ImportStageTTL   time.Duration
-	ImportValidation kpackage.ValidationOptions
+	Store             knowledgeStore.Store
+	Classifier        knowledge.Classifier
+	ChunkPolicy       ChunkPolicy
+	ToolPolicy        ToolOfferPolicy
+	Actor             ActorSource
+	Now               func() time.Time
+	NewID             IDSource
+	RankSignals       RankingSignalSource
+	Semantic          SemanticIndexProvider
+	ScoreBlender      SearchScoreBlender
+	Operational       OperationalPolicy
+	ImportStageTTL    time.Duration
+	ImportValidation  kpackage.ValidationOptions
+	PublisherRegistry *PublisherRegistry
 }
 
 type Service struct {
@@ -66,6 +69,7 @@ type Service struct {
 	importStages     map[string]*stagedImport
 	importStageTTL   time.Duration
 	importValidation kpackage.ValidationOptions
+	publishers       *PublisherRegistry
 }
 
 func New(cfg Config) (*Service, error) {
@@ -104,6 +108,17 @@ func New(cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("knowledge import stage TTL must be positive")
 	}
 	cfg.ImportValidation = normalizeImportValidationOptions(cfg.ImportValidation)
+	if cfg.PublisherRegistry != nil {
+		for keyID, key := range cfg.PublisherRegistry.VerificationKeys() {
+			if existing, exists := cfg.ImportValidation.VerificationKeys[keyID]; exists && !slices.Equal(existing, key) {
+				return nil, fmt.Errorf("knowledge publisher registry key %q conflicts with import validation", keyID)
+			}
+			if cfg.ImportValidation.VerificationKeys == nil {
+				cfg.ImportValidation.VerificationKeys = make(map[string]ed25519.PublicKey)
+			}
+			cfg.ImportValidation.VerificationKeys[keyID] = key
+		}
+	}
 	operationsCtx, operationsCancel := context.WithCancel(context.Background())
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
@@ -113,6 +128,7 @@ func New(cfg Config) (*Service, error) {
 		operational:   cfg.Operational,
 		operationsCtx: operationsCtx, operationsCancel: operationsCancel,
 		importStages: make(map[string]*stagedImport), importStageTTL: cfg.ImportStageTTL, importValidation: cfg.ImportValidation,
+		publishers: cfg.PublisherRegistry,
 	}, nil
 }
 

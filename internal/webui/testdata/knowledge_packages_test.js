@@ -6,6 +6,7 @@ const packages = require('../assets/knowledge_packages.js');
 const preview = {
   package: {id: 'dk.tools', version: '1.2.3'}, publisher: {id: 'pub', name: 'Trusted tools'}, license: {name: 'MIT'},
   chunk_id: 'chunk-1', chunk_title: 'Danish tools', signature_state: 'verified', classification: {decision: 'review', findings: [{message: 'Personal content'}]},
+  publisher_trust: {state: 'verified', trusted: true},
   summary: {additions: 4, unchanged: 1, conflicts: 2, missing_dependencies: 1, blockers: 0}, review_required: true, ready_to_stage: false,
   impacts: [
     {kind: 'entry', id: 'normal', action: 'add', reason: 'new'},
@@ -18,6 +19,7 @@ const view = packages.previewView(preview);
 assert.strictEqual(view.title, 'Danish tools');
 assert.strictEqual(view.publisher, 'Trusted tools');
 assert.strictEqual(view.signature, 'Verified');
+assert.strictEqual(view.publisherTrust, 'Verified');
 assert.strictEqual(view.conflicts, 2);
 assert.strictEqual(view.reviewRequired, true);
 assert.deepStrictEqual(packages.importantImpacts(preview.impacts, 2).map(item => item.id), ['blocked', 'conflict']);

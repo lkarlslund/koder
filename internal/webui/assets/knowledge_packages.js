@@ -24,6 +24,7 @@
       publisher: text(preview.publisher && (preview.publisher.name || preview.publisher.id), 'Unknown publisher'),
       license: text(preview.license && preview.license.name, 'No asserted license'),
       signature: displayLabel(preview.signature_state || 'unsigned'),
+      publisherTrust: displayLabel(preview.publisher_trust && preview.publisher_trust.state || 'unknown'),
       classification: displayLabel(classification.decision || 'allow'),
       findings: Array.isArray(classification.findings) ? classification.findings.slice(0, 20) : [],
       counts: [
@@ -165,7 +166,7 @@
       const view = previewView(preview);
       if (this.previewPanel) this.previewPanel.hidden = false;
       if (this.previewTitle) this.previewTitle.textContent = view.title;
-      if (this.previewMeta) this.previewMeta.textContent = [view.packageLabel, view.publisher, view.license, view.signature + ' signature', view.classification].filter(Boolean).join(' · ');
+      if (this.previewMeta) this.previewMeta.textContent = [view.packageLabel, view.publisher, view.license, view.signature + ' signature', view.publisherTrust + ' publisher', view.classification].filter(Boolean).join(' · ');
       if (this.summary) {
         this.summary.replaceChildren();
         for (const [label, count] of view.counts) {
