@@ -141,6 +141,14 @@ func newTestService(t *testing.T, store knowledgeStore.Store, classifier knowled
 		"01a01688-fc5d-7f7d-8bb8-de244977f8a2",
 		"01a01688-fc5d-7f7d-8bb8-de244977f8a3",
 		"01a01688-fc5d-7f7d-8bb8-de244977f8a4",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8a5",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8a6",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8a7",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8a8",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8a9",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8aa",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8ab",
+		"01a01688-fc5d-7f7d-8bb8-de244977f8ac",
 	}
 	service, err := New(Config{
 		Store: store, Classifier: classifier,
