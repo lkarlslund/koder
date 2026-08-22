@@ -68,17 +68,12 @@ func (m metadata) validate() error {
 }
 
 func initializeMetadata(db *cockroachpebble.DB, now time.Time) (metadata, error) {
-	data, closer, err := db.Get(metadataKey())
+	value, err := readMetadata(db)
 	if err == nil {
-		defer func() { _ = closer.Close() }()
-		value, err := decodeMetadata(data)
-		if err != nil {
-			return metadata{}, err
-		}
 		return value, value.validate()
 	}
 	if !errors.Is(err, cockroachpebble.ErrNotFound) {
-		return metadata{}, fmt.Errorf("read knowledge metadata: %w", err)
+		return metadata{}, err
 	}
 
 	empty, err := userKeyspaceEmpty(db)
@@ -89,13 +84,26 @@ func initializeMetadata(db *cockroachpebble.DB, now time.Time) (metadata, error)
 		return metadata{}, fmt.Errorf("%w: metadata is missing from a non-empty database", knowledgeStore.ErrIncompatible)
 	}
 
-	value := newMetadata(now)
+	value = newMetadata(now)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return metadata{}, fmt.Errorf("encode knowledge metadata: %w", err)
 	}
 	if err := db.Set(metadataKey(), encoded, cockroachpebble.Sync); err != nil {
 		return metadata{}, fmt.Errorf("write knowledge metadata: %w", err)
+	}
+	return value, nil
+}
+
+func readMetadata(db *cockroachpebble.DB) (metadata, error) {
+	data, closer, err := db.Get(metadataKey())
+	if err != nil {
+		return metadata{}, fmt.Errorf("read knowledge metadata: %w", err)
+	}
+	defer func() { _ = closer.Close() }()
+	value, err := decodeMetadata(data)
+	if err != nil {
+		return metadata{}, err
 	}
 	return value, nil
 }

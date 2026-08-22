@@ -93,19 +93,6 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	return nil
 }
 
-// Checkpoint remains unavailable until the independent backup/restore contract is added.
-func (s *Store) Checkpoint(ctx context.Context, _ string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return knowledgeStore.ErrClosed
-	}
-	return knowledgeStore.ErrUnsupported
-}
-
 func (tx *transaction) check(ctx context.Context, write bool) error {
 	if !tx.active || tx.reader == nil {
 		return knowledgeStore.ErrClosed
