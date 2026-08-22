@@ -192,7 +192,7 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 		{
 			Seq: 1,
 			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
-				Tool: domain.ToolKindShowMedia,
+				Tool: domain.ToolKindPresent, Args: map[string]string{"action": "media"},
 				Result: &domain.ToolResult{Data: tools.ShowMediaStoredResult{
 					SessionID: "session-1", MIMEType: "image/png", Title: "Current state",
 					Attachment: &attachment.Metadata{ID: "012345678901234567890123", Name: "screen.png", MIME: "image/png"},
@@ -202,7 +202,7 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 		{
 			Seq: 2,
 			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
-				Tool: domain.ToolKindOfferFile,
+				Tool: domain.ToolKindPresent, Args: map[string]string{"action": "file"},
 				Result: &domain.ToolResult{Data: tools.OfferFileStoredResult{
 					Token: "download-token", Name: "appointment.ics", MIMEType: "text/calendar",
 				}},
@@ -235,8 +235,8 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 
 func TestVoiceRenderPartsAddsTranscriptOnlyToolActivity(t *testing.T) {
 	timeline := []domain.TimelineItem{{Seq: 1, Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
-		ToolCallID: "tool-1", Tool: domain.ToolKindPhonePhotosThumbs, Status: domain.ToolStatusDone,
-		Args: map[string]string{"limit": "4"}, Result: &domain.ToolResult{Text: "Copied four thumbnails"},
+		ToolCallID: "tool-1", Tool: domain.ToolKindPhonePhotos, Status: domain.ToolStatusDone,
+		Args: map[string]string{"action": "thumbnails", "limit": "4"}, Result: &domain.ToolResult{Text: "Copied four thumbnails"},
 	}}}}}
 	parts := voiceRenderParts(timeline, 0)
 	if len(parts) != 1 || parts[0].MIMEType != "application/vnd.koder.tool-activity+json" || parts[0].Metadata["surface"] != "transcript" {
