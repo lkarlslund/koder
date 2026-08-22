@@ -20,16 +20,17 @@ const (
 )
 
 type LexicalSearchRequest struct {
-	Query          string
-	ChunkIDs       []knowledge.ChunkID
-	Scopes         []knowledge.Scope
-	EntryStates    []knowledge.EntryState
-	ChunkStates    []knowledge.ChunkState
-	ValidAt        time.Time
-	IncludeInvalid bool
-	Limit          int
-	Weights        LexicalFieldWeights
-	GraphExpansion *GraphExpansionOptions
+	Query             string
+	ChunkIDs          []knowledge.ChunkID
+	Scopes            []knowledge.Scope
+	EntryStates       []knowledge.EntryState
+	ChunkStates       []knowledge.ChunkState
+	ValidAt           time.Time
+	IncludeInvalid    bool
+	IncludeSuperseded bool
+	Limit             int
+	Weights           LexicalFieldWeights
+	GraphExpansion    *GraphExpansionOptions
 }
 
 type LexicalSearchResult struct {
@@ -80,6 +81,7 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 	if err != nil {
 		return LexicalSearchResult{}, err
 	}
+	postings = deduplicateLexicalPostings(postings)
 	filtered := postings[:0]
 	matched := make(map[knowledge.EntryID]struct{})
 	for _, posting := range postings {
@@ -144,6 +146,9 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 	request.EntryStates = slices.Clone(request.EntryStates)
 	if len(request.EntryStates) == 0 {
 		request.EntryStates = []knowledge.EntryState{knowledge.EntryStateActive}
+		if request.IncludeSuperseded {
+			request.EntryStates = append(request.EntryStates, knowledge.EntryStateSuperseded)
+		}
 	}
 	slices.Sort(request.EntryStates)
 	request.EntryStates = slices.Compact(request.EntryStates)
@@ -151,6 +156,11 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 		if state == knowledge.EntryStateUnspecified || !state.IsAEntryState() {
 			return LexicalSearchRequest{}, nil, fmt.Errorf("invalid lexical search entry state %q", state)
 		}
+	}
+	if !request.IncludeSuperseded {
+		request.EntryStates = slices.DeleteFunc(request.EntryStates, func(state knowledge.EntryState) bool {
+			return state == knowledge.EntryStateSuperseded
+		})
 	}
 	request.ChunkStates = slices.Clone(request.ChunkStates)
 	if len(request.ChunkStates) == 0 {
@@ -194,6 +204,9 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 }
 
 func (s *Service) listLexicalCorpusEntries(ctx context.Context, request LexicalSearchRequest) ([]knowledge.Entry, error) {
+	if len(request.EntryStates) == 0 {
+		return nil, nil
+	}
 	scopeKinds := make([]knowledge.ScopeKind, 0, len(request.Scopes))
 	for _, scope := range request.Scopes {
 		scopeKinds = append(scopeKinds, scope.Kind)

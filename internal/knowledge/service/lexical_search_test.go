@@ -173,6 +173,57 @@ func TestSearchLexicalGraphExpansionIsBoundedAndCannotReintroduceFilteredEntries
 	}
 }
 
+func TestSearchLexicalSuppressesSupersededEntriesUnlessExplicitlyIncluded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newLexicalSearchTestService(t, store)
+	chunk, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	if err != nil {
+		t.Fatalf("CreateChunk() error = %v", err)
+	}
+	old, err := service.CreateEntry(ctx, CreateEntryRequest{
+		ChunkID: chunk.Chunk.ID, Entry: knowledge.Entry{Title: "Old needle", Kind: knowledge.EntryKindFact},
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry(old) error = %v", err)
+	}
+	replacement, err := service.CreateEntry(ctx, CreateEntryRequest{
+		ChunkID: chunk.Chunk.ID, Entry: knowledge.Entry{Title: "New needle", Kind: knowledge.EntryKindFact},
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry(replacement) error = %v", err)
+	}
+	if _, err := service.SupersedeEntry(ctx, SupersedeEntryRequest{
+		EntryID: old.Entry.ID, ExpectedRevision: 1, ReplacementEntryID: replacement.Entry.ID,
+	}); err != nil {
+		t.Fatalf("SupersedeEntry() error = %v", err)
+	}
+
+	result, err := service.SearchLexical(ctx, LexicalSearchRequest{Query: "needle"})
+	if err != nil || result.CorpusDocumentCount != 1 || len(result.Matches) != 1 || result.Matches[0].EntryID != replacement.Entry.ID {
+		t.Fatalf("default supersession search = %#v, %v", result, err)
+	}
+	result, err = service.SearchLexical(ctx, LexicalSearchRequest{
+		Query: "needle", EntryStates: []knowledge.EntryState{knowledge.EntryStateActive, knowledge.EntryStateSuperseded},
+	})
+	if err != nil || result.CorpusDocumentCount != 1 || len(result.Matches) != 1 || result.Matches[0].EntryID != replacement.Entry.ID {
+		t.Fatalf("implicit supersession search = %#v, %v", result, err)
+	}
+	result, err = service.SearchLexical(ctx, LexicalSearchRequest{Query: "needle", IncludeSuperseded: true})
+	if err != nil || result.CorpusDocumentCount != 2 || len(result.Matches) != 2 {
+		t.Fatalf("included supersession search = %#v, %v", result, err)
+	}
+	result, err = service.SearchLexical(ctx, LexicalSearchRequest{
+		Query: "needle", IncludeSuperseded: true,
+		EntryStates: []knowledge.EntryState{knowledge.EntryStateSuperseded},
+	})
+	if err != nil || result.CorpusDocumentCount != 1 || len(result.Matches) != 1 || result.Matches[0].EntryID != old.Entry.ID {
+		t.Fatalf("superseded-only search = %#v, %v", result, err)
+	}
+}
+
 func newLexicalSearchTestService(t *testing.T, store *memory.Store) *Service {
 	t.Helper()
 	nextID := 0x100
