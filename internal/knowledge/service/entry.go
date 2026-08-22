@@ -134,6 +134,21 @@ func entryClassificationInput(value knowledge.Entry) knowledge.ClassificationInp
 	for index, condition := range value.Applicability.Conditions {
 		fields = append(fields, knowledge.ClassificationField{Name: fmt.Sprintf("applicability.conditions[%d]", index), Value: condition})
 	}
+	for index, operatingSystem := range value.Applicability.OperatingSystems {
+		fields = append(fields, knowledge.ClassificationField{Name: fmt.Sprintf("applicability.operating_systems[%d]", index), Value: operatingSystem})
+	}
+	for index, architecture := range value.Applicability.Architectures {
+		fields = append(fields, knowledge.ClassificationField{Name: fmt.Sprintf("applicability.architectures[%d]", index), Value: architecture})
+	}
+	for index, software := range value.Applicability.Software {
+		fields = append(fields,
+			knowledge.ClassificationField{Name: fmt.Sprintf("applicability.software[%d].name", index), Value: software.Name},
+			knowledge.ClassificationField{Name: fmt.Sprintf("applicability.software[%d].version_range", index), Value: software.VersionRange},
+		)
+	}
+	for index, locale := range value.Applicability.Locales {
+		fields = append(fields, knowledge.ClassificationField{Name: fmt.Sprintf("applicability.locales[%d]", index), Value: locale})
+	}
 	return knowledge.ClassificationInput{Fields: fields, Risk: value.Risk}
 }
 

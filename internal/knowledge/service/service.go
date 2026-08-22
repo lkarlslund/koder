@@ -103,16 +103,8 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	if err != nil {
 		return CreateChunkResult{}, fmt.Errorf("classify chunk candidate: %w", err)
 	}
-	switch classification.Decision {
-	case knowledge.ClassificationDecisionAllow:
-	case knowledge.ClassificationDecisionReview:
-		if !request.ReviewApproved {
-			return CreateChunkResult{Classification: classification}, &ClassificationError{Result: classification}
-		}
-	case knowledge.ClassificationDecisionReject:
-		return CreateChunkResult{Classification: classification}, &ClassificationError{Result: classification}
-	default:
-		return CreateChunkResult{}, fmt.Errorf("classifier returned invalid decision %q", classification.Decision)
+	if err := requireClassificationApproval(classification, request.ReviewApproved); err != nil {
+		return CreateChunkResult{Classification: classification}, err
 	}
 
 	candidate, err = knowledge.NormalizeChunk(candidate)

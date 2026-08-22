@@ -71,16 +71,8 @@ func (s *Service) UpdateChunk(ctx context.Context, request UpdateChunkRequest) (
 	if err != nil {
 		return UpdateChunkResult{}, fmt.Errorf("classify chunk update: %w", err)
 	}
-	switch classification.Decision {
-	case knowledge.ClassificationDecisionAllow:
-	case knowledge.ClassificationDecisionReview:
-		if !request.ReviewApproved {
-			return UpdateChunkResult{Classification: classification}, &ClassificationError{Result: classification}
-		}
-	case knowledge.ClassificationDecisionReject:
-		return UpdateChunkResult{Classification: classification}, &ClassificationError{Result: classification}
-	default:
-		return UpdateChunkResult{}, fmt.Errorf("classifier returned invalid decision %q", classification.Decision)
+	if err := requireClassificationApproval(classification, request.ReviewApproved); err != nil {
+		return UpdateChunkResult{Classification: classification}, err
 	}
 	candidate, err = knowledge.NormalizeChunk(candidate)
 	if err != nil {
