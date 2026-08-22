@@ -503,6 +503,9 @@ type ActionTool struct {
 	Kind              ID
 	Routes            []ActionRoute
 	BypassPermissions bool
+	// RequirePersistedChat hides and rejects resources whose results need a
+	// durable client-visible destination.
+	RequirePersistedChat bool
 	// DefaultAction accepts historical calls that predate the action field when
 	// a canonical resource reuses an older single-operation name.
 	DefaultAction string
@@ -569,6 +572,9 @@ func (t ActionTool) SummarizeResult(req Request, result Result) (string, string)
 }
 
 func (t ActionTool) Call(ctx context.Context, opts Options) (Result, error) {
+	if t.RequirePersistedChat && (opts.Runtime.SessionID == "" || opts.Runtime.ChatID == "") {
+		return Result{}, fmt.Errorf("%s requires an active persisted chat with a presentation destination", t.Kind)
+	}
 	legacyReq, _, err := t.delegatedRequest(opts.Request)
 	if err != nil {
 		return Result{}, err
@@ -588,6 +594,9 @@ func (t ActionTool) FinalizeResult(ctx context.Context, runtime Runtime, req Req
 }
 
 func (t ActionTool) Definition(runtime Runtime, spec ToolSpec) (ToolSpec, bool) {
+	if t.RequirePersistedChat && (runtime.SessionID == "" || runtime.ChatID == "") {
+		return ToolSpec{}, false
+	}
 	actions := make([]string, 0, len(t.Routes))
 	for _, route := range t.Routes {
 		if legacyOperationAvailable(route.Tool, runtime) {

@@ -30,6 +30,9 @@ func init() {
 
 func (tool) ID() tools.ID             { return tools.OfferFile }
 func (tool) BypassesPermission() bool { return false }
+func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return spec, runtime.SessionID != "" && runtime.ChatID != "" && runtime.OfferedFiles != nil
+}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(args["path"])
 	if path == "" {

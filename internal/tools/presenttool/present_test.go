@@ -6,14 +6,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/offerfiletool"
 	_ "github.com/lkarlslund/koder/internal/tools/showimagetool"
 )
 
 func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
-	definition, enabled := tools.DefinitionFor(tools.Present, tools.Runtime{ChatRole: chatrole.General})
+	persisted := tools.Runtime{
+		SessionID: "session-1", ChatID: "chat-1", ChatRole: chatrole.General,
+		Attachments: attachment.NewManager(t.TempDir()), OfferedFiles: offeredfile.NewManager(nil),
+	}
+	definition, enabled := tools.DefinitionFor(tools.Present, persisted)
 	if !enabled || !strings.Contains(string(definition.Function.Parameters), "text/markdown") || !strings.Contains(string(definition.Function.Parameters), `"media"`) || !strings.Contains(string(definition.Function.Parameters), `"file"`) {
 		t.Fatalf("definition=%#v enabled=%v", definition, enabled)
 	}
@@ -21,7 +27,7 @@ func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
 		t.Fatal("legacy presentation content tool remained model-visible")
 	}
 	result, err := tools.Call(context.Background(), tools.Options{
-		Runtime: tools.Runtime{ChatRole: chatrole.Voice},
+		Runtime: tools.Runtime{SessionID: "session-1", ChatID: "chat-1", ChatRole: chatrole.Voice},
 		Request: tools.Request{Tool: tools.Present, Args: map[string]string{
 			"title": "Appointments", "mime_type": "text/markdown", "content": "| Time | Person |\n|---|---|\n| 10:00 | Steen |",
 		}},
@@ -32,6 +38,37 @@ func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
 	stored, ok := result.Stored.(tools.PresentationStoredResult)
 	if !ok || stored.Title != "Appointments" || stored.MIMEType != "text/markdown" || !strings.Contains(stored.Content, "Steen") {
 		t.Fatalf("stored result = %#v", result.Stored)
+	}
+}
+
+func TestPresentActionsFollowDestinationCapabilities(t *testing.T) {
+	persisted := tools.Runtime{SessionID: "session-1", ChatID: "chat-1", ChatRole: chatrole.General}
+	definition, enabled := tools.DefinitionFor(tools.Present, persisted)
+	parameters := string(definition.Function.Parameters)
+	if !enabled || !strings.Contains(parameters, `"enum":["content"]`) {
+		t.Fatalf("content-only definition=%#v enabled=%v", definition, enabled)
+	}
+
+	persisted.Attachments = attachment.NewManager(t.TempDir())
+	definition, enabled = tools.DefinitionFor(tools.Present, persisted)
+	parameters = string(definition.Function.Parameters)
+	if !enabled || !strings.Contains(parameters, `"enum":["content","media"]`) {
+		t.Fatalf("media-capable definition=%#v enabled=%v", definition, enabled)
+	}
+}
+
+func TestPresentIsUnavailableWithoutDurableDestination(t *testing.T) {
+	if _, enabled := tools.DefinitionFor(tools.Present, tools.Runtime{ChatRole: chatrole.General}); enabled {
+		t.Fatal("stateless request was offered present")
+	}
+	_, err := tools.Call(context.Background(), tools.Options{
+		Runtime: tools.Runtime{ChatRole: chatrole.General},
+		Request: tools.Request{Tool: tools.Present, Args: map[string]string{
+			"action": "content", "mime_type": "text/plain", "content": "nowhere",
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "active persisted chat") {
+		t.Fatalf("stateless present error = %v", err)
 	}
 }
 

@@ -64,6 +64,12 @@ Definition filtering happens before every model request:
 4. Runtime-backed resources appear only when their service exists. Browser
    actions require the browser service; phone actions require a connected device
    that advertised the exact server-known capability.
+5. Destination-backed resources require an active persisted chat. `present` is
+   therefore available to web chats and phone-companion conversations, but not
+   to stateless single-call requests that have nowhere durable to render or replay
+   the result. Its `media` and `file` actions additionally require the attachment
+   and offered-file services, respectively; clients render the resulting shared
+   presentation according to their own runtime capabilities.
 
 An action resource builds its action enum dynamically from the operations that
 survive those checks. This preserves narrow execution-chat policy without

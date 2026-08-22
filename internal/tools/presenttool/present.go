@@ -57,7 +57,8 @@ func init() {
 		Legacy:      true,
 	})
 	tools.Register(tools.ActionTool{
-		Kind: tools.Present,
+		Kind:                 tools.Present,
+		RequirePersistedChat: true,
 		Routes: []tools.ActionRoute{
 			{Action: "content", Tool: tools.PresentContentOld},
 			{Action: "media", Tool: tools.ShowMedia},
@@ -80,7 +81,7 @@ func (tool) Preview(req tools.Request) string {
 }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return spec, true
+	return spec, runtime.SessionID != "" && runtime.ChatID != ""
 }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -252,6 +253,9 @@ func validateURI(raw string) error {
 }
 
 func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
+	if opts.Runtime.SessionID == "" || opts.Runtime.ChatID == "" {
+		return tools.Result{}, errors.New("present requires an active persisted chat with a presentation destination")
+	}
 	req := opts.Request.Args
 	stored := tools.PresentationStoredResult{Title: req["title"], MIMEType: req["mime_type"], Content: req["content"]}
 	label := "Presented visual content"

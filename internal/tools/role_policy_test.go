@@ -39,7 +39,7 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 }
 
 func TestBaseToolSurfaceRemainsCompactAndCanonical(t *testing.T) {
-	defs := tools.Definitions(tools.Runtime{ChatRole: chatrole.Orchestrator})
+	defs := tools.Definitions(tools.Runtime{SessionID: "session-1", ChatID: "chat-1", ChatRole: chatrole.Orchestrator})
 	if len(defs) > 20 {
 		t.Fatalf("base tool surface grew to %d definitions; group related operations or make them runtime-specific", len(defs))
 	}

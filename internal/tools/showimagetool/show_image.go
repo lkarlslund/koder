@@ -40,6 +40,9 @@ func init() {
 
 func (mediaTool) ID() tools.ID             { return tools.ShowMedia }
 func (mediaTool) BypassesPermission() bool { return false }
+func (mediaTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return spec, runtime.SessionID != "" && runtime.ChatID != "" && runtime.Attachments != nil
+}
 func (mediaTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return normalizeArgs(args)
 }
