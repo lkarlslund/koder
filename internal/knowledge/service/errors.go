@@ -78,7 +78,8 @@ func ClassifyError(err error) *ServiceError {
 
 func classifyErrorCode(err error) ErrorCode {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded),
+	case errors.Is(err, context.Canceled),
+		errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, ErrSemanticIndexUnavailable),
 		errors.Is(err, knowledgeStore.ErrClosed),
 		errors.Is(err, knowledgeStore.ErrReadOnly),

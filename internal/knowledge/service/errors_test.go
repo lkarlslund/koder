@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,13 +20,15 @@ func TestClassifyErrorMapsStableKnowledgeOutcomes(t *testing.T) {
 		code      ErrorCode
 		retryable bool
 	}{
-		"unavailable": {err: fmt.Errorf("private path: %w", knowledgeStore.ErrClosed), code: ErrorCodeUnavailable, retryable: true},
-		"forbidden":   {err: fmt.Errorf("policy detail: %w", ErrChunkPolicyDenied), code: ErrorCodeForbidden},
-		"not found":   {err: knowledgeStore.ErrNotFound, code: ErrorCodeNotFound},
-		"conflict":    {err: knowledgeStore.ErrConflict, code: ErrorCodeConflict, retryable: true},
-		"stale":       {err: knowledgeStore.ErrStaleCursor, code: ErrorCodeStale, retryable: true},
-		"invalid":     {err: knowledge.ErrInvalidRecord, code: ErrorCodeInvalid},
-		"internal":    {err: errors.New("private internal detail"), code: ErrorCodeInternal},
+		"unavailable":      {err: fmt.Errorf("private path: %w", knowledgeStore.ErrClosed), code: ErrorCodeUnavailable, retryable: true},
+		"canceled request": {err: context.Canceled, code: ErrorCodeUnavailable, retryable: true},
+		"expired request":  {err: context.DeadlineExceeded, code: ErrorCodeUnavailable, retryable: true},
+		"forbidden":        {err: fmt.Errorf("policy detail: %w", ErrChunkPolicyDenied), code: ErrorCodeForbidden},
+		"not found":        {err: knowledgeStore.ErrNotFound, code: ErrorCodeNotFound},
+		"conflict":         {err: knowledgeStore.ErrConflict, code: ErrorCodeConflict, retryable: true},
+		"stale":            {err: knowledgeStore.ErrStaleCursor, code: ErrorCodeStale, retryable: true},
+		"invalid":          {err: knowledge.ErrInvalidRecord, code: ErrorCodeInvalid},
+		"internal":         {err: errors.New("private internal detail"), code: ErrorCodeInternal},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := ClassifyError(test.err)
