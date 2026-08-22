@@ -3,6 +3,7 @@ package kpackage
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,6 +93,9 @@ func Parse(reader io.ReaderAt, size int64, limits ParseLimits) (ParsedPackage, e
 	if size > limits.MaxArchiveBytes {
 		return ParsedPackage{}, fmt.Errorf("%w: compressed archive is %d bytes, maximum is %d", ErrLimitExceeded, size, limits.MaxArchiveBytes)
 	}
+	if err := validateZIPEnvelope(reader, size); err != nil {
+		return ParsedPackage{}, err
+	}
 	archive, err := zip.NewReader(reader, size)
 	if err != nil {
 		return ParsedPackage{}, fmt.Errorf("%w: %v", ErrInvalidArchive, err)
@@ -171,6 +175,38 @@ func Parse(reader io.ReaderAt, size int64, limits ParseLimits) (ParsedPackage, e
 		return ParsedPackage{}, fmt.Errorf("%w: manifest.json: %v", ErrInvalidArchive, err)
 	}
 	return ParsedPackage{Manifest: manifest, manifestBytes: slices.Clone(manifestBytes), files: files, paths: paths, metadata: metadata}, nil
+}
+
+func validateZIPEnvelope(reader io.ReaderAt, size int64) error {
+	const (
+		localHeaderSize = 4
+		eocdSize        = 22
+		maxCommentSize  = 1<<16 - 1
+	)
+	if size < eocdSize {
+		return fmt.Errorf("%w: archive is too short", ErrInvalidArchive)
+	}
+	var first [localHeaderSize]byte
+	if _, err := reader.ReadAt(first[:], 0); err != nil || !bytes.Equal(first[:], []byte{'P', 'K', 3, 4}) {
+		return fmt.Errorf("%w: archive has data before its first local file header", ErrInvalidArchive)
+	}
+	tailSize := min(size, int64(eocdSize+maxCommentSize))
+	tail := make([]byte, tailSize)
+	if _, err := reader.ReadAt(tail, size-tailSize); err != nil {
+		return fmt.Errorf("%w: read ZIP envelope: %v", ErrInvalidArchive, err)
+	}
+	index := bytes.LastIndex(tail, []byte{'P', 'K', 5, 6})
+	if index < 0 || index+eocdSize > len(tail) {
+		return fmt.Errorf("%w: archive has no complete end record", ErrInvalidArchive)
+	}
+	commentSize := int(binary.LittleEndian.Uint16(tail[index+20 : index+22]))
+	if commentSize != 0 {
+		return fmt.Errorf("%w: ZIP comments are not allowed", ErrInvalidArchive)
+	}
+	if index+eocdSize != len(tail) {
+		return fmt.Errorf("%w: archive has trailing data", ErrInvalidArchive)
+	}
+	return nil
 }
 
 func normalizeParseLimits(value ParseLimits) (ParseLimits, error) {
