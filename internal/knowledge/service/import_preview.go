@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
@@ -29,14 +33,17 @@ const importImpactAssetKind knowledgeStore.RecordKind = "asset"
 // ImportImpact is one stable, content-free preview row. ExistingID is omitted when
 // disclosing it could reveal an object the caller did not name.
 type ImportImpact struct {
-	Kind       knowledgeStore.RecordKind `json:"kind"`
-	ID         string                    `json:"id"`
-	Action     ImportImpactAction        `json:"action"`
-	Reason     string                    `json:"reason"`
-	ExistingID string                    `json:"existing_id,omitempty"`
-	Required   bool                      `json:"required,omitempty"`
-	Blocking   bool                      `json:"blocking,omitempty"`
-	CrossChunk bool                      `json:"cross_chunk,omitempty"`
+	Kind                knowledgeStore.RecordKind `json:"kind"`
+	ID                  string                    `json:"id"`
+	Action              ImportImpactAction        `json:"action"`
+	Reason              string                    `json:"reason"`
+	ExistingID          string                    `json:"existing_id,omitempty"`
+	Required            bool                      `json:"required,omitempty"`
+	Blocking            bool                      `json:"blocking,omitempty"`
+	ConflictResolvable  bool                      `json:"conflict_resolvable,omitempty"`
+	CrossChunk          bool                      `json:"cross_chunk,omitempty"`
+	ExistingRevision    uint64                    `json:"-"`
+	ExistingFingerprint string                    `json:"-"`
 }
 
 // ImportImpactSummary gives UI and tool callers bounded aggregate counts without
@@ -107,13 +114,16 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 					return authErr
 				}
 			}
-			if impactErr := previewRecordImpact(existing, readErr, entry, knowledgeStore.RecordKindEntry, string(entry.ID), &preview); impactErr != nil {
+			if impactErr := previewRecordImpact(existing, readErr, entry, knowledgeStore.RecordKindEntry, string(entry.ID), packageEntryContentEqual, &preview); impactErr != nil {
 				return impactErr
+			}
+			if readErr == nil && (existing.State == knowledge.EntryStateArchived || existing.State == knowledge.EntryStateSuperseded) {
+				protectLatestImportConflict(&preview, knowledgeStore.RecordKindEntry, string(entry.ID), "existing_entry_lifecycle_protected")
 			}
 		}
 		for _, asset := range packageAssets(pkg) {
 			existing, readErr := tx.Asset(ctx, asset.ChunkID, asset.Path)
-			if impactErr := previewRecordImpact(existing, readErr, asset, importImpactAssetKind, asset.Path, &preview); impactErr != nil {
+			if impactErr := previewRecordImpact(existing, readErr, asset, importImpactAssetKind, asset.Path, packageAssetContentEqual, &preview); impactErr != nil {
 				return impactErr
 			}
 		}
@@ -122,11 +132,14 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 			if crossChunk {
 				preview.Summary.CrossChunkLinks++
 			}
-			if authErr := s.authorizeIncomingLink(ctx, tx, actor, incomingChunk, importedEntries, link); authErr != nil {
-				return authErr
-			}
 			if impactErr := s.previewLinkImpact(ctx, tx, actor, link, crossChunk, &preview); impactErr != nil {
 				return impactErr
+			}
+			impact := preview.Impacts[len(preview.Impacts)-1]
+			if impact.Action == ImportImpactAdd {
+				if authErr := s.authorizeIncomingLink(ctx, tx, actor, incomingChunk, importedEntries, link); authErr != nil {
+					return authErr
+				}
 			}
 		}
 		for _, evidence := range sortedEvidence(pkg.Evidence) {
@@ -191,13 +204,15 @@ func (s *Service) previewChunkImpact(ctx context.Context, tx knowledgeStore.Read
 	case err != nil:
 		return err
 	}
-	if err := s.authorizeChunk(ctx, actor, ChunkPolicyUpdate, existing); err != nil {
+	if err := s.authorizeChunk(ctx, actor, ChunkPolicyRead, existing); err != nil {
 		return err
 	}
 	if packageChunkContentEqual(existing, incoming) {
-		appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindChunk, ID: string(incoming.ID), Action: ImportImpactUnchanged, Reason: "same_content_already_present"})
+		appendImportImpact(preview, existingImportImpact(knowledgeStore.RecordKindChunk, string(incoming.ID), ImportImpactUnchanged, "same_content_already_present", existing))
 	} else {
-		appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindChunk, ID: string(incoming.ID), Action: ImportImpactConflict, Reason: "id_exists_with_different_content", Blocking: true})
+		impact := existingImportImpact(knowledgeStore.RecordKindChunk, string(incoming.ID), ImportImpactConflict, "id_exists_with_different_content", existing)
+		impact.Blocking, impact.ConflictResolvable = true, true
+		appendImportImpact(preview, impact)
 	}
 	return nil
 }
@@ -220,7 +235,8 @@ func (s *Service) previewDependencyImpacts(ctx context.Context, tx knowledgeStor
 		if err := s.authorizeChunk(ctx, actor, ChunkPolicyRead, existing); err != nil {
 			return err
 		}
-		impact := ImportImpact{Kind: knowledgeStore.RecordKindChunk, ID: dependency.ChunkID, Action: ImportImpactReference, Reason: "dependency_available", Required: dependency.Required}
+		impact := existingImportImpact(knowledgeStore.RecordKindChunk, dependency.ChunkID, ImportImpactReference, "dependency_available", existing)
+		impact.Required = dependency.Required
 		if existing.State != knowledge.ChunkStateActive {
 			impact.Reason = "dependency_inactive"
 			impact.Blocking = true
@@ -236,10 +252,25 @@ func (s *Service) previewLinkImpact(ctx context.Context, tx knowledgeStore.ReadT
 		if err := s.authorizeExistingLink(ctx, tx, actor, existing); err != nil {
 			return err
 		}
-		if reflect.DeepEqual(existing, incoming) {
-			appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindLink, ID: string(incoming.ID), Action: ImportImpactUnchanged, Reason: "same_content_already_present", CrossChunk: crossChunk})
+		if packageLinkContentEqual(existing, incoming) {
+			impact := existingImportImpact(knowledgeStore.RecordKindLink, string(incoming.ID), ImportImpactUnchanged, "same_content_already_present", existing)
+			impact.CrossChunk = crossChunk
+			appendImportImpact(preview, impact)
 		} else {
-			appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindLink, ID: string(incoming.ID), Action: ImportImpactConflict, Reason: "id_exists_with_different_content", Blocking: true, CrossChunk: crossChunk})
+			if equivalent, equivalentErr := tx.EquivalentLink(ctx, incoming); equivalentErr == nil && equivalent.ID != existing.ID {
+				impact := existingImportImpact(knowledgeStore.RecordKindLink, string(incoming.ID), ImportImpactConflict, "link_identity_and_equivalence_conflict", existing)
+				impact.Blocking, impact.CrossChunk = true, crossChunk
+				appendImportImpact(preview, impact)
+				return nil
+			} else if equivalentErr != nil && !errors.Is(equivalentErr, knowledgeStore.ErrNotFound) {
+				return equivalentErr
+			}
+			impact := existingImportImpact(knowledgeStore.RecordKindLink, string(incoming.ID), ImportImpactConflict, "id_exists_with_different_content", existing)
+			impact.Blocking, impact.ConflictResolvable, impact.CrossChunk = true, true, crossChunk
+			if existing.State == knowledge.LinkStateArchived {
+				impact.Reason, impact.ConflictResolvable = "existing_link_lifecycle_protected", false
+			}
+			appendImportImpact(preview, impact)
 		}
 		return nil
 	}
@@ -251,10 +282,13 @@ func (s *Service) previewLinkImpact(ctx context.Context, tx knowledgeStore.ReadT
 		if err := s.authorizeExistingLink(ctx, tx, actor, equivalent); err != nil {
 			return err
 		}
-		appendImportImpact(preview, ImportImpact{
-			Kind: knowledgeStore.RecordKindLink, ID: string(incoming.ID), Action: ImportImpactConflict,
-			Reason: "equivalent_link_exists", Blocking: true, CrossChunk: crossChunk,
-		})
+		impact := existingImportImpact(knowledgeStore.RecordKindLink, string(incoming.ID), ImportImpactConflict, "equivalent_link_exists", equivalent)
+		impact.ExistingID = string(equivalent.ID)
+		impact.Blocking, impact.ConflictResolvable, impact.CrossChunk = true, true, crossChunk
+		if equivalent.State == knowledge.LinkStateArchived {
+			impact.Reason, impact.ConflictResolvable = "existing_link_lifecycle_protected", false
+		}
+		appendImportImpact(preview, impact)
 		return nil
 	}
 	if !errors.Is(err, knowledgeStore.ErrNotFound) {
@@ -279,10 +313,26 @@ func (s *Service) authorizeExistingLink(ctx context.Context, tx knowledgeStore.R
 func previewEvidenceImpact(ctx context.Context, tx knowledgeStore.ReadTx, incoming knowledge.Evidence, preview *ImportPreview) error {
 	existing, err := tx.Evidence(ctx, incoming.ID)
 	if err == nil {
-		if reflect.DeepEqual(existing, incoming) {
-			appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindEvidence, ID: string(incoming.ID), Action: ImportImpactUnchanged, Reason: "same_content_already_present"})
+		if packageEvidenceContentEqual(existing, incoming) {
+			appendImportImpact(preview, existingImportImpact(knowledgeStore.RecordKindEvidence, string(incoming.ID), ImportImpactUnchanged, "same_content_already_present", existing))
 		} else {
-			appendImportImpact(preview, ImportImpact{Kind: knowledgeStore.RecordKindEvidence, ID: string(incoming.ID), Action: ImportImpactConflict, Reason: "id_exists_with_different_content", Blocking: true})
+			conflict := existing
+			reason := "id_exists_with_different_content"
+			if sourceMatch, sourceErr := tx.EvidenceBySource(ctx, incoming.Source.ID, incoming.Source.ContentHash); sourceErr == nil {
+				if sourceMatch.ID != existing.ID {
+					impact := existingImportImpact(knowledgeStore.RecordKindEvidence, string(incoming.ID), ImportImpactConflict, "evidence_identity_and_source_conflict", existing)
+					impact.Blocking = true
+					appendImportImpact(preview, impact)
+					return nil
+				}
+				conflict, reason = sourceMatch, "evidence_source_exists"
+			} else if !errors.Is(sourceErr, knowledgeStore.ErrNotFound) {
+				return sourceErr
+			}
+			impact := existingImportImpact(knowledgeStore.RecordKindEvidence, string(incoming.ID), ImportImpactConflict, reason, conflict)
+			impact.ExistingID = string(conflict.ID)
+			impact.Blocking, impact.ConflictResolvable = true, true
+			appendImportImpact(preview, impact)
 		}
 		return nil
 	}
@@ -291,10 +341,10 @@ func previewEvidenceImpact(ctx context.Context, tx knowledgeStore.ReadTx, incomi
 	}
 	existing, err = tx.EvidenceBySource(ctx, incoming.Source.ID, incoming.Source.ContentHash)
 	if err == nil {
-		appendImportImpact(preview, ImportImpact{
-			Kind: knowledgeStore.RecordKindEvidence, ID: string(incoming.ID), Action: ImportImpactConflict,
-			Reason: "evidence_source_exists", Blocking: true,
-		})
+		impact := existingImportImpact(knowledgeStore.RecordKindEvidence, string(incoming.ID), ImportImpactConflict, "evidence_source_exists", existing)
+		impact.ExistingID = string(existing.ID)
+		impact.Blocking, impact.ConflictResolvable = true, true
+		appendImportImpact(preview, impact)
 		return nil
 	}
 	if !errors.Is(err, knowledgeStore.ErrNotFound) {
@@ -304,18 +354,59 @@ func previewEvidenceImpact(ctx context.Context, tx knowledgeStore.ReadTx, incomi
 	return ctx.Err()
 }
 
-func previewRecordImpact[T any](existing T, err error, incoming T, kind knowledgeStore.RecordKind, id string, preview *ImportPreview) error {
+func previewRecordImpact[T any](existing T, err error, incoming T, kind knowledgeStore.RecordKind, id string, equal func(T, T) bool, preview *ImportPreview) error {
 	switch {
 	case errors.Is(err, knowledgeStore.ErrNotFound):
 		appendImportImpact(preview, ImportImpact{Kind: kind, ID: id, Action: ImportImpactAdd, Reason: "new_object"})
 	case err != nil:
 		return err
-	case reflect.DeepEqual(existing, incoming):
-		appendImportImpact(preview, ImportImpact{Kind: kind, ID: id, Action: ImportImpactUnchanged, Reason: "same_content_already_present"})
+	case equal(existing, incoming):
+		appendImportImpact(preview, existingImportImpact(kind, id, ImportImpactUnchanged, "same_content_already_present", existing))
 	default:
-		appendImportImpact(preview, ImportImpact{Kind: kind, ID: id, Action: ImportImpactConflict, Reason: "id_exists_with_different_content", Blocking: true})
+		impact := existingImportImpact(kind, id, ImportImpactConflict, "id_exists_with_different_content", existing)
+		impact.Blocking, impact.ConflictResolvable = true, true
+		appendImportImpact(preview, impact)
 	}
 	return nil
+}
+
+func protectLatestImportConflict(preview *ImportPreview, kind knowledgeStore.RecordKind, id, reason string) {
+	if len(preview.Impacts) == 0 {
+		return
+	}
+	impact := &preview.Impacts[len(preview.Impacts)-1]
+	if impact.Kind == kind && impact.ID == id && impact.Action == ImportImpactConflict {
+		impact.Reason, impact.ConflictResolvable = reason, false
+	}
+}
+
+func existingImportImpact(kind knowledgeStore.RecordKind, id string, action ImportImpactAction, reason string, existing any) ImportImpact {
+	return ImportImpact{
+		Kind: kind, ID: id, Action: action, Reason: reason, ExistingID: id,
+		ExistingRevision: importRecordRevision(existing), ExistingFingerprint: importRecordFingerprint(existing),
+	}
+}
+
+func importRecordRevision(value any) uint64 {
+	switch record := value.(type) {
+	case knowledge.Chunk:
+		return record.Revision.Number
+	case knowledge.Entry:
+		return record.Revision.Number
+	case knowledge.Link:
+		return record.Revision.Number
+	default:
+		return 0
+	}
+}
+
+func importRecordFingerprint(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 func appendImportImpact(preview *ImportPreview, impact ImportImpact) {
@@ -357,6 +448,31 @@ func packageChunk(manifest kpackage.Manifest) knowledge.Chunk {
 
 func packageChunkContentEqual(existing, incoming knowledge.Chunk) bool {
 	return chunkContentEqual(existing, incoming) && existing.State == incoming.State
+}
+
+func packageEntryContentEqual(existing, incoming knowledge.Entry) bool {
+	existing.Revision, incoming.Revision = knowledge.Revision{}, knowledge.Revision{}
+	existing.CreatedAt, incoming.CreatedAt = time.Time{}, time.Time{}
+	existing.UpdatedAt, incoming.UpdatedAt = time.Time{}, time.Time{}
+	existing.LastUsedAt, incoming.LastUsedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(existing, incoming)
+}
+
+func packageLinkContentEqual(existing, incoming knowledge.Link) bool {
+	existing.Revision, incoming.Revision = knowledge.Revision{}, knowledge.Revision{}
+	existing.CreatedAt, incoming.CreatedAt = time.Time{}, time.Time{}
+	existing.UpdatedAt, incoming.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(existing, incoming)
+}
+
+func packageEvidenceContentEqual(existing, incoming knowledge.Evidence) bool {
+	existing.Actor, incoming.Actor = knowledge.Actor{}, knowledge.Actor{}
+	existing.CreatedAt, incoming.CreatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(existing, incoming)
+}
+
+func packageAssetContentEqual(existing, incoming knowledgeStore.PackageAsset) bool {
+	return reflect.DeepEqual(existing, incoming)
 }
 
 func dependencyReason(required bool) string {
