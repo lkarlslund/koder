@@ -4250,6 +4250,13 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 	t.Cleanup(func() { _ = st.Close() })
 	engine := agent.New(cfg, st, nil, nil)
 	ctrl := app.New(cfg, engine)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ctrl.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown test controller: %v", err)
+		}
+	})
 	if err := ctrl.Start(context.Background(), app.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
