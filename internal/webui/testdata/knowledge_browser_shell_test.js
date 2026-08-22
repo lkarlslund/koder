@@ -98,6 +98,16 @@ assert.deepStrictEqual(browser.editorConflict(
   serverFields: ['description', 'title'], draftFields: ['title'], overlappingFields: ['title'],
   merged: {title: 'My title', description: 'Server description', tags: 'one', review_approved: false},
 });
+const historyRevisions = [
+  {kind: 'entry', entry: {id: 'entry-1', chunk_id: 'chunk-1', kind: 'fact', title: 'New title', summary: 'New summary', scope: {kind: 'global'}, state: 'active', evidence_ids: ['evidence-1'], revision: {number: 2, id: 'revision-2', reason: 'Correct wording', actor: {kind: 'user', id: 'me'}, created_at: '2026-01-02T10:00:00Z'}}},
+  {kind: 'entry', entry: {id: 'entry-1', chunk_id: 'chunk-1', kind: 'fact', title: 'Old title', summary: 'Old summary', scope: {kind: 'global'}, state: 'active', evidence_ids: ['evidence-1'], revision: {number: 1, id: 'revision-1', actor: {kind: 'agent', id: 'chat-1'}, created_at: '2026-01-01T10:00:00Z'}}},
+];
+const history = browser.historyTimeline(historyRevisions, 'entry', [{id: 'evidence-1', quality: 'primary', source: {title: 'User statement'}}]);
+assert.strictEqual(history[0].action, 'Correct wording');
+assert.deepStrictEqual(history[0].changedFields, ['summary', 'title']);
+assert.strictEqual(history[0].evidence[0].source.title, 'User statement');
+assert.strictEqual(history[1].isCreation, true);
+assert.strictEqual(browser.historyTimeline([historyRevisions[1]], 'entry', [], {hasOlder: true})[0].isCreation, false);
 assert.strictEqual(browser.relationshipShapeError('contradicts', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), '');
 assert.match(browser.relationshipShapeError('contradicts', {kind: 'chunk', id: 'one'}, {kind: 'entry', id: 'two'}), /two entries/);
 assert.match(browser.relationshipShapeError('part_of', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), /point to a chunk/);

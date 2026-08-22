@@ -389,6 +389,56 @@
     return {serverFields, draftFields, overlappingFields, merged};
   }
 
+  function historyProjection(objectKind, record) {
+    const value = record && record[objectKind];
+    if (!value) return null;
+    let projection;
+    if (objectKind === 'chunk') projection = chunkEditorValues(value);
+    else if (objectKind === 'entry') projection = entryEditorValues(value);
+    else if (objectKind === 'link') {
+      projection = {
+        source: value.source && `${value.source.kind}:${value.source.id}`, target: value.target && `${value.target.kind}:${value.target.id}`,
+        kind: value.kind || '', label: value.label || '', notes: value.notes || '', evidence_ids: (value.evidence_ids || []).join(', '),
+      };
+    } else return null;
+    delete projection.review_approved;
+    return {...projection, state: value.state || '', superseded_by_id: value.superseded_by_id || '', verification: value.verification && value.verification.status || ''};
+  }
+
+  function historyChangedFields(previous, current) {
+    previous = previous || {};
+    current = current || {};
+    return [...new Set([...Object.keys(previous), ...Object.keys(current)])]
+      .filter(key => comparableEditorValue(previous[key]) !== comparableEditorValue(current[key]))
+      .sort();
+  }
+
+  function historyTimeline(revisions, objectKind, evidence, options) {
+    revisions = Array.isArray(revisions) ? revisions : [];
+    evidence = Array.isArray(evidence) ? evidence : [];
+    options = options || {};
+    const evidenceByID = new Map(evidence.map(item => [String(item && item.id || ''), item]));
+    return revisions.map((record, index) => {
+      const value = record && record[objectKind] || {};
+      const revision = value.revision || {};
+      const older = index + 1 < revisions.length ? historyProjection(objectKind, revisions[index + 1]) : null;
+      const current = historyProjection(objectKind, record) || {};
+      const isCreation = !older && !options.hasOlder;
+      const changedFields = older ? historyChangedFields(older, current) : [];
+      const evidenceIDs = Array.isArray(value.evidence_ids) ? value.evidence_ids.map(String) : [];
+      const snippetSource = objectKind === 'entry' ? value.summary || value.body : objectKind === 'chunk' ? value.description : value.notes;
+      return {
+        revision: Number(revision.number) || 0, revisionID: String(revision.id || ''), reason: String(revision.reason || ''),
+        actor: [revision.actor && revision.actor.kind, revision.actor && revision.actor.id].filter(Boolean).join(':'),
+        timestamp: String(revision.created_at || value.updated_at || ''), state: String(value.state || ''),
+        title: String(value.title || value.label || displayLabel(value.kind) || `${displayLabel(objectKind)} revision`),
+        action: String(revision.reason || (isCreation ? 'Created' : `Revision ${revision.number || ''}`)).trim(),
+        changedFields, isCreation, snippet: plainTextLabel(snippetSource, 320), evidenceIDs,
+        evidence: evidenceIDs.map(id => evidenceByID.get(id)).filter(Boolean),
+      };
+    });
+  }
+
   const relationshipKinds = new Set(['related_to', 'part_of', 'requires', 'alternative_to', 'applies_to', 'supersedes', 'contradicts', 'caused_by', 'supported_by', 'derived_from']);
   const symmetricRelationshipKinds = new Set(['related_to', 'alternative_to', 'contradicts']);
 
@@ -584,6 +634,11 @@
         evidenceList: shell.querySelector('[data-knowledge-evidence-list]'),
         evidenceCount: shell.querySelector('[data-knowledge-evidence-count]'),
         supportStatus: shell.querySelector('[data-knowledge-support-status]'),
+        history: shell.querySelector('[data-knowledge-inspector-history]'),
+        historyList: shell.querySelector('[data-knowledge-history-list]'),
+        historyCount: shell.querySelector('[data-knowledge-history-count]'),
+        historyStatus: shell.querySelector('[data-knowledge-history-status]'),
+        historyMore: shell.querySelector('[data-knowledge-history-more]'),
         sendButton: shell.querySelector('[data-knowledge-send-chat]'),
         sendStatus: shell.querySelector('[data-knowledge-send-status]'),
       };
@@ -668,6 +723,7 @@
       }
       if (this.linkUnlinkButton) this.linkUnlinkButton.addEventListener('click', () => this.changeLinkLifecycle('unlink'));
       if (this.linkRestoreButton) this.linkRestoreButton.addEventListener('click', () => this.changeLinkLifecycle('restore'));
+      if (this.inspector.historyMore) this.inspector.historyMore.addEventListener('click', () => this.loadOlderHistory());
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -1198,6 +1254,8 @@
       if (!this.client || typeof this.client.cancel !== 'function') return;
       this.client.cancel('inspector-evidence');
       this.client.cancel('inspector-relations');
+      this.client.cancel('inspector-history');
+      this.client.cancel('inspector-history-more');
     }
 
     async loadSelection() {
@@ -1346,6 +1404,8 @@
       this.inspectedObject = {kind: objectKind, id: String(record.id || '')};
       this.inspectedRecord = record;
       this.renderInspectorSupport(objectKind, record, [], [], []);
+      this.historyState = {objectKind, id: String(record.id || ''), revisions: [], evidence: [], nextCursor: '', loading: true, error: ''};
+      this.renderHistoryTimeline();
       const expandable = ['chunk', 'entry'].includes(objectKind);
       if (this.graphExpandActions) this.graphExpandActions.hidden = !expandable;
       if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = !expandable;
@@ -1399,7 +1459,10 @@
       const relationsTask = ['chunk', 'entry'].includes(objectKind) && typeof this.client.neighbors === 'function'
         ? this.client.neighbors({object: {kind: objectKind, id}, kinds: ['contradicts'], limit: 25}, {channel: 'inspector-relations'}).then(response => ({response})).catch(error => ({error}))
         : Promise.resolve({response: {neighbors: [], page: {}}});
-      const [evidenceResult, relationsResult] = await Promise.all([evidenceTask, relationsTask]);
+      const historyTask = ['chunk', 'entry', 'link'].includes(objectKind) && typeof this.client.history === 'function'
+        ? this.client.history(objectKind, id, {limit: 20}, {channel: 'inspector-history'}).then(response => ({response})).catch(error => ({error}))
+        : Promise.resolve({response: {revisions: [], page: {}}});
+      const [evidenceResult, relationsResult, historyResult] = await Promise.all([evidenceTask, relationsTask, historyTask]);
       if (!this.inspectedObject || this.inspectedObject.kind !== objectKind || this.inspectedObject.id !== id) return;
       const evidence = Array.isArray(evidenceResult.response && evidenceResult.response.evidence) ? evidenceResult.response.evidence : [];
       const neighbors = Array.isArray(relationsResult.response && relationsResult.response.neighbors) ? relationsResult.response.neighbors : [];
@@ -1407,6 +1470,15 @@
       const truncated = !!(evidenceResult.response && evidenceResult.response.page && evidenceResult.response.page.next_cursor) ||
         !!(relationsResult.response && relationsResult.response.page && relationsResult.response.page.next_cursor);
       this.renderInspectorSupport(objectKind, record, evidence, neighbors, errors, truncated);
+      const historyError = historyResult.error && !['canceled', 'stale_response'].includes(historyResult.error.code) ? historyResult.error : null;
+      const historyResponse = historyResult.response || {};
+      this.historyState = {
+        objectKind, id, revisions: Array.isArray(historyResponse.revisions) ? historyResponse.revisions : [], evidence,
+        nextCursor: String(historyResponse.page && historyResponse.page.next_cursor || ''), loading: false,
+        error: historyError ? String(historyError.message || 'Revision history could not be loaded.') : '',
+        requestID: historyError ? String(historyError.requestID || '') : '',
+      };
+      this.renderHistoryTimeline();
     }
 
     renderInspectorSupport(objectKind, record, evidence, neighbors, errors, truncated) {
@@ -1482,6 +1554,115 @@
       }
       if (this.inspector.supportStatus) {
         this.inspector.supportStatus.textContent = errors && errors.length ? 'Some supporting details are temporarily unavailable.' : truncated ? 'Showing the first bounded set of supporting records.' : '';
+      }
+    }
+
+    renderHistoryTimeline() {
+      const state = this.historyState || {};
+      const list = this.inspector.historyList;
+      if (!list) return;
+      list.replaceChildren();
+      const revisions = Array.isArray(state.revisions) ? state.revisions : [];
+      if (this.inspector.historyCount) this.inspector.historyCount.textContent = revisions.length ? `${revisions.length}${state.nextCursor ? '+' : ''}` : '';
+      if (this.inspector.historyStatus) {
+        const request = state.requestID ? ` Audit ID: ${state.requestID}` : '';
+        this.inspector.historyStatus.textContent = state.loading ? 'Loading revision history…'
+          : state.error ? state.error + request
+            : !revisions.length ? 'No revision history is available.'
+              : state.nextCursor ? `Showing the newest ${revisions.length} revisions.` : `Showing all ${revisions.length} revisions.`;
+      }
+      if (this.inspector.historyMore) {
+        this.inspector.historyMore.hidden = !state.nextCursor || !!state.loading;
+        this.inspector.historyMore.disabled = !!state.loading;
+      }
+      for (const item of historyTimeline(revisions, state.objectKind, state.evidence, {hasOlder: !!state.nextCursor})) {
+        const row = this.shell.ownerDocument.createElement('li');
+        row.className = 'knowledge-history-item';
+        const marker = this.shell.ownerDocument.createElement('span');
+        marker.className = 'knowledge-history-marker';
+        marker.setAttribute('aria-hidden', 'true');
+        const card = this.shell.ownerDocument.createElement('article');
+        card.className = 'knowledge-history-card';
+        const header = this.shell.ownerDocument.createElement('header');
+        const action = this.shell.ownerDocument.createElement('strong');
+        action.textContent = item.action;
+        const timestamp = this.shell.ownerDocument.createElement('time');
+        timestamp.dateTime = item.timestamp;
+        timestamp.textContent = formatTimestamp(item.timestamp);
+        header.append(action, timestamp);
+        const meta = this.shell.ownerDocument.createElement('div');
+        meta.className = 'knowledge-history-meta';
+        meta.textContent = [`Revision ${item.revision}`, item.actor, displayLabel(item.state)].filter(Boolean).join(' · ');
+        card.append(header, meta);
+        const changes = this.shell.ownerDocument.createElement('div');
+        changes.className = 'knowledge-history-changes';
+        const fields = item.isCreation ? ['Initial version'] : item.changedFields.map(displayLabel);
+        for (const field of fields) {
+          const badge = this.shell.ownerDocument.createElement('span');
+          badge.textContent = field;
+          changes.appendChild(badge);
+        }
+        if (fields.length) card.appendChild(changes);
+        if (item.snippet) {
+          const snippet = this.shell.ownerDocument.createElement('p');
+          snippet.className = 'knowledge-history-snippet';
+          snippet.textContent = item.snippet;
+          card.appendChild(snippet);
+        }
+        if (item.evidenceIDs.length) {
+          const evidence = this.shell.ownerDocument.createElement('div');
+          evidence.className = 'knowledge-history-evidence';
+          const heading = this.shell.ownerDocument.createElement('span');
+          heading.textContent = `${item.evidenceIDs.length} evidence ${item.evidenceIDs.length === 1 ? 'record' : 'records'} on this revision`;
+          evidence.appendChild(heading);
+          const details = new Map(item.evidence.map(value => [String(value.id), value]));
+          for (const id of item.evidenceIDs) {
+            const value = details.get(id);
+            const line = this.shell.ownerDocument.createElement(value ? 'span' : 'code');
+            line.textContent = value
+              ? [value.source && (value.source.title || value.source.id), displayLabel(value.quality)].filter(Boolean).join(' · ')
+              : id;
+            evidence.appendChild(line);
+          }
+          card.appendChild(evidence);
+        }
+        row.append(marker, card);
+        list.appendChild(row);
+      }
+    }
+
+    async loadOlderHistory() {
+      const state = this.historyState;
+      if (!state || !state.nextCursor || state.loading || !this.client) return false;
+      state.loading = true;
+      state.error = '';
+      this.renderHistoryTimeline();
+      try {
+        const response = await this.client.history(state.objectKind, state.id, {limit: 20, cursor: state.nextCursor}, {channel: 'inspector-history-more'});
+        if (this.historyState !== state || !this.inspectedObject || this.inspectedObject.kind !== state.objectKind || this.inspectedObject.id !== state.id) return false;
+        const seen = new Set(state.revisions.map(record => {
+          const value = record && record[state.objectKind];
+          return String(value && value.revision && value.revision.id || '');
+        }));
+        for (const record of Array.isArray(response && response.revisions) ? response.revisions : []) {
+          const value = record && record[state.objectKind];
+          const revisionID = String(value && value.revision && value.revision.id || '');
+          if (!revisionID || seen.has(revisionID)) continue;
+          seen.add(revisionID);
+          state.revisions.push(record);
+        }
+        state.nextCursor = String(response && response.page && response.page.next_cursor || '');
+        return true;
+      } catch (error) {
+        if (error && ['canceled', 'stale_response'].includes(error.code)) return false;
+        state.error = String(error && error.message || 'Older revisions could not be loaded.');
+        state.requestID = String(error && error.requestID || '');
+        return false;
+      } finally {
+        if (this.historyState === state) {
+          state.loading = false;
+          this.renderHistoryTimeline();
+        }
       }
     }
 
@@ -2217,5 +2398,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

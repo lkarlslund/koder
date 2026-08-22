@@ -201,6 +201,12 @@
       if (!['unlink', 'restore'].includes(action)) throw new TypeError('Knowledge relationship lifecycle action is invalid');
       return this.request('/links/' + encodeID(id) + '/' + action, {...options, method: 'POST', body});
     }
+    history(kind, id, query, options) {
+      kind = String(kind || '');
+      const collections = {chunk: 'chunks', entry: 'entries', link: 'links'};
+      if (!collections[kind]) throw new TypeError('Knowledge history object kind is invalid');
+      return this.request('/' + collections[kind] + '/' + encodeID(id) + '/history', {...options, query});
+    }
     search(body, options) { return this.request('/search', {...options, method: 'POST', body}); }
     graphSnapshot(body, options) { return this.request('/graph/snapshot', {...options, method: 'POST', body}); }
     neighbors(body, options) { return this.request('/neighbors', {...options, method: 'POST', body}); }

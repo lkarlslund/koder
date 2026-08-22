@@ -61,12 +61,15 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[13].url, '/api/knowledge/v1/links/link-1/unlink');
   assert.strictEqual(requests[13].options.method, 'POST');
   assert.throws(() => client.linkLifecycle('link-1', 'delete', {}), /invalid/);
+  await client.history('entry', 'entry-1', {limit: 20, cursor: 'older'}, {channel: 'history'});
+  assert.strictEqual(requests[14].url, '/api/knowledge/v1/entries/entry-1/history?cursor=older&limit=20');
+  assert.throws(() => client.history('evidence', 'evidence-1', {}), /invalid/);
 
   const selection = {session_id: 'session-1', chat_id: 'chat-2', object: {kind: 'entry', id: 'entry-3'}};
   await client.sendToChat(selection, {channel: 'send'});
-  assert.strictEqual(requests[14].url, '/api/knowledge/v1/chat-context');
-  assert.strictEqual(requests[14].options.method, 'POST');
-  assert.deepStrictEqual(JSON.parse(requests[14].options.body), selection);
+  assert.strictEqual(requests[15].url, '/api/knowledge/v1/chat-context');
+  assert.strictEqual(requests[15].options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(requests[15].options.body), selection);
 }
 
 async function testNewGenerationCancelsStaleRequest() {
