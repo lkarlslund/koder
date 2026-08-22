@@ -114,7 +114,7 @@ func (s *Service) SupersedeEntry(ctx context.Context, request SupersedeEntryRequ
 	if result.Updated {
 		event := entryMutation(MutationSuperseded, result.Entry)
 		event.Related = []MutationObject{{Kind: knowledgeStore.RecordKindEntry, ID: string(request.ReplacementEntryID)}}
-		s.publishMutation(event)
+		s.publishMutation(ctx, event)
 	}
 	return result, nil
 }

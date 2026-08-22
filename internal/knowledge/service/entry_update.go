@@ -138,7 +138,7 @@ func (s *Service) UpdateEntry(ctx context.Context, request UpdateEntryRequest) (
 		return UpdateEntryResult{}, fmt.Errorf("update knowledge entry: %w", err)
 	}
 	if result.Updated {
-		s.publishMutation(entryMutation(MutationUpdated, result.Entry))
+		s.publishMutation(ctx, entryMutation(MutationUpdated, result.Entry))
 	}
 	return result, nil
 }

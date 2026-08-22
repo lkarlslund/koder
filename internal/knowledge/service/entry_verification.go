@@ -123,7 +123,7 @@ func (s *Service) VerifyEntry(ctx context.Context, request VerifyEntryRequest) (
 		return VerifyEntryResult{}, fmt.Errorf("verify knowledge entry: %w", err)
 	}
 	if result.Updated {
-		s.publishMutation(entryMutation(MutationVerified, result.Entry))
+		s.publishMutation(ctx, entryMutation(MutationVerified, result.Entry))
 	}
 	return result, nil
 }

@@ -192,7 +192,7 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	}); err != nil {
 		return CreateChunkResult{}, fmt.Errorf("create knowledge chunk: %w", err)
 	}
-	s.publishMutation(chunkMutation(MutationCreated, candidate))
+	s.publishMutation(ctx, chunkMutation(MutationCreated, candidate))
 	return CreateChunkResult{Chunk: candidate, Classification: classification}, nil
 }
 

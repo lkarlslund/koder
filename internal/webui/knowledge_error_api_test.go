@@ -70,6 +70,7 @@ func assertKnowledgeAPIError(t *testing.T, response *http.Response, status int, 
 	decodeKnowledgeResponse(t, response, &body)
 	requestID := response.Header.Get("X-Koder-Request-ID")
 	if response.StatusCode != status || body.APIVersion != knowledgeapi.Version || body.RequestID == "" || body.RequestID != requestID ||
+		response.Header.Get("X-Koder-Audit-ID") != requestID ||
 		body.Error == nil || body.Error.Code != code || body.Error.Message == "" {
 		t.Fatalf("error status=%d headers=%v response=%#v", response.StatusCode, response.Header, body)
 	}

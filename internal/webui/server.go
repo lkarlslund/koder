@@ -71,17 +71,18 @@ type Options struct {
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
 type Server struct {
-	controller        *app.Controller
-	options           Options
-	server            *http.Server
-	listener          net.Listener
-	connected         chan struct{}
-	once              sync.Once
-	debug             *debugsrv.Recorder
-	clientSelectionMu sync.Mutex
-	clientSelections  map[string]clientSelection
-	devices           *deviceauth.Registry
-	voice             *voiceapi.Handler
+	controller              *app.Controller
+	options                 Options
+	server                  *http.Server
+	listener                net.Listener
+	connected               chan struct{}
+	once                    sync.Once
+	debug                   *debugsrv.Recorder
+	clientSelectionMu       sync.Mutex
+	clientSelections        map[string]clientSelection
+	devices                 *deviceauth.Registry
+	voice                   *voiceapi.Handler
+	knowledgeRequestTimeout time.Duration
 }
 
 type clientSelection struct {
@@ -123,13 +124,14 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		return nil, fmt.Errorf("migrate voice token: %w", err)
 	}
 	s := &Server{
-		controller:       controller,
-		options:          options,
-		listener:         listener,
-		connected:        make(chan struct{}),
-		debug:            options.Debug,
-		clientSelections: map[string]clientSelection{},
-		devices:          devices,
+		controller:              controller,
+		options:                 options,
+		listener:                listener,
+		connected:               make(chan struct{}),
+		debug:                   options.Debug,
+		clientSelections:        map[string]clientSelection{},
+		devices:                 devices,
+		knowledgeRequestTimeout: defaultKnowledgeRequestTimeout,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -157,7 +159,10 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		debugServer := debugsrv.NewServer(controller, s.debug)
 		debugServer.Register(mux)
 	}
-	s.server = &http.Server{Handler: mux}
+	s.server = &http.Server{
+		Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
+		MaxHeaderBytes: 64 << 10,
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -101,7 +101,7 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 	if err != nil {
 		return CreateLinkResult{}, fmt.Errorf("create knowledge link: %w", err)
 	}
-	s.publishMutation(linkMutation(MutationCreated, result.Link))
+	s.publishMutation(ctx, linkMutation(MutationCreated, result.Link))
 	return result, nil
 }
 

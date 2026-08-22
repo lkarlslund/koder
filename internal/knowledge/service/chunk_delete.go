@@ -65,7 +65,7 @@ func (s *Service) DeleteChunk(ctx context.Context, request DeleteChunkRequest) e
 	if err != nil {
 		return fmt.Errorf("delete knowledge chunk: %w", err)
 	}
-	s.publishMutation(chunkMutation(MutationDeleted, deleted))
+	s.publishMutation(ctx, chunkMutation(MutationDeleted, deleted))
 	return nil
 }
 

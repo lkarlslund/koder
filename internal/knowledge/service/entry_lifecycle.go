@@ -114,7 +114,7 @@ func (s *Service) changeEntryState(ctx context.Context, request EntryLifecycleRe
 		if target == knowledge.EntryStateActive {
 			kind = MutationRestored
 		}
-		s.publishMutation(entryMutation(kind, result.Entry))
+		s.publishMutation(ctx, entryMutation(kind, result.Entry))
 	}
 	return result, nil
 }

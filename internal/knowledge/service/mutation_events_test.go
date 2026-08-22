@@ -15,18 +15,25 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 	t.Cleanup(func() { _ = store.Close() })
 	service := newTestService(t, store, nil)
 	events, unsubscribe := service.SubscribeMutations(8)
+	ctx, err := WithAuditID(context.Background(), "request:test-1")
+	if err != nil {
+		t.Fatalf("WithAuditID() error = %v", err)
+	}
 
-	created, err := service.CreateChunk(context.Background(), CreateChunkRequest{Chunk: testChunkCandidate()})
+	created, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
 	if err != nil {
 		t.Fatalf("CreateChunk() error = %v", err)
 	}
 	first := receiveMutation(t, events)
 	assertMutation(t, first, MutationCreated, knowledgeStore.RecordKindChunk, string(created.Chunk.ID), 1, 1)
+	if first.AuditID != "request:test-1" {
+		t.Fatalf("mutation audit ID = %q", first.AuditID)
+	}
 	if checkpoint := service.MutationCheckpoint(); checkpoint.StreamID != first.StreamID || checkpoint.Sequence != first.Sequence {
 		t.Fatalf("mutation checkpoint = %#v, want event checkpoint %#v", checkpoint, first)
 	}
 
-	noop, err := service.UpdateChunk(context.Background(), UpdateChunkRequest{
+	noop, err := service.UpdateChunk(ctx, UpdateChunkRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: 1, Content: ChunkContentFrom(created.Chunk),
 	})
 	if err != nil || noop.Updated {
@@ -36,7 +43,7 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 
 	content := ChunkContentFrom(created.Chunk)
 	content.Title = "Revised chunk"
-	updated, err := service.UpdateChunk(context.Background(), UpdateChunkRequest{
+	updated, err := service.UpdateChunk(ctx, UpdateChunkRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: 1, Content: content,
 	})
 	if err != nil {
@@ -49,14 +56,14 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 	}
 
 	content.Title = "Stale write"
-	if _, err := service.UpdateChunk(context.Background(), UpdateChunkRequest{
+	if _, err := service.UpdateChunk(ctx, UpdateChunkRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: 1, Content: content,
 	}); !errors.Is(err, knowledgeStore.ErrConflict) {
 		t.Fatalf("UpdateChunk(stale) error = %v, want conflict", err)
 	}
 	assertNoMutation(t, events)
 
-	archived, err := service.ArchiveChunk(context.Background(), ChunkLifecycleRequest{
+	archived, err := service.ArchiveChunk(ctx, ChunkLifecycleRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: updated.Chunk.Revision.Number,
 	})
 	if err != nil {
@@ -65,7 +72,7 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 	third := receiveMutation(t, events)
 	assertMutation(t, third, MutationArchived, knowledgeStore.RecordKindChunk, string(created.Chunk.ID), 3, 3)
 
-	if err := service.DeleteChunk(context.Background(), DeleteChunkRequest{
+	if err := service.DeleteChunk(ctx, DeleteChunkRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: archived.Chunk.Revision.Number, Confirmed: true,
 	}); err != nil {
 		t.Fatalf("DeleteChunk() error = %v", err)

@@ -88,7 +88,7 @@ func (s *Service) CreateEvidence(ctx context.Context, request CreateEvidenceRequ
 		return CreateEvidenceResult{}, fmt.Errorf("create knowledge evidence: %w", err)
 	}
 	if result.Created {
-		s.publishMutation(evidenceMutation(MutationCreated, result.Evidence))
+		s.publishMutation(ctx, evidenceMutation(MutationCreated, result.Evidence))
 	}
 	return result, nil
 }

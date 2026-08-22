@@ -77,6 +77,6 @@ func (s *Service) DeleteEntry(ctx context.Context, request DeleteEntryRequest) e
 	if err != nil {
 		return fmt.Errorf("delete knowledge entry: %w", err)
 	}
-	s.publishMutation(entryMutation(MutationDeleted, deleted))
+	s.publishMutation(ctx, entryMutation(MutationDeleted, deleted))
 	return nil
 }

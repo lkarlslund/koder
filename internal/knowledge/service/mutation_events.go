@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"slices"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
@@ -30,6 +31,7 @@ type MutationEvent struct {
 	Object   MutationObject    `json:"object"`
 	Revision *MutationRevision `json:"revision,omitempty"`
 	Related  []MutationObject  `json:"related,omitempty"`
+	AuditID  string            `json:"audit_id,omitempty"`
 }
 
 type MutationObject struct {
@@ -79,17 +81,18 @@ func (s *Service) SubscribeMutations(buffer int) (<-chan MutationEvent, func()) 
 	}
 }
 
-func (s *Service) publishMutation(event MutationEvent) {
-	s.publishMutations([]MutationEvent{event})
+func (s *Service) publishMutation(ctx context.Context, event MutationEvent) {
+	s.publishMutations(ctx, []MutationEvent{event})
 }
 
-func (s *Service) publishMutations(events []MutationEvent) {
+func (s *Service) publishMutations(ctx context.Context, events []MutationEvent) {
 	if len(events) == 0 {
 		return
 	}
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
 	for _, event := range events {
+		event.AuditID = AuditIDFromContext(ctx)
 		s.mutationSequence++
 		event.StreamID = s.mutationStreamID
 		event.Sequence = s.mutationSequence

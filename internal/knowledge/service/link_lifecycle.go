@@ -120,7 +120,7 @@ func (s *Service) changeLinkState(ctx context.Context, request LinkLifecycleRequ
 		if target == knowledge.LinkStateActive {
 			kind = MutationRestored
 		}
-		s.publishMutation(linkMutation(kind, result.Link))
+		s.publishMutation(ctx, linkMutation(kind, result.Link))
 	}
 	return result, nil
 }

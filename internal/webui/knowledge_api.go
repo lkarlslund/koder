@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/id"
@@ -18,18 +20,125 @@ import (
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
+const (
+	defaultKnowledgeRequestTimeout = 15 * time.Second
+	maxKnowledgeRequestBody        = 1 << 20
+	maxKnowledgeRequestPath        = 8 << 10
+	maxKnowledgeRequestQuery       = 16 << 10
+	maxKnowledgeAuthorization      = 8 << 10
+	maxKnowledgeDeviceHeader       = 1 << 10
+)
+
 func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
-	mux.HandleFunc(knowledgeapi.ChunkCollectionPath, s.handleKnowledgeChunks)
-	mux.HandleFunc(knowledgeapi.ChunkCollectionPath+"/", s.handleKnowledgeChunk)
-	mux.HandleFunc(knowledgeapi.EntryCollectionPath, s.handleKnowledgeEntries)
-	mux.HandleFunc(knowledgeapi.EntryCollectionPath+"/", s.handleKnowledgeEntry)
-	mux.HandleFunc(knowledgeapi.LinkCollectionPath, s.handleKnowledgeLinks)
-	mux.HandleFunc(knowledgeapi.LinkCollectionPath+"/", s.handleKnowledgeLink)
-	mux.HandleFunc(knowledgeapi.SearchPath, s.handleKnowledgeSearch)
-	mux.HandleFunc(knowledgeapi.GraphSnapshotPath, s.handleKnowledgeGraphSnapshot)
-	mux.HandleFunc(knowledgeapi.NeighborPath, s.handleKnowledgeNeighbors)
-	mux.HandleFunc(knowledgeapi.OperationalStatusPath, s.handleKnowledgeOperationalStatus)
-	mux.HandleFunc(knowledgeapi.IndexRebuildPath, s.handleKnowledgeIndexRebuild)
+	mux.Handle(knowledgeapi.ChunkCollectionPath, s.knowledgeEndpoint(s.handleKnowledgeChunks))
+	mux.Handle(knowledgeapi.ChunkCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgeChunk))
+	mux.Handle(knowledgeapi.EntryCollectionPath, s.knowledgeEndpoint(s.handleKnowledgeEntries))
+	mux.Handle(knowledgeapi.EntryCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgeEntry))
+	mux.Handle(knowledgeapi.LinkCollectionPath, s.knowledgeEndpoint(s.handleKnowledgeLinks))
+	mux.Handle(knowledgeapi.LinkCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgeLink))
+	mux.Handle(knowledgeapi.SearchPath, s.knowledgeEndpoint(s.handleKnowledgeSearch))
+	mux.Handle(knowledgeapi.GraphSnapshotPath, s.knowledgeEndpoint(s.handleKnowledgeGraphSnapshot))
+	mux.Handle(knowledgeapi.NeighborPath, s.knowledgeEndpoint(s.handleKnowledgeNeighbors))
+	mux.Handle(knowledgeapi.OperationalStatusPath, s.knowledgeEndpoint(s.handleKnowledgeOperationalStatus))
+	mux.Handle(knowledgeapi.IndexRebuildPath, s.knowledgeEndpoint(s.handleKnowledgeIndexRebuild))
+}
+
+func (s *Server) knowledgeEndpoint(handler http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auditID := string(id.New())
+		ctx, err := knowledgeService.WithAuditID(r.Context(), auditID)
+		if err != nil {
+			s.writeKnowledgeError(w, auditID, http.StatusInternalServerError, knowledgeService.ErrorCodeInternal, "Knowledge could not complete the operation.")
+			return
+		}
+		timeout := s.knowledgeRequestTimeout
+		if timeout <= 0 {
+			timeout = defaultKnowledgeRequestTimeout
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+		if deadline, ok := ctx.Deadline(); ok {
+			responseController := http.NewResponseController(w)
+			_ = responseController.SetReadDeadline(deadline)
+			_ = responseController.SetWriteDeadline(deadline.Add(2 * time.Second))
+			defer func() {
+				_ = responseController.SetReadDeadline(time.Time{})
+				_ = responseController.SetWriteDeadline(time.Time{})
+			}()
+		}
+		w.Header().Set("X-Koder-Request-ID", auditID)
+		w.Header().Set("X-Koder-Audit-ID", auditID)
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		recorder := &knowledgeResponseRecorder{ResponseWriter: w}
+		started := time.Now()
+		defer func() {
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			log := slog.Debug
+			if r.Method != http.MethodGet || status >= http.StatusBadRequest {
+				log = slog.Info
+			}
+			log("knowledge api request", "audit_id", auditID, "method", r.Method, "path", boundedKnowledgeAuditPath(r.URL.Path),
+				"status", status, "elapsed_ms", time.Since(started).Milliseconds())
+		}()
+		if !validKnowledgeTransportRequest(r) {
+			s.writeKnowledgeError(recorder, auditID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+			return
+		}
+		if r.ContentLength > maxKnowledgeRequestBody {
+			s.writeKnowledgeError(recorder, auditID, http.StatusRequestEntityTooLarge, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+			return
+		}
+		handler(recorder, r)
+	})
+}
+
+func boundedKnowledgeAuditPath(value string) string {
+	const limit = 256
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
+}
+
+type knowledgeResponseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *knowledgeResponseRecorder) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *knowledgeResponseRecorder) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func validKnowledgeTransportRequest(r *http.Request) bool {
+	if r == nil || len(r.URL.Path) > maxKnowledgeRequestPath || len(r.URL.RawQuery) > maxKnowledgeRequestQuery ||
+		len(r.Header.Get("Authorization")) > maxKnowledgeAuthorization {
+		return false
+	}
+	for _, name := range []string{
+		"X-Koder-Device-ID", "X-Koder-Device-Name", "X-Koder-Device-Manufacturer", "X-Koder-Device-Model",
+		"X-Koder-Android-Version", "X-Koder-App-Version", "X-Koder-App-ID",
+	} {
+		if len(r.Header.Get(name)) > maxKnowledgeDeviceHeader {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {
@@ -240,8 +349,12 @@ func (s *Server) deleteKnowledgeChunk(w http.ResponseWriter, r *http.Request, re
 }
 
 func (s *Server) authenticateKnowledgeRequest(w http.ResponseWriter, r *http.Request) (string, context.Context, bool) {
-	requestID := string(id.New())
+	requestID := knowledgeService.AuditIDFromContext(r.Context())
+	if requestID == "" {
+		requestID = string(id.New())
+	}
 	w.Header().Set("X-Koder-Request-ID", requestID)
+	w.Header().Set("X-Koder-Audit-ID", requestID)
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	token, ok := bearerCredential(r.Header.Get("Authorization"))
@@ -395,7 +508,7 @@ func decodeKnowledgeJSON(w http.ResponseWriter, r *http.Request, target any) err
 	if r.URL.RawQuery != "" {
 		return fmt.Errorf("request query parameters are not supported")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxKnowledgeRequestBody)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

@@ -139,7 +139,7 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 	if err != nil {
 		return CascadeDeleteChunkResult{}, fmt.Errorf("cascade delete knowledge chunk: %w", err)
 	}
-	s.publishMutations(mutationEvents)
+	s.publishMutations(ctx, mutationEvents)
 	return result, nil
 }
 

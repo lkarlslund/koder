@@ -114,7 +114,7 @@ func (s *Service) changeChunkState(ctx context.Context, request ChunkLifecycleRe
 		if target == knowledge.ChunkStateActive {
 			kind = MutationRestored
 		}
-		s.publishMutation(chunkMutation(kind, result.Chunk))
+		s.publishMutation(ctx, chunkMutation(kind, result.Chunk))
 	}
 	return result, nil
 }
