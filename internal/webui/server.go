@@ -677,10 +677,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.recordWebSocketWrite(clientID, webEvent.Type, size)
 			case <-heartbeat.C:
 				size, err := writeJSON(ctx, conn, &writeMu, map[string]any{
-					"type": "heartbeat",
-					"payload": map[string]string{
-						"server_time": time.Now().UTC().Format(time.RFC3339Nano),
-					},
+					"type":    "heartbeat",
+					"payload": s.websocketHeartbeatPayload(),
 				})
 				if err != nil {
 					slog.Info("websocket closed while writing heartbeat", "client", clientID, "error", err)
@@ -737,6 +735,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+func (s *Server) websocketHeartbeatPayload() map[string]any {
+	payload := map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339Nano)}
+	if s != nil && s.controller != nil {
+		if service := s.controller.KnowledgeService(); service != nil {
+			payload["knowledge_checkpoint"] = service.MutationCheckpoint()
+		}
+	}
+	return payload
 }
 
 func (s *Server) applyGlobalSessionEvent(event app.Event) {

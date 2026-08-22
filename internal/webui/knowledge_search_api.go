@@ -112,7 +112,7 @@ func (s *Server) handleKnowledgeGraphSnapshot(w http.ResponseWriter, r *http.Req
 		limit = 100
 	}
 	s.writeKnowledgeJSON(w, http.StatusOK, knowledgeapi.GraphSnapshotResponse{
-		ResponseMetadata: knowledgeapi.Metadata(requestID), Generation: result.Generation,
+		ResponseMetadata: knowledgeapi.Metadata(requestID), Generation: result.Generation, Checkpoint: result.Checkpoint,
 		Nodes: nodes, Edges: edges,
 		Page: knowledgeapi.Page{Limit: limit, Returned: len(nodes), Truncated: result.Truncated, TruncationReasons: result.TruncationReasons},
 	})

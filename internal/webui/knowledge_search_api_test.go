@@ -37,6 +37,11 @@ func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
 			t.Fatalf("create graph link: %v", err)
 		}
 	}
+	heartbeat := (&Server{controller: ctrl}).websocketHeartbeatPayload()
+	heartbeatCheckpoint, ok := heartbeat["knowledge_checkpoint"].(knowledgeService.MutationCheckpoint)
+	if !ok || heartbeatCheckpoint.StreamID == "" || heartbeatCheckpoint.Sequence == 0 {
+		t.Fatalf("heartbeat checkpoint = %#v", heartbeat["knowledge_checkpoint"])
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -80,7 +85,7 @@ func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
 	})
 	var graph knowledgeapi.GraphSnapshotResponse
 	decodeKnowledgeResponse(t, response, &graph)
-	if response.StatusCode != http.StatusOK || graph.Generation == 0 || len(graph.Nodes) != 2 || len(graph.Edges) != 1 ||
+	if response.StatusCode != http.StatusOK || graph.Generation == 0 || graph.Checkpoint.StreamID == "" || graph.Checkpoint.Sequence == 0 || len(graph.Nodes) != 2 || len(graph.Edges) != 1 ||
 		!graph.Page.Truncated || !slices.Contains(graph.Page.TruncationReasons, "edge_limit") || graph.Nodes[0].Object.ID != string(root.ID) {
 		t.Fatalf("graph status=%d response=%#v", response.StatusCode, graph)
 	}

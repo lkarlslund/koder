@@ -1147,6 +1147,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
+        knowledgeLive: window.KoderKnowledgeLive ? new window.KoderKnowledgeLive.Tracker() : null,
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
@@ -1466,6 +1467,7 @@
           this.connected = true;
           this.lastWSMessageAt = Date.now();
           this.reconnectDelay = 150;
+          this.invalidateKnowledgeLive('connection_reset');
           this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(err => {
             this.error = (err && err.message) || 'failed to load session';
           });
@@ -1667,7 +1669,11 @@
           p.reject(error);
         },
         onPush(msg) {
-          if (msg.type === 'heartbeat') return;
+          if (msg.type === 'heartbeat') {
+            this.observeKnowledgeCheckpoint(msg.payload && msg.payload.knowledge_checkpoint);
+            return;
+          }
+          if (msg.type === 'knowledge_delta') this.observeKnowledgeMutation(msg.payload);
           if (msg.type === 'snapshot') this.applyState(msg.payload);
           if (msg.type === 'state_delta') this.applyStateDelta(msg.payload);
           if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);
@@ -1680,6 +1686,33 @@
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
+        },
+        resetKnowledgeLive(checkpoint) {
+          if (!this.knowledgeLive) return;
+          const result = this.knowledgeLive.reset(checkpoint);
+          if (result.action === 'ready') window.dispatchEvent(new CustomEvent('koder:knowledge-ready', {detail: result}));
+          else this.emitKnowledgeRefetch(result);
+        },
+        invalidateKnowledgeLive(reason) {
+          if (!this.knowledgeLive) return;
+          this.emitKnowledgeRefetch(this.knowledgeLive.invalidate(reason));
+        },
+        observeKnowledgeMutation(event) {
+          if (!this.knowledgeLive) return;
+          const result = this.knowledgeLive.observe(event);
+          if (result.action === 'apply') {
+            window.dispatchEvent(new CustomEvent('koder:knowledge-mutation', {detail: {event, checkpoint: result.checkpoint}}));
+          } else {
+            this.emitKnowledgeRefetch(result);
+          }
+        },
+        observeKnowledgeCheckpoint(checkpoint) {
+          if (!this.knowledgeLive || !checkpoint) return;
+          this.emitKnowledgeRefetch(this.knowledgeLive.observeCheckpoint(checkpoint));
+        },
+        emitKnowledgeRefetch(result) {
+          if (!result || result.action !== 'refetch') return;
+          window.dispatchEvent(new CustomEvent('koder:knowledge-refetch', {detail: result}));
         },
         applyStateDelta(delta) {
           if (!delta) return;

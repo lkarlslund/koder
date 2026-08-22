@@ -42,6 +42,20 @@ type MutationRevision struct {
 	ID     knowledge.RevisionID `json:"id"`
 }
 
+type MutationCheckpoint struct {
+	StreamID string `json:"stream_id"`
+	Sequence uint64 `json:"sequence"`
+}
+
+// MutationCheckpoint returns the point clients can use as their live-update
+// baseline. Call it before reading a snapshot: concurrent mutations may then
+// appear both in the snapshot and as an event, but can never be missed.
+func (s *Service) MutationCheckpoint() MutationCheckpoint {
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
+	return MutationCheckpoint{StreamID: s.mutationStreamID, Sequence: s.mutationSequence}
+}
+
 func (s *Service) SubscribeMutations(buffer int) (<-chan MutationEvent, func()) {
 	if buffer <= 0 {
 		buffer = 64

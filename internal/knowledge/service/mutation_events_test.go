@@ -22,6 +22,9 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 	}
 	first := receiveMutation(t, events)
 	assertMutation(t, first, MutationCreated, knowledgeStore.RecordKindChunk, string(created.Chunk.ID), 1, 1)
+	if checkpoint := service.MutationCheckpoint(); checkpoint.StreamID != first.StreamID || checkpoint.Sequence != first.Sequence {
+		t.Fatalf("mutation checkpoint = %#v, want event checkpoint %#v", checkpoint, first)
+	}
 
 	noop, err := service.UpdateChunk(context.Background(), UpdateChunkRequest{
 		ChunkID: created.Chunk.ID, ExpectedRevision: 1, Content: ChunkContentFrom(created.Chunk),
@@ -69,6 +72,9 @@ func TestMutationEventsAreRevisionOrderedAndSkipFailedOrNoopWrites(t *testing.T)
 	}
 	fourth := receiveMutation(t, events)
 	assertMutation(t, fourth, MutationDeleted, knowledgeStore.RecordKindChunk, string(created.Chunk.ID), 3, 4)
+	if checkpoint := service.MutationCheckpoint(); checkpoint.Sequence != fourth.Sequence {
+		t.Fatalf("final mutation checkpoint = %#v", checkpoint)
+	}
 
 	unsubscribe()
 	if _, open := <-events; open {

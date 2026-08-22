@@ -398,10 +398,11 @@ type GraphEdge struct {
 
 type GraphSnapshotResponse struct {
 	ResponseMetadata
-	Generation uint64      `json:"generation"`
-	Nodes      []GraphNode `json:"nodes"`
-	Edges      []GraphEdge `json:"edges"`
-	Page       Page        `json:"page"`
+	Generation uint64                              `json:"generation"`
+	Checkpoint knowledgeService.MutationCheckpoint `json:"checkpoint"`
+	Nodes      []GraphNode                         `json:"nodes"`
+	Edges      []GraphEdge                         `json:"edges"`
+	Page       Page                                `json:"page"`
 }
 
 type ErrorResponse struct {

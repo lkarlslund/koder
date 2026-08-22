@@ -2280,6 +2280,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `websocket message failed`) {
 		t.Fatalf("expected websocket heartbeat/watchdog handling for stale live-update sockets")
 	}
+	if !strings.Contains(fullPage, `/assets/knowledge_live.js`) ||
+		!strings.Contains(fullPage, `observeKnowledgeCheckpoint`) ||
+		!strings.Contains(fullPage, `koder:knowledge-refetch`) {
+		t.Fatalf("expected knowledge live updates to detect gaps and request a snapshot refetch")
+	}
 	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(2000`) || !strings.Contains(fullPage, `reconnectDelay: 150`) {
 		t.Fatalf("expected reconnect timing to back off without spamming")
 	}
