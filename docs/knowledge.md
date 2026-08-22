@@ -425,6 +425,12 @@ text or provider error details. Its lifecycle is `queued` -> `processing` -> one
 `no_candidates`, `candidates_ready`, or `failed`. Candidate extraction and subsequent
 policy checks remain separate stages; signal confidence is never permission to persist.
 
+The curation queue depends on a small `Extractor` interface, not on a model or provider.
+Submission is idempotent by the complete turn identity, and the queue store atomically
+claims a record so concurrent workers cannot inspect it twice. Extractors return only a
+safe candidate count to the queue; candidate payload storage remains behind the extractor
+boundary. Failures retain a bounded machine code, never the provider error text.
+
 ## Combined examples
 
 ### Environment-specific procedure
