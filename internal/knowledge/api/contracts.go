@@ -20,6 +20,8 @@ const (
 	ChunkCollectionPath = RoutePrefix + "/chunks"
 	EntryCollectionPath = RoutePrefix + "/entries"
 	LinkCollectionPath  = RoutePrefix + "/links"
+	SearchPath          = RoutePrefix + "/search"
+	GraphSnapshotPath   = RoutePrefix + "/graph/snapshot"
 	ExplorerURL         = "/knowledge"
 )
 
@@ -341,7 +343,18 @@ type SearchResponse struct {
 	AsOf                 time.Time                             `json:"as_of"`
 	CorpusDocumentCount  uint64                                `json:"corpus_document_count"`
 	MatchedDocumentCount uint64                                `json:"matched_document_count"`
+	GraphExpansion       *knowledgeService.GraphExpansionStats `json:"graph_expansion,omitempty"`
 	Page                 Page                                  `json:"page"`
+}
+
+type GraphSnapshotRequest struct {
+	Root        knowledge.ObjectRef          `json:"root"`
+	Direction   knowledgeStore.LinkDirection `json:"direction,omitempty"`
+	Kinds       []knowledge.LinkKind         `json:"kinds,omitempty"`
+	MaxDepth    int                          `json:"max_depth,omitempty"`
+	MaxNodes    int                          `json:"max_nodes,omitempty"`
+	MaxEdges    int                          `json:"max_edges,omitempty"`
+	TimeLimitMS int                          `json:"time_limit_ms,omitempty"`
 }
 
 type NeighborRequest struct {

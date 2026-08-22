@@ -260,7 +260,10 @@ func normalizeTraversalRequest(request TraversalRequest) (TraversalRequest, erro
 	switch request.Direction {
 	case knowledgeStore.LinkDirectionOutgoing, knowledgeStore.LinkDirectionIncoming, knowledgeStore.LinkDirectionBoth:
 	default:
-		return TraversalRequest{}, fmt.Errorf("invalid traversal direction %q", request.Direction)
+		return TraversalRequest{}, fmt.Errorf("%w: invalid traversal direction %q", knowledge.ErrInvalidRecord, request.Direction)
+	}
+	if request.MaxDepth < 0 || request.MaxNodes < 0 || request.MaxEdges < 0 || request.TimeLimit < 0 {
+		return TraversalRequest{}, fmt.Errorf("%w: traversal limits cannot be negative", knowledge.ErrInvalidRecord)
 	}
 	if request.MaxDepth <= 0 {
 		request.MaxDepth = defaultTraversalDepth
@@ -276,11 +279,11 @@ func normalizeTraversalRequest(request TraversalRequest) (TraversalRequest, erro
 	}
 	if request.MaxDepth > maxTraversalDepth || request.MaxNodes > maxTraversalNodes || request.MaxEdges > maxTraversalEdges ||
 		request.TimeLimit > maxTraversalTimeLimit {
-		return TraversalRequest{}, fmt.Errorf("traversal limits exceed depth=%d nodes=%d edges=%d time=%s", maxTraversalDepth, maxTraversalNodes, maxTraversalEdges, maxTraversalTimeLimit)
+		return TraversalRequest{}, fmt.Errorf("%w: traversal limits exceed depth=%d nodes=%d edges=%d time=%s", knowledge.ErrInvalidRecord, maxTraversalDepth, maxTraversalNodes, maxTraversalEdges, maxTraversalTimeLimit)
 	}
 	for _, kind := range request.Kinds {
 		if kind == knowledge.LinkKindUnspecified || !kind.IsALinkKind() {
-			return TraversalRequest{}, fmt.Errorf("invalid traversal link kind")
+			return TraversalRequest{}, fmt.Errorf("%w: invalid traversal link kind", knowledge.ErrInvalidRecord)
 		}
 	}
 	return request, nil

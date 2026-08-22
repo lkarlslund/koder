@@ -25,6 +25,8 @@ func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
 	mux.HandleFunc(knowledgeapi.EntryCollectionPath+"/", s.handleKnowledgeEntry)
 	mux.HandleFunc(knowledgeapi.LinkCollectionPath, s.handleKnowledgeLinks)
 	mux.HandleFunc(knowledgeapi.LinkCollectionPath+"/", s.handleKnowledgeLink)
+	mux.HandleFunc(knowledgeapi.SearchPath, s.handleKnowledgeSearch)
+	mux.HandleFunc(knowledgeapi.GraphSnapshotPath, s.handleKnowledgeGraphSnapshot)
 }
 
 func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {

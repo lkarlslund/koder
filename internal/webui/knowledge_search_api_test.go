@@ -1,0 +1,97 @@
+package webui
+
+import (
+	"context"
+	"net/http"
+	"slices"
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgeapi "github.com/lkarlslund/koder/internal/knowledge/api"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
+	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
+)
+
+func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
+	ctrl := newTestController(t)
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatalf("new Knowledge service: %v", err)
+	}
+	ctrl.SetKnowledgeService(service)
+	chunk := createAPIChunk(t, service, "Storage tools", knowledge.Scope{Kind: knowledge.ScopeKindGlobal})
+	root := createAPIGraphEntry(t, service, chunk.ID, "Partition a disk safely")
+	first := createAPIGraphEntry(t, service, chunk.ID, "Use sfdisk for scripts")
+	second := createAPIGraphEntry(t, service, chunk.ID, "Back up the partition table")
+	for _, target := range []knowledge.Entry{first, second} {
+		if _, err := service.CreateLink(context.Background(), knowledgeService.CreateLinkRequest{Link: knowledge.Link{
+			Source: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)},
+			Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(target.ID)},
+			Kind:   knowledge.LinkKindRelatedTo,
+		}}); err != nil {
+			t.Fatalf("create graph link: %v", err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	response := knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.SearchPath, token, knowledgeapi.SearchRequest{
+		Query: "partition", Scopes: []knowledge.Scope{{Kind: knowledge.ScopeKindGlobal}}, ExpandGraph: true, Limit: 1,
+	})
+	var search knowledgeapi.SearchResponse
+	decodeKnowledgeResponse(t, response, &search)
+	if response.StatusCode != http.StatusOK || len(search.Matches) != 1 || search.Matches[0].EntryID == "" || search.Matches[0].Document.Title == "" ||
+		search.Page.Limit != 1 || search.Page.NextCursor == "" || search.GraphExpansion == nil || search.GraphExpansion.Connections != 2 {
+		t.Fatalf("search status=%d response=%#v", response.StatusCode, search)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.GraphSnapshotPath, token, knowledgeapi.GraphSnapshotRequest{
+		Root:     knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)},
+		MaxDepth: 1, MaxNodes: 2, MaxEdges: 1, TimeLimitMS: 1000,
+	})
+	var graph knowledgeapi.GraphSnapshotResponse
+	decodeKnowledgeResponse(t, response, &graph)
+	if response.StatusCode != http.StatusOK || graph.Generation == 0 || len(graph.Nodes) != 2 || len(graph.Edges) != 1 ||
+		!graph.Page.Truncated || !slices.Contains(graph.Page.TruncationReasons, "edge_limit") || graph.Nodes[0].Object.ID != string(root.ID) {
+		t.Fatalf("graph status=%d response=%#v", response.StatusCode, graph)
+	}
+	for _, node := range graph.Nodes {
+		if node.ID == "" || node.Object.ID == "" || node.Title == "" || node.Revision.Number == 0 {
+			t.Fatalf("incomplete graph node = %#v", node)
+		}
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.GraphSnapshotPath, token, knowledgeapi.GraphSnapshotRequest{
+		Root: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)}, MaxNodes: 1001,
+	})
+	var invalid knowledgeapi.ErrorResponse
+	decodeKnowledgeResponse(t, response, &invalid)
+	if response.StatusCode != http.StatusBadRequest || invalid.Error == nil || invalid.Error.Code != knowledgeService.ErrorCodeInvalid {
+		t.Fatalf("oversized graph status=%d response=%#v", response.StatusCode, invalid)
+	}
+}
+
+func createAPIGraphEntry(t *testing.T, service *knowledgeService.Service, chunkID knowledge.ChunkID, title string) knowledge.Entry {
+	t.Helper()
+	created, err := service.CreateEntry(context.Background(), knowledgeService.CreateEntryRequest{
+		ChunkID: chunkID,
+		Entry: knowledge.Entry{
+			Kind: knowledge.EntryKindProcedure, Title: title, Summary: "Bounded API graph fixture",
+			Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create graph entry %q: %v", title, err)
+	}
+	return created.Entry
+}
