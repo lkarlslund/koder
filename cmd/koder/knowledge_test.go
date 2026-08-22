@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
+	knowledgeMigration "github.com/lkarlslund/koder/internal/knowledge/store/migration"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
 )
 
@@ -68,6 +71,129 @@ func TestConfiguredKnowledgeAvailabilityPolicy(t *testing.T) {
 				t.Fatalf("subsystem open error = %v, want %v", subsystem.OpenError, wantErr)
 			}
 		})
+	}
+}
+
+func TestConfiguredOptionalKnowledgeDegradesAcrossStartupFaults(t *testing.T) {
+	t.Parallel()
+
+	faults := map[string]error{
+		"read-only":     os.ErrPermission,
+		"mid-migration": knowledgeMigration.ErrMigrationActive,
+	}
+	for name, fault := range faults {
+		name, fault := name, fault
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			subsystem, err := openConfiguredKnowledgeStore("unused", config.Knowledge{Enabled: true}, func(string) (knowledgeStore.Store, error) {
+				return nil, fault
+			})
+			if err != nil {
+				t.Fatalf("optional Knowledge prevented startup: %v", err)
+			}
+			assertUnavailableKnowledgeSubsystem(t, subsystem, fault)
+		})
+	}
+}
+
+func TestConfiguredOptionalKnowledgeDegradesWhenPebbleIsLocked(t *testing.T) {
+	t.Parallel()
+	stateDir := t.TempDir()
+	locked, err := knowledgePebble.Open(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = locked.Close() })
+
+	subsystem, err := openConfiguredDefaultKnowledgeStore(stateDir, config.Knowledge{Enabled: true})
+	if err != nil {
+		t.Fatalf("locked optional Knowledge prevented startup: %v", err)
+	}
+	assertUnavailableKnowledgeSubsystem(t, subsystem, nil)
+}
+
+func TestConfiguredOptionalKnowledgeDegradesWhenPebbleIsCorrupt(t *testing.T) {
+	t.Parallel()
+	stateDir := t.TempDir()
+	initialized, err := knowledgePebble.Open(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := initialized.Close(); err != nil {
+		t.Fatal(err)
+	}
+	databasePath, err := knowledgePebble.DefaultPath(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(databasePath, "CURRENT"), []byte("not-a-manifest\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	subsystem, err := openConfiguredDefaultKnowledgeStore(stateDir, config.Knowledge{Enabled: true})
+	if err != nil {
+		t.Fatalf("corrupt optional Knowledge prevented startup: %v", err)
+	}
+	assertUnavailableKnowledgeSubsystem(t, subsystem, nil)
+}
+
+func TestConfiguredKnowledgeCreatesMissingPebbleStore(t *testing.T) {
+	t.Parallel()
+	stateDir := t.TempDir()
+	databasePath, err := knowledgePebble.DefaultPath(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("knowledge store exists before startup: %v", err)
+	}
+
+	subsystem, err := openConfiguredDefaultKnowledgeStore(stateDir, config.Knowledge{Enabled: true})
+	if err != nil {
+		t.Fatalf("missing optional Knowledge prevented startup: %v", err)
+	}
+	t.Cleanup(func() { _ = subsystem.Close() })
+	if subsystem.OpenError != nil || subsystem.Store == nil || subsystem.Service == nil {
+		t.Fatalf("missing Knowledge was not initialized: %#v", subsystem)
+	}
+	if health := subsystem.OperationalHealth(context.Background()); health.Status != "ready" || !health.Available {
+		t.Fatalf("OperationalHealth() = %#v, want ready", health)
+	}
+}
+
+func TestConfiguredRequiredKnowledgeFailsAcrossStartupFaults(t *testing.T) {
+	t.Parallel()
+	for name, fault := range map[string]error{
+		"locked":        errors.New("database is locked"),
+		"corrupt":       knowledgeStore.ErrIncompatible,
+		"read-only":     os.ErrPermission,
+		"mid-migration": knowledgeMigration.ErrMigrationActive,
+	} {
+		name, fault := name, fault
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			subsystem, err := openConfiguredKnowledgeStore("unused", config.Knowledge{Required: true}, func(string) (knowledgeStore.Store, error) {
+				return nil, fault
+			})
+			if err == nil || !errors.Is(err, fault) {
+				t.Fatalf("required Knowledge startup error = %v, want %v", err, fault)
+			}
+			assertUnavailableKnowledgeSubsystem(t, subsystem, fault)
+		})
+	}
+}
+
+func assertUnavailableKnowledgeSubsystem(t *testing.T, subsystem optionalKnowledgeStore, wantError error) {
+	t.Helper()
+	if subsystem.Store != nil || subsystem.Service != nil || subsystem.OpenError == nil {
+		t.Fatalf("knowledge subsystem = %#v, want unavailable", subsystem)
+	}
+	if wantError != nil && !errors.Is(subsystem.OpenError, wantError) {
+		t.Fatalf("knowledge open error = %v, want %v", subsystem.OpenError, wantError)
+	}
+	health := subsystem.OperationalHealth(context.Background())
+	if health.Status != "unavailable" || health.Available || health.LastError != "knowledge store failed to open" {
+		t.Fatalf("OperationalHealth() = %#v, want sanitized unavailable state", health)
 	}
 }
 
