@@ -389,7 +389,10 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 	if requests != 2 {
 		t.Fatalf("expected one prompt-progress retry, got %d requests", requests)
 	}
-	updated := runtime.cfg.Providers["test"]
+	updated, ok := runtime.providerConfig("test")
+	if !ok {
+		t.Fatal("expected observed provider config")
+	}
 	if !updated.PromptProgressProbed || updated.PromptProgressSupported {
 		t.Fatalf("expected prompt progress to be persisted unsupported, got %#v", updated)
 	}

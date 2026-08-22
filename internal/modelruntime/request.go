@@ -120,11 +120,15 @@ func (r *Runtime) RecordLifecycle(sessionID id.ID, kind, text string, meta map[s
 
 func (r *Runtime) providerConfigForChat(chat domain.Chat) config.Provider {
 	if model, err := r.settings.Model(chat); err == nil {
+		if observed, ok := r.providerConfig(id.ID(model.SourceProviderID)); ok &&
+			config.PromptProgressObservationTarget(observed) == config.PromptProgressObservationTarget(model.Provider) {
+			return observed
+		}
 		return model.Provider
 	}
 	providerID, modelID, _ := chatModel(chat)
 	providerID, _ = r.cfg.ResolveModel(providerID, modelID)
-	cfg, _ := r.cfg.Provider(providerID)
+	cfg, _ := r.providerConfig(id.ID(providerID))
 	return cfg
 }
 

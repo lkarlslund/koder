@@ -82,6 +82,9 @@ func DefaultRetryPause(ctx context.Context, delay time.Duration, onTick func(tim
 func (r *Runtime) chatWithRetry(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, cavemanJob, error) {
 	sessionID := session.ID
 	providerID := chat.ProviderID
+	if model, modelErr := r.settings.Model(chat); modelErr == nil {
+		providerID = id.ID(model.SourceProviderID)
+	}
 	promptProgressPending := r.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
 	promptProgressRetried := false
 	for attempt := 0; ; attempt++ {
@@ -463,18 +466,37 @@ func (r *Runtime) promptProgressProbePending(providerID id.ID) bool {
 }
 
 func (r *Runtime) providerConfig(providerID id.ID) (config.Provider, bool) {
-	return r.cfg.Provider(string(providerID))
+	id := strings.TrimSpace(string(providerID))
+	r.promptProgressMu.RLock()
+	defer r.promptProgressMu.RUnlock()
+	providerCfg, ok := r.cfg.Provider(id)
+	if !ok {
+		return config.Provider{}, false
+	}
+	observed, exists := r.promptProgress[id]
+	if exists && config.PromptProgressObservationTarget(observed) == config.PromptProgressObservationTarget(providerCfg) {
+		providerCfg = observed
+	}
+	return providerCfg, true
 }
 
 func (r *Runtime) setPromptProgressSupport(providerID id.ID, supported bool) {
 	id := strings.TrimSpace(string(providerID))
-	if id == "" || r.cfg.Providers == nil {
+	if id == "" {
+		return
+	}
+	r.promptProgressMu.Lock()
+	defer r.promptProgressMu.Unlock()
+	if r.cfg.Providers == nil {
 		return
 	}
 	cfg := r.cfg
 	providerCfg, ok := cfg.Providers[id]
 	if !ok {
 		return
+	}
+	if observed, exists := r.promptProgress[id]; exists && config.PromptProgressObservationTarget(observed) == config.PromptProgressObservationTarget(providerCfg) {
+		providerCfg = observed
 	}
 	if config.PromptProgressObservationValid(providerCfg) && providerCfg.PromptProgressSupported == supported {
 		return
@@ -486,7 +508,7 @@ func (r *Runtime) setPromptProgressSupport(providerID id.ID, supported bool) {
 	}
 	providers[id] = providerCfg
 	cfg.Providers = providers
-	r.cfg = cfg
+	r.promptProgress[id] = providerCfg
 	if strings.TrimSpace(cfg.Path()) == "" {
 		return
 	}

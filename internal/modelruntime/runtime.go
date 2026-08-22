@@ -39,24 +39,26 @@ type Config struct {
 }
 
 type Runtime struct {
-	cfg           config.Config
-	store         *store.Store
-	debug         *debugsrv.Recorder
-	files         *attachment.Manager
-	caps          *provider.CapabilityStore
-	health        *provider.HealthTracker
-	agents        *agents.Manager
-	settings      *settings.Store
-	modelOverlays modeloverlay.Catalog
-	tools         *toolruntime.Runtime
-	mcp           *mcp.Manager
-	sessions      SessionSource
-	caveman       *cavemanService
-	cavemanMu     sync.Mutex
-	cavemanJobs   map[id.ID]cavemanJob
-	retryPause    func(context.Context, time.Duration, func(time.Duration)) error
-	envMu         sync.Mutex
-	envCache      map[string]string
+	cfg              config.Config
+	store            *store.Store
+	debug            *debugsrv.Recorder
+	files            *attachment.Manager
+	caps             *provider.CapabilityStore
+	health           *provider.HealthTracker
+	agents           *agents.Manager
+	settings         *settings.Store
+	modelOverlays    modeloverlay.Catalog
+	tools            *toolruntime.Runtime
+	mcp              *mcp.Manager
+	sessions         SessionSource
+	caveman          *cavemanService
+	cavemanMu        sync.Mutex
+	cavemanJobs      map[id.ID]cavemanJob
+	retryPause       func(context.Context, time.Duration, func(time.Duration)) error
+	promptProgressMu sync.RWMutex
+	promptProgress   map[string]config.Provider
+	envMu            sync.Mutex
+	envCache         map[string]string
 }
 
 const (
@@ -86,21 +88,22 @@ func New(cfg Config) *Runtime {
 		settingsStore = settings.New(cfg.Config)
 	}
 	return &Runtime{
-		cfg:           cfg.Config,
-		store:         cfg.Store,
-		debug:         cfg.Debug,
-		files:         files,
-		caps:          caps,
-		health:        cfg.Health,
-		agents:        agentManager,
-		settings:      settingsStore,
-		modelOverlays: modeloverlay.Load(cfg.Config.ManagedAssetsDir()),
-		tools:         cfg.Tools,
-		mcp:           cfg.MCP,
-		sessions:      cfg.Sessions,
-		caveman:       newCavemanService(cfg.Config.Thinking.CavemanParallelism),
-		cavemanJobs:   map[id.ID]cavemanJob{},
-		retryPause:    waitForRetry,
+		cfg:            cfg.Config,
+		store:          cfg.Store,
+		debug:          cfg.Debug,
+		files:          files,
+		caps:           caps,
+		health:         cfg.Health,
+		agents:         agentManager,
+		settings:       settingsStore,
+		modelOverlays:  modeloverlay.Load(cfg.Config.ManagedAssetsDir()),
+		tools:          cfg.Tools,
+		mcp:            cfg.MCP,
+		sessions:       cfg.Sessions,
+		caveman:        newCavemanService(cfg.Config.Thinking.CavemanParallelism),
+		cavemanJobs:    map[id.ID]cavemanJob{},
+		retryPause:     waitForRetry,
+		promptProgress: map[string]config.Provider{},
 	}
 }
 
@@ -108,7 +111,10 @@ func (r *Runtime) UpdateConfig(cfg config.Config) {
 	if r == nil {
 		return
 	}
+	r.promptProgressMu.Lock()
 	r.cfg = cfg
+	r.promptProgress = map[string]config.Provider{}
+	r.promptProgressMu.Unlock()
 	r.modelOverlays = modeloverlay.Load(cfg.ManagedAssetsDir())
 	if r.settings != nil {
 		r.settings.Update(cfg)
