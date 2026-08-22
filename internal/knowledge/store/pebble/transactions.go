@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	cockroachpebble "github.com/cockroachdb/pebble"
 
@@ -129,53 +128,26 @@ func (tx *transaction) ChunkDeletionBlockers(ctx context.Context, id knowledge.C
 	if err != nil {
 		return knowledgeStore.ChunkDeletionBlockers{}, err
 	}
-	blockers := knowledgeStore.ChunkDeletionBlockers{
-		DependencyIDs: slices.Clone(chunk.DependencyIDs), ReportedCounts: chunk.Counts,
-	}
-	entryIDs := make(map[knowledge.EntryID]struct{})
+	var chunks []knowledge.Chunk
+	var entries []knowledge.Entry
 	var links []knowledge.Link
+	var evidence []knowledge.Evidence
 	if _, err := scanCanonical(ctx, tx.reader, func(record knowledgeStore.CanonicalRecord) error {
 		switch record.Kind {
 		case knowledgeStore.RecordKindChunk:
-			if record.Chunk.ID != id && slices.Contains(record.Chunk.DependencyIDs, id) {
-				blockers.DependentChunkIDs = append(blockers.DependentChunkIDs, record.Chunk.ID)
-			}
+			chunks = append(chunks, *record.Chunk)
 		case knowledgeStore.RecordKindEntry:
-			if record.Entry.ChunkID == id {
-				entryIDs[record.Entry.ID] = struct{}{}
-				blockers.EntryIDs = append(blockers.EntryIDs, record.Entry.ID)
-			}
+			entries = append(entries, *record.Entry)
 		case knowledgeStore.RecordKindLink:
 			links = append(links, *record.Link)
+		case knowledgeStore.RecordKindEvidence:
+			evidence = append(evidence, *record.Evidence)
 		}
 		return nil
 	}); err != nil {
 		return knowledgeStore.ChunkDeletionBlockers{}, err
 	}
-	for _, link := range links {
-		if linkTouchesChunk(link, id, entryIDs) {
-			blockers.LinkIDs = append(blockers.LinkIDs, link.ID)
-		}
-	}
-	slices.Sort(blockers.EntryIDs)
-	slices.Sort(blockers.LinkIDs)
-	slices.Sort(blockers.DependencyIDs)
-	slices.Sort(blockers.DependentChunkIDs)
-	return blockers, nil
-}
-
-func linkTouchesChunk(link knowledge.Link, chunkID knowledge.ChunkID, entryIDs map[knowledge.EntryID]struct{}) bool {
-	for _, endpoint := range []knowledge.ObjectRef{link.Source, link.Target} {
-		if endpoint.Kind == knowledge.ObjectKindChunk && endpoint.ID == string(chunkID) {
-			return true
-		}
-		if endpoint.Kind == knowledge.ObjectKindEntry {
-			if _, exists := entryIDs[knowledge.EntryID(endpoint.ID)]; exists {
-				return true
-			}
-		}
-	}
-	return false
+	return knowledgeStore.DeriveChunkDeletionBlockers(chunk, chunks, entries, links, evidence), nil
 }
 
 func (tx *transaction) Entry(ctx context.Context, id knowledge.EntryID) (knowledge.Entry, error) {

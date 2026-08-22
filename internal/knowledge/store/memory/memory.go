@@ -196,45 +196,23 @@ func (tx *transaction) ChunkDeletionBlockers(ctx context.Context, id knowledge.C
 	if !exists {
 		return knowledgeStore.ChunkDeletionBlockers{}, fmt.Errorf("%w: chunk %s", knowledgeStore.ErrNotFound, id)
 	}
-	blockers := knowledgeStore.ChunkDeletionBlockers{
-		DependencyIDs: slices.Clone(chunk.DependencyIDs), ReportedCounts: chunk.Counts,
+	chunks := make([]knowledge.Chunk, 0, len(tx.data.chunks))
+	for _, item := range tx.data.chunks {
+		chunks = append(chunks, item)
 	}
-	entryIDs := make(map[knowledge.EntryID]struct{})
-	for entryID, entry := range tx.data.entries {
-		if entry.ChunkID == id {
-			entryIDs[entryID] = struct{}{}
-			blockers.EntryIDs = append(blockers.EntryIDs, entryID)
-		}
+	entries := make([]knowledge.Entry, 0, len(tx.data.entries))
+	for _, item := range tx.data.entries {
+		entries = append(entries, item)
 	}
-	for linkID, link := range tx.data.links {
-		if linkTouchesChunk(link, id, entryIDs) {
-			blockers.LinkIDs = append(blockers.LinkIDs, linkID)
-		}
+	links := make([]knowledge.Link, 0, len(tx.data.links))
+	for _, item := range tx.data.links {
+		links = append(links, item)
 	}
-	for candidateID, candidate := range tx.data.chunks {
-		if candidateID != id && slices.Contains(candidate.DependencyIDs, id) {
-			blockers.DependentChunkIDs = append(blockers.DependentChunkIDs, candidateID)
-		}
+	evidence := make([]knowledge.Evidence, 0, len(tx.data.evidence))
+	for _, item := range tx.data.evidence {
+		evidence = append(evidence, item)
 	}
-	slices.Sort(blockers.EntryIDs)
-	slices.Sort(blockers.LinkIDs)
-	slices.Sort(blockers.DependencyIDs)
-	slices.Sort(blockers.DependentChunkIDs)
-	return blockers, nil
-}
-
-func linkTouchesChunk(link knowledge.Link, chunkID knowledge.ChunkID, entryIDs map[knowledge.EntryID]struct{}) bool {
-	for _, endpoint := range []knowledge.ObjectRef{link.Source, link.Target} {
-		if endpoint.Kind == knowledge.ObjectKindChunk && endpoint.ID == string(chunkID) {
-			return true
-		}
-		if endpoint.Kind == knowledge.ObjectKindEntry {
-			if _, exists := entryIDs[knowledge.EntryID(endpoint.ID)]; exists {
-				return true
-			}
-		}
-	}
-	return false
+	return knowledgeStore.DeriveChunkDeletionBlockers(chunk, chunks, entries, links, evidence), nil
 }
 
 func (tx *transaction) Entry(ctx context.Context, id knowledge.EntryID) (knowledge.Entry, error) {
