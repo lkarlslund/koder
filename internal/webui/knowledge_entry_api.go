@@ -18,16 +18,23 @@ func (s *Server) handleKnowledgeEntries(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
-		return
-	}
 	service := s.controller.KnowledgeService()
 	if service == nil {
 		s.writeKnowledgeError(w, requestID, http.StatusServiceUnavailable, knowledgeService.ErrorCodeUnavailable, "Knowledge is temporarily unavailable.")
 		return
 	}
+	switch r.Method {
+	case http.MethodGet:
+		s.listKnowledgeEntries(w, r, requestID, ctx, service)
+	case http.MethodPost:
+		s.createKnowledgeEntry(w, r, requestID, ctx, service)
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+	}
+}
+
+func (s *Server) listKnowledgeEntries(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service) {
 	request, err := parseEntryListQuery(r)
 	if err != nil {
 		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
@@ -46,6 +53,23 @@ func (s *Server) handleKnowledgeEntries(w http.ResponseWriter, r *http.Request) 
 		ResponseMetadata: knowledgeapi.Metadata(requestID), Entries: page.Entries,
 		Page: knowledgeapi.Page{Limit: limit, Returned: len(page.Entries), NextCursor: page.NextCursor},
 	})
+}
+
+func (s *Server) createKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service) {
+	var request knowledgeapi.EntryCreateRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: request.ChunkID, Entry: entryCandidate(request.Entry), ReviewApproved: request.ReviewApproved,
+	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", knowledgeapi.EntryPath(result.Entry.ID))
+	s.writeKnowledgeEntry(w, requestID, http.StatusCreated, result.Entry, nil, &result.Classification)
 }
 
 func (s *Server) handleKnowledgeEntry(w http.ResponseWriter, r *http.Request) {
@@ -71,16 +95,31 @@ func (s *Server) handleKnowledgeEntry(w http.ResponseWriter, r *http.Request) {
 			s.getKnowledgeEntryEvidence(w, r, requestID, ctx, service, entryID)
 		case "history":
 			s.getKnowledgeHistory(w, r, requestID, ctx, service, knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entryID)})
+		case "archive", "restore":
+			s.changeKnowledgeEntryLifecycle(w, r, requestID, ctx, service, entryID, parts[1])
+		case "supersede":
+			s.supersedeKnowledgeEntry(w, r, requestID, ctx, service, entryID)
+		case "verify":
+			s.verifyKnowledgeEntry(w, r, requestID, ctx, service, entryID)
 		default:
 			s.writeKnowledgeError(w, requestID, http.StatusNotFound, knowledgeService.ErrorCodeNotFound, "The Knowledge endpoint was not found.")
 		}
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	switch r.Method {
+	case http.MethodGet:
+		s.getKnowledgeEntry(w, r, requestID, ctx, service, entryID)
+	case http.MethodPut:
+		s.updateKnowledgeEntry(w, r, requestID, ctx, service, entryID)
+	case http.MethodDelete:
+		s.deleteKnowledgeEntry(w, r, requestID, ctx, service, entryID)
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodDelete)
 		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
-		return
 	}
+}
+
+func (s *Server) getKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entryID)}
 	record, err := service.Get(ctx, reference)
 	if err != nil {
@@ -99,8 +138,110 @@ func (s *Server) handleKnowledgeEntry(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.writeKnowledgeJSON(w, http.StatusOK, knowledgeapi.EntryResponse{
-		ResponseMetadata: knowledgeapi.Metadata(requestID), ResourceMetadata: metadata, Entry: *record.Entry,
+	s.writeKnowledgeEntry(w, requestID, http.StatusOK, *record.Entry, nil, nil)
+}
+
+func (s *Server) updateKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
+	var request knowledgeapi.EntryUpdateRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.UpdateEntry(ctx, knowledgeService.UpdateEntryRequest{
+		EntryID: entryID, ExpectedRevision: request.ExpectedRevision, Content: entryServiceContent(request.Entry),
+		Reason: request.Reason, ReviewApproved: request.ReviewApproved,
+	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeEntry(w, requestID, http.StatusOK, result.Entry, nil, &result.Classification)
+}
+
+func (s *Server) changeKnowledgeEntryLifecycle(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID, action string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+		return
+	}
+	var request knowledgeapi.LifecycleRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	serviceRequest := knowledgeService.EntryLifecycleRequest{EntryID: entryID, ExpectedRevision: request.ExpectedRevision, Reason: request.Reason}
+	var result knowledgeService.EntryLifecycleResult
+	var err error
+	if action == "archive" {
+		result, err = service.ArchiveEntry(ctx, serviceRequest)
+	} else {
+		result, err = service.RestoreEntry(ctx, serviceRequest)
+	}
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeEntry(w, requestID, http.StatusOK, result.Entry, nil, nil)
+}
+
+func (s *Server) supersedeKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+		return
+	}
+	var request knowledgeapi.EntrySupersedeRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.SupersedeEntry(ctx, knowledgeService.SupersedeEntryRequest{
+		EntryID: entryID, ExpectedRevision: request.ExpectedRevision, ReplacementEntryID: request.ReplacementEntryID, Reason: request.Reason,
+	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeEntry(w, requestID, http.StatusOK, result.Entry, &result.Replacement, nil)
+}
+
+func (s *Server) verifyKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+		return
+	}
+	var request knowledgeapi.EntryVerifyRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.VerifyEntry(ctx, knowledgeService.VerifyEntryRequest{
+		EntryID: entryID, ExpectedRevision: request.ExpectedRevision, Status: request.Status,
+		Method: request.Method, EvidenceIDs: request.EvidenceIDs, Reason: request.Reason,
+	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeEntry(w, requestID, http.StatusOK, result.Entry, nil, nil)
+}
+
+func (s *Server) deleteKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
+	var request knowledgeapi.EntryDeleteRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	if err := service.DeleteEntry(ctx, knowledgeService.DeleteEntryRequest{
+		EntryID: entryID, ExpectedRevision: request.ExpectedRevision, Confirmed: request.Confirmed,
+	}); err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeJSON(w, http.StatusOK, knowledgeapi.DeleteResponse{
+		ResponseMetadata: knowledgeapi.Metadata(requestID),
+		Object:           knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entryID)}, Deleted: true,
 	})
 }
 
@@ -243,4 +384,36 @@ func knowledgeAPIRecord(record knowledgeStore.CanonicalRecord) knowledgeapi.Reco
 	return knowledgeapi.Record{
 		Kind: record.Kind, Chunk: record.Chunk, Entry: record.Entry, Link: record.Link, Evidence: record.Evidence,
 	}
+}
+
+func entryCandidate(content knowledgeapi.EntryContent) knowledge.Entry {
+	return knowledge.Entry{
+		Kind: content.Kind, Title: content.Title, Summary: content.Summary, Body: content.Body,
+		Aliases: content.Aliases, Tags: content.Tags, Scope: content.Scope, Applicability: content.Applicability,
+		Risk: content.Risk, Confidence: content.Confidence, ValidFrom: content.ValidFrom, ValidUntil: content.ValidUntil,
+		ObservedAt: content.ObservedAt, ReviewAfter: content.ReviewAfter, EvidenceIDs: content.EvidenceIDs,
+		PersonalOrigin: content.PersonalOrigin,
+	}
+}
+
+func entryServiceContent(content knowledgeapi.EntryContent) knowledgeService.EntryContent {
+	return knowledgeService.EntryContent{
+		Kind: content.Kind, Title: content.Title, Summary: content.Summary, Body: content.Body,
+		Aliases: content.Aliases, Tags: content.Tags, Scope: content.Scope, Applicability: content.Applicability,
+		Risk: content.Risk, Confidence: content.Confidence, ValidFrom: content.ValidFrom, ValidUntil: content.ValidUntil,
+		ObservedAt: content.ObservedAt, ReviewAfter: content.ReviewAfter, EvidenceIDs: content.EvidenceIDs,
+		PersonalOrigin: content.PersonalOrigin,
+	}
+}
+
+func (s *Server) writeKnowledgeEntry(w http.ResponseWriter, requestID string, status int, entry knowledge.Entry, replacement *knowledge.Entry, classification *knowledge.ClassificationResult) {
+	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entry.ID)}
+	metadata := knowledgeapi.Resource(reference, entry.Revision)
+	if metadata.ETag != "" {
+		w.Header().Set("ETag", metadata.ETag)
+	}
+	s.writeKnowledgeJSON(w, status, knowledgeapi.EntryResponse{
+		ResponseMetadata: knowledgeapi.Metadata(requestID), ResourceMetadata: metadata,
+		Entry: entry, Replacement: replacement, Classification: classification,
+	})
 }

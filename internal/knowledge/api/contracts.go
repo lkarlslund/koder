@@ -46,6 +46,10 @@ func EntryHistoryPath(entryID knowledge.EntryID) string {
 	return EntryPath(entryID) + "/history"
 }
 
+func EntryLifecyclePath(entryID knowledge.EntryID, action string) string {
+	return EntryPath(entryID) + "/" + url.PathEscape(strings.TrimSpace(action))
+}
+
 type ResponseMetadata struct {
 	APIVersion string `json:"api_version"`
 	RequestID  string `json:"request_id,omitempty"`
@@ -227,6 +231,11 @@ type EntryVerifyRequest struct {
 	Method           string                       `json:"method,omitempty"`
 	EvidenceIDs      []knowledge.EvidenceID       `json:"evidence_ids,omitempty"`
 	Reason           string                       `json:"reason,omitempty"`
+}
+
+type EntryDeleteRequest struct {
+	ExpectedRevision uint64 `json:"expected_revision"`
+	Confirmed        bool   `json:"confirmed"`
 }
 
 type EntryResponse struct {

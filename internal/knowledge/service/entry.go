@@ -70,7 +70,7 @@ func (s *Service) CreateEntry(ctx context.Context, request CreateEntryRequest) (
 	}
 	result := CreateEntryResult{Classification: classification}
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
-		chunk, err := tx.Chunk(ctx, request.ChunkID)
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntryCreate, request.ChunkID)
 		if err != nil {
 			return err
 		}

@@ -7,23 +7,31 @@ import (
 	"slices"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
 type ChunkPolicyAction string
 
 const (
-	ChunkPolicyCreate        ChunkPolicyAction = "create"
-	ChunkPolicyUpdate        ChunkPolicyAction = "update"
-	ChunkPolicyArchive       ChunkPolicyAction = "archive"
-	ChunkPolicyRestore       ChunkPolicyAction = "restore"
-	ChunkPolicyDelete        ChunkPolicyAction = "delete"
-	ChunkPolicyCascadeDelete ChunkPolicyAction = "cascade_delete"
-	ChunkPolicyLinkCreate    ChunkPolicyAction = "link_create"
-	ChunkPolicyLinkUnlink    ChunkPolicyAction = "link_unlink"
-	ChunkPolicyLinkRestore   ChunkPolicyAction = "link_restore"
-	ChunkPolicyRead          ChunkPolicyAction = "read"
-	ChunkPolicyTraverse      ChunkPolicyAction = "traverse"
-	ChunkPolicySearch        ChunkPolicyAction = "search"
+	ChunkPolicyCreate         ChunkPolicyAction = "create"
+	ChunkPolicyUpdate         ChunkPolicyAction = "update"
+	ChunkPolicyArchive        ChunkPolicyAction = "archive"
+	ChunkPolicyRestore        ChunkPolicyAction = "restore"
+	ChunkPolicyDelete         ChunkPolicyAction = "delete"
+	ChunkPolicyCascadeDelete  ChunkPolicyAction = "cascade_delete"
+	ChunkPolicyLinkCreate     ChunkPolicyAction = "link_create"
+	ChunkPolicyLinkUnlink     ChunkPolicyAction = "link_unlink"
+	ChunkPolicyLinkRestore    ChunkPolicyAction = "link_restore"
+	ChunkPolicyEntryCreate    ChunkPolicyAction = "entry_create"
+	ChunkPolicyEntryUpdate    ChunkPolicyAction = "entry_update"
+	ChunkPolicyEntryArchive   ChunkPolicyAction = "entry_archive"
+	ChunkPolicyEntryRestore   ChunkPolicyAction = "entry_restore"
+	ChunkPolicyEntryDelete    ChunkPolicyAction = "entry_delete"
+	ChunkPolicyEntryVerify    ChunkPolicyAction = "entry_verify"
+	ChunkPolicyEntrySupersede ChunkPolicyAction = "entry_supersede"
+	ChunkPolicyRead           ChunkPolicyAction = "read"
+	ChunkPolicyTraverse       ChunkPolicyAction = "traverse"
+	ChunkPolicySearch         ChunkPolicyAction = "search"
 )
 
 var (
@@ -55,6 +63,17 @@ func (s *Service) authorizeChunk(ctx context.Context, actor knowledge.Actor, act
 		return fmt.Errorf("%w: action %s on chunk %s: %w", ErrChunkPolicyDenied, action, chunk.ID, err)
 	}
 	return nil
+}
+
+func (s *Service) authorizeEntryChunk(ctx context.Context, tx knowledgeStore.ReadTx, actor knowledge.Actor, action ChunkPolicyAction, chunkID knowledge.ChunkID) (knowledge.Chunk, error) {
+	chunk, err := tx.Chunk(ctx, chunkID)
+	if err != nil {
+		return knowledge.Chunk{}, err
+	}
+	if err := s.authorizeChunk(ctx, actor, action, chunk); err != nil {
+		return knowledge.Chunk{}, err
+	}
+	return chunk, nil
 }
 
 func (s *Service) authorizeLinkChunks(ctx context.Context, actor knowledge.Actor, action ChunkPolicyAction, requireActive bool, chunks ...knowledge.Chunk) error {

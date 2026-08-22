@@ -130,6 +130,9 @@ func TestChunkRoutesRemainVersionedAndEscaped(t *testing.T) {
 	if got := EntryEvidencePath(entryID); got != "/api/knowledge/v1/entries/entry%20with%2Fslash/evidence" {
 		t.Fatalf("EntryEvidencePath() = %q", got)
 	}
+	if got := EntryLifecyclePath(entryID, " verify now "); got != "/api/knowledge/v1/entries/entry%20with%2Fslash/verify%20now" {
+		t.Fatalf("EntryLifecyclePath() = %q", got)
+	}
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {

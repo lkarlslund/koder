@@ -42,9 +42,19 @@ func (s *Service) DeleteEntry(ctx context.Context, request DeleteEntryRequest) e
 	if !request.Confirmed {
 		return ErrDeleteConfirmationRequired
 	}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		entry, err := tx.Entry(ctx, request.EntryID)
 		if err != nil {
+			return err
+		}
+		if _, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntryDelete, entry.ChunkID); err != nil {
 			return err
 		}
 		if entry.Revision.Number != request.ExpectedRevision {

@@ -39,8 +39,23 @@ func (s *Service) changeEntryState(ctx context.Context, request EntryLifecycleRe
 		return EntryLifecycleResult{}, fmt.Errorf("%w: unsupported entry target state %q", ErrInvalidLifecycleTransition, target)
 	}
 	result := EntryLifecycleResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return EntryLifecycleResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return EntryLifecycleResult{}, err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		current, err := tx.Entry(ctx, request.EntryID)
+		if err != nil {
+			return err
+		}
+		action := ChunkPolicyEntryArchive
+		if target == knowledge.EntryStateActive {
+			action = ChunkPolicyEntryRestore
+		}
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, action, current.ChunkID)
 		if err != nil {
 			return err
 		}
@@ -55,22 +70,11 @@ func (s *Service) changeEntryState(ctx context.Context, request EntryLifecycleRe
 			if current.State != knowledge.EntryStateArchived {
 				return fmt.Errorf("%w: entry %s in state %q cannot be restored", ErrInvalidLifecycleTransition, request.EntryID, current.State)
 			}
-			chunk, err := tx.Chunk(ctx, current.ChunkID)
-			if err != nil {
-				return err
-			}
 			if chunk.State == knowledge.ChunkStateArchived {
 				return fmt.Errorf("%w: restore chunk %s before restoring entries", ErrParentChunkArchived, chunk.ID)
 			}
 		} else if current.State != knowledge.EntryStateActive && current.State != knowledge.EntryStateDraft {
 			return fmt.Errorf("%w: entry %s in state %q cannot be archived", ErrInvalidLifecycleTransition, request.EntryID, current.State)
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
-			return err
 		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {

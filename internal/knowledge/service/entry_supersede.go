@@ -39,8 +39,19 @@ func (s *Service) SupersedeEntry(ctx context.Context, request SupersedeEntryRequ
 		return SupersedeEntryResult{}, fmt.Errorf("%w: an entry cannot supersede itself", ErrInvalidSupersession)
 	}
 	result := SupersedeEntryResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return SupersedeEntryResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return SupersedeEntryResult{}, err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		current, err := tx.Entry(ctx, request.EntryID)
+		if err != nil {
+			return err
+		}
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntrySupersede, current.ChunkID)
 		if err != nil {
 			return err
 		}
@@ -68,19 +79,8 @@ func (s *Service) SupersedeEntry(ctx context.Context, request SupersedeEntryRequ
 		if replacement.ChunkID != current.ChunkID {
 			return fmt.Errorf("%w: replacement entry %s belongs to chunk %s, not %s", ErrInvalidSupersession, replacement.ID, replacement.ChunkID, current.ChunkID)
 		}
-		chunk, err := tx.Chunk(ctx, current.ChunkID)
-		if err != nil {
-			return err
-		}
 		if chunk.State == knowledge.ChunkStateArchived {
 			return fmt.Errorf("%w: restore chunk %s before superseding entries", ErrParentChunkArchived, chunk.ID)
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
-			return err
 		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {

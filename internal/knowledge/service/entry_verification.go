@@ -54,8 +54,19 @@ func (s *Service) VerifyEntry(ctx context.Context, request VerifyEntryRequest) (
 	}
 
 	result := VerifyEntryResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return VerifyEntryResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return VerifyEntryResult{}, err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		current, err := tx.Entry(ctx, request.EntryID)
+		if err != nil {
+			return err
+		}
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntryVerify, current.ChunkID)
 		if err != nil {
 			return err
 		}
@@ -64,10 +75,6 @@ func (s *Service) VerifyEntry(ctx context.Context, request VerifyEntryRequest) (
 		}
 		if current.State != knowledge.EntryStateActive && current.State != knowledge.EntryStateDraft {
 			return fmt.Errorf("%w: entry %s is %q", ErrEntryNotEditable, current.ID, current.State)
-		}
-		chunk, err := tx.Chunk(ctx, current.ChunkID)
-		if err != nil {
-			return err
 		}
 		if chunk.State == knowledge.ChunkStateArchived {
 			return fmt.Errorf("%w: restore chunk %s before verifying entries", ErrParentChunkArchived, chunk.ID)
@@ -78,13 +85,6 @@ func (s *Service) VerifyEntry(ctx context.Context, request VerifyEntryRequest) (
 		if current.Verification.Status == knowledge.VerificationStatusUnverified && request.Status == knowledge.VerificationStatusUnverified {
 			result.Entry = current
 			return nil
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
-			return err
 		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {

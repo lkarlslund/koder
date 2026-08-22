@@ -88,15 +88,15 @@ func (s *Service) UpdateEntry(ctx context.Context, request UpdateEntryRequest) (
 		if err != nil {
 			return err
 		}
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntryUpdate, current.ChunkID)
+		if err != nil {
+			return err
+		}
 		if current.Revision.Number != request.ExpectedRevision {
 			return fmt.Errorf("%w: entry %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.EntryID, request.ExpectedRevision, current.Revision.Number)
 		}
 		if current.State != knowledge.EntryStateActive && current.State != knowledge.EntryStateDraft {
 			return fmt.Errorf("%w: entry %s is %q", ErrEntryNotEditable, current.ID, current.State)
-		}
-		chunk, err := tx.Chunk(ctx, current.ChunkID)
-		if err != nil {
-			return err
 		}
 		if chunk.State == knowledge.ChunkStateArchived {
 			return fmt.Errorf("%w: restore chunk %s before editing entries", ErrParentChunkArchived, chunk.ID)

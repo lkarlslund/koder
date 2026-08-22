@@ -190,6 +190,117 @@ func TestChunkMutationsEnforceChunkPolicy(t *testing.T) {
 	}
 }
 
+func TestEntryMutationsEnforceOwningChunkPolicy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		action ChunkPolicyAction
+		run    func(context.Context, *Service, knowledge.Chunk, knowledge.Entry) error
+	}{
+		{
+			name: "create", action: ChunkPolicyEntryCreate,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk, _ knowledge.Entry) error {
+				_, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: chunk.ID, Entry: testEntryCandidate()})
+				return err
+			},
+		},
+		{
+			name: "update", action: ChunkPolicyEntryUpdate,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk, entry knowledge.Entry) error {
+				content := EntryContentFrom(entry)
+				content.Title = "Denied update"
+				_, err := service.UpdateEntry(ctx, UpdateEntryRequest{EntryID: entry.ID, ExpectedRevision: entry.Revision.Number, Content: content})
+				return err
+			},
+		},
+		{
+			name: "archive", action: ChunkPolicyEntryArchive,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk, entry knowledge.Entry) error {
+				_, err := service.ArchiveEntry(ctx, EntryLifecycleRequest{EntryID: entry.ID, ExpectedRevision: entry.Revision.Number})
+				return err
+			},
+		},
+		{
+			name: "restore", action: ChunkPolicyEntryRestore,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk, entry knowledge.Entry) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				archived, err := service.ArchiveEntry(ctx, EntryLifecycleRequest{EntryID: entry.ID, ExpectedRevision: entry.Revision.Number})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyEntryRestore)
+				_, err = service.RestoreEntry(ctx, EntryLifecycleRequest{EntryID: entry.ID, ExpectedRevision: archived.Entry.Revision.Number})
+				return err
+			},
+		},
+		{
+			name: "verify", action: ChunkPolicyEntryVerify,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk, entry knowledge.Entry) error {
+				_, err := service.VerifyEntry(ctx, VerifyEntryRequest{
+					EntryID: entry.ID, ExpectedRevision: entry.Revision.Number, Status: knowledge.VerificationStatusUnverified,
+				})
+				return err
+			},
+		},
+		{
+			name: "supersede", action: ChunkPolicyEntrySupersede,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk, entry knowledge.Entry) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				replacementCandidate := testEntryCandidate()
+				replacementCandidate.Title = "Replacement"
+				replacement, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: chunk.ID, Entry: replacementCandidate})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyEntrySupersede)
+				_, err = service.SupersedeEntry(ctx, SupersedeEntryRequest{
+					EntryID: entry.ID, ExpectedRevision: entry.Revision.Number, ReplacementEntryID: replacement.Entry.ID,
+				})
+				return err
+			},
+		},
+		{
+			name: "delete", action: ChunkPolicyEntryDelete,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk, entry knowledge.Entry) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				archived, err := service.ArchiveEntry(ctx, EntryLifecycleRequest{EntryID: entry.ID, ExpectedRevision: entry.Revision.Number})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyEntryDelete)
+				return service.DeleteEntry(ctx, DeleteEntryRequest{
+					EntryID: entry.ID, ExpectedRevision: archived.Entry.Revision.Number, Confirmed: true,
+				})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := memory.New()
+			t.Cleanup(func() { _ = store.Close() })
+			service := newTestService(t, store, nil)
+			createdChunk, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+			if err != nil {
+				t.Fatalf("seed chunk: %v", err)
+			}
+			var entry knowledge.Entry
+			if test.action != ChunkPolicyEntryCreate {
+				createdEntry, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: createdChunk.Chunk.ID, Entry: testEntryCandidate()})
+				if err != nil {
+					t.Fatalf("seed entry: %v", err)
+				}
+				entry = createdEntry.Entry
+			}
+			service.chunkPolicy = denyChunkAction(test.action)
+			if err := test.run(ctx, service, createdChunk.Chunk, entry); !errors.Is(err, ErrChunkPolicyDenied) {
+				t.Fatalf("mutation error = %v, want ErrChunkPolicyDenied", err)
+			}
+		})
+	}
+}
+
 func TestChunkUpdateAuthorizesDestinationScope(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

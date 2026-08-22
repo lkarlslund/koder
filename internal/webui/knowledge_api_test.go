@@ -322,6 +322,146 @@ func TestKnowledgeEntryEvidenceAndHistoryReadsRespectChunkPolicy(t *testing.T) {
 	}
 }
 
+func TestKnowledgeEntryLifecycleWritesUseOptimisticRevisions(t *testing.T) {
+	ctrl := newTestController(t)
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatalf("new Knowledge service: %v", err)
+	}
+	ctrl.SetKnowledgeService(service)
+	chunk := createAPIChunk(t, service, "Writable entries", knowledge.Scope{Kind: knowledge.ScopeKindGlobal})
+	evidence, err := service.CreateEvidence(context.Background(), knowledgeService.CreateEvidenceRequest{Evidence: knowledge.Evidence{
+		Type: knowledge.EvidenceTypeObservation, Quality: knowledge.EvidenceQualityPrimary,
+		Source: knowledge.Source{ID: "test:lifecycle", ContentHash: "sha256:lifecycle"},
+	}})
+	if err != nil {
+		t.Fatalf("create evidence: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	content := testAPIEntryContent("Original entry")
+	content.EvidenceIDs = []knowledge.EvidenceID{evidence.Evidence.ID}
+
+	response := knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryCollectionPath, token, knowledgeapi.EntryCreateRequest{
+		ChunkID: chunk.ID, Entry: content,
+	})
+	var created knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &created)
+	if response.StatusCode != http.StatusCreated || created.Entry.Revision.Number != 1 || created.Entry.Revision.Actor.Kind != knowledge.ActorKindUser ||
+		!strings.HasPrefix(created.Entry.Revision.Actor.ID, "device:") || response.Header.Get("Location") != knowledgeapi.EntryPath(created.Entry.ID) {
+		t.Fatalf("create status=%d location=%q response=%#v", response.StatusCode, response.Header.Get("Location"), created)
+	}
+	entryURL := srv.URL() + knowledgeapi.EntryPath(created.Entry.ID)
+	content.Title = "Updated entry"
+	response = knowledgeJSONRequest(t, http.MethodPut, entryURL, token, knowledgeapi.EntryUpdateRequest{
+		Entry: content, ExpectedRevision: 1, Reason: "improve wording",
+	})
+	var updated knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &updated)
+	if response.StatusCode != http.StatusOK || updated.Entry.Title != content.Title || updated.Entry.Revision.Number != 2 || response.Header.Get("ETag") == "" {
+		t.Fatalf("update status=%d response=%#v", response.StatusCode, updated)
+	}
+	response = knowledgeJSONRequest(t, http.MethodPut, entryURL, token, knowledgeapi.EntryUpdateRequest{Entry: content, ExpectedRevision: 1})
+	var conflict knowledgeapi.ErrorResponse
+	decodeKnowledgeResponse(t, response, &conflict)
+	if response.StatusCode != http.StatusConflict || conflict.Error == nil || conflict.Error.Code != knowledgeService.ErrorCodeConflict {
+		t.Fatalf("stale update status=%d response=%#v", response.StatusCode, conflict)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryLifecyclePath(created.Entry.ID, "verify"), token, knowledgeapi.EntryVerifyRequest{
+		ExpectedRevision: 2, Status: knowledge.VerificationStatusVerified,
+		Method: "Reviewed source", EvidenceIDs: []knowledge.EvidenceID{evidence.Evidence.ID},
+	})
+	var verified knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &verified)
+	if response.StatusCode != http.StatusOK || verified.Entry.Revision.Number != 3 || verified.Entry.Verification.Status != knowledge.VerificationStatusVerified {
+		t.Fatalf("verify status=%d response=%#v", response.StatusCode, verified)
+	}
+
+	replacementContent := testAPIEntryContent("Replacement entry")
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryCollectionPath, token, knowledgeapi.EntryCreateRequest{
+		ChunkID: chunk.ID, Entry: replacementContent,
+	})
+	var replacement knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &replacement)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("replacement create status=%d response=%#v", response.StatusCode, replacement)
+	}
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryLifecyclePath(created.Entry.ID, "supersede"), token, knowledgeapi.EntrySupersedeRequest{
+		ReplacementEntryID: replacement.Entry.ID, ExpectedRevision: 3, Reason: "replace old guidance",
+	})
+	var superseded knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &superseded)
+	if response.StatusCode != http.StatusOK || superseded.Entry.State != knowledge.EntryStateSuperseded || superseded.Entry.Revision.Number != 4 ||
+		superseded.Replacement == nil || superseded.Replacement.ID != replacement.Entry.ID {
+		t.Fatalf("supersede status=%d response=%#v", response.StatusCode, superseded)
+	}
+
+	disposableContent := testAPIEntryContent("Disposable entry")
+	response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryCollectionPath, token, knowledgeapi.EntryCreateRequest{
+		ChunkID: chunk.ID, Entry: disposableContent,
+	})
+	var disposable knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &disposable)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("disposable create status=%d response=%#v", response.StatusCode, disposable)
+	}
+	disposableURL := srv.URL() + knowledgeapi.EntryPath(disposable.Entry.ID)
+	for _, lifecycle := range []struct {
+		action   string
+		revision uint64
+		state    knowledge.EntryState
+	}{
+		{action: "archive", revision: 1, state: knowledge.EntryStateArchived},
+		{action: "restore", revision: 2, state: knowledge.EntryStateActive},
+		{action: "archive", revision: 3, state: knowledge.EntryStateArchived},
+	} {
+		response = knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.EntryLifecyclePath(disposable.Entry.ID, lifecycle.action), token, knowledgeapi.LifecycleRequest{
+			ExpectedRevision: lifecycle.revision,
+		})
+		var changed knowledgeapi.EntryResponse
+		decodeKnowledgeResponse(t, response, &changed)
+		if response.StatusCode != http.StatusOK || changed.Entry.State != lifecycle.state || changed.Entry.Revision.Number != lifecycle.revision+1 {
+			t.Fatalf("%s status=%d response=%#v", lifecycle.action, response.StatusCode, changed)
+		}
+	}
+	response = knowledgeJSONRequest(t, http.MethodDelete, disposableURL, token, knowledgeapi.EntryDeleteRequest{ExpectedRevision: 4})
+	var confirmation knowledgeapi.ErrorResponse
+	decodeKnowledgeResponse(t, response, &confirmation)
+	if response.StatusCode != http.StatusBadRequest || confirmation.Error == nil || confirmation.Error.Code != knowledgeService.ErrorCodeInvalid {
+		t.Fatalf("unconfirmed delete status=%d response=%#v", response.StatusCode, confirmation)
+	}
+	response = knowledgeJSONRequest(t, http.MethodDelete, disposableURL, token, knowledgeapi.EntryDeleteRequest{ExpectedRevision: 4, Confirmed: true})
+	var deleted knowledgeapi.DeleteResponse
+	decodeKnowledgeResponse(t, response, &deleted)
+	if response.StatusCode != http.StatusOK || !deleted.Deleted || deleted.Object.ID != string(disposable.Entry.ID) {
+		t.Fatalf("delete status=%d response=%#v", response.StatusCode, deleted)
+	}
+	response = knowledgeAPIRequest(t, http.MethodGet, disposableURL, token)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("get deleted status=%d", response.StatusCode)
+	}
+}
+
+func testAPIEntryContent(title string) knowledgeapi.EntryContent {
+	return knowledgeapi.EntryContent{
+		Kind: knowledge.EntryKindFact, Title: title, Summary: "API lifecycle test",
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Confidence: 0.8,
+	}
+}
+
 func createAPIChunk(t *testing.T, service *knowledgeService.Service, title string, scope knowledge.Scope) knowledge.Chunk {
 	t.Helper()
 	created, err := service.CreateChunk(context.Background(), knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
