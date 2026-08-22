@@ -43,6 +43,12 @@
     if (typeof original.preventDefault === 'function') original.preventDefault();
   }
 
+  function displayNodeToViewport(sigma, data) {
+    if (!data || !sigma) return null;
+    if (typeof sigma.framedGraphToViewport === 'function') return sigma.framedGraphToViewport(data);
+    return typeof sigma.graphToViewport === 'function' ? sigma.graphToViewport(data) : null;
+  }
+
   class Renderer {
     constructor(options) {
       options = options || {};
@@ -260,7 +266,7 @@
       if (right - left >= 4 && bottom - top >= 4) {
         const keys = this.store.graph.filterNodes(key => {
           const data = this.sigma.getNodeDisplayData && this.sigma.getNodeDisplayData(key);
-          const point = data && this.sigma.graphToViewport ? this.sigma.graphToViewport(data) : null;
+          const point = displayNodeToViewport(this.sigma, data);
           return !!point && point.x >= left && point.x <= right && point.y >= top && point.y <= bottom;
         });
         this.suppressStageClick = true;
@@ -375,5 +381,5 @@
     }
   }
 
-  return Object.freeze({Renderer, provisionalPositions, sigmaClass, pointerModifiers, pointerLocation});
+  return Object.freeze({Renderer, provisionalPositions, sigmaClass, pointerModifiers, pointerLocation, displayNodeToViewport});
 });

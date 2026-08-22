@@ -25,6 +25,7 @@ class FakeSigma {
     return {x: 180, y: 180};
   }
   graphToViewport(value) { return value; }
+  framedGraphToViewport(value) { this.framedViewportCount = (this.framedViewportCount || 0) + 1; return value; }
   viewportToGraph(value) { return {x: value.x, y: value.y}; }
   getMouseCaptor() { return this.mouse; }
   getCamera() { return this.camera; }
@@ -113,6 +114,7 @@ assert.strictEqual(selectionBox.hidden, true);
 assert.deepStrictEqual(boxSelections, [{
   keys: [`entry:${fixture.ids.partition}`, `entry:${fixture.ids.format}`], additive: true,
 }]);
+assert.strictEqual(FakeSigma.instance.framedViewportCount, 3);
 const pinEvents = [];
 renderer.subscribe(event => { if (event.type === 'pin') pinEvents.push(event.detail); });
 FakeSigma.instance.emit('downNode', {node: `entry:${fixture.ids.partition}`, event: {x: 10, y: 10}});
