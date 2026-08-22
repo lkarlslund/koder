@@ -75,9 +75,11 @@ counts. `files` is the complete integrity inventory.
 
 The optional Ed25519 `signature` does not grant trust. It authenticates bytes from a
 publisher key; policy still decides whether that publisher and content may be imported.
-The signature input is the canonical `manifest.json` object with the `signature` member
-omitted. Because that object contains all payload hashes, the signature covers the whole
-package. KG-1103 implements signing and verification.
+The signature input is the canonical two-space-indented `manifest.json` bytes, including
+the final LF, with the `signature` member omitted. `value` is the standard padded Base64
+encoding of the 64-byte Ed25519 signature. Because the signed manifest contains all
+payload hashes, the signature covers the whole package. `key_id` selects a candidate key;
+it is not itself proof that the key is trusted.
 
 ## Compatibility
 

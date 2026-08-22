@@ -2,6 +2,7 @@
 package kpackage
 
 import (
+	"crypto/ed25519"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
@@ -47,6 +48,11 @@ type Asset struct {
 	Data      []byte
 }
 
+type SigningConfig struct {
+	KeyID      string
+	PrivateKey ed25519.PrivateKey
+}
+
 type ExportRequest struct {
 	Package      Identity
 	Publisher    Publisher
@@ -59,6 +65,7 @@ type ExportRequest struct {
 	Links        []knowledge.Link
 	Evidence     []knowledge.Evidence
 	Assets       []Asset
+	Signing      *SigningConfig
 }
 
 type ManifestChunk struct {

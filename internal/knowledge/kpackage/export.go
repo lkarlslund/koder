@@ -165,6 +165,12 @@ func buildExport(request ExportRequest) (Manifest, []payload, error) {
 		Format: Format, License: request.License, MinKoderVersion: request.Chunk.MinKoderVersion,
 		Package: request.Package, Publisher: request.Publisher, SchemaVersion: SchemaVersion,
 	}
+	if request.Signing != nil {
+		manifest, err = SignManifest(manifest, request.Signing.KeyID, request.Signing.PrivateKey)
+		if err != nil {
+			return Manifest{}, nil, err
+		}
+	}
 	return manifest, payloads, nil
 }
 
