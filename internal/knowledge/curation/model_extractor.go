@@ -84,6 +84,7 @@ type CandidateDraft struct {
 	Action         CandidateAction                `json:"action"`
 	ChunkID        knowledge.ChunkID              `json:"chunk_id"`
 	TargetEntryID  knowledge.EntryID              `json:"target_entry_id,omitempty"`
+	TargetRevision uint64                         `json:"-"`
 	Entry          EntryDraft                     `json:"entry"`
 	Reason         string                         `json:"reason"`
 	SourceItemIDs  []string                       `json:"source_item_ids"`

@@ -41,7 +41,7 @@ func (s *DeduplicatingSink) StoreCandidates(ctx context.Context, recordID knowle
 	}
 	byChunk := make(map[knowledge.ChunkID][]knowledge.Entry)
 	canonicalFingerprints := make(map[string]struct{})
-	targets := make(map[knowledge.ChunkID]map[knowledge.EntryID]struct{})
+	targets := make(map[knowledge.ChunkID]map[knowledge.EntryID]knowledge.Entry)
 	for _, draft := range drafts {
 		if _, loaded := byChunk[draft.ChunkID]; loaded {
 			continue
@@ -51,12 +51,12 @@ func (s *DeduplicatingSink) StoreCandidates(ctx context.Context, recordID knowle
 			return 0, fmt.Errorf("load entries for candidate deduplication: %w", err)
 		}
 		byChunk[draft.ChunkID] = slices.Clone(entries)
-		targets[draft.ChunkID] = make(map[knowledge.EntryID]struct{}, len(entries))
+		targets[draft.ChunkID] = make(map[knowledge.EntryID]knowledge.Entry, len(entries))
 		for _, entry := range entries {
 			if entry.ChunkID != draft.ChunkID || (entry.State != knowledge.EntryStateActive && entry.State != knowledge.EntryStateSuperseded) {
 				continue
 			}
-			targets[draft.ChunkID][entry.ID] = struct{}{}
+			targets[draft.ChunkID][entry.ID] = entry
 			fingerprint, err := entryDraftFingerprint(entryDraftFromEntry(entry))
 			if err != nil {
 				return 0, err
@@ -69,9 +69,11 @@ func (s *DeduplicatingSink) StoreCandidates(ctx context.Context, recordID knowle
 	seenDrafts := make(map[string]struct{}, len(drafts))
 	for _, draft := range drafts {
 		if draft.Action != CandidateActionCreateEntry {
-			if _, exists := targets[draft.ChunkID][draft.TargetEntryID]; !exists {
+			target, exists := targets[draft.ChunkID][draft.TargetEntryID]
+			if !exists {
 				return 0, fmt.Errorf("%w: candidate target is not active or superseded in its chunk", knowledge.ErrInvalidRecord)
 			}
+			draft.TargetRevision = target.Revision.Number
 		}
 		fingerprint, err := entryDraftFingerprint(draft.Entry)
 		if err != nil {

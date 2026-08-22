@@ -446,6 +446,14 @@ superseded target in that chunk. Action, prose reason, and model confidence cann
 identical content appear new. The sink reports the post-deduplication count back to the
 queue, so a fully duplicated batch becomes `no_candidates`.
 
+Automatic application is deliberately narrower than drafting. Only `allow`-classified
+candidates with no risk labels and a create/update action can enter the low-risk applier.
+The service atomically writes immutable completed-turn evidence and the verified entry
+revision, pins updates to the revision observed during deduplication, and includes the
+curation record ID in the revision reason. Any validation, policy, conflict, or persistence
+failure rolls both writes back. Supersession, contradiction, review-classified content,
+and risk-labelled content remain outside this automatic path.
+
 ## Combined examples
 
 ### Environment-specific procedure

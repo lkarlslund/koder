@@ -86,6 +86,31 @@ func TestDeduplicatingSinkRequiresExistingMutationTarget(t *testing.T) {
 	}
 }
 
+func TestDeduplicatingSinkPinsMutationToCurrentRevision(t *testing.T) {
+	t.Parallel()
+	draft := dedupTestDraft()
+	target := entryForDedup(draft, "00000000-0000-7000-8000-000000000049", knowledge.EntryStateActive)
+	target.Revision.Number = 7
+	draft.Action = CandidateActionUpdateEntry
+	draft.TargetEntryID = target.ID
+	draft.Entry.Summary = "A corrected value"
+	store := NewMemoryCandidateStore()
+	sink, err := NewDeduplicatingSink(entrySourceFunc(func(context.Context, knowledge.ChunkID) ([]knowledge.Entry, error) {
+		return []knowledge.Entry{target}, nil
+	}), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := knowledge.CurationRecordID("00000000-0000-7000-8000-000000000020")
+	if count, err := sink.StoreCandidates(context.Background(), id, []CandidateDraft{draft}); err != nil || count != 1 {
+		t.Fatalf("StoreCandidates() = %d, %v", count, err)
+	}
+	stored := store.Candidates(context.Background(), id)
+	if len(stored) != 1 || stored[0].TargetRevision != 7 {
+		t.Fatalf("stored target revision = %#v", stored)
+	}
+}
+
 func TestMemoryCandidateStoreIsAtomicIdempotentAndClones(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryCandidateStore()
