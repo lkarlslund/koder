@@ -292,6 +292,12 @@ func (s *Server) markConnected() {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
+	if isKnowledgeBrowserPath(r.URL.Path) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte(renderKnowledgeBrowserHTML()))
+		return
+	}
 	if _, ok := fileBrowserSessionFromPath(r.URL.Path); ok {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")

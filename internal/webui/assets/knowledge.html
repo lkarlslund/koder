@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d6efd">
+  <title>Koder Knowledge</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="/assets/koder-logo.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/site.webmanifest">
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/app.css" rel="stylesheet">
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/vendor/graphology/graphology.umd.min.js"></script>
+  <script defer src="/assets/vendor/knowledge-layouts/knowledge-layouts.min.js"></script>
+  <script defer src="/assets/vendor/sigma/sigma.min.js"></script>
+</head>
+<body class="bg-body text-body">
+  <div id="knowledge-browser" class="d-flex flex-column min-vh-100" data-state="shell">
+    <nav class="navbar bg-body-tertiary border-bottom px-3" aria-label="Knowledge explorer">
+      <div class="d-flex align-items-center gap-2 min-w-0">
+        <img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true">
+        <span class="fw-semibold">Koder Knowledge</span>
+        <span class="badge text-bg-secondary">Explorer</span>
+      </div>
+      <a class="btn btn-sm btn-outline-secondary" href="/" title="Return to Koder chat">
+        <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+        <span class="visually-hidden">Return to Koder chat</span>
+      </a>
+    </nav>
+
+    <main class="container-fluid flex-grow-1 py-3">
+      <div class="row g-3 h-100">
+        <aside class="col-12 col-lg-3" aria-labelledby="knowledge-sources-title">
+          <section class="card h-100">
+            <div class="card-header" id="knowledge-sources-title">Knowledge</div>
+            <div class="card-body text-secondary">Chunks, filters, and search results will appear here.</div>
+          </section>
+        </aside>
+        <section class="col-12 col-lg-6" aria-labelledby="knowledge-graph-title">
+          <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between gap-2">
+              <span id="knowledge-graph-title">Graph</span>
+              <span class="small text-secondary">Preparing explorer</span>
+            </div>
+            <div class="card-body d-flex flex-column align-items-center justify-content-center gap-3 text-secondary" id="knowledge-graph" role="region" aria-live="polite">
+              <span class="spinner-border text-primary" aria-hidden="true"></span>
+              <span>The graph view is being connected.</span>
+            </div>
+          </div>
+        </section>
+        <aside class="col-12 col-lg-3" aria-labelledby="knowledge-inspector-title">
+          <section class="card h-100">
+            <div class="card-header" id="knowledge-inspector-title">Inspector</div>
+            <div class="card-body text-secondary">Select knowledge to inspect its content, evidence, and history.</div>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <noscript>
+      <div class="alert alert-warning m-3">The Knowledge explorer needs JavaScript for graph navigation.</div>
+    </noscript>
+  </div>
+</body>
+</html>
