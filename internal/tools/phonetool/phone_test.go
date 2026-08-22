@@ -39,15 +39,24 @@ func (c *photoControl) Execute(_ context.Context, action phonedevice.Action, _ m
 	return c.result, nil
 }
 
-func TestPhotoCapabilitiesUseDedicatedTools(t *testing.T) {
+func TestPhotoCapabilitiesUseResourceTool(t *testing.T) {
 	control := &photoControl{}
 	runtime := tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)}
 	if _, enabled := tools.DefinitionFor(tools.Phone, runtime); enabled {
 		t.Fatal("generic phone tool should not duplicate dedicated photo tools")
 	}
-	for _, toolID := range []tools.ID{tools.PhonePhotosSearch, tools.PhonePhotosThumbs, tools.PhonePhotoView, tools.PhonePhotoTransfer} {
-		if definition, enabled := tools.DefinitionFor(toolID, runtime); !enabled || definition.Function.Name != toolID.String() {
-			t.Fatalf("photo definition %q = %#v enabled=%v", toolID, definition, enabled)
+	definition, enabled := tools.DefinitionFor(tools.PhonePhotos, runtime)
+	if !enabled {
+		t.Fatal("phone_photos resource is disabled")
+	}
+	for _, action := range []string{"search", "thumbnails", "view", "transfer"} {
+		if !strings.Contains(string(definition.Function.Parameters), `"`+action+`"`) {
+			t.Fatalf("phone_photos lacks %q: %s", action, definition.Function.Parameters)
+		}
+	}
+	for _, legacy := range []tools.ID{tools.PhonePhotosSearch, tools.PhonePhotosThumbs, tools.PhonePhotoView, tools.PhonePhotoTransfer} {
+		if _, enabled := tools.DefinitionFor(legacy, runtime); enabled {
+			t.Fatalf("legacy photo tool remained visible: %s", legacy)
 		}
 	}
 }
@@ -58,7 +67,7 @@ func TestPhotoThumbnailIsMaterializedWithoutPersistingBytes(t *testing.T) {
 	}}}}
 	runtime := tools.Runtime{SessionID: id.ID("session-1"), ChatID: id.ID("chat-1"), ChatRole: chatrole.Voice, Services: RuntimeService(control)}
 	t.Cleanup(func() { _ = os.RemoveAll(runtime.SessionTmpDir()) })
-	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: tools.PhonePhotosThumbs}})
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: tools.PhonePhotos, Args: map[string]string{"action": "thumbnails"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +90,7 @@ func TestPhotoTransferWritesRequestedWorkspacePath(t *testing.T) {
 	}}}}
 	runtime := tools.Runtime{Workdir: workspace, SessionID: id.ID("session-1"), ChatID: id.ID("chat-1"), ChatRole: chatrole.Voice, Services: RuntimeService(control)}
 	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
-		Tool: tools.PhonePhotoTransfer, Args: map[string]string{"photo_id": "42", "path": "reference/dog.jpg"},
+		Tool: tools.PhonePhotos, Args: map[string]string{"action": "transfer", "photo_id": "42", "path": "reference/dog.jpg"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -103,15 +112,48 @@ func (f *fakeControl) Execute(_ context.Context, action phonedevice.Action, args
 func TestPhoneDefinitionIsDynamicAndVoiceOnly(t *testing.T) {
 	control := &fakeControl{}
 	runtime := tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)}
-	definition, enabled := tools.DefinitionFor(tools.Phone, runtime)
-	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"search_contacts"`) {
+	definition, enabled := tools.DefinitionFor(tools.PhoneContacts, runtime)
+	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"search"`) {
 		t.Fatalf("definition=%#v enabled=%v", definition, enabled)
 	}
-	if _, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Execution, Services: RuntimeService(control)}); enabled {
+	if _, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: chatrole.Execution, Services: RuntimeService(control)}); enabled {
 		t.Fatal("phone tool offered outside the voice profile")
 	}
-	if _, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice}); enabled {
+	if _, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: chatrole.Voice}); enabled {
 		t.Fatal("phone tool offered without a connected provider")
+	}
+	if _, enabled := tools.DefinitionFor(tools.Phone, runtime); enabled {
+		t.Fatal("legacy generic phone dispatcher remained model-visible")
+	}
+}
+
+func TestPhoneResourceValidationAndFixedActions(t *testing.T) {
+	cases := []struct {
+		name string
+		req  tools.Request
+		bad  bool
+	}{
+		{name: "sms missing message", req: tools.Request{Tool: tools.PhoneMessages, Args: map[string]string{"action": "send", "phone_number": "+451234"}}, bad: true},
+		{name: "https required", req: tools.Request{Tool: tools.PhoneOpen, Args: map[string]string{"action": "url", "url": "http://example.com"}}, bad: true},
+		{name: "call recipient", req: tools.Request{Tool: tools.PhoneCalls, Args: map[string]string{"action": "place"}}, bad: true},
+		{name: "calendar cancel", req: tools.Request{Tool: tools.PhoneCalendar, Args: map[string]string{"action": "cancel", "event_id": "event-1"}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			normalized, err := tools.Normalize(test.req)
+			if test.bad {
+				if err == nil {
+					t.Fatalf("Normalize(%#v) succeeded", test.req)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if normalized.Args["operation"] != "cancel" {
+				t.Fatalf("calendar cancel args = %#v", normalized.Args)
+			}
+		})
 	}
 }
 
@@ -120,34 +162,30 @@ func TestPhoneDefinitionKeepsLocalContextReadOnly(t *testing.T) {
 		catalogEntry(t, phonedevice.GetLocation),
 		catalogEntry(t, phonedevice.OpenMap),
 	}}
-	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{
+	location, enabled := tools.DefinitionFor(tools.PhoneLocation, tools.Runtime{
 		ChatRole: chatrole.Voice,
 		Services: RuntimeService(control),
 	})
 	if !enabled {
-		t.Fatal("phone definition is disabled")
+		t.Fatal("phone_location definition is disabled")
 	}
-	description := definition.Function.Description
-	for _, required := range []string{
-		"first read get_location",
-		"coordinate a sibling chat with the resolved place name",
-		"only when the user explicitly asks",
-		"never use this merely to determine or describe where the user is",
-	} {
-		if !strings.Contains(description, required) {
-			t.Fatalf("phone definition does not contain %q: %s", required, description)
-		}
+	if !strings.Contains(location.Function.Description, "without opening a map") || strings.Contains(location.Function.Description, "USER-FACING") {
+		t.Fatalf("phone_location description = %q", location.Function.Description)
+	}
+	opened, enabled := tools.DefinitionFor(tools.PhoneOpen, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	if !enabled || !strings.Contains(opened.Function.Description, "USER-FACING ACTION") || !strings.Contains(opened.Function.Description, "never use it to gather knowledge") {
+		t.Fatalf("phone_open description = %q enabled=%v", opened.Function.Description, enabled)
 	}
 }
 
 func TestPhoneDefinitionIncludesReviewedContactEditArguments(t *testing.T) {
 	control := catalogControl{entries: []phonedevice.CatalogEntry{catalogEntry(t, phonedevice.EditContact)}}
-	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	definition, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
 	if !enabled {
 		t.Fatal("phone definition is disabled")
 	}
 	parameters := string(definition.Function.Parameters)
-	for _, required := range []string{`"edit_contact"`, `"contact_id"`, `"address"`, `"note"`} {
+	for _, required := range []string{`"edit"`, `"contact_id"`, `"address"`, `"note"`} {
 		if !strings.Contains(parameters, required) {
 			t.Fatalf("phone parameters lack %s: %s", required, parameters)
 		}
@@ -156,12 +194,12 @@ func TestPhoneDefinitionIncludesReviewedContactEditArguments(t *testing.T) {
 
 func TestPhoneDefinitionIncludesReviewedCalendarEditArguments(t *testing.T) {
 	control := catalogControl{entries: []phonedevice.CatalogEntry{catalogEntry(t, phonedevice.EditCalendarEvent)}}
-	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	definition, enabled := tools.DefinitionFor(tools.PhoneCalendar, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
 	if !enabled {
 		t.Fatal("phone definition is disabled")
 	}
 	parameters := string(definition.Function.Parameters)
-	for _, required := range []string{`"edit_calendar_event"`, `"event_id"`, `"operation"`, `"cancel"`} {
+	for _, required := range []string{`"edit"`, `"event_id"`, `"cancel"`} {
 		if !strings.Contains(parameters, required) {
 			t.Fatalf("phone parameters lack %s: %s", required, parameters)
 		}
@@ -173,18 +211,16 @@ func TestPhoneDefinitionLabelsUserFacingActions(t *testing.T) {
 		catalogEntry(t, phonedevice.GetLocation),
 		catalogEntry(t, phonedevice.OpenURL),
 	}}
-	definition, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
+	definition, enabled := tools.DefinitionFor(tools.PhoneOpen, tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)})
 	if !enabled {
 		t.Fatal("phone definition is disabled")
 	}
 	description := definition.Function.Description
 	for _, required := range []string{
-		"open_url: Open an HTTPS URL",
+		"url: Open an HTTPS URL",
 		"USER-FACING ACTION",
-		"current user utterance explicitly requests that exact action",
-		"never call one to gain knowledge",
-		"get_location: Read and resolve",
-		"without opening another app",
+		"user explicitly requested this exact",
+		"never use it to gather knowledge",
 	} {
 		if !strings.Contains(description, required) {
 			t.Fatalf("phone definition does not contain %q: %s", required, description)
@@ -196,7 +232,7 @@ func TestPhoneToolCallsInjectedControl(t *testing.T) {
 	control := &fakeControl{}
 	result, err := tools.Call(context.Background(), tools.Options{
 		Runtime: tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)},
-		Request: tools.Request{Tool: tools.Phone, Args: map[string]string{"action": " search_contacts ", "query": " Steen "}},
+		Request: tools.Request{Tool: tools.PhoneContacts, Args: map[string]string{"action": " search ", "query": " Steen "}},
 	})
 	if err != nil || result.Output != "Steen: +45 1234" || control.action != phonedevice.SearchContacts || control.args["query"] != "Steen" {
 		t.Fatalf("result=%#v action=%q args=%v err=%v", result, control.action, control.args, err)

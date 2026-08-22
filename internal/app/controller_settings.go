@@ -1777,6 +1777,8 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "image", "Image"
 	case tools.BrowserStatus, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage, tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate, tools.BrowserNetwork, tools.BrowserDownloads:
 		return "browser", "Browser"
+	case tools.PhoneDevice, tools.PhoneLocation, tools.PhoneContacts, tools.PhoneCalendar, tools.PhoneMessages, tools.PhoneCalls, tools.PhoneNotifications, tools.PhoneClock, tools.PhoneClipboard, tools.PhoneApps, tools.PhoneMedia, tools.PhoneShare, tools.PhoneOpen, tools.PhonePhotos:
+		return "phone", "Phone"
 	default:
 		key := kind.String()
 		return key, kind.DisplayName()

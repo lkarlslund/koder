@@ -95,6 +95,20 @@ const (
 	ToolKindSessionDelegate     ToolKind = "session_delegate"
 	ToolKindSessionStart        ToolKind = "session_start"
 	ToolKindPhone               ToolKind = "phone"
+	ToolKindPhoneDevice         ToolKind = "phone_device"
+	ToolKindPhoneLocation       ToolKind = "phone_location"
+	ToolKindPhoneContacts       ToolKind = "phone_contacts"
+	ToolKindPhoneCalendar       ToolKind = "phone_calendar"
+	ToolKindPhoneMessages       ToolKind = "phone_messages"
+	ToolKindPhoneCalls          ToolKind = "phone_calls"
+	ToolKindPhoneNotifications  ToolKind = "phone_notifications"
+	ToolKindPhoneClock          ToolKind = "phone_clock"
+	ToolKindPhoneClipboard      ToolKind = "phone_clipboard"
+	ToolKindPhoneApps           ToolKind = "phone_apps"
+	ToolKindPhoneMedia          ToolKind = "phone_media"
+	ToolKindPhoneShare          ToolKind = "phone_share"
+	ToolKindPhoneOpen           ToolKind = "phone_open"
+	ToolKindPhonePhotos         ToolKind = "phone_photos"
 	ToolKindPhonePhotosSearch   ToolKind = "phone_photos_search"
 	ToolKindPhonePhotosThumbs   ToolKind = "phone_photos_thumbs"
 	ToolKindPhonePhotoView      ToolKind = "phone_photo_view"
@@ -205,6 +219,20 @@ var builtinToolKinds = []ToolKind{
 	ToolKindSessionDelegate,
 	ToolKindSessionStart,
 	ToolKindPhone,
+	ToolKindPhoneDevice,
+	ToolKindPhoneLocation,
+	ToolKindPhoneContacts,
+	ToolKindPhoneCalendar,
+	ToolKindPhoneMessages,
+	ToolKindPhoneCalls,
+	ToolKindPhoneNotifications,
+	ToolKindPhoneClock,
+	ToolKindPhoneClipboard,
+	ToolKindPhoneApps,
+	ToolKindPhoneMedia,
+	ToolKindPhoneShare,
+	ToolKindPhoneOpen,
+	ToolKindPhonePhotos,
 	ToolKindPhonePhotosSearch,
 	ToolKindPhonePhotosThumbs,
 	ToolKindPhonePhotoView,
