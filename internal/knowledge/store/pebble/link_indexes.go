@@ -32,7 +32,7 @@ func linkEndpointIndex(name string, endpoint func(knowledge.Link) knowledge.Obje
 			}
 			owner := endpoint(*record.Link)
 			return []indexEntry{{
-				Suffix: encodeIndexTuple(owner.Kind.String(), owner.ID, string(record.Link.ID)),
+				Suffix: encodeIndexTuple(owner.Kind.String(), owner.ID, record.Link.Kind.String(), string(record.Link.ID)),
 				Value:  []byte(record.Link.ID),
 			}}, nil
 		},
