@@ -9,6 +9,80 @@ This document defines the vocabulary used by domain records, tools, APIs, packag
 user interfaces. Wire values use lowercase `snake_case` and must not be given different
 meanings in individual transports.
 
+## Package ownership and import direction
+
+Knowledge follows inward-only dependencies. Domain and service code must remain usable
+without a browser, chat backend, tool registry, or Pebble database.
+
+```text
+cmd/koder and internal/app                 process wiring and lifecycle
+              │
+      ┌───────┼────────────────┐
+      ▼       ▼                ▼
+knowledgeapi  tools/knowledgetool  background curator
+      └───────┼────────────────┘
+              ▼
+     knowledge/service                    policy and use cases
+              │
+      ┌───────┴────────┐
+      ▼                ▼
+knowledge/store   knowledge classifier    consumer-owned boundaries
+      │                │
+      ▼                ▼
+store/pebble      local/remote adapters   replaceable implementations
+store/memory
+      └───────┬────────┘
+              ▼
+      internal/knowledge                  canonical domain values
+```
+
+Planned package responsibilities:
+
+| Package | Owns | May import |
+| --- | --- | --- |
+| `internal/knowledge` | Canonical types, enums, validation, normalization, classification contracts | Standard library and general-purpose text/ID packages |
+| `internal/knowledge/store` | Domain-facing transaction, query, cursor, health, checkpoint, and migration interfaces | `internal/knowledge` |
+| `internal/knowledge/store/memory` | Deterministic in-memory implementation for contracts and service tests | Domain and store contracts |
+| `internal/knowledge/store/pebble` | Private keys, records, indexes, batches, generations, and Pebble lifecycle | Domain/store contracts and Pebble |
+| `internal/knowledge/service` | Authorization, policy, normalization, classification, transactions, search, audit decisions, import/export orchestration | Domain and store/classifier contracts |
+| `internal/tools/knowledgetool` | Model-facing multi-action schema and adaptation to service operations | Knowledge service and generic tool contracts |
+| `internal/knowledgeapi` | Authenticated HTTP/event DTOs, limits, ETags, and error envelopes | Knowledge service and Web/API infrastructure |
+| `internal/app` and `cmd/koder` | Configuration, construction, startup degradation, lifecycle, and dependency injection | Public constructors/interfaces from the layers above |
+| `internal/webui/assets` | Knowledge explorer, graph renderer, and API client | HTTP/event contracts only; no Go package dependency |
+
+The names may be shortened if Go package usage reads more naturally, but ownership and
+dependency direction are fixed.
+
+### Import rules
+
+- `internal/knowledge` does not import store backends, the main Koder store, web/API code,
+  tool packages, chat/agent packages, turn drivers, `internal/app`, or `cmd/koder`.
+- Store interfaces do not expose Pebble types, keys, batches, iterators, options, or
+  errors. Only the Pebble implementation imports `github.com/cockroachdb/pebble`.
+- The service owns policy and transactions. HTTP handlers and model tools must not bypass
+  it to read or write a backend directly.
+- Koder-native and Codex turn drivers do not import knowledge storage. They receive the
+  same runtime-filtered tool contract through existing tool integration.
+- Browser code does not know the database shape. It consumes bounded, versioned HTTP and
+  event DTOs and treats node/edge patches as projections.
+- Configuration describes backend selection and paths but does not construct backends.
+  Process wiring resolves configuration and owns open/close order.
+- The background curator proposes service commands; it cannot write canonical records or
+  indexes directly.
+- Package import/export uses the service boundary for validation, classification,
+  authorization, staging, and activation.
+
+### Contract testing
+
+Store behavior is specified once as a reusable contract suite and run unchanged against
+memory and Pebble implementations. Service tests use the memory store and fake
+classifier/clock/actor sources. Pebble-specific tests cover encoding, atomicity, restart,
+locking, migration, and failure behavior without leaking those concerns upward.
+
+API, tool, import, and browser tests share the canonical JSON fixtures under
+`protocol/knowledge/v1/testdata`. Transport adapters may add envelopes, but canonical
+objects and enum meanings remain owned by `internal/knowledge`.
+
 ## Identity, revisions, time, and cursors
 
 ### Stable identities
