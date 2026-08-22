@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,19 @@ import (
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/tools"
+)
+
+var (
+	supportedActions = []string{
+		"search", "get", "neighbors",
+		"chunk_list", "chunk_get", "chunk_create", "chunk_update", "chunk_archive", "chunk_restore", "chunk_delete",
+		"entry_create", "entry_update", "entry_supersede", "entry_archive", "entry_restore", "entry_delete",
+		"link", "unlink", "verify", "history",
+	}
+	supportedScopeKinds = []knowledge.ScopeKind{
+		knowledge.ScopeKindGlobal, knowledge.ScopeKindPersonal, knowledge.ScopeKindProject,
+		knowledge.ScopeKindSession, knowledge.ScopeKindEnvironment,
+	}
 )
 
 const (
@@ -143,9 +157,29 @@ func (tool) ID() tools.ID             { return tools.Knowledge }
 func (tool) BypassesPermission() bool { return false }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if _, err := requireService(runtime); err != nil {
+	service, err := requireService(runtime)
+	if err != nil {
 		return tools.ToolSpec{}, false
 	}
+	ctx := context.Background()
+	if runtime.ChatID != "" {
+		ctx, err = knowledgeService.WithActor(ctx, knowledge.Actor{Kind: knowledge.ActorKindChat, ID: string(runtime.ChatID)})
+		if err != nil {
+			return tools.ToolSpec{}, false
+		}
+	}
+	offer, err := service.FilterToolOffer(ctx, candidateToolOffer())
+	if err != nil || len(offer.Actions) == 0 || len(offer.ScopeKinds) == 0 {
+		return tools.ToolSpec{}, false
+	}
+	spec.Parameters, err = filterToolSchema(spec.Parameters, offer)
+	if err != nil {
+		return tools.ToolSpec{}, false
+	}
+	actions, scopes := strings.Join(offer.Actions, ", "), strings.Join(scopeKindStrings(offer.ScopeKinds), ", ")
+	policyDescription := " Runtime policy permits actions: " + actions + "; permitted scopes: " + scopes + "."
+	spec.Description += policyDescription
+	spec.Usage += policyDescription
 	return spec, true
 }
 
@@ -241,6 +275,13 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 			return tools.Result{}, knowledgeService.ClassifyError(err)
 		}
 	}
+	offer, err := service.FilterToolOffer(ctx, candidateToolOffer())
+	if err != nil {
+		return tools.Result{}, knowledgeService.ClassifyError(err)
+	}
+	if len(offer.ScopeKinds) == 0 || !slices.Contains(offer.Actions, options.Request.Args["action"]) {
+		return tools.Result{}, knowledgeService.ClassifyError(fmt.Errorf("%w: action %s", knowledgeService.ErrToolOfferDenied, options.Request.Args["action"]))
+	}
 	var value any
 	switch options.Request.Args["action"] {
 	case "search":
@@ -290,6 +331,76 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 
 func requireService(runtime tools.Runtime) (*knowledgeService.Service, error) {
 	return tools.RequireService[*knowledgeService.Service](runtime, serviceKey)
+}
+
+func candidateToolOffer() knowledgeService.ToolOffer {
+	return knowledgeService.ToolOffer{Actions: slices.Clone(supportedActions), ScopeKinds: slices.Clone(supportedScopeKinds)}
+}
+
+func scopeKindStrings(values []knowledge.ScopeKind) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.String())
+	}
+	return result
+}
+
+func filterToolSchema(raw string, offer knowledgeService.ToolOffer) (string, error) {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(raw), &schema); err != nil {
+		return "", fmt.Errorf("decode knowledge tool schema: %w", err)
+	}
+	properties, err := schemaObject(schema, "properties")
+	if err != nil {
+		return "", err
+	}
+	action, err := schemaObject(properties, "action")
+	if err != nil {
+		return "", err
+	}
+	action["enum"] = slices.Clone(offer.Actions)
+	scopeNames := scopeKindStrings(offer.ScopeKinds)
+	if scopeKinds, ok := properties["scope_kinds"].(map[string]any); ok {
+		if items, ok := scopeKinds["items"].(map[string]any); ok {
+			items["enum"] = slices.Clone(scopeNames)
+		}
+	}
+	for _, objectName := range []string{"chunk", "entry"} {
+		object, err := schemaObject(properties, objectName)
+		if err != nil {
+			return "", err
+		}
+		objectProperties, err := schemaObject(object, "properties")
+		if err != nil {
+			return "", err
+		}
+		scope, err := schemaObject(objectProperties, "scope")
+		if err != nil {
+			return "", err
+		}
+		scopeProperties, err := schemaObject(scope, "properties")
+		if err != nil {
+			return "", err
+		}
+		kind, err := schemaObject(scopeProperties, "kind")
+		if err != nil {
+			return "", err
+		}
+		kind["enum"] = slices.Clone(scopeNames)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return "", fmt.Errorf("encode knowledge tool schema: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func schemaObject(parent map[string]any, name string) (map[string]any, error) {
+	value, ok := parent[name].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("knowledge tool schema has no %s object", name)
+	}
+	return value, nil
 }
 
 func normalizeSearchArgs(args map[string]string) (map[string]string, error) {

@@ -69,6 +69,74 @@ func TestKnowledgeToolRequiresRuntimeService(t *testing.T) {
 	}
 }
 
+func TestKnowledgeToolDefinitionFiltersActionsAndScopesFromPolicy(t *testing.T) {
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		ToolPolicy: knowledgeService.ToolOfferPolicyFunc(func(_ context.Context, actor knowledge.Actor, _ knowledgeService.ToolOffer) (knowledgeService.ToolOffer, error) {
+			if actor.Kind != knowledge.ActorKindChat {
+				t.Fatalf("policy actor = %#v, want chat", actor)
+			}
+			return knowledgeService.ToolOffer{
+				Actions: []string{"get", "history"}, ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject},
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, enabled := tools.DefinitionFor(tools.Knowledge, runtimeFor(service))
+	if !enabled {
+		t.Fatal("restricted non-empty Knowledge offer was hidden")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(definition.Function.Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	actions := properties["action"].(map[string]any)["enum"].([]any)
+	if got := strings.Join(anyStrings(actions), ","); got != "get,history" {
+		t.Fatalf("filtered actions = %q", got)
+	}
+	scopeKinds := properties["scope_kinds"].(map[string]any)["items"].(map[string]any)["enum"].([]any)
+	chunkScopeKinds := properties["chunk"].(map[string]any)["properties"].(map[string]any)["scope"].(map[string]any)["properties"].(map[string]any)["kind"].(map[string]any)["enum"].([]any)
+	entryScopeKinds := properties["entry"].(map[string]any)["properties"].(map[string]any)["scope"].(map[string]any)["properties"].(map[string]any)["kind"].(map[string]any)["enum"].([]any)
+	for name, values := range map[string][]any{"scope filter": scopeKinds, "chunk scope": chunkScopeKinds, "entry scope": entryScopeKinds} {
+		if got := strings.Join(anyStrings(values), ","); got != "project" {
+			t.Fatalf("%s enum = %q", name, got)
+		}
+	}
+	if !strings.Contains(definition.Function.Description, "actions: get, history") || !strings.Contains(definition.Function.Description, "scopes: project") {
+		t.Fatalf("runtime policy description = %q", definition.Function.Description)
+	}
+
+	_, err = call(context.Background(), runtimeFor(service), map[string]string{"action": "search", "query": "linux"})
+	var forbidden *knowledgeService.ServiceError
+	if !errors.As(err, &forbidden) || forbidden.Code != knowledgeService.ErrorCodeForbidden {
+		t.Fatalf("withheld action error = %T %v", err, err)
+	}
+}
+
+func TestKnowledgeToolDefinitionHidesEmptyPolicyOffer(t *testing.T) {
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		ToolPolicy: knowledgeService.ToolOfferPolicyFunc(func(context.Context, knowledge.Actor, knowledgeService.ToolOffer) (knowledgeService.ToolOffer, error) {
+			return knowledgeService.ToolOffer{}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, enabled := tools.DefinitionFor(tools.Knowledge, runtimeFor(service)); enabled {
+		t.Fatal("empty Knowledge policy offer must hide the tool")
+	}
+}
+
 func TestKnowledgeReadActionsSearchGetAndTraverse(t *testing.T) {
 	ctx := context.Background()
 	service := newService(t)
@@ -631,6 +699,14 @@ func TestKnowledgeChunkInputRejectsUnknownFieldsAndOversizedCalls(t *testing.T) 
 
 func call(ctx context.Context, runtime tools.Runtime, args map[string]string) (tools.Result, error) {
 	return tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: tools.Knowledge, Args: args}})
+}
+
+func anyStrings(values []any) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.(string))
+	}
+	return result
 }
 
 func runtimeFor(service *knowledgeService.Service) tools.Runtime {

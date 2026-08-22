@@ -24,6 +24,7 @@ type Config struct {
 	Store        knowledgeStore.Store
 	Classifier   knowledge.Classifier
 	ChunkPolicy  ChunkPolicy
+	ToolPolicy   ToolOfferPolicy
 	Actor        ActorSource
 	Now          func() time.Time
 	NewID        IDSource
@@ -36,6 +37,7 @@ type Service struct {
 	store        knowledgeStore.Store
 	classifier   knowledge.Classifier
 	chunkPolicy  ChunkPolicy
+	toolPolicy   ToolOfferPolicy
 	actor        ActorSource
 	now          func() time.Time
 	newID        IDSource
@@ -54,6 +56,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.ChunkPolicy == nil {
 		cfg.ChunkPolicy = AllowAllChunkPolicy{}
 	}
+	if cfg.ToolPolicy == nil {
+		cfg.ToolPolicy = AllowAllToolOfferPolicy{}
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -68,7 +73,7 @@ func New(cfg Config) (*Service, error) {
 		}
 	}
 	return &Service{
-		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, actor: cfg.Actor,
+		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
 		now: cfg.Now, newID: cfg.NewID, rankSignals: cfg.RankSignals,
 		semantic: cfg.Semantic, scoreBlender: cfg.ScoreBlender,
 	}, nil
