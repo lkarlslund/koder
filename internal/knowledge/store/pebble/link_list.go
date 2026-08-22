@@ -26,9 +26,10 @@ func (s *Store) ListAdjacentLinks(ctx context.Context, request knowledgeStore.Ad
 	snapshot := s.db.NewSnapshot()
 	defer func() { _ = snapshot.Close() }()
 	indexNames := []string{linkOutgoingIndex, linkIncomingIndex}
-	if request.Filter.Direction == knowledgeStore.LinkDirectionOutgoing {
+	switch request.Filter.Direction {
+	case knowledgeStore.LinkDirectionOutgoing:
 		indexNames = indexNames[:1]
-	} else if request.Filter.Direction == knowledgeStore.LinkDirectionIncoming {
+	case knowledgeStore.LinkDirectionIncoming:
 		indexNames = indexNames[1:]
 	}
 	seen := make(map[knowledge.LinkID]struct{})

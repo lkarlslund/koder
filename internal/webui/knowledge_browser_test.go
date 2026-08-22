@@ -21,7 +21,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get Knowledge explorer: %v", err)
 	}
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("read Knowledge explorer: %v", err)

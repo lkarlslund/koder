@@ -35,7 +35,7 @@ func TestKnowledgeGraphViewAPILifecycleAndOwnerIsolation(t *testing.T) {
 
 	response := knowledgeJSONRequest(t, http.MethodPost, collectionURL, srv.knowledgeBrowserToken, knowledgeapi.GraphViewSaveRequest{Name: "Personal map", State: state})
 	if response.StatusCode != http.StatusCreated || response.Header.Get("Location") == "" {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("create graph view status=%d location=%q", response.StatusCode, response.Header.Get("Location"))
 	}
 	var created knowledgeapi.GraphViewResponse
@@ -66,10 +66,10 @@ func TestKnowledgeGraphViewAPILifecycleAndOwnerIsolation(t *testing.T) {
 	}
 	response = knowledgeJSONRequest(t, http.MethodPut, itemURL, srv.knowledgeBrowserToken, knowledgeapi.GraphViewSaveRequest{Name: "Stale", State: state, ExpectedRevision: 1})
 	if response.StatusCode != http.StatusConflict {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("stale update status = %d", response.StatusCode)
 	}
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 
 	response = knowledgeJSONRequest(t, http.MethodDelete, itemURL, srv.knowledgeBrowserToken, knowledgeapi.GraphViewDeleteRequest{ExpectedRevision: 2})
 	var deleted knowledgeapi.GraphViewDeleteResponse

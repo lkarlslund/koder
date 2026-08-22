@@ -60,7 +60,7 @@ func TestKnowledgeGraphVendorAssetsArePinnedAndLocal(t *testing.T) {
 			response := httptest.NewRecorder()
 			assetHandler().ServeHTTP(response, request)
 			result := response.Result()
-			defer result.Body.Close()
+			defer closeKnowledgeHTTPResponse(t, result)
 			if result.StatusCode != http.StatusOK {
 				t.Fatalf("GET local vendor asset status = %d", result.StatusCode)
 			}

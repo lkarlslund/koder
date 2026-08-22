@@ -65,7 +65,7 @@ func TestKnowledgeLinkCreateReadUnlinkRestoreAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusNotModified {
 		t.Fatalf("conditional get status=%d", response.StatusCode)
 	}

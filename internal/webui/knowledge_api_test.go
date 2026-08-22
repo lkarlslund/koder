@@ -42,7 +42,7 @@ func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 
 	response := knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.RoutePrefix+"/chunks", "")
 	if response.StatusCode != http.StatusUnauthorized || response.Header.Get("WWW-Authenticate") == "" {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("unauthenticated status=%d authenticate=%q", response.StatusCode, response.Header.Get("WWW-Authenticate"))
 	}
 	var unauthorized knowledgeapi.ErrorResponse
@@ -53,7 +53,7 @@ func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 
 	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.RoutePrefix+"/chunks?scope=global&limit=1", srv.knowledgeBrowserToken)
 	if response.StatusCode != http.StatusOK {
-		defer response.Body.Close()
+		defer closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("browser-authenticated list status = %d", response.StatusCode)
 	}
 	var browserListed knowledgeapi.ChunkListResponse
@@ -64,7 +64,7 @@ func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 
 	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.RoutePrefix+"/chunks?scope=global&limit=1", token)
 	if response.StatusCode != http.StatusOK {
-		defer response.Body.Close()
+		defer closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("list status = %d", response.StatusCode)
 	}
 	var listed knowledgeapi.ChunkListResponse
@@ -77,7 +77,7 @@ func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 	chunkURL := srv.URL() + knowledgeapi.RoutePrefix + "/chunks/" + string(global.ID)
 	response = knowledgeAPIRequest(t, http.MethodGet, chunkURL, token)
 	if response.StatusCode != http.StatusOK {
-		defer response.Body.Close()
+		defer closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("get status = %d", response.StatusCode)
 	}
 	etag := response.Header.Get("ETag")
@@ -97,7 +97,7 @@ func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conditional get: %v", err)
 	}
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusNotModified {
 		t.Fatalf("conditional get status = %d", response.StatusCode)
 	}
@@ -232,7 +232,7 @@ func TestKnowledgeChunkMutationLifecycleUsesOptimisticRevisions(t *testing.T) {
 		t.Fatalf("delete status=%d response=%#v", response.StatusCode, deleted)
 	}
 	response = knowledgeAPIRequest(t, http.MethodGet, chunkURL, token)
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("get deleted status=%d", response.StatusCode)
 	}
@@ -460,7 +460,7 @@ func TestKnowledgeEntryLifecycleWritesUseOptimisticRevisions(t *testing.T) {
 		t.Fatalf("delete status=%d response=%#v", response.StatusCode, deleted)
 	}
 	response = knowledgeAPIRequest(t, http.MethodGet, disposableURL, token)
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("get deleted status=%d", response.StatusCode)
 	}
@@ -534,7 +534,7 @@ func knowledgeJSONRequest(t *testing.T, method, url, token string, body any) *ht
 
 func decodeKnowledgeResponse(t *testing.T, response *http.Response, target any) {
 	t.Helper()
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		t.Fatalf("decode Knowledge response: %v", err)
 	}

@@ -65,7 +65,9 @@ func TestAdversarialArchiveCorpusRejectsZIPComments(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	archive := zip.NewWriter(&output)
-	archive.SetComment("hidden payload")
+	if err := archive.SetComment("hidden payload"); err != nil {
+		t.Fatalf("set ZIP comment: %v", err)
+	}
 	writer, err := archive.Create("manifest.json")
 	if err != nil {
 		t.Fatal(err)

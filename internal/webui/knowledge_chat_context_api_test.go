@@ -50,7 +50,7 @@ func TestKnowledgeChatContextQueuesExplicitReferenceForSelectedChat(t *testing.T
 	}
 	response := knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.ChatContextPath, srv.knowledgeBrowserToken, request)
 	if response.StatusCode != http.StatusOK {
-		defer response.Body.Close()
+		defer closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("send Knowledge context status = %d", response.StatusCode)
 	}
 	var sent knowledgeapi.ChatContextResponse

@@ -36,10 +36,10 @@ func TestKnowledgeCurationAPIListsAcceptsAndUndoesCandidates(t *testing.T) {
 
 	response := knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.CurationCandidatePath+"?status=pending_review&limit=10", "")
 	if response.StatusCode != http.StatusUnauthorized {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("unauthenticated status = %d", response.StatusCode)
 	}
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 
 	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.CurationCandidatePath+"?status=pending_review&limit=10", token)
 	var listed knowledgeapi.CurationCandidateListResponse
@@ -58,10 +58,10 @@ func TestKnowledgeCurationAPIListsAcceptsAndUndoesCandidates(t *testing.T) {
 
 	response = knowledgeCurationDecisionRequest(t, srv.URL()+knowledgeapi.CurationCandidateActionPath(candidate.ID, "accept"), token, knowledgeapi.CurationCandidateDecisionRequest{ExpectedVersion: candidate.Version})
 	if response.StatusCode != http.StatusConflict {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("stale accept status = %d", response.StatusCode)
 	}
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 
 	response = knowledgeCurationDecisionRequest(t, srv.URL()+knowledgeapi.CurationCandidateActionPath(candidate.ID, "undo"), token, knowledgeapi.CurationCandidateDecisionRequest{ExpectedVersion: accepted.Candidate.Version})
 	var undone knowledgeapi.CurationCandidateResponse

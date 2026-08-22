@@ -62,7 +62,8 @@ func TestContextActorIsCommittedInServerOwnedRevision(t *testing.T) {
 
 func TestWithActorRejectsInvalidOrMissingContext(t *testing.T) {
 	t.Parallel()
-	if _, err := WithActor(nil, knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:koder"}); err == nil {
+	var missingContext context.Context
+	if _, err := WithActor(missingContext, knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:koder"}); err == nil {
 		t.Fatal("WithActor(nil) unexpectedly succeeded")
 	}
 	if _, err := WithActor(context.Background(), knowledge.Actor{}); err == nil {

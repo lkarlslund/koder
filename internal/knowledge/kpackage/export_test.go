@@ -258,7 +258,11 @@ func readZIPFile(t *testing.T, file *zip.File) []byte {
 	if err != nil {
 		t.Fatalf("open ZIP file %s: %v", file.Name, err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close ZIP file %s: %v", file.Name, err)
+		}
+	}()
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		t.Fatalf("read ZIP file %s: %v", file.Name, err)

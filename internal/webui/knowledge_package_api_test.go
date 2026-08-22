@@ -37,10 +37,10 @@ func TestKnowledgePackageAPIRequiresAuthenticationAndSeparatesPreviewStageActiva
 
 	response := knowledgePackageRequest(t, http.MethodPost, srv.URL()+knowledgeapi.PackagePreviewPath, "", knowledgeapi.PackageMediaType, archive)
 	if response.StatusCode != http.StatusUnauthorized {
-		response.Body.Close()
+		closeKnowledgeHTTPResponse(t, response)
 		t.Fatalf("unauthenticated preview status = %d", response.StatusCode)
 	}
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 
 	response = knowledgePackageRequest(t, http.MethodPost, srv.URL()+knowledgeapi.PackagePreviewPath, token, knowledgeapi.PackageMediaType, archive)
 	var preview knowledgeapi.PackagePreviewResponse
@@ -104,7 +104,7 @@ func TestKnowledgePackageAPIExportsPortableArchiveAndRejectsInvalidTransport(t *
 
 	response := knowledgePackageRequest(t, http.MethodGet, srv.URL()+knowledgeapi.PackageExportPath(chunk.ID), token, "", nil)
 	archive, err := io.ReadAll(response.Body)
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestKnowledgePackageAPIExportsPortableArchiveAndRejectsInvalidTransport(t *
 		t.Fatalf("unsupported media status=%d response=%#v", response.StatusCode, invalid)
 	}
 	response = knowledgePackageRequest(t, http.MethodGet, srv.URL()+knowledgeapi.PackagePreviewPath, token, "", nil)
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusMethodNotAllowed || response.Header.Get("Allow") != http.MethodPost {
 		t.Fatalf("preview method status=%d allow=%q", response.StatusCode, response.Header.Get("Allow"))
 	}
@@ -157,7 +157,7 @@ func TestKnowledgePackageAPIRequiresPersonalExportOptIn(t *testing.T) {
 	assertKnowledgeAPIError(t, response, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid)
 
 	response = knowledgePackageRequest(t, http.MethodGet, exportURL+"?include_personal=true", token, "", nil)
-	defer response.Body.Close()
+	defer closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != knowledgeapi.PackageMediaType {
 		t.Fatalf("personal export with opt-in status=%d headers=%v", response.StatusCode, response.Header)
 	}

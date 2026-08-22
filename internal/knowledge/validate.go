@@ -32,7 +32,7 @@ func validateUUIDv7(field, value string) error {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
 			continue
 		}
-		if !((value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f')) {
+		if (value[i] < '0' || value[i] > '9') && (value[i] < 'a' || value[i] > 'f') {
 			return invalid(field, "must be a lowercase canonical UUIDv7")
 		}
 	}

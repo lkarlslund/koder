@@ -70,8 +70,8 @@ func Export(ctx context.Context, writer io.Writer, request ExportRequest) (Expor
 	}
 	digestWriter := &digestLimitWriter{ctx: ctx, writer: writer, hash: sha256.New(), limit: HardMaxCompressedBytes}
 	compressed := gzip.NewWriter(digestWriter)
-	compressed.Header.ModTime = createdAt
-	compressed.Header.OS = 255
+	compressed.ModTime = createdAt
+	compressed.OS = 255
 	uncompressed := &limitWriter{ctx: ctx, writer: compressed, limit: HardMaxUncompressedBytes}
 	encoder := json.NewEncoder(uncompressed)
 	encoder.SetEscapeHTML(false)

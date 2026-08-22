@@ -67,7 +67,7 @@ func TestKnowledgeOperationalStatusAndIndexRebuildAPI(t *testing.T) {
 	token := bindKnowledgeTestDevice(t, srv)
 	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.OperationalStatusPath, token)
 	body, err := io.ReadAll(response.Body)
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestKnowledgeIndexRebuildCancelAPI(t *testing.T) {
 	}
 	token := bindKnowledgeTestDevice(t, srv)
 	response := knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.IndexRebuildPath, token, knowledgeapi.IndexRebuildRequest{Index: "lexical"})
-	response.Body.Close()
+	closeKnowledgeHTTPResponse(t, response)
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("start rebuild status = %d", response.StatusCode)
 	}
