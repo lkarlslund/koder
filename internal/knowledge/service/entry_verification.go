@@ -122,5 +122,8 @@ func (s *Service) VerifyEntry(ctx context.Context, request VerifyEntryRequest) (
 	if err != nil {
 		return VerifyEntryResult{}, fmt.Errorf("verify knowledge entry: %w", err)
 	}
+	if result.Updated {
+		s.publishMutation(entryMutation(MutationVerified, result.Entry))
+	}
 	return result, nil
 }

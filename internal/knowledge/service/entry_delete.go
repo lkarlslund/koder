@@ -49,6 +49,7 @@ func (s *Service) DeleteEntry(ctx context.Context, request DeleteEntryRequest) e
 	if err := actor.Validate(); err != nil {
 		return err
 	}
+	var deleted knowledge.Entry
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		entry, err := tx.Entry(ctx, request.EntryID)
 		if err != nil {
@@ -70,10 +71,12 @@ func (s *Service) DeleteEntry(ctx context.Context, request DeleteEntryRequest) e
 		if !blockers.Empty() {
 			return &EntryDeletionBlockedError{EntryID: request.EntryID, Blockers: blockers}
 		}
+		deleted = entry
 		return tx.DeleteEntry(ctx, request.EntryID, request.ExpectedRevision)
 	})
 	if err != nil {
 		return fmt.Errorf("delete knowledge entry: %w", err)
 	}
+	s.publishMutation(entryMutation(MutationDeleted, deleted))
 	return nil
 }

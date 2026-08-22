@@ -68,6 +68,9 @@ func (s *Service) EnsurePersonalChunk(ctx context.Context) (EnsurePersonalChunkR
 	if err != nil {
 		return EnsurePersonalChunkResult{}, fmt.Errorf("ensure personal/me knowledge chunk: %w", err)
 	}
+	if result.Created {
+		s.publishMutation(chunkMutation(MutationCreated, result.Chunk))
+	}
 	return result, nil
 }
 

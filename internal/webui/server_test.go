@@ -1067,6 +1067,20 @@ func TestWebSocketStatusDeltaDoesNotSerializeTimeline(t *testing.T) {
 	}
 }
 
+func TestWebSocketPassesKnowledgeDeltaFromController(t *testing.T) {
+	original := app.Event{Seq: 13, Type: "knowledge_delta", Payload: map[string]any{
+		"stream_id": "stream-1", "sequence": uint64(4),
+	}}
+	event, ok := webEventFromControllerEvent(original)
+	if !ok || event.Seq != original.Seq || event.Type != original.Type {
+		t.Fatalf("web event = %#v, %v", event, ok)
+	}
+	payload, ok := event.Payload.(map[string]any)
+	if !ok || payload["stream_id"] != "stream-1" || payload["sequence"] != uint64(4) {
+		t.Fatalf("knowledge payload = %#v", event.Payload)
+	}
+}
+
 func TestWebSocketReplaceTimelineDeltaIsOnlyTimelineCarrier(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:      "item-1",

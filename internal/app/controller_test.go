@@ -28,6 +28,9 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
+	knowledgeMemory "github.com/lkarlslund/koder/internal/knowledge/store/memory"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modeltest"
@@ -185,6 +188,55 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 			t.Fatalf("expected subscriptions to avoid unsolicited full snapshots, got %q", event.Type)
 		}
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestControllerPublishesKnowledgeMutations(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	events, unsubscribe := ctrl.Subscribe()
+	defer unsubscribe()
+
+	knowledgeStore := knowledgeMemory.New()
+	t.Cleanup(func() { _ = knowledgeStore.Close() })
+	ids := []string{"01a01688-fc5d-7f7d-8bb8-de244977f8a1", "01a01688-fc5d-7f7d-8bb8-de244977f8a2"}
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: knowledgeStore,
+		Actor: func(context.Context) (knowledge.Actor, error) {
+			return knowledge.Actor{Kind: knowledge.ActorKindUser, ID: "user:test"}, nil
+		},
+		NewID: func() string {
+			value := ids[0]
+			ids = ids[1:]
+			return value
+		},
+	})
+	if err != nil {
+		t.Fatalf("new knowledge service: %v", err)
+	}
+	ctrl.SetKnowledgeService(service)
+	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })
+	created, err := service.CreateChunk(context.Background(), knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Live knowledge", Kind: knowledge.ChunkKindReference,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+	}})
+	if err != nil {
+		t.Fatalf("create chunk: %v", err)
+	}
+
+	select {
+	case event := <-events:
+		mutation, ok := event.Payload.(knowledgeService.MutationEvent)
+		if event.Type != "knowledge_delta" || !ok || mutation.Object.ID != string(created.Chunk.ID) || mutation.Sequence != 1 {
+			t.Fatalf("controller event = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for knowledge_delta")
 	}
 }
 

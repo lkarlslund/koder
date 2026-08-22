@@ -109,5 +109,12 @@ func (s *Service) changeEntryState(ctx context.Context, request EntryLifecycleRe
 	if err != nil {
 		return EntryLifecycleResult{}, fmt.Errorf("change knowledge entry lifecycle: %w", err)
 	}
+	if result.Updated {
+		kind := MutationArchived
+		if target == knowledge.EntryStateActive {
+			kind = MutationRestored
+		}
+		s.publishMutation(entryMutation(kind, result.Entry))
+	}
 	return result, nil
 }

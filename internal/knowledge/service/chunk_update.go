@@ -131,6 +131,9 @@ func (s *Service) UpdateChunk(ctx context.Context, request UpdateChunkRequest) (
 	if err != nil {
 		return UpdateChunkResult{}, fmt.Errorf("update knowledge chunk: %w", err)
 	}
+	if result.Updated {
+		s.publishMutation(chunkMutation(MutationUpdated, result.Chunk))
+	}
 	return result, nil
 }
 

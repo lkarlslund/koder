@@ -111,5 +111,10 @@ func (s *Service) SupersedeEntry(ctx context.Context, request SupersedeEntryRequ
 	if err != nil {
 		return SupersedeEntryResult{}, fmt.Errorf("supersede knowledge entry: %w", err)
 	}
+	if result.Updated {
+		event := entryMutation(MutationSuperseded, result.Entry)
+		event.Related = []MutationObject{{Kind: knowledgeStore.RecordKindEntry, ID: string(request.ReplacementEntryID)}}
+		s.publishMutation(event)
+	}
 	return result, nil
 }

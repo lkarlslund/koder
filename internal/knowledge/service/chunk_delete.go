@@ -50,19 +50,22 @@ func (s *Service) DeleteChunk(ctx context.Context, request DeleteChunkRequest) e
 	if err := actor.Validate(); err != nil {
 		return err
 	}
+	var deleted knowledge.Chunk
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
-		_, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyDelete)
+		current, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyDelete)
 		if err != nil {
 			return err
 		}
 		if !blockers.Empty() {
 			return &ChunkDeletionBlockedError{ChunkID: request.ChunkID, Blockers: blockers}
 		}
+		deleted = current
 		return tx.DeleteChunk(ctx, request.ChunkID, request.ExpectedRevision)
 	})
 	if err != nil {
 		return fmt.Errorf("delete knowledge chunk: %w", err)
 	}
+	s.publishMutation(chunkMutation(MutationDeleted, deleted))
 	return nil
 }
 

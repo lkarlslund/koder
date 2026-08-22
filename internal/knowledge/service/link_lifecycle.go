@@ -115,5 +115,12 @@ func (s *Service) changeLinkState(ctx context.Context, request LinkLifecycleRequ
 	if err != nil {
 		return LinkLifecycleResult{}, fmt.Errorf("change knowledge link lifecycle: %w", err)
 	}
+	if result.Updated {
+		kind := MutationUnlinked
+		if target == knowledge.LinkStateActive {
+			kind = MutationRestored
+		}
+		s.publishMutation(linkMutation(kind, result.Link))
+	}
 	return result, nil
 }

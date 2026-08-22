@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/id"
@@ -34,16 +35,21 @@ type Config struct {
 }
 
 type Service struct {
-	store        knowledgeStore.Store
-	classifier   knowledge.Classifier
-	chunkPolicy  ChunkPolicy
-	toolPolicy   ToolOfferPolicy
-	actor        ActorSource
-	now          func() time.Time
-	newID        IDSource
-	rankSignals  RankingSignalSource
-	semantic     SemanticIndexProvider
-	scoreBlender SearchScoreBlender
+	store            knowledgeStore.Store
+	classifier       knowledge.Classifier
+	chunkPolicy      ChunkPolicy
+	toolPolicy       ToolOfferPolicy
+	actor            ActorSource
+	now              func() time.Time
+	newID            IDSource
+	rankSignals      RankingSignalSource
+	semantic         SemanticIndexProvider
+	scoreBlender     SearchScoreBlender
+	mutationMu       sync.Mutex
+	mutationStreamID string
+	mutationSequence uint64
+	mutationNextSub  uint64
+	mutationSubs     map[uint64]chan MutationEvent
 }
 
 func New(cfg Config) (*Service, error) {
@@ -76,6 +82,7 @@ func New(cfg Config) (*Service, error) {
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
 		now: cfg.Now, newID: cfg.NewID, rankSignals: cfg.RankSignals,
 		semantic: cfg.Semantic, scoreBlender: cfg.ScoreBlender,
+		mutationStreamID: id.New(), mutationSubs: make(map[uint64]chan MutationEvent),
 	}, nil
 }
 
@@ -170,6 +177,7 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	}); err != nil {
 		return CreateChunkResult{}, fmt.Errorf("create knowledge chunk: %w", err)
 	}
+	s.publishMutation(chunkMutation(MutationCreated, candidate))
 	return CreateChunkResult{Chunk: candidate, Classification: classification}, nil
 }
 

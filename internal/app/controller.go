@@ -489,6 +489,8 @@ type Controller struct {
 	restartBuild                RestartBuildInfo
 	clearedStartupRunningTools  bool
 	providerHealth              *provider.HealthTracker
+	knowledgeEventMu            sync.Mutex
+	knowledgeEventUnsubscribe   func()
 
 	subMu   sync.Mutex
 	nextSub int
@@ -517,6 +519,7 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)
 		engine.SetPhoneDeviceControl(phone)
+		controller.attachKnowledgeEvents(engine.KnowledgeService())
 	}
 	return controller
 }
@@ -544,7 +547,31 @@ func (c *Controller) KnowledgeService() *knowledgeService.Service {
 func (c *Controller) SetKnowledgeService(service *knowledgeService.Service) {
 	if c != nil && c.agent != nil {
 		c.agent.SetKnowledgeService(service)
+		c.attachKnowledgeEvents(service)
 	}
+}
+
+func (c *Controller) attachKnowledgeEvents(service *knowledgeService.Service) {
+	if c == nil {
+		return
+	}
+	c.knowledgeEventMu.Lock()
+	if c.knowledgeEventUnsubscribe != nil {
+		c.knowledgeEventUnsubscribe()
+		c.knowledgeEventUnsubscribe = nil
+	}
+	if service == nil {
+		c.knowledgeEventMu.Unlock()
+		return
+	}
+	events, unsubscribe := service.SubscribeMutations(128)
+	c.knowledgeEventUnsubscribe = unsubscribe
+	c.knowledgeEventMu.Unlock()
+	go func() {
+		for event := range events {
+			c.broadcast("knowledge_delta", event)
+		}
+	}()
 }
 
 // ChatBackends reports runtime availability and models for chat creation.
@@ -1443,6 +1470,7 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	started := time.Now()
 	c.shutdownMu.Lock()
 	defer c.shutdownMu.Unlock()
+	defer c.attachKnowledgeEvents(nil)
 
 	c.mu.Lock()
 	agent := c.agent

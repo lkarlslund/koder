@@ -102,6 +102,7 @@ func (s *Service) CreateEntry(ctx context.Context, request CreateEntryRequest) (
 	if err != nil {
 		return CreateEntryResult{}, fmt.Errorf("create knowledge entry: %w", err)
 	}
+	s.publishMutation(entryMutation(MutationCreated, result.Entry))
 	return result, nil
 }
 

@@ -32,8 +32,9 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 		return CascadeDeleteChunkResult{}, err
 	}
 	result := CascadeDeleteChunkResult{}
+	mutationEvents := make([]MutationEvent, 0)
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
-		_, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyCascadeDelete)
+		target, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyCascadeDelete)
 		if err != nil {
 			return err
 		}
@@ -78,6 +79,7 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 			if err := tx.DeleteLink(ctx, linkID, link.Revision.Number); err != nil {
 				return err
 			}
+			mutationEvents = append(mutationEvents, linkMutation(MutationDeleted, link))
 			result.DeletedLinkIDs = append(result.DeletedLinkIDs, linkID)
 		}
 		for _, entryID := range blockers.EntryIDs {
@@ -88,12 +90,18 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 			if err := tx.DeleteEntry(ctx, entryID, entry.Revision.Number); err != nil {
 				return err
 			}
+			mutationEvents = append(mutationEvents, entryMutation(MutationDeleted, entry))
 			result.DeletedEntryIDs = append(result.DeletedEntryIDs, entryID)
 		}
 		for _, evidenceID := range blockers.EvidenceIDs {
+			evidence, err := tx.Evidence(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
 			if err := tx.DeleteEvidence(ctx, evidenceID); err != nil {
 				return err
 			}
+			mutationEvents = append(mutationEvents, evidenceMutation(MutationDeleted, evidence))
 			result.DeletedEvidenceIDs = append(result.DeletedEvidenceIDs, evidenceID)
 		}
 		if len(blockers.DependentChunkIDs) > 0 {
@@ -118,14 +126,20 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 				if err := tx.PutChunk(ctx, dependent, dependent.Revision.Number-1); err != nil {
 					return err
 				}
+				mutationEvents = append(mutationEvents, chunkMutation(MutationUpdated, dependent))
 				result.UpdatedDependentChunkIDs = append(result.UpdatedDependentChunkIDs, dependentID)
 			}
 		}
-		return tx.DeleteChunk(ctx, request.ChunkID, request.ExpectedRevision)
+		if err := tx.DeleteChunk(ctx, request.ChunkID, request.ExpectedRevision); err != nil {
+			return err
+		}
+		mutationEvents = append(mutationEvents, chunkMutation(MutationDeleted, target))
+		return nil
 	})
 	if err != nil {
 		return CascadeDeleteChunkResult{}, fmt.Errorf("cascade delete knowledge chunk: %w", err)
 	}
+	s.publishMutations(mutationEvents)
 	return result, nil
 }
 
