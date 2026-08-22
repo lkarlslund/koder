@@ -66,6 +66,7 @@ func DefaultRegistry() Registry {
 
 Answer the user's questions and complete requested work directly. Do not create, control, or coordinate other chats.`),
 			DenyTools: toolSet(
+				"chats",
 				"chat_list",
 				"chat_start",
 				"chat_send",
@@ -92,6 +93,7 @@ You retain this chat's conversation across voice calls and have the same session
 - Do not mention tools, routing, delegation, prompts, Markdown, or internal implementation details.`),
 			DenyTools: toolSet(
 				"request_user_input",
+				"sessions",
 				"session_list",
 				"session_delegate",
 				"session_start",
@@ -118,6 +120,7 @@ Focus only on the assigned milestone and task list.
 			- Do not rewrite unrelated milestones or task lists.`),
 			DenyTools: toolSet(
 				"request_user_input",
+				"chats",
 				"chat_list",
 				"chat_start",
 				"chat_send",

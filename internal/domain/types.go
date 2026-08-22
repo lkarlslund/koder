@@ -83,6 +83,7 @@ const (
 	ToolKindTaskDelete          ToolKind = "task_delete"
 	ToolKindTasksAdd            ToolKind = "tasks_add"
 	ToolKindTasksUpdate         ToolKind = "tasks_update"
+	ToolKindChats               ToolKind = "chats"
 	ToolKindChatList            ToolKind = "chat_list"
 	ToolKindChatStart           ToolKind = "chat_start"
 	ToolKindChatSend            ToolKind = "chat_send"
@@ -91,6 +92,7 @@ const (
 	ToolKindChatRename          ToolKind = "chat_rename"
 	ToolKindChatCleanup         ToolKind = "chat_cleanup"
 	ToolKindChatStatus          ToolKind = "chat_status"
+	ToolKindSessions            ToolKind = "sessions"
 	ToolKindSessionList         ToolKind = "session_list"
 	ToolKindSessionDelegate     ToolKind = "session_delegate"
 	ToolKindSessionStart        ToolKind = "session_start"
@@ -207,6 +209,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindTaskDelete,
 	ToolKindTasksAdd,
 	ToolKindTasksUpdate,
+	ToolKindChats,
 	ToolKindChatList,
 	ToolKindChatStart,
 	ToolKindChatSend,
@@ -215,6 +218,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindChatRename,
 	ToolKindChatCleanup,
 	ToolKindChatStatus,
+	ToolKindSessions,
 	ToolKindSessionList,
 	ToolKindSessionDelegate,
 	ToolKindSessionStart,

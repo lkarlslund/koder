@@ -30,20 +30,35 @@ func RuntimeService(control Control) map[string]any {
 }
 
 func init() {
+	tools.Register(tools.ActionTool{
+		Kind: tools.Sessions,
+		Routes: []tools.ActionRoute{
+			{Action: "list", Tool: tools.SessionList},
+			{Action: "ask", Tool: tools.SessionDelegate},
+			{Action: "start", Tool: tools.SessionStart},
+		},
+		BypassPermissions: true,
+	}, tools.ToolSpec{
+		Title:       "Sessions",
+		Description: "List, start, or ask another work session through the legacy voice-session bridge.",
+		Usage:       "Use list before ask. Ask requires an exact session_id. Start can create a temporary one-off session or a persistent session.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"session_id":{"type":"string"},"message":{"type":"string"},"title":{"type":"string"},"temporary":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title: "List work sessions", Description: "List ordinary work sessions available to this voice chat.",
 		Usage:      "Use before choosing where prior work lives. Results contain bounded titles and recent summaries, not full transcripts.",
-		Parameters: `{"type":"object","properties":{},"additionalProperties":false}`, ExposeToLLM: true,
+		Parameters: `{"type":"object","properties":{},"additionalProperties":false}`, ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(delegateTool{}, tools.ToolSpec{
 		Title: "Ask work session", Description: "Send a request to an existing work session and wait for its answer.",
 		Usage:      "Use the exact session_id returned by session_list. The target chat retains its own history, tools, permissions, and approvals.",
-		Parameters: `{"type":"object","properties":{"session_id":{"type":"string"},"message":{"type":"string"}},"required":["session_id","message"],"additionalProperties":false}`, ExposeToLLM: true,
+		Parameters: `{"type":"object","properties":{"session_id":{"type":"string"},"message":{"type":"string"}},"required":["session_id","message"],"additionalProperties":false}`, ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title: "Start work session", Description: "Create a temporary or persistent work session.",
 		Usage:      "Use temporary=true for self-contained one-off work. Use temporary=false only for ongoing work the user should retain. Then use session_delegate to perform the work.",
-		Parameters: `{"type":"object","properties":{"title":{"type":"string"},"temporary":{"type":"boolean"}},"required":["title","temporary"],"additionalProperties":false}`, ExposeToLLM: true,
+		Parameters: `{"type":"object","properties":{"title":{"type":"string"},"temporary":{"type":"boolean"}},"required":["title","temporary"],"additionalProperties":false}`, ExposeToLLM: true, Legacy: true,
 	})
 }
 

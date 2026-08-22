@@ -39,7 +39,7 @@ func voiceRuntime(control Control) tools.Runtime {
 
 func TestDefinitionsAreNotOfferedToVoiceChats(t *testing.T) {
 	control := &fakeControl{}
-	for _, toolID := range []tools.ID{tools.SessionList, tools.SessionDelegate, tools.SessionStart} {
+	for _, toolID := range []tools.ID{tools.Sessions, tools.SessionList, tools.SessionDelegate, tools.SessionStart} {
 		if !tools.IsBuiltinID(toolID) {
 			t.Fatalf("legacy voice session tool %q is not registered as built in", toolID)
 		}
@@ -51,11 +51,11 @@ func TestDefinitionsAreNotOfferedToVoiceChats(t *testing.T) {
 
 func TestSessionToolsRejectVoiceCalls(t *testing.T) {
 	runtime := voiceRuntime(&fakeControl{})
-	for _, toolID := range []tools.ID{tools.SessionList, tools.SessionDelegate, tools.SessionStart} {
+	for _, toolID := range []tools.ID{tools.Sessions, tools.SessionList, tools.SessionDelegate, tools.SessionStart} {
 		_, err := tools.Call(context.Background(), tools.Options{
 			Runtime: runtime,
 			Request: tools.Request{Tool: toolID, Args: map[string]string{
-				"session_id": "laptop", "message": "check it", "title": "One-off task", "temporary": "true",
+				"action": "list", "session_id": "laptop", "message": "check it", "title": "One-off task", "temporary": "true",
 			}},
 		})
 		if err == nil || !strings.Contains(err.Error(), "not available to voice chats") {

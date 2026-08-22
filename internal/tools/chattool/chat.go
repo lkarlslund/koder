@@ -14,54 +14,74 @@ import (
 )
 
 func init() {
+	tools.Register(tools.ActionTool{
+		Kind: tools.Chats,
+		Routes: []tools.ActionRoute{
+			{Action: "list", Tool: tools.ChatList},
+			{Action: "start", Tool: tools.ChatStart},
+			{Action: "send", Tool: tools.ChatSend},
+			{Action: "cancel", Tool: tools.ChatCancel},
+			{Action: "archive", Tool: tools.ChatArchive, FixedArgs: map[string]string{"archived": "true"}},
+			{Action: "restore", Tool: tools.ChatArchive, FixedArgs: map[string]string{"archived": "false"}},
+			{Action: "rename", Tool: tools.ChatRename},
+			{Action: "cleanup", Tool: tools.ChatCleanup},
+		},
+		BypassPermissions: true,
+	}, tools.ToolSpec{
+		Title:       "Chats",
+		Description: "List, create, coordinate, rename, archive, restore, and cancel chats in this session.",
+		Usage:       "Use list to discover chats. Use start for a new child, send to give a direct child work, and cancel to stop work. Archive only idle direct children; restore makes an archived child visible again. Cleanup archives eligible idle execution children. Child chats report back automatically, so do not poll them.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived chats"},"profile":{"type":"string","description":"Registered chat profile"},"objective":{"type":"string"},"title":{"type":"string"},"backend":{"type":"string","enum":["koder","codex"]},"interaction_mode":{"type":"string","enum":["text","voice"]},"model_id":{"type":"string"},"permission_profile":{"type":"string"},"milestone_key":{"type":"string"},"task_ref":{"type":"string"},"disabled_tools":{"type":"string"},"chat_id":{"type":"string"},"message":{"type":"string"},"steer":{"type":"boolean"},"wait":{"type":"boolean"},"hard":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List chats",
 		Description: "List chats in the current session.",
 		Usage:       "List chats in the current session, including worker chats started for execution. Archived chats are hidden by default; pass archived=true when you need to inspect or restore hidden chats.",
 		Parameters:  `{"type":"object","properties":{"archived":{"type":"boolean","description":"Include archived chats. Defaults to false."}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
 		Usage:       "Start a background child chat using a registered chat profile and either the Koder or Codex backend. Omit backend to use the current chat's backend. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chat_send instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
 		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile such as orchestrator, planning, or execution"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"backend":{"type":"string","enum":["koder","codex"],"description":"Optional turn backend; defaults to the current chat's backend"},"interaction_mode":{"type":"string","enum":["text","voice"],"description":"Optional interaction mode; defaults to text"},"model_id":{"type":"string","description":"Optional backend model id"},"permission_profile":{"type":"string","description":"Optional Koder permission profile"},"milestone_key":{"type":"string","description":"Optional milestone scope; mutually exclusive with task_ref"},"task_ref":{"type":"string","description":"Optional single task scope; mutually exclusive with milestone_key"},"disabled_tools":{"type":"string","description":"Optional comma-separated Koder tool ids to disable for this chat"}},"required":["profile","objective"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(sendTool{}, tools.ToolSpec{
 		Title:       "Send chat message",
 		Description: "Send a message to a direct child chat.",
 		Usage:       "Send work instructions to a chat you may coordinate. Do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy chat; otherwise it is queued as the next user turn. Pass wait=true when the current response needs the target chat's sealed answer; voice chats wait by default.",
 		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to message"},"message":{"type":"string","description":"Message to queue for the chat"},"steer":{"type":"boolean","description":"Deliver as a turn-boundary steer instead of the next user turn"},"wait":{"type":"boolean","description":"Wait for and return the target chat's next sealed answer"}},"required":["chat_id","message"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(cancelTool{}, tools.ToolSpec{
 		Title:       "Cancel chat",
 		Description: "Ask the current chat or a direct child chat to stop.",
 		Usage:       "Ask the current chat or a direct child chat you own to stop. Omit chat_id to cancel the current chat. Pass hard=true only when it must cancel active streaming or tools immediately; otherwise it stops after the current turn.",
 		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to cancel; defaults to the current chat when omitted"},"hard":{"type":"boolean","description":"Immediately cancel active streaming or tools instead of stopping after the current turn"}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(archiveTool{}, tools.ToolSpec{
 		Title:       "Archive chat",
 		Description: "Archive or restore a chat.",
 		Usage:       "Set archived=true for a completed or no-longer-needed direct child chat, archived=false to restore an archived direct child chat. chat_id is required; this tool cannot target the current chat. Only idle chats can be archived. If you need to find archived chats first, call chat_list with archived=true.",
 		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Direct child chat UUID to archive or restore"},"archived":{"type":"boolean","description":"true hides the chat; false restores it"}},"required":["chat_id","archived"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(cleanupTool{}, tools.ToolSpec{
 		Title:       "Cleanup chats",
 		Description: "Archive idle execution child chats.",
 		Usage:       "Archive idle direct child chats owned by the current chat. This only archives execution chats that are idle, have no queued inputs, and have no pending approvals. It skips the current chat, non-child chats, non-execution chats, running chats, waiting-approval chats, queued chats, and already archived chats.",
 		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(renameTool{}, tools.ToolSpec{
 		Title:       "Rename chat",
 		Description: "Rename a chat.",
 		Usage:       "Rename the current chat or a direct child chat you own. Omit chat_id to target the current chat.",
 		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to rename; defaults to the current chat when omitted"},"title":{"type":"string","description":"Replacement title"}},"required":["title"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 }
 

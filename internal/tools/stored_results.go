@@ -1019,7 +1019,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case MilestoneArchive, MilestoneDelete, TaskArchive, TaskDelete:
 		return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
-	case ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename, ChatCleanup:
+	case Chats, ChatList, ChatStart, ChatSend, ChatCancel, ChatArchive, ChatRename, ChatCleanup:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext, TasksAdd, TasksUpdate:
 		return decodeAndFormat[TaskListStoredResult](env.Payload, formatTaskListStoredResult)

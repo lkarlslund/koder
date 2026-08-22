@@ -47,6 +47,7 @@ const (
 	TaskDelete          ID = domain.ToolKindTaskDelete
 	TasksAdd            ID = domain.ToolKindTasksAdd
 	TasksUpdate         ID = domain.ToolKindTasksUpdate
+	Chats               ID = domain.ToolKindChats
 	ChatList            ID = domain.ToolKindChatList
 	ChatStart           ID = domain.ToolKindChatStart
 	ChatSend            ID = domain.ToolKindChatSend
@@ -55,6 +56,7 @@ const (
 	ChatRename          ID = domain.ToolKindChatRename
 	ChatCleanup         ID = domain.ToolKindChatCleanup
 	ChatStatus          ID = domain.ToolKindChatStatus
+	Sessions            ID = domain.ToolKindSessions
 	SessionList         ID = domain.ToolKindSessionList
 	SessionDelegate     ID = domain.ToolKindSessionDelegate
 	SessionStart        ID = domain.ToolKindSessionStart

@@ -42,7 +42,7 @@ func AllowsTool(mode Mode, kind fmt.Stringer) bool {
 		return true
 	}
 	switch strings.TrimSpace(kind.String()) {
-	case "request_user_input", "session_list", "session_delegate", "session_start":
+	case "request_user_input", "sessions", "session_list", "session_delegate", "session_start":
 		return false
 	default:
 		return true

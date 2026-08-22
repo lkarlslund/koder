@@ -1767,8 +1767,10 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "web", "Web"
 	case tools.ExecCommand, tools.ExecSession, tools.ExecStatus, tools.ExecList, tools.ExecWriteStdin, tools.ExecResize, tools.ExecTerminate, tools.ExecCleanup:
 		return "exec", "Exec"
-	case tools.ChatList, tools.ChatStart, tools.ChatSend, tools.ChatCancel, tools.ChatArchive, tools.ChatRename, tools.ChatCleanup:
+	case tools.Chats, tools.ChatList, tools.ChatStart, tools.ChatSend, tools.ChatCancel, tools.ChatArchive, tools.ChatRename, tools.ChatCleanup:
 		return "chat", "Chat"
+	case tools.Sessions, tools.SessionList, tools.SessionDelegate, tools.SessionStart:
+		return "session", "Session"
 	case tools.MilestoneList, tools.MilestoneAdd, tools.MilestoneUpdate, tools.MilestoneArchive, tools.MilestoneDelete, tools.MilestonePlan, tools.MilestoneWrite:
 		return "milestone", "Milestone"
 	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TaskArchive, tools.TaskDelete, tools.TasksAdd, tools.TasksUpdate:

@@ -135,6 +135,40 @@ func TestNormalizeArgs(t *testing.T) {
 	}
 }
 
+func TestChatsResourceIsModelFacingAndDispatches(t *testing.T) {
+	control := &fakeChatControl{statuses: []Status{{ID: "child", Title: "Worker", Role: chatrole.Execution, State: RunStateIdle}}}
+	runtime := testRuntime(control)
+	definition, enabled := tools.DefinitionFor(tools.Chats, runtime)
+	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"restore"`) {
+		t.Fatalf("expected chats resource actions, got enabled=%v definition=%#v", enabled, definition)
+	}
+	if _, enabled := tools.DefinitionFor(tools.ChatList, runtime); enabled {
+		t.Fatal("legacy chat_list remained model-visible")
+	}
+	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.Chats,
+		Args: map[string]string{"action": "restore", "chat_id": "child"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.lastUpdate.Archived == nil || *control.lastUpdate.Archived || control.lastChatID != "child" {
+		t.Fatalf("restore did not dispatch to chat archive handler: update=%#v chat=%q", control.lastUpdate, control.lastChatID)
+	}
+	stored, ok := result.Stored.(tools.ChatListStoredResult)
+	if !ok || len(stored.Items) != 1 || stored.Items[0].ID != "child" {
+		t.Fatalf("unexpected stored result: %#v", result.Stored)
+	}
+}
+
+func TestChatsResourceRespectsExecutionRole(t *testing.T) {
+	runtime := testRuntime(&fakeChatControl{})
+	runtime.ChatRole = chatrole.Execution
+	if _, enabled := tools.DefinitionFor(tools.Chats, runtime); enabled {
+		t.Fatal("execution chat was offered chat coordination resource")
+	}
+}
+
 func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	_, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{}})
 	if err == nil || !strings.Contains(err.Error(), "active persisted chat") {
