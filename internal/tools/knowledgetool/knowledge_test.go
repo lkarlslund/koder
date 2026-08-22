@@ -54,7 +54,7 @@ func TestKnowledgeToolDefinitionRequiresServiceAndOffersReadActions(t *testing.T
 	if err := json.Unmarshal(definition.Function.Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors,chunk_list,chunk_get,chunk_create,chunk_update,chunk_archive,chunk_restore,chunk_delete,entry_create,entry_update,entry_supersede,entry_archive,entry_restore,entry_delete,verify" {
+	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors,chunk_list,chunk_get,chunk_create,chunk_update,chunk_archive,chunk_restore,chunk_delete,entry_create,entry_update,entry_supersede,entry_archive,entry_restore,entry_delete,link,unlink,verify,history" {
 		t.Fatalf("knowledge actions = %q", got)
 	}
 }
@@ -495,6 +495,118 @@ func TestKnowledgeEntryDeleteReportsGraphBlockers(t *testing.T) {
 	if !errors.As(err, &dependency) || dependency.Code != knowledgeService.ErrorCodeDependency || dependency.Details == nil ||
 		dependency.Details.EntryBlockers == nil || len(dependency.Details.EntryBlockers.LinkIDs) != 1 {
 		t.Fatalf("blocked entry_delete error = %#v (%v)", dependency, err)
+	}
+}
+
+func TestKnowledgeLinkUnlinkRestoreAndHistoryActions(t *testing.T) {
+	ctx := context.Background()
+	service := newService(t)
+	chunk, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Partition knowledge", Kind: knowledge.ChunkKindReference, Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: chunk.Chunk.ID, Entry: knowledge.Entry{Title: "Use sfdisk", Summary: "Current guidance", Body: "Full current body must not appear in history.", Kind: knowledge.EntryKindProcedure},
+	})
+	second, _ := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: chunk.Chunk.ID, Entry: knowledge.Entry{Title: "Back up first", Kind: knowledge.EntryKindWarning},
+	})
+	runtime := runtimeFor(service)
+	createdCall, err := call(ctx, runtime, map[string]string{
+		"action":       "link",
+		"relationship": `{"source":{"kind":"entry","id":"` + string(first.Entry.ID) + `"},"target":{"kind":"entry","id":"` + string(second.Entry.ID) + `"},"kind":"requires","label":"safety prerequisite"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, ok := createdCall.Stored.(linkMutationResult)
+	if !ok || !created.Created || created.Link.Kind != knowledge.LinkKindRequires || created.Link.Revision.Number != 1 ||
+		created.Link.Revision.Actor.Kind != knowledge.ActorKindChat || created.Link.Revision.Actor.ID != string(runtime.ChatID) {
+		t.Fatalf("link = %#v", createdCall.Stored)
+	}
+
+	_, err = call(ctx, runtime, map[string]string{
+		"action":       "link",
+		"relationship": `{"source":{"kind":"entry","id":"` + string(first.Entry.ID) + `"},"target":{"kind":"entry","id":"` + string(second.Entry.ID) + `"},"kind":"requires"}`,
+	})
+	var duplicate *knowledgeService.ServiceError
+	if !errors.As(err, &duplicate) || duplicate.Code != knowledgeService.ErrorCodeConflict {
+		t.Fatalf("duplicate link error = %T %v", err, err)
+	}
+
+	unlinkedCall, err := call(ctx, runtime, map[string]string{
+		"action": "unlink", "id": string(created.Link.ID), "expected_revision": "1", "reason": "temporarily inapplicable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinked := unlinkedCall.Stored.(linkMutationResult)
+	if !unlinked.Updated || unlinked.Link.State != knowledge.LinkStateArchived || unlinked.Link.Revision.Number != 2 {
+		t.Fatalf("unlink = %#v", unlinked)
+	}
+
+	restoredCall, err := call(ctx, runtime, map[string]string{
+		"action": "link", "id": string(created.Link.ID), "expected_revision": "2", "reason": "applies again",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := restoredCall.Stored.(linkMutationResult)
+	if !restored.Updated || restored.Link.State != knowledge.LinkStateActive || restored.Link.Revision.Number != 3 {
+		t.Fatalf("link restore = %#v", restored)
+	}
+
+	historyCall, err := call(ctx, runtime, map[string]string{
+		"action": "history", "object_kind": "link", "id": string(created.Link.ID), "limit": "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, ok := historyCall.Stored.(historyPageResult)
+	if !ok || len(history.Revisions) != 2 || history.Revisions[0].Revision.Number != 3 || history.Revisions[1].Revision.Number != 2 || history.NextCursor == "" ||
+		history.Revisions[0].RelationshipKind != knowledge.LinkKindRequires || history.Revisions[0].Source == nil {
+		t.Fatalf("link history = %#v", historyCall.Stored)
+	}
+	nextCall, err := call(ctx, runtime, map[string]string{
+		"action": "history", "object_kind": "link", "id": string(created.Link.ID), "limit": "2", "cursor": history.NextCursor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := nextCall.Stored.(historyPageResult)
+	if len(next.Revisions) != 1 || next.Revisions[0].Revision.Number != 1 {
+		t.Fatalf("second link history page = %#v", next)
+	}
+
+	entryHistoryCall, err := call(ctx, runtime, map[string]string{
+		"action": "history", "object_kind": "entry", "id": string(first.Entry.ID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryHistory := entryHistoryCall.Stored.(historyPageResult)
+	if len(entryHistory.Revisions) != 1 || entryHistory.Revisions[0].Summary != first.Entry.Summary ||
+		strings.Contains(entryHistoryCall.Output, first.Entry.Body) {
+		t.Fatalf("entry history exposed wrong projection: %#v, output=%s", entryHistory, entryHistoryCall.Output)
+	}
+}
+
+func TestKnowledgeLinkAndHistoryInputValidation(t *testing.T) {
+	runtime := runtimeFor(newService(t))
+	_, err := call(context.Background(), runtime, map[string]string{
+		"action": "link", "id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1", "expected_revision": "1",
+		"relationship": `{"source":{"kind":"chunk","id":"01a01688-fc5d-7f7d-8bb8-de244977f8a2"},"target":{"kind":"chunk","id":"01a01688-fc5d-7f7d-8bb8-de244977f8a3"},"kind":"related_to"}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "either relationship") {
+		t.Fatalf("ambiguous link error = %v", err)
+	}
+	_, err = call(context.Background(), runtime, map[string]string{
+		"action": "history", "object_kind": "entry", "id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1", "limit": "51",
+	})
+	if err == nil || !strings.Contains(err.Error(), "between 1 and 50") {
+		t.Fatalf("oversized history error = %v", err)
 	}
 }
 

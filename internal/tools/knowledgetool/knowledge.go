@@ -21,7 +21,7 @@ const (
 	parameters = `{
   "type":"object",
   "properties":{
-    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","verify"]},
+    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","link","unlink","verify","history"]},
     "query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},
     "object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},
     "id":{"type":"string","description":"Knowledge UUID returned by a prior action"},
@@ -99,6 +99,18 @@ const (
       },
       "required":["status"],
       "additionalProperties":false
+    },
+    "relationship":{
+      "type":"object",
+      "properties":{
+        "source":{"type":"object","properties":{"kind":{"type":"string","enum":["chunk","entry"]},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false},
+        "target":{"type":"object","properties":{"kind":{"type":"string","enum":["chunk","entry"]},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false},
+        "kind":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]},
+        "label":{"type":"string"},"notes":{"type":"string"},
+        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}}
+      },
+      "required":["source","target","kind"],
+      "additionalProperties":false
     }
   },
   "required":["action"],
@@ -119,7 +131,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
 		Description: "Search, inspect, and maintain Koder's durable, linked knowledge.",
-		Usage:       "Search existing knowledge before web research when durable or environment-specific knowledge may apply. Search returns a small ranked set of summaries and IDs; use get for the full body and neighbors for linked context. Persist only durable lessons, record applicability, and use verify with existing evidence for assessed claims. Correct a claim with entry_update or entry_supersede instead of silently adding a conflict. Create/update objects are patches where documented and mutations require the current expected_revision. Archive is reversible. Delete is permanent, requires archive plus confirmed=true, and chunk cascade deletion may remove dependent graph data. Never store secrets; use fresh authoritative evidence for high-risk knowledge.",
+		Usage:       "Search existing knowledge before web research when durable or environment-specific knowledge may apply. Search returns a small ranked set of summaries and IDs; use get for the full current body, neighbors for linked context, and history for compact revision summaries. Persist only durable lessons, record applicability, and use verify with existing evidence for assessed claims. Correct a claim with entry_update or entry_supersede instead of silently adding a conflict. Use link with relationship to create a relationship, unlink to archive it, and link with an archived link id plus expected_revision to restore it. Create/update objects are patches where documented and mutations require the current expected_revision. Archive is reversible. Delete is permanent, requires archive plus confirmed=true, and chunk cascade deletion may remove dependent graph data. Never store secrets; use fresh authoritative evidence for high-risk knowledge.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -154,8 +166,17 @@ func (tool) Preview(req tools.Request) string {
 		return "Create knowledge entry"
 	case "entry_update", "entry_supersede", "entry_archive", "entry_restore", "entry_delete":
 		return "Knowledge " + strings.TrimPrefix(action, "entry_") + " entry " + strings.TrimSpace(req.Args["id"])
+	case "link":
+		if strings.TrimSpace(req.Args["id"]) != "" {
+			return "Restore knowledge link " + strings.TrimSpace(req.Args["id"])
+		}
+		return "Link knowledge objects"
+	case "unlink":
+		return "Unlink knowledge relationship " + strings.TrimSpace(req.Args["id"])
 	case "verify":
 		return "Verify knowledge entry " + strings.TrimSpace(req.Args["id"])
+	case "history":
+		return "Knowledge history for " + strings.TrimSpace(req.Args["id"])
 	default:
 		return "Knowledge " + action
 	}
@@ -191,8 +212,14 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return normalizeEntryLifecycleArgs(args, action)
 	case "entry_delete":
 		return normalizeEntryDeleteArgs(args)
+	case "link":
+		return normalizeLinkArgs(args)
+	case "unlink":
+		return normalizeUnlinkArgs(args)
 	case "verify":
 		return normalizeVerifyArgs(args)
+	case "history":
+		return normalizeHistoryArgs(args)
 	case "":
 		return nil, errors.New("action is required")
 	default:
@@ -244,8 +271,14 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 		value, err = callEntryLifecycle(ctx, service, options.Request.Args)
 	case "entry_delete":
 		value, err = callEntryDelete(ctx, service, options.Request.Args)
+	case "link":
+		value, err = callLink(ctx, service, options.Request.Args)
+	case "unlink":
+		value, err = callUnlink(ctx, service, options.Request.Args)
 	case "verify":
 		value, err = callVerify(ctx, service, options.Request.Args)
+	case "history":
+		value, err = callHistory(ctx, service, options.Request.Args)
 	default:
 		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
 	}
