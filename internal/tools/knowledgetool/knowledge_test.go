@@ -1,9 +1,12 @@
 package knowledgetool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,6 +79,84 @@ func TestKnowledgeToolRequiresRuntimeService(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "knowledge service is not configured") {
 		t.Fatalf("Call() error = %v, want missing service", err)
+	}
+}
+
+func TestKnowledgePackageToolActionsRequirePersistentWorkspaceAndRoundTrip(t *testing.T) {
+	source := newService(t)
+	created, err := source.CreateChunk(context.Background(), knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Tool package", Kind: knowledge.ChunkKindReference,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Visibility: knowledge.VisibilityPrivate,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if _, err := source.ExportPackage(context.Background(), &archive, knowledgeService.ExportPackageRequest{ChunkID: created.Chunk.ID}); err != nil {
+		t.Fatal(err)
+	}
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "incoming.kknowledge"), archive.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := newService(t)
+	runtime := runtimeFor(target)
+	runtime.Workdir = workdir
+
+	definition, enabled := tools.DefinitionFor(tools.Knowledge, runtime)
+	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"package_preview"`) || !strings.Contains(definition.Function.Description, "Packages:") {
+		t.Fatalf("persistent Knowledge definition lacks package actions: enabled=%v definition=%#v", enabled, definition)
+	}
+	previewResult, err := call(context.Background(), runtime, map[string]string{"action": "package_preview", "path": "incoming.kknowledge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, ok := previewResult.Stored.(knowledgeService.ImportPreview)
+	if !ok || preview.ChunkID != created.Chunk.ID || !preview.ReadyToStage {
+		t.Fatalf("package preview = %#v", previewResult.Stored)
+	}
+	stageResult, err := call(context.Background(), runtime, map[string]string{"action": "package_stage", "path": "incoming.kknowledge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, ok := stageResult.Stored.(knowledgeService.ImportStage)
+	if !ok || stage.ID == "" {
+		t.Fatalf("package stage = %#v", stageResult.Stored)
+	}
+	activatedResult, err := call(context.Background(), runtime, map[string]string{"action": "package_activate", "stage_id": stage.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, ok := activatedResult.Stored.(knowledgeService.ActivateImportResult)
+	if !ok || activated.ChunkID != created.Chunk.ID {
+		t.Fatalf("package activation = %#v", activatedResult.Stored)
+	}
+	exportedResult, err := call(context.Background(), runtime, map[string]string{
+		"action": "package_export", "id": string(created.Chunk.ID), "path": "exports/tool.kknowledge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, ok := exportedResult.Stored.(packageExportResult)
+	if !ok || exported.Path != "exports/tool.kknowledge" || exported.Size == 0 {
+		t.Fatalf("package export = %#v", exportedResult.Stored)
+	}
+	data, err := os.ReadFile(filepath.Join(workdir, "exports", "tool.kknowledge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.ValidateImportArchive(context.Background(), data); err != nil {
+		t.Fatalf("validate tool export: %v", err)
+	}
+	if _, err := call(context.Background(), runtime, map[string]string{
+		"action": "package_export", "id": string(created.Chunk.ID), "path": "exports/tool.kknowledge",
+	}); err == nil || knowledgeService.ClassifyError(err).Code != knowledgeService.ErrorCodeConflict {
+		t.Fatalf("second package export error = %v", err)
+	}
+
+	withoutWorkspace := runtimeFor(target)
+	if _, err := call(context.Background(), withoutWorkspace, map[string]string{"action": "package_activate", "stage_id": stage.ID}); err == nil {
+		t.Fatal("package action was accepted without a persistent workspace")
 	}
 }
 

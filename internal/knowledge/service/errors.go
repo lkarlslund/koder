@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -90,11 +91,15 @@ func classifyErrorCode(err error) ErrorCode {
 		errors.Is(err, ErrToolOfferDenied),
 		errors.Is(err, ErrOperationalPolicyDenied),
 		errors.Is(err, ErrProtectedChunk),
-		errors.Is(err, ErrClassificationRejected):
+		errors.Is(err, ErrClassificationRejected),
+		errors.Is(err, kpackage.ErrRejectedContent):
 		return ErrorCodeForbidden
-	case errors.Is(err, knowledgeStore.ErrNotFound):
+	case errors.Is(err, knowledgeStore.ErrNotFound),
+		errors.Is(err, ErrImportStageNotFound):
 		return ErrorCodeNotFound
-	case errors.Is(err, knowledgeStore.ErrStaleCursor):
+	case errors.Is(err, knowledgeStore.ErrStaleCursor),
+		errors.Is(err, ErrImportStageStale),
+		errors.Is(err, ErrImportStageExpired):
 		return ErrorCodeStale
 	case errors.Is(err, knowledgeStore.ErrConflict),
 		errors.Is(err, ErrDuplicateLink),
@@ -103,14 +108,22 @@ func classifyErrorCode(err error) ErrorCode {
 		errors.Is(err, ErrChunkMustBeArchived),
 		errors.Is(err, ErrEntryMustBeArchived),
 		errors.Is(err, ErrEntryNotEditable),
-		errors.Is(err, ErrLinkEndpointUnavailable):
+		errors.Is(err, ErrLinkEndpointUnavailable),
+		errors.Is(err, ErrImportBlocked),
+		errors.Is(err, ErrImportStageBusy):
 		return ErrorCodeConflict
 	case errors.Is(err, knowledge.ErrInvalidRecord),
 		errors.Is(err, knowledgeStore.ErrInvalidCursor),
 		errors.Is(err, ErrDeleteConfirmationRequired),
 		errors.Is(err, ErrReviewRequired),
 		errors.Is(err, ErrInvalidSupersession),
-		errors.Is(err, ErrPersonalOriginPolicy):
+		errors.Is(err, ErrPersonalOriginPolicy),
+		errors.Is(err, ErrImportConflictPolicy),
+		errors.Is(err, kpackage.ErrInvalidArchive),
+		errors.Is(err, kpackage.ErrLimitExceeded),
+		errors.Is(err, kpackage.ErrInvalidPackage),
+		errors.Is(err, kpackage.ErrIntegrityMismatch),
+		errors.Is(err, kpackage.ErrIncompatiblePackage):
 		return ErrorCodeInvalid
 	default:
 		return ErrorCodeInternal

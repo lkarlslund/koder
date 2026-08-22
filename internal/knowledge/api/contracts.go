@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	PackageMediaType        = "application/vnd.koder.knowledge+zip"
 	Version                 = "knowledge.v1"
 	RoutePrefix             = "/api/knowledge/v1"
 	ChunkCollectionPath     = RoutePrefix + "/chunks"
@@ -27,6 +28,10 @@ const (
 	IndexRebuildPath        = RoutePrefix + "/indexes/rebuild"
 	ChatContextPath         = RoutePrefix + "/chat-context"
 	GraphViewCollectionPath = RoutePrefix + "/views"
+	PackageCollectionPath   = RoutePrefix + "/packages"
+	PackagePreviewPath      = PackageCollectionPath + "/preview"
+	PackageStagePath        = PackageCollectionPath + "/stages"
+	PackageExportPrefix     = PackageCollectionPath + "/export"
 	ExplorerURL             = "/knowledge"
 )
 
@@ -72,6 +77,18 @@ func LinkHistoryPath(linkID knowledge.LinkID) string {
 
 func GraphViewPath(viewID string) string {
 	return GraphViewCollectionPath + "/" + url.PathEscape(strings.TrimSpace(viewID))
+}
+
+func PackageStageItemPath(stageID string) string {
+	return PackageStagePath + "/" + url.PathEscape(strings.TrimSpace(stageID))
+}
+
+func PackageActivatePath(stageID string) string {
+	return PackageStageItemPath(stageID) + "/activate"
+}
+
+func PackageExportPath(chunkID knowledge.ChunkID) string {
+	return PackageExportPrefix + "/" + url.PathEscape(string(chunkID))
 }
 
 type ResponseMetadata struct {
@@ -220,6 +237,29 @@ type GraphViewDeleteResponse struct {
 	ResponseMetadata
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
+}
+
+type PackagePreviewResponse struct {
+	ResponseMetadata
+	Preview knowledgeService.ImportPreview `json:"preview"`
+}
+
+type PackageStageResponse struct {
+	ResponseMetadata
+	Stage   *knowledgeService.ImportStage  `json:"stage,omitempty"`
+	Preview knowledgeService.ImportPreview `json:"preview"`
+	Error   *knowledgeService.ServiceError `json:"error,omitempty"`
+}
+
+type PackageActivationResponse struct {
+	ResponseMetadata
+	Result knowledgeService.ActivateImportResult `json:"result"`
+}
+
+type PackageDiscardResponse struct {
+	ResponseMetadata
+	StageID   string `json:"stage_id"`
+	Discarded bool   `json:"discarded"`
 }
 
 // EntryContent is the complete client-editable portion of an entry.

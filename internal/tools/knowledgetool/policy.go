@@ -56,6 +56,8 @@ func authorizeToolScopes(ctx context.Context, service *knowledgeService.Service,
 		return requireAllowedScope(offer, patch.apply(knowledgeService.ChunkContentFrom(*record.Chunk)).Scope)
 	case "chunk_get", "chunk_archive", "chunk_restore", "chunk_delete":
 		return authorizeObjectScope(ctx, service, offer, knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: args["id"]})
+	case "package_export":
+		return authorizeObjectScope(ctx, service, offer, knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: args["id"]})
 	case "entry_create":
 		parent, err := authorizedRecord(ctx, service, offer, knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: args["chunk_id"]})
 		if err != nil {

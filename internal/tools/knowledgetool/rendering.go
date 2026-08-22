@@ -66,6 +66,16 @@ func knowledgeActionTitle(action string) string {
 		return "Verify knowledge entry"
 	case "history":
 		return "Review knowledge history"
+	case "package_preview":
+		return "Preview knowledge package"
+	case "package_stage":
+		return "Stage knowledge package"
+	case "package_activate":
+		return "Activate knowledge package"
+	case "package_discard":
+		return "Discard knowledge package"
+	case "package_export":
+		return "Export knowledge package"
 	default:
 		return "Use knowledge"
 	}
@@ -129,6 +139,19 @@ func knowledgeResultSummary(req tools.Request, stored any) string {
 			break
 		}
 		return countSummary("Loaded", len(value.Revisions), "knowledge revision")
+	case "package_preview":
+		return "Previewed knowledge package"
+	case "package_stage":
+		return "Staged knowledge package"
+	case "package_activate":
+		return "Activated knowledge package"
+	case "package_discard":
+		return "Discarded knowledge package stage"
+	case "package_export":
+		value, ok := decodeKnowledgeResult[packageExportResult](stored)
+		if ok {
+			return titledSummary("Exported knowledge package", value.Path)
+		}
 	}
 	return knowledgeActionTitle(action)
 }

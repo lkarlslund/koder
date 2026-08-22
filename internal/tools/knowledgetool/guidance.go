@@ -32,6 +32,10 @@ func toolGuidance(offer knowledgeService.ToolOffer) string {
 			"High-risk knowledge: for medical, legal, financial, physical-safety, or security-sensitive material, require fresh authoritative sources, locale/domain and applicability, review/validity dates, explicit uncertainty, and a warning not to substitute stored guidance for current professional or primary-source advice.",
 			"Personal knowledge: distinguish explicit user statements from observed facts and inferred conclusions with personal_origin. Do not convert casual conversation into a profile; keep sensitive or uncertain inferences draft/review-only and prefer a direct user statement as evidence.")
 	}
+	if hasAnyAction(offer, "package_preview", "package_stage", "package_activate", "package_export") {
+		parts = append(parts,
+			"Packages: use package_preview before package_stage, inspect conflicts, dependencies, classification, and signature state, then choose replace, merge, or keep_both explicitly when conflicts exist. Activate only the intended actor-owned stage after review; package_export writes a portable archive to a new workspace path and never overwrites a file.")
+	}
 	return strings.Join(parts, " ")
 }
 

@@ -16,12 +16,14 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeapi "github.com/lkarlslund/koder/internal/knowledge/api"
+	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
 const (
 	defaultKnowledgeRequestTimeout = 15 * time.Second
+	defaultKnowledgePackageTimeout = 90 * time.Second
 	maxKnowledgeRequestBody        = 1 << 20
 	maxKnowledgeRequestPath        = 8 << 10
 	maxKnowledgeRequestQuery       = 16 << 10
@@ -44,6 +46,7 @@ func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
 	mux.Handle(knowledgeapi.ChatContextPath, s.knowledgeEndpoint(s.handleKnowledgeChatContext))
 	mux.Handle(knowledgeapi.GraphViewCollectionPath, s.knowledgeEndpoint(s.handleKnowledgeGraphViews))
 	mux.Handle(knowledgeapi.GraphViewCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgeGraphView))
+	mux.Handle(knowledgeapi.PackageCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgePackages))
 }
 
 func (s *Server) knowledgeEndpoint(handler http.HandlerFunc) http.Handler {
@@ -57,6 +60,9 @@ func (s *Server) knowledgeEndpoint(handler http.HandlerFunc) http.Handler {
 		timeout := s.knowledgeRequestTimeout
 		if timeout <= 0 {
 			timeout = defaultKnowledgeRequestTimeout
+			if strings.HasPrefix(r.URL.Path, knowledgeapi.PackageCollectionPath+"/") {
+				timeout = defaultKnowledgePackageTimeout
+			}
 		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -92,7 +98,11 @@ func (s *Server) knowledgeEndpoint(handler http.HandlerFunc) http.Handler {
 			s.writeKnowledgeError(recorder, auditID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
 			return
 		}
-		if r.ContentLength > maxKnowledgeRequestBody {
+		bodyLimit := int64(maxKnowledgeRequestBody)
+		if strings.HasPrefix(r.URL.Path, knowledgeapi.PackageCollectionPath+"/") {
+			bodyLimit = kpackage.HardMaxArchiveBytes
+		}
+		if r.ContentLength > bodyLimit {
 			s.writeKnowledgeError(recorder, auditID, http.StatusRequestEntityTooLarge, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
 			return
 		}
@@ -561,21 +571,7 @@ func (s *Server) writeKnowledgeChunk(w http.ResponseWriter, requestID string, st
 
 func (s *Server) writeKnowledgeServiceError(w http.ResponseWriter, requestID string, err error) {
 	classified := knowledgeService.ClassifyError(err)
-	status := http.StatusInternalServerError
-	switch classified.Code {
-	case knowledgeService.ErrorCodeInvalid:
-		status = http.StatusBadRequest
-	case knowledgeService.ErrorCodeForbidden:
-		status = http.StatusForbidden
-	case knowledgeService.ErrorCodeNotFound:
-		status = http.StatusNotFound
-	case knowledgeService.ErrorCodeConflict, knowledgeService.ErrorCodeDependency:
-		status = http.StatusConflict
-	case knowledgeService.ErrorCodeStale:
-		status = http.StatusGone
-	case knowledgeService.ErrorCodeUnavailable:
-		status = http.StatusServiceUnavailable
-	}
+	status := knowledgeServiceHTTPStatus(classified.Code)
 	s.writeKnowledgeJSON(w, status, knowledgeapi.ErrorResponse{ResponseMetadata: knowledgeapi.Metadata(requestID), Error: classified})
 }
 

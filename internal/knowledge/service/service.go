@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -22,18 +23,19 @@ type ActorSource func(context.Context) (knowledge.Actor, error)
 type IDSource func() string
 
 type Config struct {
-	Store          knowledgeStore.Store
-	Classifier     knowledge.Classifier
-	ChunkPolicy    ChunkPolicy
-	ToolPolicy     ToolOfferPolicy
-	Actor          ActorSource
-	Now            func() time.Time
-	NewID          IDSource
-	RankSignals    RankingSignalSource
-	Semantic       SemanticIndexProvider
-	ScoreBlender   SearchScoreBlender
-	Operational    OperationalPolicy
-	ImportStageTTL time.Duration
+	Store            knowledgeStore.Store
+	Classifier       knowledge.Classifier
+	ChunkPolicy      ChunkPolicy
+	ToolPolicy       ToolOfferPolicy
+	Actor            ActorSource
+	Now              func() time.Time
+	NewID            IDSource
+	RankSignals      RankingSignalSource
+	Semantic         SemanticIndexProvider
+	ScoreBlender     SearchScoreBlender
+	Operational      OperationalPolicy
+	ImportStageTTL   time.Duration
+	ImportValidation kpackage.ValidationOptions
 }
 
 type Service struct {
@@ -63,6 +65,7 @@ type Service struct {
 	importMu         sync.Mutex
 	importStages     map[string]*stagedImport
 	importStageTTL   time.Duration
+	importValidation kpackage.ValidationOptions
 }
 
 func New(cfg Config) (*Service, error) {
@@ -100,6 +103,7 @@ func New(cfg Config) (*Service, error) {
 	if cfg.ImportStageTTL < 0 {
 		return nil, fmt.Errorf("knowledge import stage TTL must be positive")
 	}
+	cfg.ImportValidation = normalizeImportValidationOptions(cfg.ImportValidation)
 	operationsCtx, operationsCancel := context.WithCancel(context.Background())
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
@@ -108,7 +112,7 @@ func New(cfg Config) (*Service, error) {
 		mutationStreamID: id.New(), mutationSubs: make(map[uint64]chan MutationEvent),
 		operational:   cfg.Operational,
 		operationsCtx: operationsCtx, operationsCancel: operationsCancel,
-		importStages: make(map[string]*stagedImport), importStageTTL: cfg.ImportStageTTL,
+		importStages: make(map[string]*stagedImport), importStageTTL: cfg.ImportStageTTL, importValidation: cfg.ImportValidation,
 	}, nil
 }
 

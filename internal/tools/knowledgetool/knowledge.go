@@ -24,6 +24,7 @@ var (
 		"entry_create", "entry_update", "entry_supersede", "entry_archive", "entry_restore", "entry_delete",
 		"link", "unlink", "verify", "history",
 	}
+	packageActions      = []string{"package_preview", "package_stage", "package_activate", "package_discard", "package_export"}
 	supportedScopeKinds = []knowledge.ScopeKind{
 		knowledge.ScopeKindGlobal, knowledge.ScopeKindPersonal, knowledge.ScopeKindProject,
 		knowledge.ScopeKindSession, knowledge.ScopeKindEnvironment,
@@ -35,10 +36,13 @@ const (
 	parameters = `{
   "type":"object",
   "properties":{
-    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","link","unlink","verify","history"]},
+    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","link","unlink","verify","history","package_preview","package_stage","package_activate","package_discard","package_export"]},
     "query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},
     "object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},
     "id":{"type":"string","description":"Knowledge UUID returned by a prior action"},
+	"path":{"type":"string","description":"Workspace package path to read for preview/stage or create for export"},
+	"stage_id":{"type":"string","description":"Actor-owned package stage ID returned by package_stage"},
+	"conflict_policy":{"type":"string","enum":["replace","merge","keep_both"],"description":"Explicit package-wide resolution when preview reports conflicts"},
     "chunk_id":{"type":"string","description":"Owning chunk UUID for a new entry"},
     "replacement_entry_id":{"type":"string","description":"Existing active entry that replaces the superseded entry"},
     "chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},
@@ -168,7 +172,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			return tools.ToolSpec{}, false
 		}
 	}
-	offer, err := service.FilterToolOffer(ctx, candidateToolOffer())
+	offer, err := service.FilterToolOffer(ctx, candidateToolOffer(runtime))
 	if err != nil || len(offer.Actions) == 0 || len(offer.ScopeKinds) == 0 {
 		return tools.ToolSpec{}, false
 	}
@@ -214,6 +218,16 @@ func (tool) Preview(req tools.Request) string {
 		return "Verify knowledge entry " + strings.TrimSpace(req.Args["id"])
 	case "history":
 		return "Knowledge history for " + strings.TrimSpace(req.Args["id"])
+	case "package_preview":
+		return "Preview knowledge package " + strings.TrimSpace(req.Args["path"])
+	case "package_stage":
+		return "Stage knowledge package " + strings.TrimSpace(req.Args["path"])
+	case "package_activate":
+		return "Activate knowledge package stage " + strings.TrimSpace(req.Args["stage_id"])
+	case "package_discard":
+		return "Discard knowledge package stage " + strings.TrimSpace(req.Args["stage_id"])
+	case "package_export":
+		return "Export knowledge chunk " + strings.TrimSpace(req.Args["id"])
 	default:
 		return "Knowledge " + action
 	}
@@ -257,6 +271,12 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return normalizeVerifyArgs(args)
 	case "history":
 		return normalizeHistoryArgs(args)
+	case "package_preview", "package_stage":
+		return normalizePackageReadArgs(args, action)
+	case "package_activate", "package_discard":
+		return normalizePackageStageArgs(args, action)
+	case "package_export":
+		return normalizePackageExportArgs(args)
 	case "":
 		return nil, errors.New("action is required")
 	default:
@@ -278,7 +298,7 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 			return tools.Result{}, knowledgeService.ClassifyError(err)
 		}
 	}
-	offer, err := service.FilterToolOffer(ctx, candidateToolOffer())
+	offer, err := service.FilterToolOffer(ctx, candidateToolOffer(options.Runtime))
 	if err != nil {
 		return tools.Result{}, knowledgeService.ClassifyError(err)
 	}
@@ -326,6 +346,15 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 		value, err = callVerify(ctx, service, options.Request.Args)
 	case "history":
 		value, err = callHistory(ctx, service, offer, options.Request.Args)
+	case "package_preview", "package_stage":
+		value, err = callPackageRead(ctx, service, offer, options.Runtime, options.Request.Args)
+	case "package_activate":
+		value, err = service.ActivateImport(ctx, options.Request.Args["stage_id"])
+	case "package_discard":
+		err = service.DiscardImportStage(ctx, options.Request.Args["stage_id"])
+		value = packageDiscardResult{StageID: options.Request.Args["stage_id"], Discarded: err == nil}
+	case "package_export":
+		value, err = callPackageExport(ctx, service, options.Runtime, options.Request.Args)
 	default:
 		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
 	}
@@ -339,8 +368,12 @@ func requireService(runtime tools.Runtime) (*knowledgeService.Service, error) {
 	return tools.RequireService[*knowledgeService.Service](runtime, serviceKey)
 }
 
-func candidateToolOffer() knowledgeService.ToolOffer {
-	return knowledgeService.ToolOffer{Actions: slices.Clone(supportedActions), ScopeKinds: slices.Clone(supportedScopeKinds)}
+func candidateToolOffer(runtime tools.Runtime) knowledgeService.ToolOffer {
+	actions := slices.Clone(supportedActions)
+	if runtime.ChatID != "" && strings.TrimSpace(runtime.Workdir) != "" {
+		actions = append(actions, packageActions...)
+	}
+	return knowledgeService.ToolOffer{Actions: actions, ScopeKinds: slices.Clone(supportedScopeKinds)}
 }
 
 func scopeKindStrings(values []knowledge.ScopeKind) []string {
