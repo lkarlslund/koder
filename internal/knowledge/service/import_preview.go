@@ -80,15 +80,18 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 	if err := ctx.Err(); err != nil {
 		return ImportPreview{}, err
 	}
-	report, err := kpackage.Scan(ctx, pkg, s.classifier)
 	preview := ImportPreview{
 		Package: pkg.Manifest.Package, Publisher: pkg.Manifest.Publisher, License: pkg.Manifest.License,
 		ChunkID:    knowledge.ChunkID(pkg.Manifest.Chunk.ID),
 		ChunkTitle: pkg.Manifest.Chunk.Title, SignatureState: pkg.SignatureState,
 		PublisherTrust: s.publishers.Assess(pkg.Manifest, pkg.SignatureState),
-		Classification: knowledge.ClassificationResult{Decision: report.Decision, Findings: slices.Clone(report.Findings)},
-		ReviewRequired: report.Decision == knowledge.ClassificationDecisionReview,
 	}
+	if err := rejectGenericPersonalImport(pkg.Manifest.Chunk); err != nil {
+		return preview, err
+	}
+	report, err := kpackage.Scan(ctx, pkg, s.classifier)
+	preview.Classification = knowledge.ClassificationResult{Decision: report.Decision, Findings: slices.Clone(report.Findings)}
+	preview.ReviewRequired = report.Decision == knowledge.ClassificationDecisionReview
 	if err != nil {
 		return preview, fmt.Errorf("scan knowledge package before preview: %w", err)
 	}
@@ -159,6 +162,15 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 	}
 	preview.ReadyToStage = preview.Summary.Blockers == 0 && !preview.ReviewRequired
 	return preview, nil
+}
+
+func rejectGenericPersonalImport(chunk kpackage.ManifestChunk) error {
+	reservedScope := chunk.Kind == knowledge.ChunkKindPersonal &&
+		chunk.Scope == (knowledge.Scope{Kind: knowledge.ScopeKindPersonal, Selector: "me"})
+	if knowledge.ChunkID(chunk.ID) == PersonalMeChunkID || reservedScope {
+		return fmt.Errorf("%w: personal/me packages require the dedicated personal import flow", ErrProtectedChunk)
+	}
+	return nil
 }
 
 func (s *Service) authorizeIncomingLink(

@@ -281,6 +281,9 @@ func (s *Service) activateImportTransaction(
 	policy ImportConflictPolicy,
 	now time.Time,
 ) (activatedRecords, error) {
+	if err := rejectGenericPersonalImport(pkg.Manifest.Chunk); err != nil {
+		return activatedRecords{}, err
+	}
 	dependencies, err := s.availableImportDependencies(ctx, tx, owner, pkg.Manifest.Dependencies, expected)
 	if err != nil {
 		return activatedRecords{}, err

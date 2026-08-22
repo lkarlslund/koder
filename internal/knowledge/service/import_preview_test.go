@@ -54,6 +54,48 @@ func TestPreviewImportReportsAdditionsAndDependenciesWithoutWrites(t *testing.T)
 	}
 }
 
+func TestGenericPackageImportCannotTargetReservedPersonalKnowledge(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backend := memory.New()
+	t.Cleanup(func() { _ = backend.Close() })
+	store := &updateCountingStore{Store: backend}
+	service := newTestService(t, store, nil)
+
+	for _, test := range []struct {
+		name string
+		pkg  kpackage.ValidatedPackage
+	}{
+		{name: "reserved ID", pkg: previewPackage(string(PersonalMeChunkID), "Forged personal package")},
+		{name: "reserved scope", pkg: func() kpackage.ValidatedPackage {
+			pkg := previewPackage("01a02b00-0000-7000-8000-000000000099", "Aliased personal package")
+			pkg.Manifest.Chunk.Kind = knowledge.ChunkKindPersonal
+			pkg.Manifest.Chunk.Scope = knowledge.Scope{Kind: knowledge.ScopeKindPersonal, Selector: "me"}
+			return pkg
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store.updates = 0
+			if _, err := service.PreviewImport(ctx, test.pkg); !errors.Is(err, ErrProtectedChunk) {
+				t.Fatalf("PreviewImport(personal) error = %v, want ErrProtectedChunk", err)
+			}
+			if store.updates != 0 {
+				t.Fatalf("rejected personal preview opened %d write transactions", store.updates)
+			}
+		})
+	}
+
+	pkg := previewPackage(string(PersonalMeChunkID), "Forged activation")
+	err := backend.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		_, err := service.activateImportTransaction(ctx, tx,
+			knowledge.Actor{Kind: knowledge.ActorKindUser, ID: "user:test"}, pkg, ImportPreview{}, ImportConflictPolicyMerge, serviceTime)
+		return err
+	})
+	if !errors.Is(err, ErrProtectedChunk) {
+		t.Fatalf("activateImportTransaction(personal) error = %v, want ErrProtectedChunk", err)
+	}
+}
+
 func TestPreviewImportReportsConflictsAndUnchangedRecords(t *testing.T) {
 	t.Parallel()
 	backend := memory.New()
