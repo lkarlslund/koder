@@ -18,6 +18,19 @@ import (
 
 const directoryName = "knowledge-pebble-v1"
 
+// DefaultPath returns the independent Knowledge database directory below stateDir.
+func DefaultPath(stateDir string) (string, error) {
+	stateDir = strings.TrimSpace(stateDir)
+	if stateDir == "" {
+		return "", fmt.Errorf("knowledge state directory is required")
+	}
+	abs, err := filepath.Abs(stateDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve knowledge state directory: %w", err)
+	}
+	return filepath.Join(abs, directoryName), nil
+}
+
 // Store owns the independent Pebble database used by Koder Knowledge.
 type Store struct {
 	mu                     sync.RWMutex
@@ -37,10 +50,10 @@ type Store struct {
 // Open creates or opens the Knowledge database below stateDir. It never opens or shares
 // Koder's main application database.
 func Open(stateDir string) (*Store, error) {
-	if strings.TrimSpace(stateDir) == "" {
-		return nil, fmt.Errorf("open knowledge pebble: state directory is required")
+	dir, err := DefaultPath(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("open knowledge pebble: %w", err)
 	}
-	dir := filepath.Join(stateDir, directoryName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create knowledge pebble directory: %w", err)
 	}
@@ -62,6 +75,26 @@ func Open(stateDir string) (*Store, error) {
 			ActiveGeneration: meta.IndexGeneration,
 		},
 	}, nil
+}
+
+// OpenExisting opens a Knowledge database without creating an empty one when the
+// configured state directory is wrong. Maintenance commands use this safer entrypoint.
+func OpenExisting(stateDir string) (*Store, error) {
+	dir, err := DefaultPath(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("open existing knowledge pebble: %w", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("open existing knowledge pebble: %w: %s", knowledgeStore.ErrNotFound, dir)
+		}
+		return nil, fmt.Errorf("open existing knowledge pebble: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("open existing knowledge pebble: %w: database path is not a directory", knowledgeStore.ErrIncompatible)
+	}
+	return Open(stateDir)
 }
 
 // Health reports this independent backend's current lifecycle state.

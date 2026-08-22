@@ -18,10 +18,10 @@ import (
 // CheckpointInfo identifies a validated Knowledge checkpoint without exposing any
 // canonical content or backend-private keys.
 type CheckpointInfo struct {
-	Backend         string
-	SchemaVersion   uint32
-	IndexGeneration uint64
-	CreatedAt       time.Time
+	Backend         string    `json:"backend"`
+	SchemaVersion   uint32    `json:"schema_version"`
+	IndexGeneration uint64    `json:"index_generation"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // Checkpoint creates and validates an independent Pebble snapshot at destination.

@@ -73,6 +73,33 @@ func TestOpenRequiresUsableStateDirectory(t *testing.T) {
 	}
 }
 
+func TestOpenExistingNeverCreatesMissingKnowledgeStore(t *testing.T) {
+	t.Parallel()
+	stateDir := t.TempDir()
+	databasePath, err := DefaultPath(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenExisting(stateDir); !errors.Is(err, knowledgeStore.ErrNotFound) {
+		t.Fatalf("OpenExisting(missing) error = %v", err)
+	}
+	if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenExisting created %s: %v", databasePath, err)
+	}
+	created, err := Open(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenExisting(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+}
+
 func TestCloseUpdatesHealth(t *testing.T) {
 	t.Parallel()
 	s, err := Open(t.TempDir())

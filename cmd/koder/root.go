@@ -47,7 +47,7 @@ func NewRootCommand() *cobra.Command {
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	bindRootFlags(cmd, &opts)
-	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts))
+	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts), newKnowledgeCommand(&opts))
 	return cmd
 }
 

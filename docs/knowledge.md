@@ -4,6 +4,8 @@ Koder Knowledge stores curated, reusable material separately from chat history. 
 architectural domain and storage decisions are recorded in
 [ADR 0001](decisions/0001-knowledge-domain.md) and
 [ADR 0002](decisions/0002-knowledge-storage-boundary.md).
+Backup, restore, and maintenance procedures live in
+[Knowledge operations](knowledge-operations.md).
 
 This document defines the vocabulary used by domain records, tools, APIs, packages, and
 user interfaces. Wire values use lowercase `snake_case` and must not be given different
