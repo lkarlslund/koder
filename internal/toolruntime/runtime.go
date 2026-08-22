@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -43,6 +44,7 @@ type Runtime struct {
 	managedSkillsDir string
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
+	knowledgeMu      sync.RWMutex
 	knowledge        *knowledgeService.Service
 }
 
@@ -96,8 +98,20 @@ func (r *Runtime) SetVoiceSessionControl(control sessiontool.Control) {
 // Nil removes the capability from subsequent tool runtime snapshots.
 func (r *Runtime) SetKnowledgeService(service *knowledgeService.Service) {
 	if r != nil {
+		r.knowledgeMu.Lock()
+		defer r.knowledgeMu.Unlock()
 		r.knowledge = service
 	}
+}
+
+// KnowledgeService returns the process-wide durable Knowledge capability.
+func (r *Runtime) KnowledgeService() *knowledgeService.Service {
+	if r == nil {
+		return nil
+	}
+	r.knowledgeMu.RLock()
+	defer r.knowledgeMu.RUnlock()
+	return r.knowledge
 }
 
 func (r *Runtime) UpdateSettings(store *settings.Store) {
@@ -179,7 +193,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		}
 		runtime.Services[key] = service
 	}
-	for key, service := range knowledgetool.RuntimeService(r.knowledge) {
+	for key, service := range knowledgetool.RuntimeService(r.KnowledgeService()) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

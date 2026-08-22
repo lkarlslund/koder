@@ -220,11 +220,13 @@ func (r *Registry) Bind(code string, info DeviceInfo) (Binding, error) {
 	return Binding{Device: item.Device, Token: token}, nil
 }
 
-// Authorize validates a device token and refreshes bounded handset metadata.
-func (r *Registry) Authorize(token string, info DeviceInfo) bool {
+// Authenticate validates a device token, returns its trusted registration, and
+// refreshes bounded handset metadata. The caller must derive authorization
+// identity from the returned Device rather than request-supplied metadata.
+func (r *Registry) Authenticate(token string, info DeviceInfo) (Device, bool) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return false
+		return Device{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -242,9 +244,15 @@ func (r *Registry) Authorize(token string, info DeviceInfo) bool {
 			item.LastSeenAt = now
 			_ = r.persistLocked()
 		}
-		return true
+		return item.Device, true
 	}
-	return false
+	return Device{}, false
+}
+
+// Authorize validates a device token and refreshes bounded handset metadata.
+func (r *Registry) Authorize(token string, info DeviceInfo) bool {
+	_, ok := r.Authenticate(token, info)
+	return ok
 }
 
 // List returns newest-seen devices first, including revoked registrations.

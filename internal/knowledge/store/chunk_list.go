@@ -24,6 +24,7 @@ const (
 type ChunkFilter struct {
 	Kinds       []knowledge.ChunkKind
 	States      []knowledge.ChunkState
+	Scopes      []knowledge.Scope
 	ScopeKinds  []knowledge.ScopeKind
 	Tags        []string
 	Locale      string
@@ -127,6 +128,20 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	request.Filter.States = slices.Clone(request.Filter.States)
 	slices.Sort(request.Filter.States)
 	request.Filter.States = slices.Compact(request.Filter.States)
+	request.Filter.Scopes = slices.Clone(request.Filter.Scopes)
+	for index := range request.Filter.Scopes {
+		request.Filter.Scopes[index].Selector = strings.TrimSpace(request.Filter.Scopes[index].Selector)
+	}
+	slices.SortFunc(request.Filter.Scopes, func(left, right knowledge.Scope) int {
+		if left.Kind < right.Kind {
+			return -1
+		}
+		if left.Kind > right.Kind {
+			return 1
+		}
+		return strings.Compare(left.Selector, right.Selector)
+	})
+	request.Filter.Scopes = slices.Compact(request.Filter.Scopes)
 	request.Filter.ScopeKinds = slices.Clone(request.Filter.ScopeKinds)
 	slices.Sort(request.Filter.ScopeKinds)
 	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
@@ -138,6 +153,11 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	for _, state := range request.Filter.States {
 		if state == knowledge.ChunkStateUnspecified || !state.IsAChunkState() {
 			return ChunkListRequest{}, fmt.Errorf("invalid chunk state filter")
+		}
+	}
+	for _, scope := range request.Filter.Scopes {
+		if err := scope.Validate(); err != nil {
+			return ChunkListRequest{}, err
 		}
 	}
 	for _, scope := range request.Filter.ScopeKinds {
@@ -162,7 +182,8 @@ func chunkCursorBinding(request ChunkListRequest, generation uint64) (CursorBind
 
 func chunkMatchesFilter(chunk knowledge.Chunk, filter ChunkFilter) bool {
 	if !containsOrEmpty(filter.Kinds, chunk.Kind) || !containsOrEmpty(filter.States, chunk.State) ||
-		!containsOrEmpty(filter.ScopeKinds, chunk.Scope.Kind) || (filter.Locale != "" && chunk.Locale != filter.Locale) ||
+		!containsOrEmpty(filter.Scopes, chunk.Scope) || !containsOrEmpty(filter.ScopeKinds, chunk.Scope.Kind) ||
+		(filter.Locale != "" && chunk.Locale != filter.Locale) ||
 		!containsAll(chunk.Tags, filter.Tags) {
 		return false
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -48,5 +49,46 @@ func TestListChunksDefaultsToActiveButAllowsExplicitLifecycle(t *testing.T) {
 	}
 	if len(page.Chunks) != 1 || page.Chunks[0].ID != archived.ID {
 		t.Fatalf("ListChunks(archived) = %#v", page)
+	}
+}
+
+func TestListChunksFiltersDeniedChunksWithoutLeakingPagination(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, actor knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+		if actor.ID != "user:test" || action != ChunkPolicyRead {
+			t.Fatalf("policy actor=%#v action=%q", actor, action)
+		}
+		if chunk.Title == "Alpha hidden" {
+			return errors.New("hidden by test policy")
+		}
+		return nil
+	})
+	for _, title := range []string{"Alpha hidden", "Bravo visible", "Charlie visible"} {
+		candidate := testChunkCandidate()
+		candidate.Title = title
+		if _, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: candidate}); err != nil {
+			t.Fatalf("CreateChunk(%q) error = %v", title, err)
+		}
+	}
+
+	request := knowledgeStore.ChunkListRequest{Sort: knowledgeStore.ChunkSortTitle, Limit: 1}
+	first, err := service.ListChunks(ctx, request)
+	if err != nil {
+		t.Fatalf("ListChunks(first) error = %v", err)
+	}
+	if len(first.Chunks) != 1 || first.Chunks[0].Title != "Bravo visible" || first.NextCursor == "" {
+		t.Fatalf("ListChunks(first) = %#v", first)
+	}
+	request.Cursor = first.NextCursor
+	second, err := service.ListChunks(ctx, request)
+	if err != nil {
+		t.Fatalf("ListChunks(second) error = %v", err)
+	}
+	if len(second.Chunks) != 1 || second.Chunks[0].Title != "Charlie visible" || second.NextCursor != "" {
+		t.Fatalf("ListChunks(second) = %#v", second)
 	}
 }

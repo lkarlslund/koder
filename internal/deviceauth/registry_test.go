@@ -57,8 +57,15 @@ func TestInvitationBindsPersistsAndRevokesDevice(t *testing.T) {
 	}
 
 	now = now.Add(2 * time.Minute)
-	if !registry.Authorize(binding.Token, DeviceInfo{AppVersion: "0.1.1"}) {
+	authenticated, ok := registry.Authenticate(binding.Token, DeviceInfo{AppVersion: "0.1.1"})
+	if !ok {
 		t.Fatal("bound token was not authorized")
+	}
+	if authenticated.ID != binding.Device.ID || authenticated.AppVersion != "0.1.1" {
+		t.Fatalf("authenticated device = %#v", authenticated)
+	}
+	if _, ok := registry.Authenticate("wrong-token", DeviceInfo{}); ok {
+		t.Fatal("wrong token was authenticated")
 	}
 	devices := registry.List()
 	if len(devices) != 1 || devices[0].AppVersion != "0.1.1" || !devices[0].LastSeenAt.Equal(now) {

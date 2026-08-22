@@ -145,6 +145,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/api/voice-devices/qr", s.handleVoiceDeviceQR)
+	s.registerKnowledgeAPI(mux)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	voiceHandler := voiceapi.NewHandler(controller, options.VoiceToken)
 	voiceHandler.Auth = devices

@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -527,6 +528,23 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 		return nil
 	}
 	return c.phone
+}
+
+// KnowledgeService returns the process-wide durable Knowledge capability.
+func (c *Controller) KnowledgeService() *knowledgeService.Service {
+	if c == nil || c.agent == nil {
+		return nil
+	}
+	return c.agent.KnowledgeService()
+}
+
+// SetKnowledgeService changes the process-wide Knowledge capability. It is
+// primarily useful to hosts and tests that construct a controller before the
+// optional Knowledge store is available.
+func (c *Controller) SetKnowledgeService(service *knowledgeService.Service) {
+	if c != nil && c.agent != nil {
+		c.agent.SetKnowledgeService(service)
+	}
 }
 
 // ChatBackends reports runtime availability and models for chat creation.

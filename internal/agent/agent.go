@@ -97,6 +97,14 @@ func (e *Engine) SetKnowledgeService(service *knowledgeService.Service) {
 	}
 }
 
+// KnowledgeService returns the optional process-wide Knowledge service.
+func (e *Engine) KnowledgeService() *knowledgeService.Service {
+	if e == nil || e.toolsRuntime == nil {
+		return nil
+	}
+	return e.toolsRuntime.KnowledgeService()
+}
+
 const (
 	compactionMaxTokens = 8 * 1024
 	compactionMaxBytes  = 64 * 1024
