@@ -132,15 +132,7 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	for index := range request.Filter.Scopes {
 		request.Filter.Scopes[index].Selector = strings.TrimSpace(request.Filter.Scopes[index].Selector)
 	}
-	slices.SortFunc(request.Filter.Scopes, func(left, right knowledge.Scope) int {
-		if left.Kind < right.Kind {
-			return -1
-		}
-		if left.Kind > right.Kind {
-			return 1
-		}
-		return strings.Compare(left.Selector, right.Selector)
-	})
+	slices.SortFunc(request.Filter.Scopes, compareScopes)
 	request.Filter.Scopes = slices.Compact(request.Filter.Scopes)
 	request.Filter.ScopeKinds = slices.Clone(request.Filter.ScopeKinds)
 	slices.Sort(request.Filter.ScopeKinds)

@@ -18,6 +18,7 @@ const (
 	Version             = "knowledge.v1"
 	RoutePrefix         = "/api/knowledge/v1"
 	ChunkCollectionPath = RoutePrefix + "/chunks"
+	EntryCollectionPath = RoutePrefix + "/entries"
 	ExplorerURL         = "/knowledge"
 )
 
@@ -27,6 +28,22 @@ func ChunkPath(chunkID knowledge.ChunkID) string {
 
 func ChunkLifecyclePath(chunkID knowledge.ChunkID, action string) string {
 	return ChunkPath(chunkID) + "/" + url.PathEscape(strings.TrimSpace(action))
+}
+
+func ChunkHistoryPath(chunkID knowledge.ChunkID) string {
+	return ChunkPath(chunkID) + "/history"
+}
+
+func EntryPath(entryID knowledge.EntryID) string {
+	return EntryCollectionPath + "/" + url.PathEscape(string(entryID))
+}
+
+func EntryEvidencePath(entryID knowledge.EntryID) string {
+	return EntryPath(entryID) + "/evidence"
+}
+
+func EntryHistoryPath(entryID knowledge.EntryID) string {
+	return EntryPath(entryID) + "/history"
 }
 
 type ResponseMetadata struct {
@@ -172,16 +189,17 @@ type EntryContent struct {
 }
 
 type EntryListRequest struct {
-	ChunkIDs          []knowledge.ChunkID    `json:"chunk_ids,omitempty"`
-	Kinds             []knowledge.EntryKind  `json:"kinds,omitempty"`
-	States            []knowledge.EntryState `json:"states,omitempty"`
-	Scopes            []knowledge.Scope      `json:"scopes,omitempty"`
-	ScopeKinds        []knowledge.ScopeKind  `json:"scope_kinds,omitempty"`
-	Tags              []string               `json:"tags,omitempty"`
-	IncludeInvalid    bool                   `json:"include_invalid,omitempty"`
-	IncludeSuperseded bool                   `json:"include_superseded,omitempty"`
-	Limit             int                    `json:"limit,omitempty"`
-	Cursor            string                 `json:"cursor,omitempty"`
+	ChunkIDs   []knowledge.ChunkID    `json:"chunk_ids,omitempty"`
+	Kinds      []knowledge.EntryKind  `json:"kinds,omitempty"`
+	States     []knowledge.EntryState `json:"states,omitempty"`
+	Scopes     []knowledge.Scope      `json:"scopes,omitempty"`
+	ScopeKinds []knowledge.ScopeKind  `json:"scope_kinds,omitempty"`
+	Tags       []string               `json:"tags,omitempty"`
+	Locales    []string               `json:"locales,omitempty"`
+	Sort       string                 `json:"sort,omitempty"`
+	Descending bool                   `json:"descending,omitempty"`
+	Limit      int                    `json:"limit,omitempty"`
+	Cursor     string                 `json:"cursor,omitempty"`
 }
 
 type EntryCreateRequest struct {

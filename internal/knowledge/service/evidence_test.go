@@ -73,6 +73,48 @@ func TestCreateEvidenceRejectsSecretsAndServerOwnedFieldsBeforePersistence(t *te
 	}
 }
 
+func TestEntryEvidenceIsAuthorizedPagedAndRevisionBound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	chunk, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	firstCandidate := testEvidenceCandidate()
+	firstCandidate.Source.ContentHash = "sha256:first"
+	first, _ := service.CreateEvidence(ctx, CreateEvidenceRequest{Evidence: firstCandidate})
+	secondCandidate := testEvidenceCandidate()
+	secondCandidate.Source.ContentHash = "sha256:second"
+	second, _ := service.CreateEvidence(ctx, CreateEvidenceRequest{Evidence: secondCandidate})
+	entryCandidate := testEntryCandidate()
+	entryCandidate.EvidenceIDs = []knowledge.EvidenceID{second.Evidence.ID, first.Evidence.ID}
+	entry, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: chunk.Chunk.ID, Entry: entryCandidate})
+	if err != nil {
+		t.Fatalf("CreateEntry() error = %v", err)
+	}
+	firstPage, err := service.EntryEvidence(ctx, EntryEvidenceRequest{EntryID: entry.Entry.ID, Limit: 1})
+	if err != nil || len(firstPage.Evidence) != 1 || firstPage.NextCursor == "" {
+		t.Fatalf("EntryEvidence(first) = %#v, %v", firstPage, err)
+	}
+	secondPage, err := service.EntryEvidence(ctx, EntryEvidenceRequest{EntryID: entry.Entry.ID, Limit: 1, Cursor: firstPage.NextCursor})
+	if err != nil || len(secondPage.Evidence) != 1 || secondPage.NextCursor != "" || secondPage.Evidence[0].ID == firstPage.Evidence[0].ID {
+		t.Fatalf("EntryEvidence(second) = %#v, %v", secondPage, err)
+	}
+
+	content := EntryContentFrom(entry.Entry)
+	content.Summary = "revision changes cursor generation"
+	if _, err := service.UpdateEntry(ctx, UpdateEntryRequest{EntryID: entry.Entry.ID, ExpectedRevision: 1, Content: content}); err != nil {
+		t.Fatalf("UpdateEntry() error = %v", err)
+	}
+	if _, err := service.EntryEvidence(ctx, EntryEvidenceRequest{EntryID: entry.Entry.ID, Limit: 1, Cursor: firstPage.NextCursor}); err == nil {
+		t.Fatal("EntryEvidence() accepted a cursor from an older entry revision")
+	}
+	service.chunkPolicy = denyChunkAction(ChunkPolicyRead)
+	if _, err := service.EntryEvidence(ctx, EntryEvidenceRequest{EntryID: entry.Entry.ID}); !errors.Is(err, ErrChunkPolicyDenied) {
+		t.Fatalf("EntryEvidence(denied) error = %v", err)
+	}
+}
+
 func testEvidenceCandidate() knowledge.Evidence {
 	return knowledge.Evidence{
 		Type: knowledge.EvidenceTypeObservation, Quality: knowledge.EvidenceQualityPrimary,

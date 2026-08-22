@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
@@ -19,6 +22,17 @@ type CreateEvidenceResult struct {
 	Evidence       knowledge.Evidence
 	Classification knowledge.ClassificationResult
 	Created        bool
+}
+
+type EntryEvidenceRequest struct {
+	EntryID knowledge.EntryID
+	Limit   int
+	Cursor  string
+}
+
+type EvidencePage struct {
+	Evidence   []knowledge.Evidence
+	NextCursor string
 }
 
 func (s *Service) CreateEvidence(ctx context.Context, request CreateEvidenceRequest) (CreateEvidenceResult, error) {
@@ -89,6 +103,81 @@ func (s *Service) Evidence(ctx context.Context, evidenceID knowledge.EvidenceID)
 		return knowledge.Evidence{}, fmt.Errorf("get knowledge evidence: %w", err)
 	}
 	return result, nil
+}
+
+// EntryEvidence returns evidence through an authorized owning entry. Evidence is
+// intentionally contextual because one immutable record may be cited by several chunks
+// with different visibility policies.
+func (s *Service) EntryEvidence(ctx context.Context, request EntryEvidenceRequest) (EvidencePage, error) {
+	if err := ctx.Err(); err != nil {
+		return EvidencePage{}, err
+	}
+	if request.EntryID == "" {
+		return EvidencePage{}, fmt.Errorf("%w: entry ID is required", knowledge.ErrInvalidRecord)
+	}
+	if request.Limit <= 0 {
+		request.Limit = 50
+	}
+	if request.Limit > 200 {
+		return EvidencePage{}, fmt.Errorf("evidence page limit must not exceed 200")
+	}
+	record, err := s.Get(ctx, knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(request.EntryID)})
+	if err != nil {
+		return EvidencePage{}, fmt.Errorf("authorize evidence owner: %w", err)
+	}
+	if record.Entry == nil {
+		return EvidencePage{}, fmt.Errorf("%w: entry was not found", knowledgeStore.ErrNotFound)
+	}
+	ids := append(slices.Clone(record.Entry.EvidenceIDs), record.Entry.Verification.EvidenceIDs...)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	binding := entryEvidenceCursorBinding(*record.Entry)
+	start := 0
+	if request.Cursor != "" {
+		position, err := knowledgeStore.DecodeCursor(request.Cursor, binding)
+		if err != nil {
+			return EvidencePage{}, err
+		}
+		start = len(ids)
+		for index, evidenceID := range ids {
+			if string(evidenceID) > position.ObjectID {
+				start = index
+				break
+			}
+		}
+	}
+	end := min(start+request.Limit, len(ids))
+	pageIDs := ids[start:end]
+	result := EvidencePage{Evidence: make([]knowledge.Evidence, 0, len(pageIDs))}
+	err = s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
+		for _, evidenceID := range pageIDs {
+			evidence, err := tx.Evidence(ctx, evidenceID)
+			if err != nil {
+				return err
+			}
+			result.Evidence = append(result.Evidence, evidence)
+		}
+		return nil
+	})
+	if err != nil {
+		return EvidencePage{}, fmt.Errorf("get entry evidence: %w", err)
+	}
+	if end < len(ids) && len(pageIDs) > 0 {
+		last := string(pageIDs[len(pageIDs)-1])
+		result.NextCursor, err = knowledgeStore.EncodeCursor(binding, knowledgeStore.CursorPosition{SortValue: last, ObjectID: last})
+		if err != nil {
+			return EvidencePage{}, err
+		}
+	}
+	return result, nil
+}
+
+func entryEvidenceCursorBinding(entry knowledge.Entry) knowledgeStore.CursorBinding {
+	digest := sha256.Sum256([]byte(entry.ID))
+	return knowledgeStore.CursorBinding{
+		Index: "entry-evidence", IndexGeneration: entry.Revision.Number,
+		QueryFingerprint: hex.EncodeToString(digest[:]), SortField: "evidence_id",
+	}
 }
 
 func evidenceClassificationInput(value knowledge.Evidence) knowledge.ClassificationInput {

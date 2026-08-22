@@ -63,3 +63,24 @@ func TestGetAuthorizesOwningAndLinkedChunks(t *testing.T) {
 		t.Fatalf("Get(denied link) error = %v, want ErrChunkPolicyDenied", err)
 	}
 }
+
+func TestHistoryRequiresCurrentObjectReadAuthorization(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	created, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(created.Chunk.ID)}
+	page, err := service.History(ctx, knowledgeStore.RevisionListRequest{Object: object})
+	if err != nil || len(page.Revisions) != 1 {
+		t.Fatalf("History() = %#v, %v", page, err)
+	}
+	service.chunkPolicy = denyChunkAction(ChunkPolicyRead)
+	if _, err := service.History(ctx, knowledgeStore.RevisionListRequest{Object: object}); !errors.Is(err, ErrChunkPolicyDenied) {
+		t.Fatalf("History(denied) error = %v", err)
+	}
+}

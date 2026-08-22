@@ -26,6 +26,7 @@ type EntryFilter struct {
 	ChunkIDs    []knowledge.ChunkID
 	Kinds       []knowledge.EntryKind
 	States      []knowledge.EntryState
+	Scopes      []knowledge.Scope
 	ScopeKinds  []knowledge.ScopeKind
 	Tags        []string
 	Locales     []string
@@ -124,6 +125,12 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	request.Filter.States = slices.Clone(request.Filter.States)
 	slices.Sort(request.Filter.States)
 	request.Filter.States = slices.Compact(request.Filter.States)
+	request.Filter.Scopes = slices.Clone(request.Filter.Scopes)
+	for index := range request.Filter.Scopes {
+		request.Filter.Scopes[index].Selector = strings.TrimSpace(request.Filter.Scopes[index].Selector)
+	}
+	slices.SortFunc(request.Filter.Scopes, compareScopes)
+	request.Filter.Scopes = slices.Compact(request.Filter.Scopes)
 	request.Filter.ScopeKinds = slices.Clone(request.Filter.ScopeKinds)
 	slices.Sort(request.Filter.ScopeKinds)
 	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
@@ -153,6 +160,11 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 			return EntryListRequest{}, fmt.Errorf("invalid entry state filter")
 		}
 	}
+	for _, scope := range request.Filter.Scopes {
+		if err := scope.Validate(); err != nil {
+			return EntryListRequest{}, err
+		}
+	}
 	for _, scope := range request.Filter.ScopeKinds {
 		if scope == knowledge.ScopeKindUnspecified || !scope.IsAScopeKind() {
 			return EntryListRequest{}, fmt.Errorf("invalid entry scope filter")
@@ -175,7 +187,8 @@ func entryCursorBinding(request EntryListRequest, generation uint64) (CursorBind
 
 func entryMatchesFilter(entry knowledge.Entry, filter EntryFilter) bool {
 	if !containsOrEmpty(filter.ChunkIDs, entry.ChunkID) || !containsOrEmpty(filter.Kinds, entry.Kind) ||
-		!containsOrEmpty(filter.States, entry.State) || !containsOrEmpty(filter.ScopeKinds, entry.Scope.Kind) ||
+		!containsOrEmpty(filter.States, entry.State) || !containsOrEmpty(filter.Scopes, entry.Scope) ||
+		!containsOrEmpty(filter.ScopeKinds, entry.Scope.Kind) ||
 		!containsAll(entry.Tags, filter.Tags) || !intersectsOrEmpty(entry.Applicability.Locales, filter.Locales) {
 		return false
 	}
@@ -198,6 +211,16 @@ func entryMatchesFilter(entry knowledge.Entry, filter EntryFilter) bool {
 		}
 	}
 	return true
+}
+
+func compareScopes(left, right knowledge.Scope) int {
+	if left.Kind < right.Kind {
+		return -1
+	}
+	if left.Kind > right.Kind {
+		return 1
+	}
+	return strings.Compare(left.Selector, right.Selector)
 }
 
 func normalizeFilterTime(value time.Time) time.Time {

@@ -21,6 +21,8 @@ import (
 func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
 	mux.HandleFunc(knowledgeapi.ChunkCollectionPath, s.handleKnowledgeChunks)
 	mux.HandleFunc(knowledgeapi.ChunkCollectionPath+"/", s.handleKnowledgeChunk)
+	mux.HandleFunc(knowledgeapi.EntryCollectionPath, s.handleKnowledgeEntries)
+	mux.HandleFunc(knowledgeapi.EntryCollectionPath+"/", s.handleKnowledgeEntry)
 }
 
 func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +106,10 @@ func (s *Server) handleKnowledgeChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 {
+		if parts[1] == "history" {
+			s.getKnowledgeHistory(w, r, requestID, ctx, service, knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: chunkID})
+			return
+		}
 		s.changeKnowledgeChunkLifecycle(w, r, requestID, ctx, service, knowledge.ChunkID(chunkID), parts[1])
 		return
 	}
@@ -124,12 +130,7 @@ func (s *Server) getKnowledgeChunk(w http.ResponseWriter, r *http.Request, reque
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: chunkID}
 	record, err := service.Get(ctx, reference)
 	if err != nil {
-		// A denied object is deliberately indistinguishable from an absent one.
-		if errors.Is(err, knowledgeService.ErrChunkPolicyDenied) {
-			s.writeKnowledgeError(w, requestID, http.StatusNotFound, knowledgeService.ErrorCodeNotFound, "The Knowledge object was not found.")
-			return
-		}
-		s.writeKnowledgeServiceError(w, requestID, err)
+		s.writeKnowledgeReadError(w, requestID, err)
 		return
 	}
 	if record.Chunk == nil {
@@ -426,6 +427,15 @@ func (s *Server) writeKnowledgeServiceError(w http.ResponseWriter, requestID str
 		status = http.StatusServiceUnavailable
 	}
 	s.writeKnowledgeJSON(w, status, knowledgeapi.ErrorResponse{ResponseMetadata: knowledgeapi.Metadata(requestID), Error: classified})
+}
+
+func (s *Server) writeKnowledgeReadError(w http.ResponseWriter, requestID string, err error) {
+	// A policy-denied object is deliberately indistinguishable from an absent one.
+	if errors.Is(err, knowledgeService.ErrChunkPolicyDenied) {
+		s.writeKnowledgeError(w, requestID, http.StatusNotFound, knowledgeService.ErrorCodeNotFound, "The Knowledge object was not found.")
+		return
+	}
+	s.writeKnowledgeServiceError(w, requestID, err)
 }
 
 func (s *Server) writeKnowledgeError(w http.ResponseWriter, requestID string, status int, code knowledgeService.ErrorCode, message string) {

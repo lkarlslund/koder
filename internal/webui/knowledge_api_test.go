@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/deviceauth"
@@ -223,6 +224,101 @@ func TestKnowledgeChunkMutationLifecycleUsesOptimisticRevisions(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("get deleted status=%d", response.StatusCode)
+	}
+}
+
+func TestKnowledgeEntryEvidenceAndHistoryReadsRespectChunkPolicy(t *testing.T) {
+	ctrl := newTestController(t)
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	var denyReads atomic.Bool
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		ChunkPolicy: knowledgeService.ChunkPolicyFunc(func(_ context.Context, actor knowledge.Actor, action knowledgeService.ChunkPolicyAction, _ knowledge.Chunk) error {
+			if denyReads.Load() && actor.Kind == knowledge.ActorKindUser && action == knowledgeService.ChunkPolicyRead {
+				return errors.New("hidden by test policy")
+			}
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("new Knowledge service: %v", err)
+	}
+	ctrl.SetKnowledgeService(service)
+	chunk := createAPIChunk(t, service, "Entry owner", knowledge.Scope{Kind: knowledge.ScopeKindGlobal})
+	evidence, err := service.CreateEvidence(context.Background(), knowledgeService.CreateEvidenceRequest{Evidence: knowledge.Evidence{
+		Type: knowledge.EvidenceTypeObservation, Quality: knowledge.EvidenceQualityPrimary,
+		Source: knowledge.Source{ID: "test:api", ContentHash: "sha256:api"},
+	}})
+	if err != nil {
+		t.Fatalf("create evidence: %v", err)
+	}
+	entry, err := service.CreateEntry(context.Background(), knowledgeService.CreateEntryRequest{
+		ChunkID: chunk.ID,
+		Entry: knowledge.Entry{
+			Kind: knowledge.EntryKindFact, Title: "API entry", Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+			Verification: knowledge.Verification{Status: knowledge.VerificationStatusUnverified},
+			EvidenceIDs:  []knowledge.EvidenceID{evidence.Evidence.ID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create entry: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	entriesURL := srv.URL() + knowledgeapi.EntryCollectionPath
+	entryURL := srv.URL() + knowledgeapi.EntryPath(entry.Entry.ID)
+
+	response := knowledgeAPIRequest(t, http.MethodGet, entriesURL+"?chunk_id="+string(chunk.ID)+"&scope=global", token)
+	var entries knowledgeapi.EntryListResponse
+	decodeKnowledgeResponse(t, response, &entries)
+	if response.StatusCode != http.StatusOK || len(entries.Entries) != 1 || entries.Entries[0].ID != entry.Entry.ID {
+		t.Fatalf("entry list status=%d response=%#v", response.StatusCode, entries)
+	}
+	response = knowledgeAPIRequest(t, http.MethodGet, entryURL, token)
+	var got knowledgeapi.EntryResponse
+	decodeKnowledgeResponse(t, response, &got)
+	if response.StatusCode != http.StatusOK || got.Entry.ID != entry.Entry.ID || got.ETag == "" {
+		t.Fatalf("entry get status=%d response=%#v", response.StatusCode, got)
+	}
+	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.EntryEvidencePath(entry.Entry.ID), token)
+	var evidencePage knowledgeapi.EvidenceListResponse
+	decodeKnowledgeResponse(t, response, &evidencePage)
+	if response.StatusCode != http.StatusOK || len(evidencePage.Evidence) != 1 || evidencePage.Evidence[0].ID != evidence.Evidence.ID {
+		t.Fatalf("evidence status=%d response=%#v", response.StatusCode, evidencePage)
+	}
+	for _, historyURL := range []string{
+		srv.URL() + knowledgeapi.EntryHistoryPath(entry.Entry.ID),
+		srv.URL() + knowledgeapi.ChunkHistoryPath(chunk.ID),
+	} {
+		response = knowledgeAPIRequest(t, http.MethodGet, historyURL, token)
+		var history knowledgeapi.HistoryResponse
+		decodeKnowledgeResponse(t, response, &history)
+		if response.StatusCode != http.StatusOK || len(history.Revisions) != 1 {
+			t.Fatalf("history %s status=%d response=%#v", historyURL, response.StatusCode, history)
+		}
+	}
+
+	denyReads.Store(true)
+	response = knowledgeAPIRequest(t, http.MethodGet, entriesURL, token)
+	decodeKnowledgeResponse(t, response, &entries)
+	if response.StatusCode != http.StatusOK || len(entries.Entries) != 0 {
+		t.Fatalf("denied list status=%d response=%#v", response.StatusCode, entries)
+	}
+	for _, deniedURL := range []string{entryURL, srv.URL() + knowledgeapi.EntryEvidencePath(entry.Entry.ID), srv.URL() + knowledgeapi.EntryHistoryPath(entry.Entry.ID)} {
+		response = knowledgeAPIRequest(t, http.MethodGet, deniedURL, token)
+		var denied knowledgeapi.ErrorResponse
+		decodeKnowledgeResponse(t, response, &denied)
+		if response.StatusCode != http.StatusNotFound || denied.Error == nil || denied.Error.Code != knowledgeService.ErrorCodeNotFound {
+			t.Fatalf("denied %s status=%d response=%#v", deniedURL, response.StatusCode, denied)
+		}
 	}
 }
 

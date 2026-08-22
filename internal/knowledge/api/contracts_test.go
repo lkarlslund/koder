@@ -126,6 +126,10 @@ func TestChunkRoutesRemainVersionedAndEscaped(t *testing.T) {
 	if got := ChunkLifecyclePath(chunkID, " archive "); got != "/api/knowledge/v1/chunks/chunk%20with%2Fslash/archive" {
 		t.Fatalf("ChunkLifecyclePath() = %q", got)
 	}
+	entryID := knowledge.EntryID("entry with/slash")
+	if got := EntryEvidencePath(entryID); got != "/api/knowledge/v1/entries/entry%20with%2Fslash/evidence" {
+		t.Fatalf("EntryEvidencePath() = %q", got)
+	}
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {
