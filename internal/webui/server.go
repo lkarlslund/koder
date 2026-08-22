@@ -83,6 +83,7 @@ type Server struct {
 	devices                 *deviceauth.Registry
 	voice                   *voiceapi.Handler
 	knowledgeRequestTimeout time.Duration
+	knowledgeBrowserToken   string
 }
 
 type clientSelection struct {
@@ -114,6 +115,11 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	if err != nil {
 		return nil, fmt.Errorf("listen web ui: %w", err)
 	}
+	knowledgeBrowserToken, err := newKnowledgeBrowserToken()
+	if err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
 	devices, err := deviceauth.Open(controller.StateDir())
 	if err != nil {
 		_ = listener.Close()
@@ -132,6 +138,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		clientSelections:        map[string]clientSelection{},
 		devices:                 devices,
 		knowledgeRequestTimeout: defaultKnowledgeRequestTimeout,
+		knowledgeBrowserToken:   knowledgeBrowserToken,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -295,7 +302,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if isKnowledgeBrowserPath(r.URL.Path) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write([]byte(renderKnowledgeBrowserHTML()))
+		_, _ = w.Write([]byte(renderKnowledgeBrowserHTML(s.knowledgeBrowserToken)))
 		return
 	}
 	if _, ok := fileBrowserSessionFromPath(r.URL.Path); ok {

@@ -1,0 +1,107 @@
+'use strict';
+
+const assert = require('assert');
+const knowledge = require('../assets/knowledge_api_client.js');
+
+function response(status, body, requestID = 'request-1') {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({'X-Koder-Request-ID': requestID}),
+    text: async () => body === null ? '' : JSON.stringify(body),
+  };
+}
+
+async function testRequestAndCursorEncoding() {
+  const requests = [];
+  const client = new knowledge.Client({token: 'secret', fetchImpl: async (url, options) => {
+    requests.push({url, options});
+    return response(200, {api_version: 'knowledge.v1', chunks: [], page: {next_cursor: 'opaque'}});
+  }});
+  const data = await client.listChunks({kind: ['reference', 'personal'], cursor: 'opaque +/='}, {channel: 'chunks'});
+  assert.strictEqual(data.page.next_cursor, 'opaque');
+  assert.strictEqual(requests[0].url, '/api/knowledge/v1/chunks?cursor=opaque+%2B%2F%3D&kind=reference&kind=personal');
+  assert.strictEqual(requests[0].options.headers.get('Authorization'), 'Bearer secret');
+  assert.strictEqual(requests[0].options.credentials, 'same-origin');
+  assert.strictEqual(client.generation('chunks'), 1);
+}
+
+async function testNewGenerationCancelsStaleRequest() {
+  let calls = 0;
+  const client = new knowledge.Client({fetchImpl: (url, options) => {
+    calls++;
+    if (calls === 2) return Promise.resolve(response(200, {api_version: 'knowledge.v1', value: 'new'}));
+    return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+      const error = new Error('aborted'); error.name = 'AbortError'; reject(error);
+    }, {once: true}));
+  }});
+  const stale = client.request('/status', {channel: 'status'});
+  const current = client.request('/status', {channel: 'status'});
+  await assert.rejects(stale, error => error instanceof knowledge.KnowledgeAPIStaleResponseError && error.generation === 1);
+  assert.strictEqual((await current).value, 'new');
+  assert.strictEqual(client.generation('status'), 2);
+}
+
+async function testStructuredErrors() {
+  const client = new knowledge.Client({fetchImpl: async () => response(409, {
+    api_version: 'knowledge.v1', request_id: 'audit-9',
+    error: {code: 'conflict', message: 'Refresh.', retryable: true, details: {revision: 4}},
+  })});
+  await assert.rejects(client.getChunk('chunk-1'), error => {
+    assert(error instanceof knowledge.KnowledgeAPIError);
+    assert.strictEqual(error.code, 'conflict');
+    assert.strictEqual(error.status, 409);
+    assert.strictEqual(error.requestID, 'audit-9');
+    assert.strictEqual(error.details.revision, 4);
+    return true;
+  });
+}
+
+async function testPaginationUsesOpaqueCursors() {
+  const urls = [];
+  const pages = [
+    {api_version: 'knowledge.v1', chunks: [{id: 'one'}], page: {next_cursor: 'cursor/1 +'}},
+    {api_version: 'knowledge.v1', chunks: [{id: 'two'}], page: {}},
+  ];
+  const client = new knowledge.Client({fetchImpl: async url => {
+    urls.push(url);
+    return response(200, pages.shift());
+  }});
+  const ids = [];
+  for await (const page of client.pages('/chunks', {query: {limit: 1}, channel: 'pages'})) ids.push(page.chunks[0].id);
+  assert.deepStrictEqual(ids, ['one', 'two']);
+  assert.deepStrictEqual(urls, [
+    '/api/knowledge/v1/chunks?limit=1',
+    '/api/knowledge/v1/chunks?cursor=cursor%2F1+%2B&limit=1',
+  ]);
+}
+
+async function testCancelAndValidation() {
+  const client = new knowledge.Client({fetchImpl: (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), {name: 'AbortError'})), {once: true});
+  })});
+  const pending = client.status({channel: 'cancel'});
+  assert.strictEqual(client.cancel('cancel'), true);
+  await assert.rejects(pending, error => error.code === 'canceled');
+  assert.throws(() => new knowledge.Client({base: 'https://example.com/api', fetchImpl: async () => {}}), /local versioned path/);
+  assert.throws(() => client.getChunk('../secret'), /invalid/);
+  assert.throws(() => knowledge.queryString({scope: {kind: 'global'}}), /scalar/);
+}
+
+async function testRepeatedCursorIsRejected() {
+  const client = new knowledge.Client({fetchImpl: async () => response(200, {
+    api_version: 'knowledge.v1', chunks: [], page: {next_cursor: 'same'},
+  })});
+  const iterator = client.pages('/chunks', {cursor: 'same'});
+  await iterator.next();
+  await assert.rejects(iterator.next(), error => error.code === 'invalid_cursor');
+}
+
+Promise.resolve()
+  .then(testRequestAndCursorEncoding)
+  .then(testNewGenerationCancelsStaleRequest)
+  .then(testStructuredErrors)
+  .then(testPaginationUsesOpaqueCursors)
+  .then(testCancelAndValidation)
+  .then(testRepeatedCursorIsRejected)
+  .catch(error => { console.error(error); process.exitCode = 1; });

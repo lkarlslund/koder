@@ -17,7 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
 )
 
-func TestKnowledgeChunkReadAndListRequireDeviceAuthentication(t *testing.T) {
+func TestKnowledgeChunkReadAndListRequireAuthentication(t *testing.T) {
 	ctrl := newTestController(t)
 	store := memory.New()
 	t.Cleanup(func() { _ = store.Close() })
@@ -49,6 +49,17 @@ func TestKnowledgeChunkReadAndListRequireDeviceAuthentication(t *testing.T) {
 	decodeKnowledgeResponse(t, response, &unauthorized)
 	if unauthorized.APIVersion != knowledgeapi.Version || unauthorized.Error == nil || unauthorized.Error.Code != knowledgeService.ErrorCodeForbidden {
 		t.Fatalf("unauthorized response = %#v", unauthorized)
+	}
+
+	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.RoutePrefix+"/chunks?scope=global&limit=1", srv.knowledgeBrowserToken)
+	if response.StatusCode != http.StatusOK {
+		defer response.Body.Close()
+		t.Fatalf("browser-authenticated list status = %d", response.StatusCode)
+	}
+	var browserListed knowledgeapi.ChunkListResponse
+	decodeKnowledgeResponse(t, response, &browserListed)
+	if len(browserListed.Chunks) != 1 || browserListed.Chunks[0].ID != global.ID {
+		t.Fatalf("browser-authenticated list response = %#v", browserListed)
 	}
 
 	response = knowledgeAPIRequest(t, http.MethodGet, srv.URL()+knowledgeapi.RoutePrefix+"/chunks?scope=global&limit=1", token)

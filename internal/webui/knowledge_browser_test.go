@@ -33,7 +33,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	for _, required := range []string{
 		`id="knowledge-browser"`, `id="knowledge-graph"`, "Koder Knowledge",
 		`data-knowledge-pane="sources"`, `data-knowledge-pane="graph"`, `data-knowledge-pane="inspector"`, `data-knowledge-return`,
-		`/assets/knowledge_browser.css`, `/assets/knowledge_browser.js`,
+		`/assets/knowledge_browser.css`, `/assets/knowledge_api_client.js`, `/assets/knowledge_browser.js`,
 		`/assets/vendor/graphology/graphology.umd.min.js`,
 		`/assets/vendor/knowledge-layouts/knowledge-layouts.min.js`,
 		`/assets/vendor/sigma/sigma.min.js`, currentAssetHash,
@@ -42,8 +42,28 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 			t.Fatalf("Knowledge explorer does not contain %q", required)
 		}
 	}
-	if strings.Contains(page, assetHashPlaceholder) || strings.Contains(page, "https://") || strings.Contains(page, "http://") {
+	if !strings.Contains(page, `"token":"`+srv.knowledgeBrowserToken+`"`) || !strings.Contains(page, `"api_base":"/api/knowledge/v1"`) {
+		t.Fatal("Knowledge explorer does not contain its process-scoped API configuration")
+	}
+	if strings.Contains(page, assetHashPlaceholder) || strings.Contains(page, knowledgeBrowserConfigPlaceholder) || strings.Contains(page, "https://") || strings.Contains(page, "http://") {
 		t.Fatal("Knowledge explorer contains an unresolved hash or remote dependency")
+	}
+}
+
+func TestKnowledgeBrowserCredentialsAreRotatedAndComparedSafely(t *testing.T) {
+	first, err := newKnowledgeBrowserToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newKnowledgeBrowserToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || !strings.HasPrefix(first, "kbw1_") || len(first) < 40 {
+		t.Fatalf("Knowledge browser credentials are not independently random: %q %q", first, second)
+	}
+	if !knowledgeBrowserTokenMatches(first, first) || knowledgeBrowserTokenMatches(first, second) || knowledgeBrowserTokenMatches(first, "") {
+		t.Fatal("Knowledge browser credential comparison is incorrect")
 	}
 }
 
@@ -64,7 +84,7 @@ func TestMainWebUIExposesKnowledgeExplorerEntry(t *testing.T) {
 }
 
 func TestKnowledgeExplorerResponsiveShellAssetsAreEmbedded(t *testing.T) {
-	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_browser.js"} {
+	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_api_client.js", "assets/knowledge_browser.js"} {
 		data, err := webAssets.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read embedded Knowledge shell asset %q: %v", path, err)

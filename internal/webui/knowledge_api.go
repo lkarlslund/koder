@@ -358,7 +358,20 @@ func (s *Server) authenticateKnowledgeRequest(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	token, ok := bearerCredential(r.Header.Get("Authorization"))
-	if !ok || s.devices == nil {
+	if !ok {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="Koder Knowledge"`)
+		s.writeKnowledgeError(w, requestID, http.StatusUnauthorized, knowledgeService.ErrorCodeForbidden, "Knowledge authentication is required.")
+		return requestID, nil, false
+	}
+	if knowledgeBrowserTokenMatches(s.knowledgeBrowserToken, token) {
+		ctx, err := knowledgeService.WithActor(r.Context(), knowledge.Actor{Kind: knowledge.ActorKindUser, ID: "browser:webui"})
+		if err != nil {
+			s.writeKnowledgeError(w, requestID, http.StatusInternalServerError, knowledgeService.ErrorCodeInternal, "Knowledge could not complete the operation.")
+			return requestID, nil, false
+		}
+		return requestID, ctx, true
+	}
+	if s.devices == nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="Koder Knowledge"`)
 		s.writeKnowledgeError(w, requestID, http.StatusUnauthorized, knowledgeService.ErrorCodeForbidden, "Knowledge authentication is required.")
 		return requestID, nil, false
