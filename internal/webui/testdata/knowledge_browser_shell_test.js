@@ -90,6 +90,14 @@ assert.deepStrictEqual(browser.entryContentFromValues({
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', confidence: '2'}), /confidence/);
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', valid_from: '2026-02-01T00:00', valid_until: '2026-01-01T00:00'}), /later/);
 assert.strictEqual(browser.entryEditorValues({chunk_id: 'chunk-1', applicability: {software: [{name: 'Go', version_range: '>=1.24'}]}}).software, 'Go|>=1.24');
+assert.deepStrictEqual(browser.editorConflict(
+  {title: 'Old title', description: 'Old description', tags: 'one', review_approved: false},
+  {title: 'My title', description: 'Old description', tags: 'one', review_approved: true},
+  {title: 'Server title', description: 'Server description', tags: 'one', review_approved: false},
+), {
+  serverFields: ['description', 'title'], draftFields: ['title'], overlappingFields: ['title'],
+  merged: {title: 'My title', description: 'Server description', tags: 'one', review_approved: false},
+});
 assert.strictEqual(browser.relationshipShapeError('contradicts', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), '');
 assert.match(browser.relationshipShapeError('contradicts', {kind: 'chunk', id: 'one'}, {kind: 'entry', id: 'two'}), /two entries/);
 assert.match(browser.relationshipShapeError('part_of', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), /point to a chunk/);

@@ -252,6 +252,12 @@
           </details>
           <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
         </div>
+        <section class="knowledge-editor-conflict" data-knowledge-chunk-conflict role="alert" hidden>
+          <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This chunk changed while you were editing</strong><span data-knowledge-chunk-conflict-revision></span></div></header>
+          <dl><dt>Changed on server</dt><dd data-knowledge-chunk-conflict-server></dd><dt>Changed in your draft</dt><dd data-knowledge-chunk-conflict-draft></dd><dt>Changed in both</dt><dd data-knowledge-chunk-conflict-overlap></dd></dl>
+          <p data-knowledge-chunk-conflict-detail></p>
+          <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-chunk-conflict-reload>Reload latest</button><button type="button" class="btn btn-sm btn-warning" data-knowledge-chunk-conflict-rebase>Merge draft onto latest</button></footer>
+        </section>
         <div class="knowledge-editor-error" data-knowledge-chunk-form-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-chunk-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-chunk-submit>Save chunk</button></footer>
       </form>
@@ -293,6 +299,12 @@
           </details>
           <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
         </div>
+        <section class="knowledge-editor-conflict" data-knowledge-entry-conflict role="alert" hidden>
+          <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This entry changed while you were editing</strong><span data-knowledge-entry-conflict-revision></span></div></header>
+          <dl><dt>Changed on server</dt><dd data-knowledge-entry-conflict-server></dd><dt>Changed in your draft</dt><dd data-knowledge-entry-conflict-draft></dd><dt>Changed in both</dt><dd data-knowledge-entry-conflict-overlap></dd></dl>
+          <p data-knowledge-entry-conflict-detail></p>
+          <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-entry-conflict-reload>Reload latest</button><button type="button" class="btn btn-sm btn-warning" data-knowledge-entry-conflict-rebase>Merge draft onto latest</button></footer>
+        </section>
         <div class="knowledge-editor-error" data-knowledge-entry-form-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-entry-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-entry-submit>Create entry</button></footer>
       </form>

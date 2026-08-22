@@ -356,6 +356,39 @@
     };
   }
 
+  function comparableEditorValue(value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (Array.isArray(value)) return JSON.stringify(value);
+    return String(value).trim();
+  }
+
+  function editorConflict(base, draft, latest, options) {
+    base = base || {};
+    draft = draft || {};
+    latest = latest || {};
+    options = options || {};
+    const ignored = new Set(options.ignore || ['review_approved']);
+    const keys = [...new Set([...Object.keys(base), ...Object.keys(draft), ...Object.keys(latest)])].filter(key => !ignored.has(key)).sort();
+    const serverFields = [];
+    const draftFields = [];
+    const overlappingFields = [];
+    const merged = {...latest};
+    for (const key of keys) {
+      const baseValue = comparableEditorValue(base[key]);
+      const draftValue = comparableEditorValue(draft[key]);
+      const latestValue = comparableEditorValue(latest[key]);
+      const serverChanged = latestValue !== baseValue;
+      const draftChanged = draftValue !== baseValue;
+      if (serverChanged) serverFields.push(key);
+      if (draftChanged) draftFields.push(key);
+      if (serverChanged && draftChanged && draftValue !== latestValue) overlappingFields.push(key);
+      if (draftChanged) merged[key] = draft[key];
+    }
+    for (const key of ignored) if (Object.hasOwn(draft, key)) merged[key] = key === 'review_approved' ? false : draft[key];
+    return {serverFields, draftFields, overlappingFields, merged};
+  }
+
   const relationshipKinds = new Set(['related_to', 'part_of', 'requires', 'alternative_to', 'applies_to', 'supersedes', 'contradicts', 'caused_by', 'supported_by', 'derived_from']);
   const symmetricRelationshipKinds = new Set(['related_to', 'alternative_to', 'contradicts']);
 
@@ -497,6 +530,7 @@
       this.chunkRestoreButton = shell.querySelector('[data-knowledge-chunk-restore]');
       this.chunkDeleteButton = shell.querySelector('[data-knowledge-chunk-delete]');
       this.chunkMutationStatus = shell.querySelector('[data-knowledge-chunk-mutation-status]');
+      this.chunkConflictUI = this.conflictUI('chunk');
       this.entryCreateButton = shell.querySelector('[data-knowledge-entry-create]');
       this.entryDialog = shell.querySelector('[data-knowledge-entry-dialog]');
       this.entryForm = shell.querySelector('[data-knowledge-entry-form]');
@@ -510,6 +544,7 @@
       this.entryRestoreButton = shell.querySelector('[data-knowledge-entry-restore]');
       this.entryDeleteButton = shell.querySelector('[data-knowledge-entry-delete]');
       this.entryMutationStatus = shell.querySelector('[data-knowledge-entry-mutation-status]');
+      this.entryConflictUI = this.conflictUI('entry');
       this.supersedeDialog = shell.querySelector('[data-knowledge-supersede-dialog]');
       this.supersedeForm = shell.querySelector('[data-knowledge-supersede-form]');
       this.supersedeError = shell.querySelector('[data-knowledge-supersede-error]');
@@ -607,6 +642,8 @@
       if (this.chunkForm) this.chunkForm.addEventListener('submit', event => { event.preventDefault(); this.saveChunkEditor(); });
       const scopeInput = this.chunkForm && this.chunkForm.elements.namedItem('scope_kind');
       if (scopeInput) scopeInput.addEventListener('change', () => this.syncChunkScopeField());
+      if (this.chunkConflictUI.reload) this.chunkConflictUI.reload.addEventListener('click', () => this.resolveEditorConflict('chunk', 'reload'));
+      if (this.chunkConflictUI.rebase) this.chunkConflictUI.rebase.addEventListener('click', () => this.resolveEditorConflict('chunk', 'rebase'));
       if (this.entryCreateButton) this.entryCreateButton.addEventListener('click', () => this.openEntryEditor(null, this.inspectedRecord));
       if (this.entryEditButton) this.entryEditButton.addEventListener('click', () => this.openEntryEditor(this.inspectedRecord));
       if (this.entrySupersedeButton) this.entrySupersedeButton.addEventListener('click', () => this.openSupersedeEditor());
@@ -617,6 +654,8 @@
       if (this.entryForm) this.entryForm.addEventListener('submit', event => { event.preventDefault(); this.saveEntryEditor(); });
       const entryScopeInput = this.entryForm && this.entryForm.elements.namedItem('scope_kind');
       if (entryScopeInput) entryScopeInput.addEventListener('change', () => this.syncEntryScopeField());
+      if (this.entryConflictUI.reload) this.entryConflictUI.reload.addEventListener('click', () => this.resolveEditorConflict('entry', 'reload'));
+      if (this.entryConflictUI.rebase) this.entryConflictUI.rebase.addEventListener('click', () => this.resolveEditorConflict('entry', 'rebase'));
       for (const button of shell.querySelectorAll('[data-knowledge-supersede-cancel]')) button.addEventListener('click', () => this.closeSupersedeEditor());
       if (this.supersedeForm) this.supersedeForm.addEventListener('submit', event => { event.preventDefault(); this.saveSupersedeEditor(); });
       if (this.linkCreateButton) this.linkCreateButton.addEventListener('click', () => this.openLinkEditor());
@@ -1446,8 +1485,108 @@
       }
     }
 
+    conflictUI(kind) {
+      const prefix = `[data-knowledge-${kind}-conflict`;
+      return {
+        container: this.shell.querySelector(`${prefix}]`), revision: this.shell.querySelector(`${prefix}-revision]`),
+        server: this.shell.querySelector(`${prefix}-server]`), draft: this.shell.querySelector(`${prefix}-draft]`),
+        overlap: this.shell.querySelector(`${prefix}-overlap]`), detail: this.shell.querySelector(`${prefix}-detail]`),
+        reload: this.shell.querySelector(`${prefix}-reload]`), rebase: this.shell.querySelector(`${prefix}-rebase]`),
+      };
+    }
+
+    clearEditorConflict(kind) {
+      const ui = kind === 'chunk' ? this.chunkConflictUI : this.entryConflictUI;
+      if (ui && ui.container) ui.container.hidden = true;
+      this[`${kind}EditorConflict`] = null;
+    }
+
+    editorValuesFor(kind, record) {
+      return kind === 'chunk' ? chunkEditorValues(record) : entryEditorValues(record);
+    }
+
+    editorFormFor(kind) {
+      return kind === 'chunk' ? this.chunkForm : this.entryForm;
+    }
+
+    async handleEditorConflict(kind, original, draftValues, error) {
+      if (!original || !original.id || error && error.code !== 'conflict') return false;
+      const ui = kind === 'chunk' ? this.chunkConflictUI : this.entryConflictUI;
+      const formError = kind === 'chunk' ? this.chunkFormError : this.entryFormError;
+      try {
+        const response = kind === 'chunk'
+          ? await this.client.getChunk(original.id, {channel: 'chunk-conflict'})
+          : await this.client.getEntry(original.id, {channel: 'entry-conflict'});
+        const latest = response && response[kind];
+        const currentEditor = this[`${kind}EditorRecord`];
+        if (!latest || !currentEditor || currentEditor.id !== original.id) return false;
+        if (latest.revision && original.revision && latest.revision.number === original.revision.number) return false;
+        const base = this.editorValuesFor(kind, original);
+        const form = this.editorFormFor(kind);
+        const liveValues = form ? Object.fromEntries(new FormData(form).entries()) : {};
+        if (form && form.elements.namedItem('review_approved')) liveValues.review_approved = !!form.elements.namedItem('review_approved').checked;
+        const draft = {...base, ...draftValues, ...liveValues};
+        const current = this.editorValuesFor(kind, latest);
+        const comparison = editorConflict(base, draft, current, {ignore: kind === 'entry' ? ['review_approved', 'chunk_id'] : ['review_approved']});
+        const editable = kind === 'chunk' ? latest.state !== 'archived' : latest.state === 'active';
+        this[`${kind}EditorConflict`] = {latest, comparison, editable};
+        const fieldList = fields => fields.length ? fields.map(displayLabel).join(', ') : 'None';
+        if (ui.revision) ui.revision.textContent = `You opened revision ${original.revision.number}; revision ${latest.revision.number} is current (${displayLabel(latest.state)}).`;
+        if (ui.server) ui.server.textContent = fieldList(comparison.serverFields);
+        if (ui.draft) ui.draft.textContent = fieldList(comparison.draftFields);
+        if (ui.overlap) ui.overlap.textContent = fieldList(comparison.overlappingFields);
+        if (ui.detail) ui.detail.textContent = !editable
+          ? `The current ${kind} is ${displayLabel(latest.state)} and can no longer be edited. Reload it to inspect the latest version.`
+          : comparison.overlappingFields.length
+            ? 'Merging keeps your choices for fields changed in both versions. Review those fields carefully before saving again.'
+            : 'Merging keeps your draft changes and adopts newer server values for fields you did not edit.';
+        if (ui.rebase) ui.rebase.disabled = !editable;
+        if (ui.container) { ui.container.hidden = false; ui.container.scrollIntoView({block: 'nearest'}); }
+        if (formError) { formError.hidden = true; formError.textContent = ''; }
+        return true;
+      } catch (loadError) {
+        const requestID = String(loadError && loadError.requestID || error && error.requestID || '');
+        const message = loadError && loadError.code === 'not_found'
+          ? `This ${kind} was deleted while you were editing it.`
+          : `Knowledge changed, but the latest ${kind} could not be loaded for comparison.`;
+        if (formError) { formError.hidden = false; formError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      }
+    }
+
+    resolveEditorConflict(kind, action) {
+      const conflict = this[`${kind}EditorConflict`];
+      const form = this.editorFormFor(kind);
+      if (!conflict || !form || !['reload', 'rebase'].includes(action)) return false;
+      if (action === 'reload') {
+        if (conflict.comparison.draftFields.length && typeof globalThis.confirm === 'function' && !globalThis.confirm('Discard your draft and load the latest saved version?')) return false;
+        if (kind === 'chunk') { this.closeChunkEditor(); return this.openChunkEditor(conflict.latest); }
+        this.closeEntryEditor();
+        return this.openEntryEditor(conflict.latest);
+      }
+      if (!conflict.editable) return false;
+      for (const [name, value] of Object.entries(conflict.comparison.merged)) {
+        if (!name) continue;
+        const input = form.elements.namedItem(name);
+        if (!input) continue;
+        if (input.type === 'checkbox') input.checked = !!value;
+        else input.value = value;
+      }
+      this[`${kind}EditorRecord`] = conflict.latest;
+      if (kind === 'chunk') {
+        this.syncChunkScopeField();
+        if (this.chunkDialogTitle) this.chunkDialogTitle.textContent = `Edit chunk · revision ${conflict.latest.revision.number}`;
+      } else {
+        this.syncEntryScopeField();
+        if (this.entryDialogTitle) this.entryDialogTitle.textContent = `Edit entry · revision ${conflict.latest.revision.number}`;
+      }
+      this.clearEditorConflict(kind);
+      return true;
+    }
+
     openChunkEditor(record) {
       if (!this.chunkDialog || !this.chunkForm) return false;
+      this.clearEditorConflict('chunk');
       this.chunkEditorRecord = record && record.id ? record : null;
       const values = chunkEditorValues(this.chunkEditorRecord);
       for (const [name, value] of Object.entries(values)) {
@@ -1469,9 +1608,11 @@
 
     closeChunkEditor() {
       if (!this.chunkDialog) return;
+      if (this.client && typeof this.client.cancel === 'function') this.client.cancel('chunk-conflict');
       if (typeof this.chunkDialog.close === 'function') this.chunkDialog.close();
       else this.chunkDialog.removeAttribute('open');
       this.chunkEditorRecord = null;
+      this.clearEditorConflict('chunk');
     }
 
     syncChunkScopeField() {
@@ -1509,6 +1650,8 @@
         }
         return true;
       } catch (error) {
+        const existing = this.chunkEditorRecord;
+        if (existing && error && error.code === 'conflict' && await this.handleEditorConflict('chunk', existing, values, error)) return false;
         const requestID = String(error && error.requestID || '');
         const message = String(error && error.message || 'Knowledge could not save this chunk.');
         if (this.chunkFormError) { this.chunkFormError.hidden = false; this.chunkFormError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
@@ -1562,6 +1705,7 @@
 
     openEntryEditor(record, chunk) {
       if (!this.entryDialog || !this.entryForm) return false;
+      this.clearEditorConflict('entry');
       this.entryEditorRecord = record && record.id ? record : null;
       this.entryEditorChunk = this.entryEditorRecord ? null : chunk && chunk.id ? chunk : null;
       const values = entryEditorValues(this.entryEditorRecord, this.entryEditorChunk);
@@ -1585,10 +1729,12 @@
 
     closeEntryEditor() {
       if (!this.entryDialog) return;
+      if (this.client && typeof this.client.cancel === 'function') this.client.cancel('entry-conflict');
       if (typeof this.entryDialog.close === 'function') this.entryDialog.close();
       else this.entryDialog.removeAttribute('open');
       this.entryEditorRecord = null;
       this.entryEditorChunk = null;
+      this.clearEditorConflict('entry');
     }
 
     syncEntryScopeField() {
@@ -1626,6 +1772,8 @@
         }
         return true;
       } catch (error) {
+        const existing = this.entryEditorRecord;
+        if (existing && error && error.code === 'conflict' && await this.handleEditorConflict('entry', existing, values, error)) return false;
         const requestID = String(error && error.requestID || '');
         const message = String(error && error.message || 'Knowledge could not save this entry.');
         if (this.entryFormError) { this.entryFormError.hidden = false; this.entryFormError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
@@ -2069,5 +2217,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
