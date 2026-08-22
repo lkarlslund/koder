@@ -18,6 +18,8 @@ var (
 	ErrClosed = errors.New("knowledge store closed")
 	// ErrReadOnly indicates that the backend cannot currently accept writes.
 	ErrReadOnly = errors.New("knowledge store is read-only")
+	// ErrUnsupported indicates that an optional backend operation is not implemented.
+	ErrUnsupported = errors.New("knowledge store operation unsupported")
 )
 
 // Health is backend-neutral operational state. LastError contains a sanitized summary and
