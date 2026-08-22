@@ -29,13 +29,22 @@ type LexicalSearchRequest struct {
 	IncludeInvalid bool
 	Limit          int
 	Weights        LexicalFieldWeights
+	GraphExpansion *GraphExpansionOptions
 }
 
 type LexicalSearchResult struct {
 	Terms                []string             `json:"terms"`
-	Matches              []LexicalScoredEntry `json:"matches"`
+	Matches              []LexicalSearchMatch `json:"matches"`
+	GraphExpansion       *GraphExpansionStats `json:"graph_expansion,omitempty"`
 	CorpusDocumentCount  uint64               `json:"corpus_document_count"`
 	MatchedDocumentCount uint64               `json:"matched_document_count"`
+}
+
+type LexicalSearchMatch struct {
+	EntryID          knowledge.EntryID  `json:"entry_id"`
+	LexicalScore     float64            `json:"lexical_score"`
+	Terms            []LexicalTermScore `json:"terms,omitempty"`
+	GraphConnections []GraphConnection  `json:"graph_connections,omitempty"`
 }
 
 // SearchLexical applies authorization, exact scope, lifecycle, and temporal validity
@@ -61,9 +70,9 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 	if err != nil {
 		return LexicalSearchResult{}, err
 	}
-	allowed := make(map[knowledge.EntryID]struct{}, len(entries))
+	allowed := make(map[knowledge.EntryID]knowledge.Entry, len(entries))
 	for _, entry := range entries {
-		allowed[entry.ID] = struct{}{}
+		allowed[entry.ID] = entry
 	}
 
 	postings, err := s.lookupAllLexicalPostings(ctx, terms)
@@ -80,15 +89,28 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 		matched[posting.EntryID] = struct{}{}
 	}
 	frequencies := filteredDocumentFrequencies(filtered, terms)
-	matches, err := ScoreLexicalMatches(filtered, uint64(len(entries)), frequencies, request.Weights)
+	scored, err := ScoreLexicalMatches(filtered, uint64(len(entries)), frequencies, request.Weights)
 	if err != nil {
 		return LexicalSearchResult{}, err
+	}
+	matches := make([]LexicalSearchMatch, 0, len(scored))
+	for _, score := range scored {
+		matches = append(matches, LexicalSearchMatch{
+			EntryID: score.EntryID, LexicalScore: score.Score, Terms: score.Terms,
+		})
+	}
+	var expansion *GraphExpansionStats
+	if request.GraphExpansion != nil {
+		matches, expansion, err = s.expandSearchGraph(ctx, matches, allowed, *request.GraphExpansion)
+		if err != nil {
+			return LexicalSearchResult{}, err
+		}
 	}
 	if len(matches) > request.Limit {
 		matches = matches[:request.Limit]
 	}
 	return LexicalSearchResult{
-		Terms: slices.Clone(terms), Matches: matches,
+		Terms: slices.Clone(terms), Matches: matches, GraphExpansion: expansion,
 		CorpusDocumentCount: uint64(len(entries)), MatchedDocumentCount: uint64(len(matched)),
 	}, nil
 }
@@ -155,6 +177,13 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 		request.ValidAt = s.now().UTC().Round(0)
 	} else {
 		request.ValidAt = request.ValidAt.UTC().Round(0)
+	}
+	if request.GraphExpansion != nil {
+		normalized, err := normalizeGraphExpansionOptions(*request.GraphExpansion)
+		if err != nil {
+			return LexicalSearchRequest{}, nil, err
+		}
+		request.GraphExpansion = &normalized
 	}
 	return request, postingRequest.Terms, nil
 }

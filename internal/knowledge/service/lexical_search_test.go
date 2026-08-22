@@ -95,10 +95,81 @@ func TestSearchLexicalRejectsInvalidFilters(t *testing.T) {
 		{Query: "valid", Scopes: []knowledge.Scope{{Kind: knowledge.ScopeKindProject}}},
 		{Query: "valid", EntryStates: []knowledge.EntryState{knowledge.EntryStateUnspecified}},
 		{Query: "valid", ChunkStates: []knowledge.ChunkState{knowledge.ChunkStateUnspecified}},
+		{Query: "valid", GraphExpansion: &GraphExpansionOptions{Kinds: []knowledge.LinkKind{knowledge.LinkKindUnspecified}}},
+		{Query: "valid", GraphExpansion: &GraphExpansionOptions{MaxEntries: maxGraphExpansionEntries + 1}},
 	} {
 		if _, err := service.SearchLexical(context.Background(), request); err == nil {
 			t.Errorf("SearchLexical(%#v) unexpectedly succeeded", request)
 		}
+	}
+}
+
+func TestSearchLexicalGraphExpansionIsBoundedAndCannotReintroduceFilteredEntries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newLexicalSearchTestService(t, store)
+	projectScope := knowledge.Scope{Kind: knowledge.ScopeKindProject, Selector: "koder"}
+	globalScope := knowledge.Scope{Kind: knowledge.ScopeKindGlobal}
+	_, root := createLexicalSearchEntry(t, ctx, service, "Root", projectScope, "Needle root")
+	_, firstAllowed := createLexicalSearchEntry(t, ctx, service, "First allowed", projectScope, "Disk utility")
+	_, secondAllowed := createLexicalSearchEntry(t, ctx, service, "Second allowed", projectScope, "Storage utility")
+	deniedChunk, denied := createLexicalSearchEntry(t, ctx, service, "Denied", projectScope, "Private utility")
+	_, global := createLexicalSearchEntry(t, ctx, service, "Global", globalScope, "Global utility")
+	for _, target := range []knowledge.Entry{firstAllowed, secondAllowed, denied, global} {
+		if _, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+			Source: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(root.ID)},
+			Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(target.ID)},
+			Kind:   knowledge.LinkKindRelatedTo,
+		}}); err != nil {
+			t.Fatalf("CreateLink(%s) error = %v", target.ID, err)
+		}
+	}
+	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+		if action != ChunkPolicySearch {
+			t.Fatalf("policy action = %q", action)
+		}
+		if chunk.ID == deniedChunk.ID {
+			return fmt.Errorf("denied fixture")
+		}
+		return nil
+	})
+
+	result, err := service.SearchLexical(ctx, LexicalSearchRequest{
+		Query: "needle", Scopes: []knowledge.Scope{projectScope}, GraphExpansion: &GraphExpansionOptions{},
+	})
+	if err != nil {
+		t.Fatalf("SearchLexical(expand) error = %v", err)
+	}
+	if len(result.Matches) != 3 || result.Matches[0].EntryID != root.ID || result.Matches[0].LexicalScore == 0 {
+		t.Fatalf("expanded matches = %#v", result.Matches)
+	}
+	expandedIDs := []knowledge.EntryID{result.Matches[1].EntryID, result.Matches[2].EntryID}
+	slices.Sort(expandedIDs)
+	wantIDs := []knowledge.EntryID{firstAllowed.ID, secondAllowed.ID}
+	slices.Sort(wantIDs)
+	if !slices.Equal(expandedIDs, wantIDs) || slices.Contains(expandedIDs, denied.ID) || slices.Contains(expandedIDs, global.ID) {
+		t.Fatalf("expanded IDs = %v, want %v", expandedIDs, wantIDs)
+	}
+	if result.GraphExpansion == nil || result.GraphExpansion.RootsExpanded != 1 ||
+		result.GraphExpansion.Connections != 2 || result.GraphExpansion.EntriesAdded != 2 || result.GraphExpansion.Truncated {
+		t.Fatalf("graph expansion stats = %#v", result.GraphExpansion)
+	}
+	for _, match := range result.Matches[1:] {
+		if match.LexicalScore != 0 || len(match.Terms) != 0 || len(match.GraphConnections) != 1 ||
+			match.GraphConnections[0].FromEntryID != root.ID {
+			t.Fatalf("expanded match = %#v", match)
+		}
+	}
+
+	limited, err := service.SearchLexical(ctx, LexicalSearchRequest{
+		Query: "needle", Scopes: []knowledge.Scope{projectScope},
+		GraphExpansion: &GraphExpansionOptions{MaxEntries: 1},
+	})
+	if err != nil || len(limited.Matches) != 2 || limited.GraphExpansion == nil ||
+		!limited.GraphExpansion.Truncated || !slices.Contains(limited.GraphExpansion.Reasons, "entry_limit") {
+		t.Fatalf("entry-limited expansion = %#v, %v", limited, err)
 	}
 }
 
@@ -124,6 +195,14 @@ func newLexicalSearchTestService(t *testing.T, store *memory.Store) *Service {
 }
 
 func createLexicalSearchFixture(t *testing.T, ctx context.Context, service *Service, title string, scope knowledge.Scope, validUntil time.Time) (knowledge.Chunk, knowledge.Entry) {
+	return createLexicalSearchEntryWithValidity(t, ctx, service, title, scope, title+" needle", validUntil)
+}
+
+func createLexicalSearchEntry(t *testing.T, ctx context.Context, service *Service, title string, scope knowledge.Scope, entryTitle string) (knowledge.Chunk, knowledge.Entry) {
+	return createLexicalSearchEntryWithValidity(t, ctx, service, title, scope, entryTitle, time.Time{})
+}
+
+func createLexicalSearchEntryWithValidity(t *testing.T, ctx context.Context, service *Service, title string, scope knowledge.Scope, entryTitle string, validUntil time.Time) (knowledge.Chunk, knowledge.Entry) {
 	t.Helper()
 	chunk, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: knowledge.Chunk{
 		Title: title, Kind: knowledge.ChunkKindReference, Scope: scope,
@@ -133,7 +212,7 @@ func createLexicalSearchFixture(t *testing.T, ctx context.Context, service *Serv
 	}
 	entry, err := service.CreateEntry(ctx, CreateEntryRequest{
 		ChunkID: chunk.Chunk.ID,
-		Entry:   knowledge.Entry{Title: title + " needle", Kind: knowledge.EntryKindFact, ValidUntil: validUntil},
+		Entry:   knowledge.Entry{Title: entryTitle, Kind: knowledge.EntryKindFact, ValidUntil: validUntil},
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry(%q) error = %v", title, err)
