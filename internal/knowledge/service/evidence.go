@@ -93,21 +93,6 @@ func (s *Service) CreateEvidence(ctx context.Context, request CreateEvidenceRequ
 	return result, nil
 }
 
-func (s *Service) Evidence(ctx context.Context, evidenceID knowledge.EvidenceID) (knowledge.Evidence, error) {
-	if err := ctx.Err(); err != nil {
-		return knowledge.Evidence{}, err
-	}
-	var result knowledge.Evidence
-	if err := s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
-		var err error
-		result, err = tx.Evidence(ctx, evidenceID)
-		return err
-	}); err != nil {
-		return knowledge.Evidence{}, fmt.Errorf("get knowledge evidence: %w", err)
-	}
-	return result, nil
-}
-
 // EntryEvidence returns evidence through an authorized owning entry. Evidence is
 // intentionally contextual because one immutable record may be cited by several chunks
 // with different visibility policies.

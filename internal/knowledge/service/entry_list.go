@@ -53,7 +53,12 @@ func (s *Service) ListEntries(ctx context.Context, request knowledgeStore.EntryL
 		cursor = page.NextCursor
 		allowed, known := decisions[entry.ChunkID]
 		if !known {
-			chunk, err := s.Chunk(ctx, entry.ChunkID)
+			var chunk knowledge.Chunk
+			err := s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
+				var err error
+				chunk, err = tx.Chunk(ctx, entry.ChunkID)
+				return err
+			})
 			if err != nil {
 				return knowledgeStore.EntryPage{}, err
 			}

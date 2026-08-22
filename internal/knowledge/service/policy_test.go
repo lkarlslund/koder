@@ -381,6 +381,7 @@ func TestCascadeDeleteAuthorizesEveryTouchedChunkBeforeMutation(t *testing.T) {
 	if len(checked) != 2 || checked[0] != fixture.root.ID || checked[1] != fixture.dependent.ID {
 		t.Fatalf("authorized chunks = %v", checked)
 	}
+	service.chunkPolicy = AllowAllChunkPolicy{}
 	if _, err := service.Chunk(ctx, fixture.root.ID); err != nil {
 		t.Fatalf("root changed after denied cascade: %v", err)
 	}

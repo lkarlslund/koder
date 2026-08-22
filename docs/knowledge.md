@@ -241,6 +241,13 @@ visibility than the importer explicitly grants.
 The initial single-user implementation primarily uses `private` and `installation` while
 preserving the vocabulary needed for future multi-user deployments.
 
+Canonical store transactions are an internal persistence boundary and do not make access
+decisions. Consumer-facing reads go through the Knowledge service, which authorizes the
+owning chunk for direct chunk, entry, relationship, list, search, traversal, history, and
+usage operations. Evidence is read through an authorized citing entry rather than by a
+bare evidence ID, because one immutable evidence record can support chunks with different
+visibility policies.
+
 ## Lifecycle
 
 Lifecycle controls normal visibility and mutation. Permanent deletion is an operation,

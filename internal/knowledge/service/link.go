@@ -106,18 +106,14 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 }
 
 func (s *Service) Link(ctx context.Context, linkID knowledge.LinkID) (knowledge.Link, error) {
-	if err := ctx.Err(); err != nil {
+	record, err := s.Get(ctx, knowledge.ObjectRef{Kind: knowledge.ObjectKindLink, ID: string(linkID)})
+	if err != nil {
 		return knowledge.Link{}, err
 	}
-	var result knowledge.Link
-	if err := s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
-		var err error
-		result, err = tx.Link(ctx, linkID)
-		return err
-	}); err != nil {
-		return knowledge.Link{}, fmt.Errorf("get knowledge link: %w", err)
+	if record.Link == nil {
+		return knowledge.Link{}, fmt.Errorf("%w: link projection is unavailable", knowledge.ErrInvalidRecord)
 	}
-	return result, nil
+	return *record.Link, nil
 }
 
 func resolveLinkEndpoint(ctx context.Context, tx knowledgeStore.ReadTx, endpoint knowledge.ObjectRef) (knowledge.Chunk, error) {

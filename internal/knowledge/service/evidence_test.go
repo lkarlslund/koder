@@ -40,9 +40,14 @@ func TestCreateEvidenceDeduplicatesNormalizedSourceHashWithoutConsumingID(t *tes
 	if err != nil || !third.Created || third.Evidence.ID != "01a01688-fc5d-7f7d-8bb8-de244977f8a2" {
 		t.Fatalf("CreateEvidence(different hash) = %#v, %v", third, err)
 	}
-	got, err := service.Evidence(ctx, first.Evidence.ID)
-	if err != nil || got.ID != first.Evidence.ID {
-		t.Fatalf("Evidence() = %#v, %v", got, err)
+	if err := store.View(ctx, func(tx knowledgeStore.ReadTx) error {
+		got, err := tx.Evidence(ctx, first.Evidence.ID)
+		if err != nil || got.ID != first.Evidence.ID {
+			t.Fatalf("stored Evidence() = %#v, %v", got, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

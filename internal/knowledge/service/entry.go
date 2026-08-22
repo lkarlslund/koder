@@ -107,18 +107,14 @@ func (s *Service) CreateEntry(ctx context.Context, request CreateEntryRequest) (
 }
 
 func (s *Service) Entry(ctx context.Context, entryID knowledge.EntryID) (knowledge.Entry, error) {
-	if err := ctx.Err(); err != nil {
+	record, err := s.Get(ctx, knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entryID)})
+	if err != nil {
 		return knowledge.Entry{}, err
 	}
-	var result knowledge.Entry
-	if err := s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
-		var err error
-		result, err = tx.Entry(ctx, entryID)
-		return err
-	}); err != nil {
-		return knowledge.Entry{}, fmt.Errorf("get knowledge entry: %w", err)
+	if record.Entry == nil {
+		return knowledge.Entry{}, fmt.Errorf("%w: entry projection is unavailable", knowledge.ErrInvalidRecord)
 	}
-	return result, nil
+	return *record.Entry, nil
 }
 
 func hasServerOwnedEntryFields(value knowledge.Entry) bool {

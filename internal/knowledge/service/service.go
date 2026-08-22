@@ -228,18 +228,14 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 }
 
 func (s *Service) Chunk(ctx context.Context, chunkID knowledge.ChunkID) (knowledge.Chunk, error) {
-	if err := ctx.Err(); err != nil {
+	record, err := s.Get(ctx, knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)})
+	if err != nil {
 		return knowledge.Chunk{}, err
 	}
-	var result knowledge.Chunk
-	if err := s.store.View(ctx, func(tx knowledgeStore.ReadTx) error {
-		var err error
-		result, err = tx.Chunk(ctx, chunkID)
-		return err
-	}); err != nil {
-		return knowledge.Chunk{}, fmt.Errorf("get knowledge chunk: %w", err)
+	if record.Chunk == nil {
+		return knowledge.Chunk{}, fmt.Errorf("%w: chunk projection is unavailable", knowledge.ErrInvalidRecord)
 	}
-	return result, nil
+	return *record.Chunk, nil
 }
 
 func hasServerOwnedChunkFields(value knowledge.Chunk) bool {

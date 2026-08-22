@@ -18,12 +18,25 @@ func (s *Service) MarkChunkUsed(ctx context.Context, chunkID knowledge.ChunkID) 
 	if chunkID == "" {
 		return knowledge.Chunk{}, fmt.Errorf("%w: chunk ID is required", knowledge.ErrInvalidRecord)
 	}
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return knowledge.Chunk{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return knowledge.Chunk{}, err
+	}
 	var result knowledge.Chunk
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		chunk, err := tx.Chunk(ctx, chunkID)
+		if err != nil {
+			return err
+		}
+		if err := s.authorizeChunk(ctx, actor, ChunkPolicySearch, chunk); err != nil {
+			return err
+		}
 		if err := tx.TouchChunk(ctx, chunkID, s.now().UTC().Round(0)); err != nil {
 			return err
 		}
-		var err error
 		result, err = tx.Chunk(ctx, chunkID)
 		return err
 	})
