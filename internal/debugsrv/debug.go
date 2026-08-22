@@ -98,10 +98,26 @@ type HTTPTraceFilter struct {
 }
 
 type RuntimeDebug struct {
-	Process   ProcessDebug  `json:"process"`
-	Clients   []ClientDebug `json:"clients"`
-	Chats     []ChatDebug   `json:"chats"`
-	DeepDebug bool          `json:"deep_debug"`
+	Process    ProcessDebug               `json:"process"`
+	Clients    []ClientDebug              `json:"clients"`
+	Chats      []ChatDebug                `json:"chats"`
+	Subsystems map[string]SubsystemHealth `json:"subsystems,omitempty"`
+	DeepDebug  bool                       `json:"deep_debug"`
+}
+
+// SubsystemHealth is sanitized process-local health. It intentionally excludes file
+// paths, record counts derived from private content, and backend error details that may
+// contain either of those.
+type SubsystemHealth struct {
+	Status          string `json:"status"`
+	Enabled         bool   `json:"enabled"`
+	Required        bool   `json:"required"`
+	Available       bool   `json:"available"`
+	Backend         string `json:"backend,omitempty"`
+	ReadOnly        bool   `json:"read_only,omitempty"`
+	SchemaVersion   uint32 `json:"schema_version,omitempty"`
+	IndexGeneration uint64 `json:"index_generation,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
 }
 
 type ProcessDebug struct {
@@ -289,6 +305,7 @@ type Recorder struct {
 	httpTraces    []HTTPTrace
 	lastHTTPBody  map[string]string
 	activeHTTP    map[id.ID]activeHTTPTrace
+	subsystems    map[string]SubsystemHealth
 }
 
 type activeHTTPTrace struct {
@@ -306,7 +323,25 @@ func NewRecorder() *Recorder {
 		sessionEvents: map[id.ID][]RecordedEvent{},
 		lastHTTPBody:  map[string]string{},
 		activeHTTP:    map[id.ID]activeHTTPTrace{},
+		subsystems:    map[string]SubsystemHealth{},
 	}
+}
+
+// UpdateSubsystemHealth replaces one sanitized subsystem snapshot.
+func (r *Recorder) UpdateSubsystemHealth(name string, health SubsystemHealth) {
+	if r == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.subsystems == nil {
+		r.subsystems = map[string]SubsystemHealth{}
+	}
+	r.subsystems[name] = health
 }
 
 func (r *Recorder) Enabled() bool {
@@ -817,7 +852,24 @@ func (r *Recorder) Runtime() RuntimeDebug {
 	clients := cloneClients(r.clients)
 	chats := cloneChats(r.chats)
 	process.WebsocketClientCount = connectedClientCount(clients)
-	return RuntimeDebug{Process: process, Clients: clients, Chats: chats, DeepDebug: r.deepDebug}
+	return RuntimeDebug{
+		Process:    process,
+		Clients:    clients,
+		Chats:      chats,
+		Subsystems: cloneSubsystems(r.subsystems),
+		DeepDebug:  r.deepDebug,
+	}
+}
+
+func cloneSubsystems(values map[string]SubsystemHealth) map[string]SubsystemHealth {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]SubsystemHealth, len(values))
+	for name, health := range values {
+		out[name] = health
+	}
+	return out
 }
 
 func (r *Recorder) Clients() []ClientDebug {
@@ -941,9 +993,11 @@ func (s *Server) Recorder() *Recorder {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	runtime := s.recorder.Runtime()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"debug": s.recorder.Runtime().Process.DebugAPI,
+		"ok":         true,
+		"debug":      runtime.Process.DebugAPI,
+		"subsystems": runtime.Subsystems,
 	})
 }
 

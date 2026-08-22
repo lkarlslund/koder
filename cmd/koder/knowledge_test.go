@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -79,6 +81,34 @@ func TestConfiguredRequiredKnowledgeOpensAndCloses(t *testing.T) {
 	}
 	if err := subsystem.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestKnowledgeOperationalHealthIsSanitized(t *testing.T) {
+	t.Parallel()
+	subsystem := optionalKnowledgeStore{
+		Enabled:   true,
+		Backend:   "pebble",
+		OpenError: errors.New("open /home/private/knowledge: secret database detail"),
+	}
+	health := subsystem.OperationalHealth(context.Background())
+	if health.Status != "unavailable" || health.Available || health.LastError != "knowledge store failed to open" {
+		t.Fatalf("OperationalHealth() = %#v", health)
+	}
+	encoded := fmt.Sprintf("%#v", health)
+	if strings.Contains(encoded, "/home/private") || strings.Contains(encoded, "secret database detail") {
+		t.Fatalf("OperationalHealth() leaked raw error: %s", encoded)
+	}
+}
+
+func TestKnowledgeOperationalHealthReportsStoreMetadataWithoutPath(t *testing.T) {
+	t.Parallel()
+	memoryStore := memory.New()
+	t.Cleanup(func() { _ = memoryStore.Close() })
+	subsystem := optionalKnowledgeStore{Store: memoryStore, Enabled: true, Backend: "configured"}
+	health := subsystem.OperationalHealth(context.Background())
+	if health.Status != "ready" || !health.Available || health.Backend != "memory" || health.SchemaVersion != 1 {
+		t.Fatalf("OperationalHealth() = %#v", health)
 	}
 }
 

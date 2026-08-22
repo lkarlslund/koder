@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
 )
@@ -18,6 +20,7 @@ type optionalKnowledgeStore struct {
 	OpenError error
 	Enabled   bool
 	Required  bool
+	Backend   string
 }
 
 func openOptionalKnowledgeStore(stateDir string, open knowledgeStoreOpener) optionalKnowledgeStore {
@@ -54,9 +57,55 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 }
 
 func openConfiguredDefaultKnowledgeStore(stateDir string, cfg config.Knowledge) (optionalKnowledgeStore, error) {
-	return openConfiguredKnowledgeStore(stateDir, cfg, func(stateDir string) (knowledgeStore.Store, error) {
+	subsystem, err := openConfiguredKnowledgeStore(stateDir, cfg, func(stateDir string) (knowledgeStore.Store, error) {
 		return knowledgePebble.Open(stateDir)
 	})
+	subsystem.Backend = "pebble"
+	return subsystem, err
+}
+
+func (s optionalKnowledgeStore) OperationalHealth(ctx context.Context) debugsrv.SubsystemHealth {
+	health := debugsrv.SubsystemHealth{
+		Status:    "disabled",
+		Enabled:   s.Enabled,
+		Required:  s.Required,
+		Backend:   s.Backend,
+		Available: false,
+	}
+	if !s.Enabled {
+		return health
+	}
+	if s.OpenError != nil || s.Store == nil {
+		health.Status = "unavailable"
+		health.LastError = "knowledge store failed to open"
+		return health
+	}
+	storeHealth, err := s.Store.Health(ctx)
+	if err != nil {
+		health.Status = "unavailable"
+		health.LastError = "knowledge store health check failed"
+		return health
+	}
+	health.Backend = storeHealth.Backend
+	health.Available = storeHealth.Open
+	health.ReadOnly = storeHealth.ReadOnly
+	health.SchemaVersion = storeHealth.SchemaVersion
+	health.IndexGeneration = storeHealth.IndexGeneration
+	switch {
+	case !storeHealth.Open:
+		health.Status = "unavailable"
+	case storeHealth.ReadOnly:
+		health.Status = "read_only"
+	default:
+		health.Status = "ready"
+	}
+	if storeHealth.LastError != "" {
+		health.LastError = "knowledge store reported an operational error"
+		if health.Status == "ready" {
+			health.Status = "degraded"
+		}
+	}
+	return health
 }
 
 func (s optionalKnowledgeStore) Close() error {

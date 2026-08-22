@@ -95,6 +95,10 @@ Response fields:
 
 - `ok`: always `true` when the server responds.
 - `debug`: debug API base URL known by the process.
+- `subsystems`: sanitized runtime health for optional process subsystems. The
+  `knowledge` entry reports whether Knowledge is enabled, required, available,
+  or read-only, plus its backend, schema version, and index generation. Paths
+  and raw backend errors are never exposed.
 
 ### `GET /debug/runtime`
 
@@ -111,6 +115,8 @@ Top-level fields:
 - `clients`: known browser websocket clients, including disconnected clients
   retained by the recorder.
 - `chats`: live chat runtime summaries known by the recorder.
+- `subsystems`: the same sanitized optional-subsystem health reported by
+  `/debug/health`.
 - `deep_debug`: whether deep debug capture is enabled.
 
 Useful `jq` views:

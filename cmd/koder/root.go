@@ -139,6 +139,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 		}
 	}()
 	recorder := debugsrv.NewRecorder()
+	recorder.UpdateSubsystemHealth("knowledge", knowledge.OperationalHealth(ctx))
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
 	if err != nil {
