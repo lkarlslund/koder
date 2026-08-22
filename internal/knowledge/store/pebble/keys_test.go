@@ -112,3 +112,18 @@ func TestPrefixBoundsHandlesAllFFPrefix(t *testing.T) {
 		t.Fatalf("prefixBounds(ff) = %x, %x", lower, upper)
 	}
 }
+
+func FuzzRevisionKeyRoundTrip(f *testing.F) {
+	f.Add(testID, uint64(1))
+	f.Add("", ^uint64(0))
+	f.Fuzz(func(t *testing.T, id string, revision uint64) {
+		key := revisionKey(recordChunk, id, revision)
+		got, err := decodeRevisionKey(key, recordChunk, id)
+		if err != nil || got != revision {
+			t.Fatalf("decodeRevisionKey(revisionKey()) = %d, %v; want %d", got, err, revision)
+		}
+		if _, err := decodeRevisionKey(key, recordEntry, id); err == nil {
+			t.Fatal("revision key crossed record-kind keyspace")
+		}
+	})
+}

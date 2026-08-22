@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -174,6 +175,31 @@ func FuzzParseNeverPanics(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = ParseBytes(data, limits)
+	})
+}
+
+func FuzzValidateArchivePathCannotEscape(f *testing.F) {
+	f.Add("assets/reference.txt")
+	f.Add("../escape")
+	f.Add("C:\\escape")
+	f.Add("/absolute")
+	limits, err := normalizeParseLimits(ParseLimits{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		normalized, err := validateArchivePath(name, limits)
+		if err != nil {
+			return
+		}
+		if normalized == "" || path.IsAbs(normalized) || path.Clean(normalized) != normalized || strings.Contains(normalized, "\\") {
+			t.Fatalf("validateArchivePath(%q) returned unsafe path %q", name, normalized)
+		}
+		for _, component := range strings.Split(normalized, "/") {
+			if component == "" || component == "." || component == ".." {
+				t.Fatalf("validateArchivePath(%q) returned unsafe component in %q", name, normalized)
+			}
+		}
 	})
 }
 
