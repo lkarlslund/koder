@@ -66,6 +66,23 @@ func (s *Service) changeLinkState(ctx context.Context, request LinkLifecycleRequ
 		if err := actor.Validate(); err != nil {
 			return err
 		}
+		sourceChunk, err := resolveLinkEndpoint(ctx, tx, current.Source)
+		if err != nil {
+			return fmt.Errorf("resolve link source: %w", err)
+		}
+		targetChunk, err := resolveLinkEndpoint(ctx, tx, current.Target)
+		if err != nil {
+			return fmt.Errorf("resolve link target: %w", err)
+		}
+		action := ChunkPolicyLinkUnlink
+		requireActive := false
+		if target == knowledge.LinkStateActive {
+			action = ChunkPolicyLinkRestore
+			requireActive = true
+		}
+		if err := s.authorizeLinkChunks(ctx, actor, action, requireActive, sourceChunk, targetChunk); err != nil {
+			return err
+		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {
 			now = current.UpdatedAt.Add(time.Nanosecond)

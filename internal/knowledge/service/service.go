@@ -21,19 +21,21 @@ type ActorSource func(context.Context) (knowledge.Actor, error)
 type IDSource func() string
 
 type Config struct {
-	Store      knowledgeStore.Store
-	Classifier knowledge.Classifier
-	Actor      ActorSource
-	Now        func() time.Time
-	NewID      IDSource
+	Store       knowledgeStore.Store
+	Classifier  knowledge.Classifier
+	ChunkPolicy ChunkPolicy
+	Actor       ActorSource
+	Now         func() time.Time
+	NewID       IDSource
 }
 
 type Service struct {
-	store      knowledgeStore.Store
-	classifier knowledge.Classifier
-	actor      ActorSource
-	now        func() time.Time
-	newID      IDSource
+	store       knowledgeStore.Store
+	classifier  knowledge.Classifier
+	chunkPolicy ChunkPolicy
+	actor       ActorSource
+	now         func() time.Time
+	newID       IDSource
 }
 
 func New(cfg Config) (*Service, error) {
@@ -43,6 +45,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Classifier == nil {
 		cfg.Classifier = knowledge.RuleClassifier{}
 	}
+	if cfg.ChunkPolicy == nil {
+		cfg.ChunkPolicy = AllowAllChunkPolicy{}
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -50,7 +55,7 @@ func New(cfg Config) (*Service, error) {
 		cfg.NewID = id.New
 	}
 	return &Service{
-		store: cfg.Store, classifier: cfg.Classifier, actor: cfg.Actor,
+		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, actor: cfg.Actor,
 		now: cfg.Now, newID: cfg.NewID,
 	}, nil
 }
