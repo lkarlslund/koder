@@ -25,6 +25,7 @@ const controller = new layoutAPI.ForceAtlasController({
   }},
   schedule(callback) { queue.push(callback); return queue.length; },
   cancelSchedule(handle) { canceled.push(handle); },
+  workerFactory: null,
 });
 const events = [];
 controller.subscribe(event => events.push(event));
@@ -46,3 +47,28 @@ assert.strictEqual(layoutAPI.layoutNodeSize({objectKind: 'entry', semanticKind: 
 assert.strictEqual(layoutAPI.layoutNodeSize({objectKind: 'entry', semanticKind: 'fact'}), 1);
 controller.destroy();
 assert.throws(() => controller.start(), /destroyed/);
+
+class FakeWorker {
+  postMessage(message) { this.message = message; }
+  terminate() { this.terminated = true; }
+  send(data) { this.onmessage({data}); }
+}
+let worker;
+const workerEvents = [];
+const workerController = new layoutAPI.ForceAtlasController({
+  graph, layouts: {forceAtlas2() {}}, workerFactory: () => (worker = new FakeWorker()),
+});
+workerController.subscribe(event => workerEvents.push(event));
+const workerGeneration = workerController.start({iterations: 20});
+assert.strictEqual(worker.message.type, 'layout');
+assert.strictEqual(worker.message.generation, workerGeneration);
+assert.strictEqual(worker.message.nodes.find(node => node.key === 'one').attributes.layoutSize, 1.9);
+worker.send({type: 'progress', generation: workerGeneration, completed: 10, total: 20, stage: 'coarse'});
+worker.send({type: 'ready', generation: workerGeneration, completed: 20, total: 20, positions: {one: {x: 12, y: 7}, two: {x: 30, y: 30}}});
+assert.strictEqual(worker.terminated, true);
+assert.strictEqual(graph.getNodeAttribute('one', 'x'), 12);
+assert.strictEqual(graph.getNodeAttribute('two', 'x'), 1);
+assert.deepStrictEqual(workerEvents.map(event => event.phase), ['start', 'progress', 'ready']);
+workerController.start({iterations: 20});
+assert.strictEqual(workerController.stop('selection_changed'), true);
+assert.strictEqual(worker.terminated, true);

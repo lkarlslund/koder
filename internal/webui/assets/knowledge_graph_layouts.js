@@ -21,6 +21,8 @@
       if (!this.layouts || typeof this.layouts.forceAtlas2 !== 'function') throw new Error('ForceAtlas2 did not load');
       this.schedule = options.schedule || (callback => globalThis.requestAnimationFrame(callback));
       this.cancelSchedule = options.cancelSchedule || (handle => globalThis.cancelAnimationFrame(handle));
+      this.workerFactory = options.workerFactory === null ? null : options.workerFactory ||
+        (typeof globalThis.Worker === 'function' ? () => new globalThis.Worker('/assets/knowledge_layout_worker.js') : null);
       this.listeners = new Set();
       this.generation = 0;
       this.handle = 0;
@@ -61,6 +63,10 @@
       if (this.graph.order <= 1) {
         this.running = false;
         this.emit('ready', {completed: total, total, stage: 'settled'});
+        return token;
+      }
+      if (this.workerFactory) {
+        this.startWorker(token, {total, batch, coarse, settings, overlapIterations, overlapSettings});
         return token;
       }
       let completed = 0;
@@ -118,10 +124,63 @@
       return token;
     }
 
+    startWorker(token, options) {
+      const worker = this.workerFactory();
+      if (!worker || typeof worker.postMessage !== 'function') throw new Error('Knowledge layout worker could not start');
+      this.worker = worker;
+      worker.onmessage = event => {
+        const message = event && event.data || {};
+        if (!this.running || token !== this.generation || Number(message.generation) !== token) return;
+        if (message.type === 'progress') {
+          this.emit('progress', {completed: message.completed, total: message.total, stage: message.stage});
+          return;
+        }
+        if (message.type === 'error') {
+          this.finishWorker();
+          this.running = false;
+          this.emit('error', {completed: 0, total: options.total, stage: 'worker', error: new Error(String(message.message || 'Knowledge layout failed'))});
+          return;
+        }
+        if (message.type !== 'ready') return;
+        this.applyPositions(message.positions);
+        this.finishWorker();
+        this.running = false;
+        this.emit('ready', {completed: message.completed, total: message.total, stage: 'settled'});
+      };
+      worker.onerror = event => {
+        if (!this.running || token !== this.generation) return;
+        this.finishWorker();
+        this.running = false;
+        this.emit('error', {completed: 0, total: options.total, stage: 'worker', error: new Error(String(event && event.message || 'Knowledge layout worker failed'))});
+      };
+      worker.postMessage({
+        type: 'layout', generation: token, ...options,
+        nodes: this.graph.mapNodes((key, attributes) => ({
+          key, attributes: {x: attributes.x, y: attributes.y, pinned: !!attributes.pinned, layoutSize: layoutNodeSize(attributes)},
+        })),
+        edges: this.graph.mapEdges((key, attributes, source, target) => ({key, source, target})),
+      });
+    }
+
+    applyPositions(positions) {
+      this.graph.updateEachNodeAttributes((key, attributes) => {
+        const position = positions && positions[key];
+        if (attributes.pinned || !position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return attributes;
+        return {...attributes, x: position.x, y: position.y};
+      }, {attributes: ['x', 'y']});
+    }
+
+    finishWorker() {
+      if (!this.worker) return;
+      this.worker.terminate();
+      this.worker = null;
+    }
+
     stop(reason) {
-      if (!this.running && !this.handle) return false;
+      if (!this.running && !this.handle && !this.worker) return false;
       if (this.handle) this.cancelSchedule(this.handle);
       this.handle = 0;
+      this.finishWorker();
       const wasRunning = this.running;
       this.running = false;
       if (wasRunning) this.emit('stopped', {reason: String(reason || 'canceled')});

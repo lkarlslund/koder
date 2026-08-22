@@ -91,7 +91,7 @@ func TestMainWebUIExposesKnowledgeExplorerEntry(t *testing.T) {
 }
 
 func TestKnowledgeExplorerResponsiveShellAssetsAreEmbedded(t *testing.T) {
-	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_api_client.js", "assets/knowledge_graph_adapter.js", "assets/knowledge_graph.js", "assets/knowledge_graph_rendering.js", "assets/knowledge_graph_renderer.js", "assets/knowledge_graph_viewport.js", "assets/knowledge_graph_layouts.js", "assets/knowledge_browser.js"} {
+	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_api_client.js", "assets/knowledge_graph_adapter.js", "assets/knowledge_graph.js", "assets/knowledge_graph_rendering.js", "assets/knowledge_graph_renderer.js", "assets/knowledge_graph_viewport.js", "assets/knowledge_graph_layouts.js", "assets/knowledge_layout_worker.js", "assets/knowledge_browser.js"} {
 		data, err := webAssets.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read embedded Knowledge shell asset %q: %v", path, err)
