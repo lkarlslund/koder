@@ -714,6 +714,30 @@ body {
 
 .knowledge-inspector-markdown img { max-width: 100%; height: auto; }
 
+.knowledge-inspector-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .45rem;
+  margin-top: .9rem;
+  padding-top: .9rem;
+  border-top: 1px solid var(--knowledge-pane-border);
+}
+
+.knowledge-inspector-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .42rem;
+}
+
+.knowledge-inspector-actions span {
+  color: var(--bs-secondary-color);
+  font-size: .68rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .knowledge-empty-icon {
   display: grid;
   place-items: center;

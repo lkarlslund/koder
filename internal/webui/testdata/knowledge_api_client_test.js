@@ -27,6 +27,12 @@ async function testRequestAndCursorEncoding() {
 
   await client.getLink('link-1', {channel: 'link'});
   assert.strictEqual(requests[1].url, '/api/knowledge/v1/links/link-1');
+
+  const selection = {session_id: 'session-1', chat_id: 'chat-2', object: {kind: 'entry', id: 'entry-3'}};
+  await client.sendToChat(selection, {channel: 'send'});
+  assert.strictEqual(requests[2].url, '/api/knowledge/v1/chat-context');
+  assert.strictEqual(requests[2].options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(requests[2].options.body), selection);
 }
 
 async function testNewGenerationCancelsStaleRequest() {

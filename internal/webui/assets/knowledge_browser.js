@@ -63,6 +63,12 @@
     }
   }
 
+  function chatSelectionFromSearch(search) {
+    const path = returnPathFromSearch(search);
+    const match = path.match(/^\/s\/([A-Za-z0-9_-]+)\/c\/([A-Za-z0-9_-]+)$/);
+    return match ? {sessionID: match[1], chatID: match[2], path} : null;
+  }
+
   const browserURLKeys = Object.freeze(['query', 'kind', 'scope_kind', 'state', 'tag', 'object_kind', 'id']);
   const allowedChunkKinds = new Set(['reference', 'personal', 'project', 'environment']);
   const allowedScopeKinds = new Set(['global', 'personal', 'project', 'session', 'environment']);
@@ -157,6 +163,8 @@
       this.lastError = null;
       this.resultMode = 'chunks';
       this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
+      this.chatSelection = chatSelectionFromSearch(globalThis.location && globalThis.location.search);
+      this.inspectedObject = null;
       this.searchTimer = 0;
       this.refreshButton = shell.querySelector('[data-knowledge-retry]');
       this.searchForm = shell.querySelector('[data-knowledge-search-form]');
@@ -176,6 +184,8 @@
         badges: shell.querySelector('[data-knowledge-inspector-badges]'),
         meta: shell.querySelector('[data-knowledge-inspector-meta]'),
         markdown: shell.querySelector('[data-knowledge-inspector-markdown]'),
+        sendButton: shell.querySelector('[data-knowledge-send-chat]'),
+        sendStatus: shell.querySelector('[data-knowledge-send-status]'),
       };
       if (this.refreshButton) this.refreshButton.addEventListener('click', () => this.refresh());
       if (this.searchForm) this.searchForm.addEventListener('submit', event => {
@@ -194,6 +204,7 @@
       });
       for (const input of Object.values(this.filters)) input.addEventListener('change', () => this.applyControlState({replace: false}));
       if (this.loadMoreButton) this.loadMoreButton.addEventListener('click', () => this.loadMore());
+      if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
         this.syncControls();
@@ -441,6 +452,10 @@
         element.hidden = name !== mode;
       }
       if (mode === 'error' && this.inspector.error) this.inspector.error.textContent = String(message || 'Knowledge could not load this selection.');
+      if (mode !== 'content') {
+        this.inspectedObject = null;
+        if (this.inspector.sendButton) this.inspector.sendButton.disabled = true;
+      }
     }
 
     async loadSelection() {
@@ -535,10 +550,37 @@
           }
         }
       }
+      this.inspectedObject = {kind: objectKind, id: String(record.id || '')};
+      if (this.inspector.sendButton) this.inspector.sendButton.disabled = !this.chatSelection;
+      if (this.inspector.sendStatus) {
+        this.inspector.sendStatus.textContent = this.chatSelection
+          ? 'Send an explicit reference to the chat that opened this explorer.'
+          : 'Open Knowledge from a chat to send context back.';
+      }
       this.setInspectorMode('content');
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
         detail: {objectKind, id: String(record.id || ''), record, label: plainTextLabel(title)}
       }));
+    }
+
+    async sendSelectionToChat() {
+      if (!this.chatSelection || !this.inspectedObject || !this.inspector.sendButton) return;
+      this.inspector.sendButton.disabled = true;
+      if (this.inspector.sendStatus) this.inspector.sendStatus.textContent = 'Sending Knowledge reference…';
+      try {
+        await this.client.sendToChat({
+          session_id: this.chatSelection.sessionID,
+          chat_id: this.chatSelection.chatID,
+          object: {kind: this.inspectedObject.kind, id: this.inspectedObject.id},
+        }, {channel: 'send-to-chat'});
+        if (this.inspector.sendStatus) this.inspector.sendStatus.textContent = 'Sent to chat. Return there to continue.';
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not send this reference.');
+        if (this.inspector.sendStatus) this.inspector.sendStatus.textContent = requestID ? message + ' Audit ID: ' + requestID : message;
+      } finally {
+        this.inspector.sendButton.disabled = !this.chatSelection || !this.inspectedObject;
+      }
     }
 
     destroy() {
@@ -604,5 +646,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, sanitizedMarkdownHTML, mount});
 });

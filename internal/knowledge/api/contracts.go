@@ -25,6 +25,7 @@ const (
 	NeighborPath          = RoutePrefix + "/neighbors"
 	OperationalStatusPath = RoutePrefix + "/status"
 	IndexRebuildPath      = RoutePrefix + "/indexes/rebuild"
+	ChatContextPath       = RoutePrefix + "/chat-context"
 	ExplorerURL           = "/knowledge"
 )
 
@@ -419,6 +420,19 @@ type IndexRebuildRequest struct {
 type IndexRebuildResponse struct {
 	ResponseMetadata
 	Result knowledgeService.StartIndexRebuildResult `json:"result"`
+}
+
+type ChatContextRequest struct {
+	SessionID string              `json:"session_id"`
+	ChatID    string              `json:"chat_id"`
+	Object    knowledge.ObjectRef `json:"object"`
+}
+
+type ChatContextResponse struct {
+	ResponseMetadata
+	Object      knowledge.ObjectRef `json:"object"`
+	ExplorerURL string              `json:"explorer_url"`
+	Queued      bool                `json:"queued"`
 }
 
 type ErrorResponse struct {

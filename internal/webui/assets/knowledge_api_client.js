@@ -181,6 +181,7 @@
     graphSnapshot(body, options) { return this.request('/graph/snapshot', {...options, method: 'POST', body}); }
     neighbors(body, options) { return this.request('/neighbors', {...options, method: 'POST', body}); }
     status(options) { return this.request('/status', options); }
+    sendToChat(body, options) { return this.request('/chat-context', {...options, method: 'POST', body}); }
 
     async *pages(path, options) {
       options = options || {};

@@ -15,6 +15,11 @@ assert.strictEqual(browser.safeReturnPath('//example.com'), '/');
 assert.strictEqual(browser.safeReturnPath('/s/../c/chat'), '/');
 assert.strictEqual(browser.returnPathFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2'), '/s/session-1/c/chat-2');
 assert.strictEqual(browser.returnPathFromSearch('?return=https%3A%2F%2Fexample.com'), '/');
+assert.deepStrictEqual(browser.chatSelectionFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2'), {
+  sessionID: 'session-1', chatID: 'chat-2', path: '/s/session-1/c/chat-2',
+});
+assert.strictEqual(browser.chatSelectionFromSearch('?return=%2Fs%2Fsession-1'), null);
+assert.strictEqual(browser.chatSelectionFromSearch('?return=https%3A%2F%2Fexample.com'), null);
 assert.deepStrictEqual([...browser.states], ['shell', 'loading', 'ready', 'empty', 'unavailable', 'truncated', 'stale', 'error']);
 assert.strictEqual(browser.normalizeState(' READY '), 'ready');
 assert.strictEqual(browser.normalizeState('unknown'), 'error');
