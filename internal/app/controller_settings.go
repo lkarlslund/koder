@@ -1765,7 +1765,7 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "file", "File"
 	case tools.WebFetch, tools.WebSearch:
 		return "web", "Web"
-	case tools.ExecCommand, tools.ExecStatus, tools.ExecList, tools.ExecWriteStdin, tools.ExecResize, tools.ExecTerminate, tools.ExecCleanup:
+	case tools.ExecCommand, tools.ExecSession, tools.ExecStatus, tools.ExecList, tools.ExecWriteStdin, tools.ExecResize, tools.ExecTerminate, tools.ExecCleanup:
 		return "exec", "Exec"
 	case tools.ChatList, tools.ChatStart, tools.ChatSend, tools.ChatCancel, tools.ChatArchive, tools.ChatRename, tools.ChatCleanup:
 		return "chat", "Chat"

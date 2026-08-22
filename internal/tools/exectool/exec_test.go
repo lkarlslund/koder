@@ -24,6 +24,34 @@ func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 	}
 }
 
+func TestExecSessionDefinitionAndWaitDispatch(t *testing.T) {
+	def, enabled := tools.DefinitionFor(tools.ExecSession, tools.Runtime{})
+	if !enabled {
+		t.Fatal("exec_session definition is disabled")
+	}
+	params := string(def.Function.Parameters)
+	for _, action := range []string{"list", "status", "wait", "send_input", "resize", "terminate", "cleanup"} {
+		if !strings.Contains(params, `"`+action+`"`) {
+			t.Fatalf("exec_session schema is missing %q: %s", action, params)
+		}
+	}
+	if _, enabled := tools.DefinitionFor(tools.ExecWriteStdin, tools.Runtime{}); enabled {
+		t.Fatal("legacy exec_write_stdin remained model-visible")
+	}
+	control := &recordingExecControl{}
+	_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		SessionID: "session-1", ChatID: "chat-1", Exec: control,
+	}, Request: tools.Request{Tool: tools.ExecSession, Args: map[string]string{
+		"action": "wait", "process_id": "exec_1", "yield_time_ms": "25",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.writeStdin.ProcessID != "exec_1" || control.writeStdin.YieldTime != 25*time.Millisecond || control.writeStdin.Chars != "" {
+		t.Fatalf("wait request = %#v", control.writeStdin)
+	}
+}
+
 func TestCommandNormalizeArgs(t *testing.T) {
 	args, err := (commandTool{}).NormalizeArgs(map[string]string{
 		"cmd":           "sleep 1",
@@ -176,7 +204,7 @@ func TestWriteStdinMissingProcessIDExplainsNoRunningProcesses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing process id error")
 	}
-	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "do not call exec_write_stdin again", "exec_command"} {
+	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "do not call exec_session again", "exec_command"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}
@@ -203,7 +231,7 @@ func TestWriteStdinMissingProcessIDListsRunningProcesses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing process id error")
 	}
-	for _, want := range []string{"process_id is empty", "Running exec sessions", "exec_7 (sleep 60)", "exec_list", "exec_status"} {
+	for _, want := range []string{"process_id is empty", "Running exec sessions", "exec_7 (sleep 60)", "action=list", "action=status"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}
@@ -267,7 +295,7 @@ func (c *recordingExecControl) Cleanup(context.Context, execruntime.CleanupReque
 
 func TestExecStartMessageDistinguishesRunningProcess(t *testing.T) {
 	running := execStartMessage(execruntime.Snapshot{State: execruntime.StateRunning})
-	if running == "" || !containsAll(running, "still running", "empty chars", "exec_status", "exec_write_stdin", "exec_terminate") {
+	if running == "" || !containsAll(running, "still running", "action=wait", "action=status", "action=send_input", "action=terminate") {
 		t.Fatalf("expected running guidance, got %q", running)
 	}
 	completed := execStartMessage(execruntime.Snapshot{State: execruntime.StateCompleted})

@@ -16,6 +16,7 @@ const (
 	Lint                ID = domain.ToolKindLint
 	Bash                ID = domain.ToolKindBash
 	ExecCommand         ID = domain.ToolKindExecCommand
+	ExecSession         ID = domain.ToolKindExecSession
 	ExecStatus          ID = domain.ToolKindExecStatus
 	ExecList            ID = domain.ToolKindExecList
 	ExecWriteStdin      ID = domain.ToolKindExecWriteStdin

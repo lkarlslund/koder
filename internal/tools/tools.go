@@ -660,9 +660,10 @@ func schemaWithActionEnum(raw string, actions []string) (string, error) {
 
 func ArgumentByteLimits() map[string]int {
 	return map[string]int{
-		FileWrite.String(): 64 * 1024,
-		FileEdit.String():  32 * 1024,
-		Bash.String():      8 * 1024,
+		FileWrite.String():   64 * 1024,
+		FileEdit.String():    32 * 1024,
+		Bash.String():        8 * 1024,
+		ExecCommand.String(): 8 * 1024,
 	}
 }
 

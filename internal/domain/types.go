@@ -52,6 +52,7 @@ const (
 	ToolKindLint                ToolKind = "lint"
 	ToolKindBash                ToolKind = "bash"
 	ToolKindExecCommand         ToolKind = "exec_command"
+	ToolKindExecSession         ToolKind = "exec_session"
 	ToolKindExecStatus          ToolKind = "exec_status"
 	ToolKindExecList            ToolKind = "exec_list"
 	ToolKindExecWriteStdin      ToolKind = "exec_write_stdin"
@@ -154,6 +155,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindLint,
 	ToolKindBash,
 	ToolKindExecCommand,
+	ToolKindExecSession,
 	ToolKindExecStatus,
 	ToolKindExecList,
 	ToolKindExecWriteStdin,

@@ -131,7 +131,7 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 }
 
 func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {
-	if req.Tool == domain.ToolKindExecWriteStdin &&
+	if isExecWait(req.Tool, req.Args) &&
 		strings.TrimSpace(req.Args["chars"]) == "" &&
 		strings.TrimSpace(req.Args["close_stdin"]) == "" &&
 		strings.TrimSpace(req.Args["process_id"]) != "" {
@@ -141,13 +141,18 @@ func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {
 }
 
 func comparableStoredToolCall(call domain.ToolCall) (toolLoopComparableCall, bool) {
-	if call.Tool == domain.ToolKindExecWriteStdin &&
+	if isExecWait(call.Tool, call.Args) &&
 		strings.TrimSpace(call.Args["chars"]) == "" &&
 		strings.TrimSpace(call.Args["close_stdin"]) == "" &&
 		strings.TrimSpace(call.Args["process_id"]) != "" {
 		return toolLoopComparableCall{}, false
 	}
 	return toolLoopComparableCall{Tool: call.Tool, Args: cloneToolLoopArgs(call.Args)}, true
+}
+
+func isExecWait(tool domain.ToolKind, args map[string]string) bool {
+	return tool == domain.ToolKindExecWriteStdin ||
+		(tool == domain.ToolKindExecSession && strings.TrimSpace(args["action"]) == "wait")
 }
 
 func storedToolCallArgumentsJSON(call domain.ToolCall) string {

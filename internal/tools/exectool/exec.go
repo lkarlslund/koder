@@ -18,47 +18,66 @@ const (
 )
 
 func init() {
+	tools.Register(tools.ActionTool{
+		Kind: tools.ExecSession,
+		Routes: []tools.ActionRoute{
+			{Action: "list", Tool: tools.ExecList},
+			{Action: "status", Tool: tools.ExecStatus},
+			{Action: "wait", Tool: tools.ExecWriteStdin, FixedArgs: map[string]string{"chars": ""}},
+			{Action: "send_input", Tool: tools.ExecWriteStdin},
+			{Action: "resize", Tool: tools.ExecResize},
+			{Action: "terminate", Tool: tools.ExecTerminate},
+			{Action: "cleanup", Tool: tools.ExecCleanup},
+		},
+		BypassPermissions: true,
+	}, tools.ToolSpec{
+		Title:       "Exec session",
+		Description: "Inspect and interact with persistent command sessions.",
+		Usage:       "Manage commands that exec_command returned as still running. wait consumes newly available output without sending input; send_input writes chars and can close stdin; status returns a non-consuming snapshot; terminate stops one process; cleanup stops processes in the selected scope. Prefer wait over repeated status polling.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["list","status","wait","send_input","resize","terminate","cleanup"]},"process_id":{"type":"string","description":"Process id returned by exec_command"},"scope":{"type":"string","enum":["chat","session"]},"chars":{"type":"string","description":"For send_input, exact characters to write"},"close_stdin":{"type":"boolean"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":300000},"max_output_bytes":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(commandTool{}, tools.ToolSpec{
 		Title:       "Start exec session",
 		Description: "Start a persistent shell command session.",
-		Usage:       "Start a shell command. Short commands usually return their initial output immediately; commands still running after the startup grace period remain as persistent exec sessions. Use exec_write_stdin with empty chars to wait for new output, exec_write_stdin with chars to interact, exec_status for one-off inspection, and exec_terminate to stop a running command. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Use comment for a short user-facing description when cmd is long or dense.",
+		Usage:       "Run a shell command in the workspace. Short commands return their output directly; commands still running after the startup grace period become persistent exec sessions managed with exec_session. Use this for both quick and long-running commands. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Prefer dedicated file and search tools where available.",
 		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"comment":{"type":"string","description":"Optional short user-facing description of what this exec does. Use this for long or dense commands instead of relying on cmd as the visible label."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":0,"maximum":9223372036854,"description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":30000,"description":"Optional startup grace period in milliseconds before returning. Defaults to a short wait."}},"required":["cmd"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(statusTool{}, tools.ToolSpec{
 		Title:       "Exec status",
 		Description: "Get state and recent output for a persistent exec session.",
 		Usage:       "Inspect the latest state and accumulated output tail for one persistent exec session. This is a non-consuming status snapshot; do not repeatedly poll it for long-running commands. Use exec_write_stdin with empty chars and yield_time_ms to wait for new output.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "Exec sessions",
 		Description: "List persistent exec sessions.",
 		Usage:       "List persistent exec sessions in the current chat or session.",
 		Parameters:  `{"type":"object","properties":{"scope":{"type":"string","description":"Listing scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(writeStdinTool{}, tools.ToolSpec{
 		Title:       "Write exec stdin",
 		Description: "Write stdin text to, or wait for output from, a running persistent exec session.",
 		Usage:       "Write stdin text to a persistent exec session. Pass empty chars to wait for new output or process completion without writing input. Prefer this over repeated exec_status polling for long-running commands; returned output is newly drained output since the previous consuming exec result.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin. Use an empty string to wait/poll for new output without writing input."},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":300000,"description":"Optional positive wait in milliseconds for new output before returning. Defaults to 10000 ms."},"max_output_bytes":{"type":"integer","description":"Optional output size to return"}},"required":["process_id"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(resizeTool{}, tools.ToolSpec{
 		Title:       "Resize exec tty",
 		Description: "Resize a tty-backed persistent exec session.",
 		Usage:       "Resize a tty-backed persistent exec session.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"rows":{"type":"integer","description":"Terminal rows"},"cols":{"type":"integer","description":"Terminal columns"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id","rows","cols"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(terminateTool{}, tools.ToolSpec{
 		Title:       "Terminate exec session",
 		Description: "Terminate a persistent exec session.",
 		Usage:       "Terminate a persistent exec session.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(cleanupTool{}, tools.ToolSpec{
 		Title:       "Cleanup exec sessions",
@@ -497,7 +516,7 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 
 func execStartMessage(snap execruntime.Snapshot) string {
 	if snap.State == execruntime.StateRunning {
-		return "Exec session is still running. Use exec_write_stdin with empty chars to wait for new output, exec_write_stdin with chars to interact with stdin, exec_status for one-off inspection, or exec_terminate to stop it."
+		return "Exec session is still running. Use exec_session action=wait for new output, action=send_input to interact with stdin, action=status for one-off inspection, or action=terminate to stop it."
 	}
 	return "Exec session completed during startup grace period."
 }
@@ -570,7 +589,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		MaxBytes:  intArg(req.Args, "max_output_bytes"),
 	})
 	if err != nil {
-		return fmt.Errorf("process_id is empty. exec_write_stdin requires the process_id returned by exec_command. Could not inspect current exec sessions: %w", err)
+		return fmt.Errorf("process_id is empty. exec_session requires the process_id returned by exec_command. Could not inspect current exec sessions: %w", err)
 	}
 	var running []execruntime.Snapshot
 	for _, snap := range snaps {
@@ -579,7 +598,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		}
 	}
 	if len(running) == 0 {
-		return errors.New("process_id is empty; exec_write_stdin can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat; do not call exec_write_stdin again; use the information already available, start a new command with exec_command if more work is needed, or answer the user")
+		return errors.New("process_id is empty; exec_session can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat; do not call exec_session again; use the information already available, start a new command with exec_command if more work is needed, or answer the user")
 	}
 	ids := make([]string, 0, len(running))
 	for _, snap := range running {
@@ -589,7 +608,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		}
 		ids = append(ids, label)
 	}
-	return fmt.Errorf("process_id is empty. exec_write_stdin requires the process_id returned by exec_command. Running exec sessions in this chat: %s. Use exec_list with scope \"chat\" to inspect sessions, then call exec_write_stdin with one of those process_id values, or use exec_status for a non-consuming status snapshot", strings.Join(ids, ", "))
+	return fmt.Errorf("process_id is empty. exec_session requires the process_id returned by exec_command. Running exec sessions in this chat: %s. Use exec_session action=list with scope \"chat\" to inspect sessions, then action=wait or action=send_input with one of those process_id values, or action=status for a non-consuming snapshot", strings.Join(ids, ", "))
 }
 
 func normalizeScope(args map[string]string) string {
