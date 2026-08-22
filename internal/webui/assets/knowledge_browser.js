@@ -281,6 +281,13 @@
           if (event.phase === 'error') status.textContent = 'Layout unavailable';
         });
       }
+      if (this.graphRenderer) {
+        this.graphInteractionUnsubscribe = this.graphRenderer.subscribe(event => {
+          if (event.type === 'node' && event.detail && event.detail.key) this.selectGraphObject('node', event.detail.key);
+          if (event.type === 'edge' && event.detail && event.detail.key) this.selectGraphObject('edge', event.detail.key);
+          if (event.type === 'background') this.clearGraphSelection();
+        });
+      }
       this.syncControls();
     }
 
@@ -509,6 +516,37 @@
       this.loadGraphSelection();
     }
 
+    selectGraphObject(graphKind, key) {
+      key = String(key || '');
+      let objectKind;
+      let id;
+      if (graphKind === 'node') {
+        const separator = key.indexOf(':');
+        objectKind = separator > 0 ? key.slice(0, separator) : '';
+        id = separator > 0 ? key.slice(separator + 1) : '';
+        if (!['chunk', 'entry', 'evidence'].includes(objectKind)) return false;
+      } else if (graphKind === 'edge') {
+        objectKind = 'link';
+        id = key;
+      } else return false;
+      if (!id) return false;
+      this.writeURLState({...this.urlState, objectKind, id}, false);
+      this.renderSelection();
+      if (this.graphAdapter) this.graphAdapter.select(graphKind, key);
+      if (this.graphRenderer) this.graphRenderer.setSelection(graphKind, key);
+      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, label: plainTextLabel(id)}}));
+      this.loadSelection();
+      return true;
+    }
+
+    clearGraphSelection() {
+      this.writeURLState({...this.urlState, objectKind: '', id: ''}, false);
+      if (this.graphAdapter) this.graphAdapter.clearSelection();
+      if (this.graphRenderer) this.graphRenderer.setSelection(null, null);
+      this.client.cancel('inspector');
+      this.setInspectorMode('empty');
+    }
+
     renderSelection() {
       if (!this.resultList) return;
       for (const card of this.resultList.querySelectorAll('[data-object-kind][data-object-id]')) {
@@ -594,7 +632,9 @@
       try {
         const response = await this.client.graphSnapshot(request, {channel: 'graph', timeoutMS: 10000});
         this.graphAdapter.replaceSnapshot(response);
-        this.graphRenderer.setSelection('node', `${request.root.kind}:${request.root.id}`);
+        const rootKey = `${request.root.kind}:${request.root.id}`;
+        this.graphAdapter.select('node', rootKey);
+        this.graphRenderer.setSelection('node', rootKey);
         const counts = this.graphAdapter.counts();
         const truncated = !!(response && response.page && response.page.truncated);
         const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
@@ -710,6 +750,7 @@
       globalThis.removeEventListener('popstate', this.onPopState);
       this.shell.removeEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphUnsubscribe) this.graphUnsubscribe();
+      if (this.graphInteractionUnsubscribe) this.graphInteractionUnsubscribe();
       if (this.graphLayoutUnsubscribe) this.graphLayoutUnsubscribe();
       if (this.graphLayout) this.graphLayout.destroy();
       if (this.graphViewport) this.graphViewport.destroy();

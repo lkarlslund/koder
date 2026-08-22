@@ -9,6 +9,9 @@ const fixture = require('./knowledge_graph_fixtures.js');
 
 class FakeSigma {
   constructor(graph, container, settings) { this.graph = graph; this.container = container; this.settings = settings; FakeSigma.instance = this; }
+  on(name, handler) { (this.handlers ||= {})[name] = handler; }
+  off(name, handler) { if (this.handlers && this.handlers[name] === handler) delete this.handlers[name]; }
+  emit(name, value) { this.handlers[name](value); }
   resize() { this.resizeCount = (this.resizeCount || 0) + 1; }
   refresh() { this.refreshCount = (this.refreshCount || 0) + 1; }
   kill() { this.killed = true; }
@@ -44,6 +47,14 @@ for (const key of store.graph.nodes()) {
 assert.strictEqual(FakeSigma.instance.settings.defaultEdgeType, 'arrow');
 assert.strictEqual(FakeSigma.instance.settings.allowInvalidContainer, true);
 assert.strictEqual(FakeResizeObserver.instance.observed, container);
+const interactions = [];
+renderer.subscribe(event => interactions.push([event.type, event.detail && event.detail.key]));
+FakeSigma.instance.emit('clickNode', {node: `entry:${fixture.ids.partition}`});
+FakeSigma.instance.emit('clickEdge', {edge: fixture.ids.requires});
+FakeSigma.instance.emit('clickStage', {});
+assert.deepStrictEqual(interactions, [
+  ['node', `entry:${fixture.ids.partition}`], ['edge', fixture.ids.requires], ['background', null],
+]);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);
 assert.strictEqual(FakeSigma.instance.refreshCount, 1);
@@ -70,4 +81,5 @@ renderer.destroy();
 assert.strictEqual(canceled, 7);
 assert.strictEqual(FakeSigma.instance.killed, true);
 assert.strictEqual(FakeResizeObserver.instance.disconnected, true);
+assert.deepStrictEqual(FakeSigma.instance.handlers, {});
 renderer.destroy();

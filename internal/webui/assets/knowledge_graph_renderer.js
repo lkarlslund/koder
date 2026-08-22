@@ -45,6 +45,7 @@
       this.debug = !!options.debug;
       this.logger = options.logger || globalThis.console;
       this.metrics = {refreshes: 0, resizes: 0, lastRefreshMS: 0, maxRefreshMS: 0};
+      this.listeners = new Set();
       this.frame = 0;
       this.destroyed = false;
       this.selection = null;
@@ -70,6 +71,14 @@
         settings.defaultEdgeType = 'arrow';
       }
       this.sigma = new Sigma(this.store.graph, this.container, settings);
+      this.interactionHandlers = {
+        clickNode: event => this.emit('node', {key: String(event && event.node || '')}),
+        clickEdge: event => this.emit('edge', {key: String(event && event.edge || '')}),
+        clickStage: () => this.emit('background', null),
+      };
+      if (typeof this.sigma.on === 'function') {
+        for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.on(name, handler);
+      }
       this.unsubscribe = this.store.subscribe(event => this.onStoreEvent(event));
       if (typeof this.ResizeObserver === 'function') {
         this.resizeObserver = new this.ResizeObserver(() => this.scheduleRefresh(true));
@@ -87,6 +96,17 @@
         this.scheduleRefresh(false);
       }
       if (event.type === 'refetch') this.setState('stale');
+    }
+
+    subscribe(listener) {
+      if (typeof listener !== 'function') throw new TypeError('Knowledge renderer listener must be a function');
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+
+    emit(type, detail) {
+      const event = Object.freeze({type, detail, renderer: this});
+      for (const listener of [...this.listeners]) listener(event);
     }
 
     updateLegend() {
@@ -141,6 +161,10 @@
       if (this.frame) this.cancelFrame(this.frame);
       this.frame = 0;
       if (this.unsubscribe) this.unsubscribe();
+      if (this.sigma && typeof this.sigma.off === 'function') {
+        for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.off(name, handler);
+      }
+      this.listeners.clear();
       if (this.resizeObserver) this.resizeObserver.disconnect();
       if (this.sigma && typeof this.sigma.kill === 'function') this.sigma.kill();
       if (this.legend) {
