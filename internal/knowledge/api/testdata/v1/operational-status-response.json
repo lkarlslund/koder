@@ -1,0 +1,32 @@
+{
+  "api_version": "knowledge.v1",
+  "request_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1",
+  "status": {
+    "store": {
+      "backend": "pebble",
+      "open": true,
+      "read_only": false,
+      "schema_version": 1,
+      "index_generation": 4
+    },
+    "maintenance_available": true,
+    "lexical_index": {
+      "running": false,
+      "active_generation": 4,
+      "target_generation": 4,
+      "scanned": {
+        "chunks": 3,
+        "entries": 12,
+        "links": 8,
+        "evidence": 5,
+        "total": 28
+      },
+      "started_at": "2026-08-22T12:00:00Z",
+      "completed_at": "2026-08-22T12:00:01Z"
+    },
+    "mutation_checkpoint": {
+      "stream_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a2",
+      "sequence": 42
+    }
+  }
+}

@@ -87,6 +87,7 @@ func classifyErrorCode(err error) ErrorCode {
 		return ErrorCodeUnavailable
 	case errors.Is(err, ErrChunkPolicyDenied),
 		errors.Is(err, ErrToolOfferDenied),
+		errors.Is(err, ErrOperationalPolicyDenied),
 		errors.Is(err, ErrProtectedChunk),
 		errors.Is(err, ErrClassificationRejected):
 		return ErrorCodeForbidden

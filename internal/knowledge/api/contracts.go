@@ -15,15 +15,17 @@ import (
 )
 
 const (
-	Version             = "knowledge.v1"
-	RoutePrefix         = "/api/knowledge/v1"
-	ChunkCollectionPath = RoutePrefix + "/chunks"
-	EntryCollectionPath = RoutePrefix + "/entries"
-	LinkCollectionPath  = RoutePrefix + "/links"
-	SearchPath          = RoutePrefix + "/search"
-	GraphSnapshotPath   = RoutePrefix + "/graph/snapshot"
-	NeighborPath        = RoutePrefix + "/neighbors"
-	ExplorerURL         = "/knowledge"
+	Version               = "knowledge.v1"
+	RoutePrefix           = "/api/knowledge/v1"
+	ChunkCollectionPath   = RoutePrefix + "/chunks"
+	EntryCollectionPath   = RoutePrefix + "/entries"
+	LinkCollectionPath    = RoutePrefix + "/links"
+	SearchPath            = RoutePrefix + "/search"
+	GraphSnapshotPath     = RoutePrefix + "/graph/snapshot"
+	NeighborPath          = RoutePrefix + "/neighbors"
+	OperationalStatusPath = RoutePrefix + "/status"
+	IndexRebuildPath      = RoutePrefix + "/indexes/rebuild"
+	ExplorerURL           = "/knowledge"
 )
 
 func ChunkPath(chunkID knowledge.ChunkID) string {
@@ -403,6 +405,20 @@ type GraphSnapshotResponse struct {
 	Nodes      []GraphNode                         `json:"nodes"`
 	Edges      []GraphEdge                         `json:"edges"`
 	Page       Page                                `json:"page"`
+}
+
+type OperationalStatusResponse struct {
+	ResponseMetadata
+	Status knowledgeService.OperationalStatus `json:"status"`
+}
+
+type IndexRebuildRequest struct {
+	Index string `json:"index"`
+}
+
+type IndexRebuildResponse struct {
+	ResponseMetadata
+	Result knowledgeService.StartIndexRebuildResult `json:"result"`
 }
 
 type ErrorResponse struct {

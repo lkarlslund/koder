@@ -77,11 +77,11 @@ func (r CanonicalRecord) Validate() error {
 }
 
 type ScanStats struct {
-	Chunks   uint64
-	Entries  uint64
-	Links    uint64
-	Evidence uint64
-	Total    uint64
+	Chunks   uint64 `json:"chunks"`
+	Entries  uint64 `json:"entries"`
+	Links    uint64 `json:"links"`
+	Evidence uint64 `json:"evidence"`
+	Total    uint64 `json:"total"`
 }
 
 func (s *ScanStats) Add(kind RecordKind) {
@@ -99,13 +99,13 @@ func (s *ScanStats) Add(kind RecordKind) {
 }
 
 type IndexRebuildStatus struct {
-	Running          bool
-	ActiveGeneration uint64
-	TargetGeneration uint64
-	Scanned          ScanStats
-	StartedAt        time.Time
-	CompletedAt      time.Time
-	LastError        string
+	Running          bool      `json:"running"`
+	ActiveGeneration uint64    `json:"active_generation"`
+	TargetGeneration uint64    `json:"target_generation"`
+	Scanned          ScanStats `json:"scanned"`
+	StartedAt        time.Time `json:"started_at,omitzero"`
+	CompletedAt      time.Time `json:"completed_at,omitzero"`
+	LastError        string    `json:"last_error,omitempty"`
 }
 
 // MaintenanceStore is implemented by backends that support consistent canonical scans

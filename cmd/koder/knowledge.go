@@ -130,6 +130,11 @@ func (s optionalKnowledgeStore) OperationalHealth(ctx context.Context) debugsrv.
 }
 
 func (s optionalKnowledgeStore) Close() error {
+	if s.Service != nil {
+		if err := s.Service.ShutdownOperations(context.Background()); err != nil {
+			return err
+		}
+	}
 	if s.Store == nil {
 		return nil
 	}

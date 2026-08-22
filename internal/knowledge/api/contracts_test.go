@@ -56,6 +56,16 @@ func TestV1FixturesStrictlyMatchContracts(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "operational status response", file: "operational-status-response.json", new: func() any { return &OperationalStatusResponse{} },
+			check: func(t *testing.T, value any) {
+				response := value.(*OperationalStatusResponse)
+				if response.APIVersion != Version || response.Status.Store.Backend != "pebble" || response.Status.Store.IndexGeneration != 4 ||
+					response.Status.LexicalIndex == nil || response.Status.LexicalIndex.Scanned.Total != 28 || response.Status.MutationCheckpoint.Sequence != 42 {
+					t.Fatalf("operational status fixture = %#v", response)
+				}
+			},
+		},
 	}
 
 	for _, test := range tests {

@@ -32,6 +32,7 @@ type Config struct {
 	RankSignals  RankingSignalSource
 	Semantic     SemanticIndexProvider
 	ScoreBlender SearchScoreBlender
+	Operational  OperationalPolicy
 }
 
 type Service struct {
@@ -50,6 +51,14 @@ type Service struct {
 	mutationSequence uint64
 	mutationNextSub  uint64
 	mutationSubs     map[uint64]chan MutationEvent
+	operational      OperationalPolicy
+	operationalMu    sync.Mutex
+	rebuildRunning   bool
+	rebuildStartedAt time.Time
+	operationsCtx    context.Context
+	operationsCancel context.CancelFunc
+	operationsClosed bool
+	operationsWG     sync.WaitGroup
 }
 
 func New(cfg Config) (*Service, error) {
@@ -78,11 +87,17 @@ func New(cfg Config) (*Service, error) {
 			cfg.RankSignals = NoRankingSignals{}
 		}
 	}
+	if cfg.Operational == nil {
+		cfg.Operational = AllowAllOperationalPolicy{}
+	}
+	operationsCtx, operationsCancel := context.WithCancel(context.Background())
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
 		now: cfg.Now, newID: cfg.NewID, rankSignals: cfg.RankSignals,
 		semantic: cfg.Semantic, scoreBlender: cfg.ScoreBlender,
 		mutationStreamID: id.New(), mutationSubs: make(map[uint64]chan MutationEvent),
+		operational:   cfg.Operational,
+		operationsCtx: operationsCtx, operationsCancel: operationsCancel,
 	}, nil
 }
 
