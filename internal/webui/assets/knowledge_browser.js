@@ -63,15 +63,104 @@
     }
   }
 
+  const browserURLKeys = Object.freeze(['query', 'kind', 'scope_kind', 'state', 'tag', 'object_kind', 'id']);
+  const allowedChunkKinds = new Set(['reference', 'personal', 'project', 'environment']);
+  const allowedScopeKinds = new Set(['global', 'personal', 'project', 'session', 'environment']);
+  const allowedChunkStates = new Set(['draft', 'archived']);
+  const allowedObjectKinds = new Set(['chunk', 'entry', 'link', 'evidence']);
+
+  function boundedText(value, limit) {
+    value = String(value || '').trim();
+    return value.length > limit ? value.slice(0, limit) : value;
+  }
+
+  function allowedValue(value, allowed) {
+    value = String(value || '').trim().toLowerCase();
+    return allowed.has(value) ? value : '';
+  }
+
+  function browserStateFromSearch(search) {
+    let params;
+    try { params = new URLSearchParams(String(search || '')); } catch (_) { params = new URLSearchParams(); }
+    const objectKind = allowedValue(params.get('object_kind'), allowedObjectKinds);
+    const id = boundedText(params.get('id'), 160);
+    return {
+      query: boundedText(params.get('query'), 500),
+      kind: allowedValue(params.get('kind'), allowedChunkKinds),
+      scopeKind: allowedValue(params.get('scope_kind'), allowedScopeKinds),
+      state: allowedValue(params.get('state'), allowedChunkStates),
+      tag: boundedText(params.get('tag'), 80),
+      objectKind: objectKind && /^[A-Za-z0-9_-]+$/.test(id) ? objectKind : '',
+      id: objectKind && /^[A-Za-z0-9_-]+$/.test(id) ? id : '',
+    };
+  }
+
+  function searchForBrowserState(search, state) {
+    const params = new URLSearchParams(String(search || ''));
+    for (const key of browserURLKeys) params.delete(key);
+    state = {...browserStateFromSearch(''), ...(state || {})};
+    if (boundedText(state.query, 500)) params.set('query', boundedText(state.query, 500));
+    if (allowedValue(state.kind, allowedChunkKinds)) params.set('kind', allowedValue(state.kind, allowedChunkKinds));
+    if (allowedValue(state.scopeKind, allowedScopeKinds)) params.set('scope_kind', allowedValue(state.scopeKind, allowedScopeKinds));
+    if (allowedValue(state.state, allowedChunkStates)) params.set('state', allowedValue(state.state, allowedChunkStates));
+    if (boundedText(state.tag, 80)) params.set('tag', boundedText(state.tag, 80));
+    const objectKind = allowedValue(state.objectKind, allowedObjectKinds);
+    const id = boundedText(state.id, 160);
+    if (objectKind && /^[A-Za-z0-9_-]+$/.test(id)) {
+      params.set('object_kind', objectKind);
+      params.set('id', id);
+    }
+    const encoded = params.toString();
+    return encoded ? '?' + encoded : '';
+  }
+
+  function displayLabel(value) {
+    value = String(value || '').replaceAll('_', ' ').trim();
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+  }
+
   class BrowserApp {
     constructor(shell, client) {
       this.shell = shell;
       this.client = client;
       this.chunks = [];
+      this.matches = [];
       this.page = null;
       this.lastError = null;
+      this.resultMode = 'chunks';
+      this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
+      this.searchTimer = 0;
       this.refreshButton = shell.querySelector('[data-knowledge-retry]');
+      this.searchForm = shell.querySelector('[data-knowledge-search-form]');
+      this.searchInput = shell.querySelector('[data-knowledge-search]');
+      this.searchClear = shell.querySelector('[data-knowledge-search-clear]');
+      this.resultList = shell.querySelector('[data-knowledge-results]');
+      this.loadMoreButton = shell.querySelector('[data-knowledge-load-more]');
+      this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       if (this.refreshButton) this.refreshButton.addEventListener('click', () => this.refresh());
+      if (this.searchForm) this.searchForm.addEventListener('submit', event => {
+        event.preventDefault();
+        this.applyControlState({replace: false});
+      });
+      if (this.searchInput) this.searchInput.addEventListener('input', () => {
+        if (this.searchClear) this.searchClear.hidden = !this.searchInput.value;
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => this.applyControlState({replace: true}), 260);
+      });
+      if (this.searchClear) this.searchClear.addEventListener('click', () => {
+        this.searchInput.value = '';
+        this.applyControlState({replace: false});
+        this.searchInput.focus();
+      });
+      for (const input of Object.values(this.filters)) input.addEventListener('change', () => this.applyControlState({replace: false}));
+      if (this.loadMoreButton) this.loadMoreButton.addEventListener('click', () => this.loadMore());
+      this.onPopState = () => {
+        this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
+        this.syncControls();
+        this.refresh();
+      };
+      globalThis.addEventListener('popstate', this.onPopState);
+      this.syncControls();
     }
 
     setState(state, options) {
@@ -94,7 +183,8 @@
       if (count) {
         const loaded = Number(options.count);
         count.textContent = Number.isFinite(loaded) ? String(loaded) + (options.hasMore ? '+' : '') : '—';
-        count.setAttribute('aria-label', Number.isFinite(loaded) ? loaded + (options.hasMore ? ' or more chunks' : ' chunks') : 'Chunk count unavailable');
+        const noun = options.countLabel || 'chunks';
+        count.setAttribute('aria-label', Number.isFinite(loaded) ? loaded + (options.hasMore ? ' or more ' : ' ') + noun : 'Knowledge count unavailable');
       }
       if (this.refreshButton) this.refreshButton.hidden = !presentation.retry;
       if (banner) {
@@ -104,43 +194,207 @@
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-browser-state', {detail: {state, ...options}}));
     }
 
+    syncControls() {
+      if (this.searchInput) this.searchInput.value = this.urlState.query;
+      if (this.searchClear) this.searchClear.hidden = !this.urlState.query;
+      const values = {kind: this.urlState.kind, scope_kind: this.urlState.scopeKind, state: this.urlState.state, tag: this.urlState.tag};
+      for (const [name, input] of Object.entries(this.filters)) {
+        input.value = values[name] || '';
+        const browseOnly = name !== 'scope_kind';
+        input.disabled = !!this.urlState.query && browseOnly;
+        input.title = input.disabled ? 'This filter applies while browsing chunks, not full-text search.' : '';
+      }
+      this.renderSelection();
+    }
+
+    applyControlState(options) {
+      clearTimeout(this.searchTimer);
+      const next = {
+        ...this.urlState,
+        query: this.searchInput ? this.searchInput.value : '',
+        kind: this.filters.kind ? this.filters.kind.value : '',
+        scopeKind: this.filters.scope_kind ? this.filters.scope_kind.value : '',
+        state: this.filters.state ? this.filters.state.value : '',
+        tag: this.filters.tag ? this.filters.tag.value : '',
+      };
+      this.writeURLState(next, options && options.replace);
+      this.refresh();
+    }
+
+    writeURLState(next, replace) {
+      const search = searchForBrowserState(globalThis.location && globalThis.location.search, next);
+      const target = globalThis.location.pathname + search;
+      globalThis.history[replace ? 'replaceState' : 'pushState'](null, '', target);
+      this.urlState = browserStateFromSearch(search);
+      this.syncControls();
+    }
+
+    chunkQuery(cursor) {
+      const query = {sort: 'updated_at', descending: true, limit: 50};
+      if (this.urlState.kind) query.kind = this.urlState.kind;
+      if (this.urlState.scopeKind) query.scope_kind = this.urlState.scopeKind;
+      if (this.urlState.state) query.state = this.urlState.state;
+      if (this.urlState.tag) query.tag = this.urlState.tag;
+      if (cursor) query.cursor = cursor;
+      return query;
+    }
+
+    searchRequest(cursor) {
+      const request = {query: this.urlState.query, limit: 25};
+      if (this.urlState.scopeKind) request.scope_kinds = [this.urlState.scopeKind];
+      if (cursor) request.cursor = cursor;
+      return request;
+    }
+
     async refresh() {
       this.setState('loading');
       this.lastError = null;
+      if (this.loadMoreButton) this.loadMoreButton.hidden = true;
       try {
-        const response = await this.client.listChunks({sort: 'updated_at', descending: true, limit: 50}, {channel: 'initial-chunks'});
-        this.chunks = Array.isArray(response && response.chunks) ? response.chunks : [];
+        const searching = !!this.urlState.query;
+        const response = searching
+          ? await this.client.search(this.searchRequest(), {channel: 'results'})
+          : await this.client.listChunks(this.chunkQuery(), {channel: 'results'});
+        this.resultMode = searching ? 'search' : 'chunks';
+        this.chunks = searching ? [] : (Array.isArray(response && response.chunks) ? response.chunks : []);
+        this.matches = searching ? (Array.isArray(response && response.matches) ? response.matches : []) : [];
         this.page = response && response.page || {};
+        this.renderResults();
         const hasMore = !!this.page.next_cursor;
-        const sourceDetail = this.chunks.length
-          ? this.chunks.length + (hasMore ? ' or more' : '') + ' knowledge chunks are ready to browse.'
-          : '';
+        const items = searching ? this.matches : this.chunks;
+        const noun = searching ? 'results' : 'chunks';
+        const sourceDetail = searching
+          ? (items.length ? items.length + (hasMore ? ' or more' : '') + ' matches for “' + this.urlState.query + '”.' : 'No knowledge entries match “' + this.urlState.query + '”.')
+          : (items.length ? items.length + (hasMore ? ' or more' : '') + ' knowledge chunks are ready to browse.' : 'No chunks match the current filters.');
         if (this.page.truncated) {
           const reasons = Array.isArray(this.page.truncation_reasons) ? this.page.truncation_reasons.join(', ') : '';
           this.setState('truncated', {
-            count: this.chunks.length, hasMore, sourceDetail,
+            count: items.length, countLabel: noun, hasMore, sourceDetail,
             banner: reasons ? 'The server bounded this view: ' + reasons + '.' : 'The server bounded this view for safety.'
           });
-        } else if (!this.chunks.length) {
+        } else if (!searching && !items.length && !this.urlState.kind && !this.urlState.scopeKind && !this.urlState.state && !this.urlState.tag) {
           this.setState('empty', {count: 0, sourceDetail: 'There are no active knowledge chunks yet.'});
         } else {
-          this.setState('ready', {count: this.chunks.length, hasMore, sourceDetail});
+          this.setState('ready', {count: items.length, countLabel: noun, hasMore, sourceDetail});
         }
+        if (this.loadMoreButton) this.loadMoreButton.hidden = !hasMore;
       } catch (error) {
-        if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
-        this.lastError = error;
-        const state = stateForError(error);
-        const requestID = String(error && error.requestID || '');
-        const detail = String(error && error.message || '').trim();
-        this.setState(state, {
-          detail, errorCode: error && error.code,
-          sourceDetail: requestID ? detail + ' Audit ID: ' + requestID : detail,
-          banner: state === 'stale' ? 'Knowledge changed. Refresh to load a consistent view.' : ''
+        this.handleError(error);
+      }
+    }
+
+    async loadMore() {
+      const cursor = String(this.page && this.page.next_cursor || '');
+      if (!cursor || !this.loadMoreButton) return;
+      this.loadMoreButton.disabled = true;
+      try {
+        const searching = this.resultMode === 'search';
+        const response = searching
+          ? await this.client.search(this.searchRequest(cursor), {channel: 'results-more'})
+          : await this.client.listChunks(this.chunkQuery(cursor), {channel: 'results-more'});
+        const incoming = searching ? response.matches : response.chunks;
+        if (searching) this.matches.push(...(Array.isArray(incoming) ? incoming : []));
+        else this.chunks.push(...(Array.isArray(incoming) ? incoming : []));
+        this.page = response.page || {};
+        this.renderResults();
+        const items = searching ? this.matches : this.chunks;
+        const hasMore = !!this.page.next_cursor;
+        const noun = searching ? 'results' : 'chunks';
+        const truncated = !!this.page.truncated;
+        this.setState(truncated ? 'truncated' : 'ready', {
+          count: items.length, countLabel: noun, hasMore,
+          sourceDetail: items.length + (hasMore ? ' or more' : '') + ' ' + noun + ' loaded.',
+          banner: truncated ? 'The server bounded this view for safety.' : ''
         });
+        this.loadMoreButton.hidden = !hasMore;
+      } catch (error) {
+        this.handleError(error);
+      } finally {
+        this.loadMoreButton.disabled = false;
+      }
+    }
+
+    handleError(error) {
+      if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
+      this.lastError = error;
+      const state = stateForError(error);
+      const requestID = String(error && error.requestID || '');
+      const detail = String(error && error.message || '').trim();
+      this.setState(state, {
+        detail, errorCode: error && error.code,
+        sourceDetail: requestID ? detail + ' Audit ID: ' + requestID : detail,
+        banner: state === 'stale' ? 'Knowledge changed. Refresh to load a consistent view.' : ''
+      });
+    }
+
+    renderResults() {
+      if (!this.resultList) return;
+      this.resultList.replaceChildren();
+      const items = this.resultMode === 'search' ? this.matches : this.chunks;
+      for (const item of items) this.resultList.appendChild(this.resultCard(item));
+      this.renderSelection();
+    }
+
+    resultCard(item) {
+      const searching = this.resultMode === 'search';
+      const document = searching ? (item.document || {}) : item;
+      const objectKind = searching ? 'entry' : 'chunk';
+      const objectID = String(searching ? item.entry_id : item.id || '');
+      const button = this.shell.ownerDocument.createElement('button');
+      button.type = 'button';
+      button.className = 'knowledge-result-card';
+      button.dataset.objectKind = objectKind;
+      button.dataset.objectId = objectID;
+      button.setAttribute('role', 'listitem');
+      const icon = this.shell.ownerDocument.createElement('span');
+      icon.className = 'knowledge-result-icon';
+      icon.innerHTML = '<i class="bi ' + (searching ? 'bi-file-text' : 'bi-collection') + '" aria-hidden="true"></i>';
+      const copy = this.shell.ownerDocument.createElement('span');
+      copy.className = 'knowledge-result-copy';
+      const title = this.shell.ownerDocument.createElement('span');
+      title.className = 'knowledge-result-title';
+      title.textContent = String(document.title || objectID || 'Untitled knowledge');
+      copy.appendChild(title);
+      const summaryText = String(searching ? document.summary || '' : document.description || '');
+      if (summaryText) {
+        const summary = this.shell.ownerDocument.createElement('span');
+        summary.className = 'knowledge-result-summary';
+        summary.textContent = summaryText;
+        copy.appendChild(summary);
+      }
+      const meta = this.shell.ownerDocument.createElement('span');
+      meta.className = 'knowledge-result-meta';
+      const metaValues = [document.kind, document.scope && document.scope.kind, searching ? document.verification : document.state];
+      for (const value of metaValues) {
+        if (!value) continue;
+        const badge = this.shell.ownerDocument.createElement('span');
+        badge.textContent = displayLabel(value);
+        meta.appendChild(badge);
+      }
+      copy.appendChild(meta);
+      button.append(icon, copy);
+      button.addEventListener('click', () => this.selectObject(objectKind, objectID, item));
+      return button;
+    }
+
+    selectObject(objectKind, id, object) {
+      this.writeURLState({...this.urlState, objectKind, id}, false);
+      this.renderSelection();
+      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, object}}));
+    }
+
+    renderSelection() {
+      if (!this.resultList) return;
+      for (const card of this.resultList.querySelectorAll('[data-object-kind][data-object-id]')) {
+        const selected = card.dataset.objectKind === this.urlState.objectKind && card.dataset.objectId === this.urlState.id;
+        card.classList.toggle('is-selected', selected);
+        card.setAttribute('aria-pressed', selected ? 'true' : 'false');
       }
     }
 
     destroy() {
+      clearTimeout(this.searchTimer);
+      globalThis.removeEventListener('popstate', this.onPopState);
       this.client.cancelAll();
     }
   }
@@ -198,5 +452,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, mount});
 });

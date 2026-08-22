@@ -24,3 +24,16 @@ assert.strictEqual(browser.stateForError({code: 'invalid_cursor'}), 'stale');
 assert.strictEqual(browser.stateForError({code: 'conflict'}), 'error');
 assert.strictEqual(browser.presentationForState('empty').title, 'No knowledge yet');
 assert.strictEqual(browser.presentationForState('error', 'Safe detail').detail, 'Safe detail');
+
+const urlState = browser.browserStateFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&query=partition&kind=reference&scope_kind=project&state=archived&tag=linux&object_kind=entry&id=entry-7');
+assert.deepStrictEqual(urlState, {
+  query: 'partition', kind: 'reference', scopeKind: 'project', state: 'archived', tag: 'linux', objectKind: 'entry', id: 'entry-7',
+});
+assert.strictEqual(
+  browser.searchForBrowserState('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&unknown=kept', urlState),
+  '?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&unknown=kept&query=partition&kind=reference&scope_kind=project&state=archived&tag=linux&object_kind=entry&id=entry-7'
+);
+assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&object_kind=entry&id=..%2Fsecret'), {
+  query: '', kind: '', scopeKind: '', state: '', tag: '', objectKind: '', id: '',
+});
+assert.strictEqual(browser.displayLabel('partially_verified'), 'Partially verified');

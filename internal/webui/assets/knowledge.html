@@ -52,13 +52,32 @@
           <span class="knowledge-count-placeholder" data-knowledge-count aria-label="Loading chunk count">—</span>
         </header>
         <div class="knowledge-pane-body knowledge-shell-list">
+          <form class="knowledge-search-form" data-knowledge-search-form role="search">
+            <label class="visually-hidden" for="knowledge-search-input">Search knowledge</label>
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input id="knowledge-search-input" type="search" inputmode="search" autocomplete="off" maxlength="500" placeholder="Search knowledge" data-knowledge-search>
+            <button type="button" data-knowledge-search-clear title="Clear search" hidden><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Clear search</span></button>
+          </form>
+          <div class="knowledge-filter-grid" aria-label="Knowledge filters">
+            <label><span>Chunk type</span><select data-knowledge-filter="kind">
+              <option value="">All types</option><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option>
+            </select></label>
+            <label><span>Scope</span><select data-knowledge-filter="scope_kind">
+              <option value="">All scopes</option><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option>
+            </select></label>
+            <label><span>Lifecycle</span><select data-knowledge-filter="state">
+              <option value="">Active</option><option value="draft">Draft</option><option value="archived">Archived</option>
+            </select></label>
+            <label><span>Tag</span><input type="text" maxlength="80" placeholder="Any tag" data-knowledge-filter="tag"></label>
+          </div>
           <div class="knowledge-loading-skeleton" aria-hidden="true">
-            <div class="knowledge-skeleton knowledge-skeleton-search"></div>
             <div class="knowledge-skeleton knowledge-skeleton-row"></div>
             <div class="knowledge-skeleton knowledge-skeleton-row is-short"></div>
             <div class="knowledge-skeleton knowledge-skeleton-row"></div>
           </div>
           <div class="knowledge-source-status" data-knowledge-source-status role="status">Connecting to Knowledge…</div>
+          <div class="knowledge-result-list" data-knowledge-results role="list"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary knowledge-load-more" data-knowledge-load-more hidden><i class="bi bi-chevron-down" aria-hidden="true"></i> Load more</button>
         </div>
       </aside>
 
