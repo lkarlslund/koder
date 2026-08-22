@@ -40,6 +40,7 @@ for (const key of store.graph.nodes()) {
   assert(Number.isFinite(attributes.y));
 }
 assert.strictEqual(FakeSigma.instance.settings.defaultEdgeType, 'arrow');
+assert.strictEqual(FakeSigma.instance.settings.allowInvalidContainer, true);
 assert.strictEqual(FakeResizeObserver.instance.observed, container);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);

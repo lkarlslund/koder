@@ -46,6 +46,17 @@
     return result;
   }
 
+  function initialPoint(key) {
+    let hash = 2166136261;
+    for (const character of String(key)) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    const angle = (hash / 0x100000000) * Math.PI * 2;
+    const radius = 0.8 + ((hash >>> 24) / 255) * 2.4;
+    return {x: Math.cos(angle) * radius, y: Math.sin(angle) * radius};
+  }
+
   class Store {
     constructor(options) {
       options = options || {};
@@ -184,6 +195,7 @@
       const key = String(node.key);
       const attributes = cloneAttributes(node.attributes);
       if (!this.graph.hasNode(key)) {
+        if (!Number.isFinite(attributes.x) || !Number.isFinite(attributes.y)) Object.assign(attributes, initialPoint(key));
         this.graph.addNode(key, attributes);
         return;
       }
@@ -191,6 +203,7 @@
       for (const name of localNodeAttributes) {
         if (current[name] !== undefined && attributes[name] === undefined) attributes[name] = current[name];
       }
+      if (!Number.isFinite(attributes.x) || !Number.isFinite(attributes.y)) Object.assign(attributes, initialPoint(key));
       this.graph.replaceNodeAttributes(key, attributes);
     }
 
@@ -248,5 +261,5 @@
     }
   }
 
-  return Object.freeze({PATCH_VERSION, Store});
+  return Object.freeze({PATCH_VERSION, Store, initialPoint});
 });

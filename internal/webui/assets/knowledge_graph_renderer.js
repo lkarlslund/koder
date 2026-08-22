@@ -49,7 +49,9 @@
       const Sigma = sigmaClass(this.SigmaAPI);
       const programs = this.SigmaAPI && this.SigmaAPI.rendering || {};
       const settings = {
-        allowInvalidContainer: false, renderLabels: true, renderEdgeLabels: false, zIndex: true,
+        // Responsive tabs deliberately make this container 0x0 while the inspector is
+        // visible. Sigma must remain attached and resize when the graph pane returns.
+        allowInvalidContainer: true, renderLabels: true, renderEdgeLabels: false, zIndex: true,
         labelDensity: 0.12, labelGridCellSize: 90, labelRenderedSizeThreshold: 7,
         minCameraRatio: 0.04, maxCameraRatio: 25,
         nodeReducer: (key, attributes) => this.rendering.styledNodeAttributes(attributes, {

@@ -15,6 +15,10 @@ assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 1});
 assert.strictEqual(store.graph.type, 'directed');
 assert.strictEqual(store.graph.multi, true);
 assert.strictEqual(store.graph.hasDirectedEdge(fixture.ids.requires), true);
+for (const key of store.graph.nodes()) {
+  assert(Number.isFinite(store.graph.getNodeAttribute(key, 'x')));
+  assert(Number.isFinite(store.graph.getNodeAttribute(key, 'y')));
+}
 assert.strictEqual(batches.length, 1);
 assert.strictEqual(batches[0][0], 'change');
 assert.strictEqual(batches[0][1].mode, 'replace');
