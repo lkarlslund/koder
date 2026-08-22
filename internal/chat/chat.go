@@ -3774,7 +3774,8 @@ func toolCallRequiresImages(call domain.ToolCall) bool {
 }
 
 func toolExecutionRequiresImages(execution domain.ToolExecution) bool {
-	if (execution.Tool != domain.ToolKindViewImage && execution.Tool != domain.ToolKindBrowserScreenshot && execution.Tool != domain.ToolKindBrowserImage) || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
+	if (execution.Tool != domain.ToolKindViewImage && execution.Tool != domain.ToolKindBrowserScreenshot && execution.Tool != domain.ToolKindBrowserImage &&
+		!(execution.Tool == domain.ToolKindBrowserCapture && (execution.Args["action"] == "screenshot" || execution.Args["action"] == "image"))) || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
 		return false
 	}
 	return toolResultRequiresImages(execution.Tool, execution.ToolCallID, execution.Args, *execution.Result)

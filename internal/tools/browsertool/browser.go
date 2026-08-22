@@ -58,7 +58,7 @@ var specs = []tool{
 	{tools.BrowserRequests, "Browser requests", "List bounded network records for the selected tab.", object(`"limit":{"type":"integer"},` + saveToFileProperty)},
 	{tools.BrowserRequest, "Browser request", "Inspect one opaque browser request record.", required(object(`"request_id":{"type":"string"},`+saveToFileProperty), "request_id")},
 	{tools.BrowserResponseBody, "Browser response body", "Read a response body by opaque request ID.", required(object(`"request_id":{"type":"string"},`+saveToFileProperty), "request_id")},
-	{tools.BrowserDownloads, "Browser downloads", "List downloads owned by this chat.", object(saveToFileProperty)},
+	{tools.BrowserDownloadsOld, "Browser downloads", "List downloads owned by this chat.", object(saveToFileProperty)},
 	{tools.BrowserDownload, "Browser download", "Read a completed browser download. Return it as a session attachment unless save_to_file persists it to disk instead.", required(object(`"download_id":{"type":"string"},`+saveToFileProperty), "download_id")},
 }
 
@@ -66,8 +66,56 @@ const saveToFileProperty = `"save_to_file":{"type":"string","description":"Optio
 
 func init() {
 	for _, spec := range specs {
-		tools.Register(spec, tools.ToolSpec{Title: spec.title, Description: spec.description, Usage: spec.description, Parameters: spec.parameters, ExposeToLLM: true})
+		tools.Register(spec, tools.ToolSpec{Title: spec.title, Description: spec.description, Usage: spec.description, Parameters: spec.parameters, ExposeToLLM: true, Legacy: legacyBrowserOperation(spec.id)})
 	}
+	registerResourceTools()
+}
+
+func legacyBrowserOperation(kind tools.ID) bool {
+	switch kind {
+	case tools.BrowserStatus, tools.BrowserConsole, tools.BrowserEvaluate:
+		return false
+	default:
+		return true
+	}
+}
+
+func registerResourceTools() {
+	registerActionTool(tools.BrowserTabs, "Browser tabs", "Manage tabs owned by this chat. list returns owned and claimable manual tabs; create opens and selects a new tab; claim takes ownership of a manual tab; select changes the active tab; close closes an owned tab.",
+		`{"type":"object","properties":{"action":{"type":"string"},"tab_id":{"type":"string"},"url":{"type":"string"},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+		[]tools.ActionRoute{{Action: "list", Tool: tools.BrowserTabList}, {Action: "create", Tool: tools.BrowserTabNew}, {Action: "claim", Tool: tools.BrowserTabClaim}, {Action: "select", Tool: tools.BrowserTabSelect}, {Action: "close", Tool: tools.BrowserTabClose}})
+	registerActionTool(tools.BrowserNavigation, "Browser navigation", "Navigate the selected tab. goto requires an HTTP, HTTPS, or permitted local file URL; back and forward move through history; reload refreshes the current page.",
+		`{"type":"object","properties":{"action":{"type":"string"},"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}},"required":["action"],"additionalProperties":false}`,
+		[]tools.ActionRoute{{Action: "goto", Tool: tools.BrowserNavigate}, {Action: "back", Tool: tools.BrowserBack}, {Action: "forward", Tool: tools.BrowserForward}, {Action: "reload", Tool: tools.BrowserReload}})
+	registerActionTool(tools.BrowserPage, "Browser page", "Inspect the selected page. snapshot returns a compact visible DOM; find returns semantic locator arguments for matching elements; wait blocks until specified visible text appears or timeout_ms expires.",
+		`{"type":"object","properties":{"action":{"type":"string"},"query":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"depth":{"type":"integer"},"max_chars":{"type":"integer"},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+		[]tools.ActionRoute{{Action: "snapshot", Tool: tools.BrowserSnapshot}, {Action: "find", Tool: tools.BrowserFind}, {Action: "wait", Tool: tools.BrowserWait}})
+	registerActionTool(tools.BrowserInteract, "Browser interaction", "Interact with the selected page using current semantic targets. click, fill, type, press, select, check, uncheck, hover, drag, scroll, and upload map to their ordinary browser meanings. fill replaces a value while type appends keystrokes; upload requires authorized workspace paths.",
+		required(object(`"action":{"type":"string"},`+locatorProperties("")+`,`+locatorProperties("source")+`,"value":{"type":"string"},"key":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"paths":{"type":"array","items":{"type":"string"}}`), "action"),
+		[]tools.ActionRoute{{Action: "click", Tool: tools.BrowserClick}, {Action: "fill", Tool: tools.BrowserFill}, {Action: "type", Tool: tools.BrowserType}, {Action: "press", Tool: tools.BrowserPress}, {Action: "select", Tool: tools.BrowserSelect}, {Action: "check", Tool: tools.BrowserCheck}, {Action: "uncheck", Tool: tools.BrowserUncheck}, {Action: "hover", Tool: tools.BrowserHover}, {Action: "drag", Tool: tools.BrowserDrag}, {Action: "scroll", Tool: tools.BrowserScroll}, {Action: "upload", Tool: tools.BrowserUpload}})
+	registerActionTool(tools.BrowserCapture, "Browser capture", "Capture page output. screenshot captures rendered pixels; image extracts original image, canvas, or SVG bytes; pdf prints the selected page. Omit save_to_file for a session attachment or set it to persist the result.",
+		required(object(`"action":{"type":"string"},`+locatorProperties("")+`,"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},`+saveToFileProperty), "action"),
+		[]tools.ActionRoute{{Action: "screenshot", Tool: tools.BrowserScreenshot}, {Action: "image", Tool: tools.BrowserImage}, {Action: "pdf", Tool: tools.BrowserPDF}})
+	registerActionTool(tools.BrowserNetwork, "Browser network", "Inspect selected-page network activity. list returns bounded request records; get_request returns one opaque request record; get_response_body reads its response bytes. Obtain request_id from list and use save_to_file for large or binary bodies.",
+		`{"type":"object","properties":{"action":{"type":"string"},"request_id":{"type":"string"},"limit":{"type":"integer"},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+		[]tools.ActionRoute{{Action: "list", Tool: tools.BrowserRequests}, {Action: "get_request", Tool: tools.BrowserRequest}, {Action: "get_response_body", Tool: tools.BrowserResponseBody}})
+	tools.Register(tools.ActionTool{
+		Kind:          tools.BrowserDownloads,
+		Routes:        []tools.ActionRoute{{Action: "list", Tool: tools.BrowserDownloadsOld}, {Action: "get", Tool: tools.BrowserDownload}},
+		DefaultAction: "list",
+	}, tools.ToolSpec{
+		Title: "Browser downloads", Description: "List or retrieve downloads owned by this chat.",
+		Usage:      "Use action=list to inspect downloads and action=get with download_id to retrieve a completed download. Omit save_to_file to return an attachment; set it to persist the bytes in the workspace.",
+		Parameters: `{"type":"object","properties":{"action":{"type":"string","enum":["list","get"]},"download_id":{"type":"string"},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`, ExposeToLLM: true,
+	})
+}
+
+func registerActionTool(kind tools.ID, title, description, parameters string, routes []tools.ActionRoute) {
+	tools.Register(tools.ActionTool{Kind: kind, Routes: routes}, tools.ToolSpec{
+		Title: title, Description: description,
+		Usage:      description + " Choose the specific action and provide only fields used by that action. Semantic targets are resolved against the current DOM; do not invent stored element references.",
+		Parameters: parameters, ExposeToLLM: true,
+	})
 }
 
 func (t tool) ID() tools.ID             { return t.id }
@@ -268,7 +316,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	case tools.BrowserResponseBody:
 		binary, binaryErr := service.ResponseBody(ctx, chat, args["request_id"])
 		return binaryResult(opts, t.id.String(), args["save_to_file"], binary, binaryErr)
-	case tools.BrowserDownloads:
+	case tools.BrowserDownloadsOld:
 		value, err = service.Downloads(ctx, chat)
 	case tools.BrowserDownload:
 		binary, binaryErr := service.Download(ctx, chat, args["download_id"])

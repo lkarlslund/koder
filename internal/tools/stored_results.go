@@ -31,6 +31,7 @@ type storedResultEnvelope struct {
 	Tool     ID                 `json:"tool,omitempty"`
 	Status   StoredResultStatus `json:"status"`
 	Payload  json.RawMessage    `json:"payload,omitempty"`
+	Args     map[string]string  `json:"-"`
 }
 
 type ReadStoredMode string
@@ -487,6 +488,13 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[ExecStoredResult](env.Payload, func(result ExecStoredResult) string {
 			return compactExecStoredResult(result, limits)
 		})
+	case ExecSession:
+		if env.Args["action"] == "list" || env.Args["action"] == "cleanup" {
+			return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
+		}
+		return decodeAndFormat[ExecStoredResult](env.Payload, func(result ExecStoredResult) string {
+			return compactExecStoredResult(result, limits)
+		})
 	case ViewImage:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
 	case ShowImage, ShowMedia:
@@ -495,13 +503,28 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
 	case Present:
 		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
-	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
+		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
 		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserUpload, BrowserEvaluate,
 		BrowserScreenshot, BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest,
-		BrowserResponseBody, BrowserDownloads, BrowserDownload:
+		BrowserResponseBody, BrowserDownloads, BrowserDownloadsOld, BrowserDownload:
 		return decodeAndFormat[BrowserStoredResult](env.Payload, formatBrowserStoredResult)
+	case Milestones:
+		switch env.Args["action"] {
+		case "archive", "restore", "delete":
+			return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
+		default:
+			return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
+		}
+	case Tasks:
+		switch env.Args["action"] {
+		case "archive", "restore", "delete":
+			return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
+		default:
+			return decodeAndFormat[TaskListStoredResult](env.Payload, formatTaskListStoredResult)
+		}
 	case FileEdit, FileWrite, Lint:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
@@ -813,6 +836,7 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 			Tool:     payload.Tool,
 			Status:   StoredResultStatus(payload.Status),
 			Payload:  raw,
+			Args:     payload.Args,
 		}, true
 	case domain.TaskUpdatePayload:
 		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: planning.LegacyTaskStatus(payload.Status)})
@@ -901,6 +925,11 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
 	case ExecList, ExecCleanup:
 		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
+	case ExecSession:
+		if env.Args["action"] == "list" || env.Args["action"] == "cleanup" {
+			return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
+		}
+		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
 	case FileEdit:
 		return decodeAndFormat[EditStoredResult](env.Payload, func(result EditStoredResult) string {
 			return strings.TrimSpace(result.Summary)
@@ -950,13 +979,28 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
 	case Present:
 		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
-	case BrowserStatus, BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
+	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
+		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
 		BrowserHover, BrowserDrag, BrowserScroll, BrowserWait, BrowserUpload, BrowserEvaluate,
 		BrowserScreenshot, BrowserImage, BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest,
-		BrowserResponseBody, BrowserDownloads, BrowserDownload:
+		BrowserResponseBody, BrowserDownloads, BrowserDownloadsOld, BrowserDownload:
 		return decodeAndFormat[BrowserStoredResult](env.Payload, formatBrowserStoredResult)
+	case Milestones:
+		switch env.Args["action"] {
+		case "archive", "restore", "delete":
+			return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
+		default:
+			return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
+		}
+	case Tasks:
+		switch env.Args["action"] {
+		case "archive", "restore", "delete":
+			return decodeAndFormat[PlanningLifecycleStoredResult](env.Payload, formatPlanningLifecycleStoredResult)
+		default:
+			return decodeAndFormat[TaskListStoredResult](env.Payload, formatTaskListStoredResult)
+		}
 	case MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend, MilestoneWrite, MilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case MilestoneArchive, MilestoneDelete, TaskArchive, TaskDelete:

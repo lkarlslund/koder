@@ -86,6 +86,47 @@ func TestBrowserDefinitionsRequireRuntimeService(t *testing.T) {
 	}
 }
 
+func TestBrowserDefinitionsExposeResourceTools(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{Browser: fakeBrowser{}})
+	names := make(map[string]string, len(defs))
+	for _, def := range defs {
+		names[def.Function.Name] = string(def.Function.Parameters)
+	}
+	for _, kind := range []tools.ID{
+		tools.BrowserStatus, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage,
+		tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate,
+		tools.BrowserNetwork, tools.BrowserDownloads,
+	} {
+		if names[kind.String()] == "" {
+			t.Errorf("missing browser resource definition %s", kind)
+		}
+	}
+	for _, legacy := range []tools.ID{tools.BrowserTabList, tools.BrowserNavigate, tools.BrowserClick, tools.BrowserScreenshot, tools.BrowserRequests, tools.BrowserDownload} {
+		if _, ok := names[legacy.String()]; ok {
+			t.Errorf("legacy browser operation remained visible: %s", legacy)
+		}
+	}
+	for _, action := range []string{"click", "fill", "drag", "upload"} {
+		if !strings.Contains(names[tools.BrowserInteract.String()], `"`+action+`"`) {
+			t.Errorf("browser_interact is missing %q: %s", action, names[tools.BrowserInteract.String()])
+		}
+	}
+}
+
+func TestBrowserResourceDispatchAndLegacyDownloadsDefault(t *testing.T) {
+	runtime := tools.Runtime{Browser: fakeBrowser{}, SessionID: "session-1", ChatID: "chat-1"}
+	if _, err := tools.Call(t.Context(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.BrowserNavigation, Args: map[string]string{"action": "goto", "url": "https://example.com"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.Call(t.Context(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.BrowserDownloads,
+	}}); err != nil {
+		t.Fatalf("historical browser_downloads call without action: %v", err)
+	}
+}
+
 func TestBrowserToolsRequireNetworkAccess(t *testing.T) {
 	_, err := tools.Call(t.Context(), tools.Options{Runtime: tools.Runtime{Browser: fakeBrowser{}, AccessSettings: accesssettings.LockedDown()}, Request: tools.Request{Tool: tools.BrowserStatus, Args: map[string]string{}}})
 	if err == nil || !tools.IsDenied(err) {

@@ -69,6 +69,12 @@ const (
 	WebSearch           ID = domain.ToolKindWebSearch
 	MCP                 ID = domain.ToolKindMCP
 	BrowserStatus       ID = domain.ToolKindBrowserStatus
+	BrowserTabs         ID = domain.ToolKindBrowserTabs
+	BrowserNavigation   ID = domain.ToolKindBrowserNavigation
+	BrowserPage         ID = domain.ToolKindBrowserPage
+	BrowserInteract     ID = domain.ToolKindBrowserInteract
+	BrowserCapture      ID = domain.ToolKindBrowserCapture
+	BrowserNetwork      ID = domain.ToolKindBrowserNetwork
 	BrowserTabList      ID = domain.ToolKindBrowserTabList
 	BrowserTabNew       ID = domain.ToolKindBrowserTabNew
 	BrowserTabClaim     ID = domain.ToolKindBrowserTabClaim
@@ -101,6 +107,7 @@ const (
 	BrowserRequest      ID = domain.ToolKindBrowserRequest
 	BrowserResponseBody ID = domain.ToolKindBrowserResponseBody
 	BrowserDownloads    ID = domain.ToolKindBrowserDownloads
+	BrowserDownloadsOld ID = domain.ToolKindBrowserDownloadsOld
 	BrowserDownload     ID = domain.ToolKindBrowserDownload
 )
 

@@ -1775,6 +1775,8 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "task", "Task"
 	case tools.ViewImage, tools.ShowImage, tools.ShowMedia:
 		return "image", "Image"
+	case tools.BrowserStatus, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage, tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate, tools.BrowserNetwork, tools.BrowserDownloads:
+		return "browser", "Browser"
 	default:
 		key := kind.String()
 		return key, kind.DisplayName()

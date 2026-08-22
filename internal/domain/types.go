@@ -105,6 +105,12 @@ const (
 	ToolKindWebSearch           ToolKind = "web_search"
 	ToolKindMCP                 ToolKind = "mcp"
 	ToolKindBrowserStatus       ToolKind = "browser_status"
+	ToolKindBrowserTabs         ToolKind = "browser_tabs"
+	ToolKindBrowserNavigation   ToolKind = "browser_navigation"
+	ToolKindBrowserPage         ToolKind = "browser_page"
+	ToolKindBrowserInteract     ToolKind = "browser_interact"
+	ToolKindBrowserCapture      ToolKind = "browser_capture"
+	ToolKindBrowserNetwork      ToolKind = "browser_network"
 	ToolKindBrowserTabList      ToolKind = "browser_tab_list"
 	ToolKindBrowserTabNew       ToolKind = "browser_tab_new"
 	ToolKindBrowserTabClaim     ToolKind = "browser_tab_claim"
@@ -137,6 +143,7 @@ const (
 	ToolKindBrowserRequest      ToolKind = "browser_request"
 	ToolKindBrowserResponseBody ToolKind = "browser_response_body"
 	ToolKindBrowserDownloads    ToolKind = "browser_downloads"
+	ToolKindBrowserDownloadsOld ToolKind = "browser_downloads_legacy"
 	ToolKindBrowserDownload     ToolKind = "browser_download"
 )
 
@@ -206,7 +213,9 @@ var builtinToolKinds = []ToolKind{
 	ToolKindWebFetch,
 	ToolKindWebSearch,
 	ToolKindMCP,
-	ToolKindBrowserStatus, ToolKindBrowserTabList, ToolKindBrowserTabNew, ToolKindBrowserTabClaim,
+	ToolKindBrowserStatus, ToolKindBrowserTabs, ToolKindBrowserNavigation, ToolKindBrowserPage,
+	ToolKindBrowserInteract, ToolKindBrowserCapture, ToolKindBrowserNetwork,
+	ToolKindBrowserTabList, ToolKindBrowserTabNew, ToolKindBrowserTabClaim,
 	ToolKindBrowserTabSelect, ToolKindBrowserTabClose, ToolKindBrowserNavigate, ToolKindBrowserBack,
 	ToolKindBrowserForward, ToolKindBrowserReload, ToolKindBrowserSnapshot, ToolKindBrowserFind,
 	ToolKindBrowserClick, ToolKindBrowserFill, ToolKindBrowserType, ToolKindBrowserPress,
@@ -214,7 +223,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindBrowserDrag, ToolKindBrowserScroll, ToolKindBrowserWait, ToolKindBrowserUpload,
 	ToolKindBrowserEvaluate, ToolKindBrowserScreenshot, ToolKindBrowserImage, ToolKindBrowserPDF,
 	ToolKindBrowserConsole, ToolKindBrowserRequests, ToolKindBrowserRequest, ToolKindBrowserResponseBody,
-	ToolKindBrowserDownloads, ToolKindBrowserDownload,
+	ToolKindBrowserDownloads, ToolKindBrowserDownloadsOld, ToolKindBrowserDownload,
 }
 
 func BuiltinToolKinds() []ToolKind {

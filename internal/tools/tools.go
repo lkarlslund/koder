@@ -491,6 +491,9 @@ type ActionTool struct {
 	Kind              ID
 	Routes            []ActionRoute
 	BypassPermissions bool
+	// DefaultAction accepts historical calls that predate the action field when
+	// a canonical resource reuses an older single-operation name.
+	DefaultAction string
 }
 
 func (t ActionTool) ID() ID { return t.Kind }
@@ -499,6 +502,9 @@ func (t ActionTool) BypassesPermission() bool { return t.BypassPermissions }
 
 func (t ActionTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	action := strings.TrimSpace(args["action"])
+	if action == "" {
+		action = strings.TrimSpace(t.DefaultAction)
+	}
 	legacy, ok := t.legacyTool(action)
 	if !ok {
 		return nil, fmt.Errorf("unsupported %s action %q", t.Kind, action)
@@ -606,9 +612,13 @@ func (t ActionTool) routeFixedArgs(action string) map[string]string {
 }
 
 func (t ActionTool) delegatedRequest(req Request) (Request, Tool, error) {
-	legacy, ok := t.legacyTool(strings.TrimSpace(req.Args["action"]))
+	action := strings.TrimSpace(req.Args["action"])
+	if action == "" {
+		action = strings.TrimSpace(t.DefaultAction)
+	}
+	legacy, ok := t.legacyTool(action)
 	if !ok {
-		return Request{}, nil, fmt.Errorf("unsupported %s action %q", t.Kind, req.Args["action"])
+		return Request{}, nil, fmt.Errorf("unsupported %s action %q", t.Kind, action)
 	}
 	delegate, _, ok := lookupWithSpec(legacy)
 	if !ok {
@@ -616,7 +626,7 @@ func (t ActionTool) delegatedRequest(req Request) (Request, Tool, error) {
 	}
 	args := maps.Clone(req.Args)
 	delete(args, "action")
-	for key, value := range t.routeFixedArgs(req.Args["action"]) {
+	for key, value := range t.routeFixedArgs(action) {
 		args[key] = value
 	}
 	return Request{Tool: legacy, ToolCallID: req.ToolCallID, Args: args}, delegate, nil
