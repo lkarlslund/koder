@@ -15,6 +15,21 @@ var (
 	ErrChunkNotEmpty              = errors.New("knowledge chunk is not empty")
 )
 
+// ChunkDeletionBlockedError exposes exact canonical blockers without requiring callers
+// to parse an error string.
+type ChunkDeletionBlockedError struct {
+	ChunkID  knowledge.ChunkID
+	Blockers knowledgeStore.ChunkDeletionBlockers
+}
+
+func (e *ChunkDeletionBlockedError) Error() string {
+	return fmt.Sprintf("%s: chunk %s has %d entries, %d links, %d dependencies, %d dependent chunks, and reported counts entries=%d links=%d evidence=%d",
+		ErrChunkNotEmpty, e.ChunkID, len(e.Blockers.EntryIDs), len(e.Blockers.LinkIDs), len(e.Blockers.DependencyIDs),
+		len(e.Blockers.DependentChunkIDs), e.Blockers.ReportedCounts.Entries, e.Blockers.ReportedCounts.Links, e.Blockers.ReportedCounts.Evidence)
+}
+
+func (e *ChunkDeletionBlockedError) Unwrap() error { return ErrChunkNotEmpty }
+
 type DeleteChunkRequest struct {
 	ChunkID          knowledge.ChunkID
 	ExpectedRevision uint64
@@ -45,8 +60,12 @@ func (s *Service) DeleteChunk(ctx context.Context, request DeleteChunkRequest) e
 		if current.State != knowledge.ChunkStateArchived {
 			return fmt.Errorf("%w: archive chunk %s before deleting it", ErrChunkMustBeArchived, request.ChunkID)
 		}
-		if current.Counts != (knowledge.ChunkCounts{}) || len(current.DependencyIDs) != 0 {
-			return fmt.Errorf("%w: chunk %s has entries, links, evidence, or declared dependencies", ErrChunkNotEmpty, request.ChunkID)
+		blockers, err := tx.ChunkDeletionBlockers(ctx, request.ChunkID)
+		if err != nil {
+			return err
+		}
+		if !blockers.Empty() {
+			return &ChunkDeletionBlockedError{ChunkID: request.ChunkID, Blockers: blockers}
 		}
 		return tx.DeleteChunk(ctx, request.ChunkID, request.ExpectedRevision)
 	})

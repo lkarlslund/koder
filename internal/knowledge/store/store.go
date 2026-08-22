@@ -44,6 +44,7 @@ type Health struct {
 // during its Store.View or Store.Update callback and must not escape that callback.
 type ReadTx interface {
 	Chunk(context.Context, knowledge.ChunkID) (knowledge.Chunk, error)
+	ChunkDeletionBlockers(context.Context, knowledge.ChunkID) (ChunkDeletionBlockers, error)
 	Entry(context.Context, knowledge.EntryID) (knowledge.Entry, error)
 	Link(context.Context, knowledge.LinkID) (knowledge.Link, error)
 	Evidence(context.Context, knowledge.EvidenceID) (knowledge.Evidence, error)

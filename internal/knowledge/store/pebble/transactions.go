@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	cockroachpebble "github.com/cockroachdb/pebble"
 
@@ -17,6 +18,7 @@ import (
 
 type recordReader interface {
 	Get([]byte) ([]byte, io.Closer, error)
+	NewIter(*cockroachpebble.IterOptions) (*cockroachpebble.Iterator, error)
 }
 
 type transaction struct {
@@ -117,6 +119,63 @@ func (tx *transaction) Chunk(ctx context.Context, id knowledge.ChunkID) (knowled
 		return knowledge.Chunk{}, err
 	}
 	return readRecord[knowledge.Chunk](tx.reader, chunkKey(string(id)), "chunk", string(id))
+}
+
+func (tx *transaction) ChunkDeletionBlockers(ctx context.Context, id knowledge.ChunkID) (knowledgeStore.ChunkDeletionBlockers, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledgeStore.ChunkDeletionBlockers{}, err
+	}
+	chunk, err := tx.Chunk(ctx, id)
+	if err != nil {
+		return knowledgeStore.ChunkDeletionBlockers{}, err
+	}
+	blockers := knowledgeStore.ChunkDeletionBlockers{
+		DependencyIDs: slices.Clone(chunk.DependencyIDs), ReportedCounts: chunk.Counts,
+	}
+	entryIDs := make(map[knowledge.EntryID]struct{})
+	var links []knowledge.Link
+	if _, err := scanCanonical(ctx, tx.reader, func(record knowledgeStore.CanonicalRecord) error {
+		switch record.Kind {
+		case knowledgeStore.RecordKindChunk:
+			if record.Chunk.ID != id && slices.Contains(record.Chunk.DependencyIDs, id) {
+				blockers.DependentChunkIDs = append(blockers.DependentChunkIDs, record.Chunk.ID)
+			}
+		case knowledgeStore.RecordKindEntry:
+			if record.Entry.ChunkID == id {
+				entryIDs[record.Entry.ID] = struct{}{}
+				blockers.EntryIDs = append(blockers.EntryIDs, record.Entry.ID)
+			}
+		case knowledgeStore.RecordKindLink:
+			links = append(links, *record.Link)
+		}
+		return nil
+	}); err != nil {
+		return knowledgeStore.ChunkDeletionBlockers{}, err
+	}
+	for _, link := range links {
+		if linkTouchesChunk(link, id, entryIDs) {
+			blockers.LinkIDs = append(blockers.LinkIDs, link.ID)
+		}
+	}
+	slices.Sort(blockers.EntryIDs)
+	slices.Sort(blockers.LinkIDs)
+	slices.Sort(blockers.DependencyIDs)
+	slices.Sort(blockers.DependentChunkIDs)
+	return blockers, nil
+}
+
+func linkTouchesChunk(link knowledge.Link, chunkID knowledge.ChunkID, entryIDs map[knowledge.EntryID]struct{}) bool {
+	for _, endpoint := range []knowledge.ObjectRef{link.Source, link.Target} {
+		if endpoint.Kind == knowledge.ObjectKindChunk && endpoint.ID == string(chunkID) {
+			return true
+		}
+		if endpoint.Kind == knowledge.ObjectKindEntry {
+			if _, exists := entryIDs[knowledge.EntryID(endpoint.ID)]; exists {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (tx *transaction) Entry(ctx context.Context, id knowledge.EntryID) (knowledge.Entry, error) {

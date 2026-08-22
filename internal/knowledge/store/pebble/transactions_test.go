@@ -243,6 +243,50 @@ func TestTransactionDeleteRemovesCanonicalAndRevisionHistory(t *testing.T) {
 	}
 }
 
+func TestChunkDeletionBlockersSeeCanonicalRecordsAndPendingWrites(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	dependentID := knowledge.ChunkID("019f132e-4f3a-739a-9ab2-5198dcd19e68")
+	dependencyID := knowledge.ChunkID("019f132e-4f3a-739a-9ab2-5198dcd19e69")
+	root := txChunk(1)
+	root.DependencyIDs = []knowledge.ChunkID{dependencyID}
+	dependent := txChunk(1)
+	dependent.ID = dependentID
+	dependent.Title = "Dependent"
+	dependent.DependencyIDs = []knowledge.ChunkID{txChunkID}
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutChunk(ctx, root, 0); err != nil {
+			return err
+		}
+		if err := tx.PutChunk(ctx, dependent, 0); err != nil {
+			return err
+		}
+		if err := tx.PutEntry(ctx, txEntry(), 0); err != nil {
+			return err
+		}
+		if err := tx.PutLink(ctx, txLink(), 0); err != nil {
+			return err
+		}
+		blockers, err := tx.ChunkDeletionBlockers(ctx, txChunkID)
+		if err != nil {
+			return err
+		}
+		if len(blockers.EntryIDs) != 1 || blockers.EntryIDs[0] != txEntryID || len(blockers.LinkIDs) != 1 || blockers.LinkIDs[0] != txLinkID ||
+			len(blockers.DependencyIDs) != 1 || blockers.DependencyIDs[0] != dependencyID ||
+			len(blockers.DependentChunkIDs) != 1 || blockers.DependentChunkIDs[0] != dependentID {
+			return fmt.Errorf("pending deletion blockers = %#v", blockers)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+}
+
 func TestTransactionExpiresAfterCallbackAndStoreClose(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
