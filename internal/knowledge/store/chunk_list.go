@@ -106,13 +106,13 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	switch request.Sort {
 	case ChunkSortTitle, ChunkSortCreatedAt, ChunkSortUpdatedAt, ChunkSortLastUsedAt:
 	default:
-		return ChunkListRequest{}, fmt.Errorf("invalid chunk sort %q", request.Sort)
+		return ChunkListRequest{}, fmt.Errorf("%w: invalid chunk sort %q", knowledge.ErrInvalidRecord, request.Sort)
 	}
 	if request.Limit <= 0 {
 		request.Limit = 50
 	}
 	if request.Limit > 200 {
-		return ChunkListRequest{}, fmt.Errorf("chunk page limit must not exceed 200")
+		return ChunkListRequest{}, fmt.Errorf("%w: chunk page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 	request.Filter.Tags = knowledge.NormalizeTags(request.Filter.Tags)
 	locale, err := knowledge.NormalizeLocale(request.Filter.Locale)
@@ -139,12 +139,12 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
 	for _, kind := range request.Filter.Kinds {
 		if kind == knowledge.ChunkKindUnspecified || !kind.IsAChunkKind() {
-			return ChunkListRequest{}, fmt.Errorf("invalid chunk kind filter")
+			return ChunkListRequest{}, fmt.Errorf("%w: invalid chunk kind filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	for _, state := range request.Filter.States {
 		if state == knowledge.ChunkStateUnspecified || !state.IsAChunkState() {
-			return ChunkListRequest{}, fmt.Errorf("invalid chunk state filter")
+			return ChunkListRequest{}, fmt.Errorf("%w: invalid chunk state filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	for _, scope := range request.Filter.Scopes {
@@ -154,7 +154,7 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 	}
 	for _, scope := range request.Filter.ScopeKinds {
 		if scope == knowledge.ScopeKindUnspecified || !scope.IsAScopeKind() {
-			return ChunkListRequest{}, fmt.Errorf("invalid chunk scope filter")
+			return ChunkListRequest{}, fmt.Errorf("%w: invalid chunk scope filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	return request, nil

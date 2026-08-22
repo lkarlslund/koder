@@ -33,7 +33,7 @@ func (s *Service) ListChunks(ctx context.Context, request knowledgeStore.ChunkLi
 		limit = 50
 	}
 	if limit > 200 {
-		return knowledgeStore.ChunkPage{}, fmt.Errorf("chunk page limit must not exceed 200")
+		return knowledgeStore.ChunkPage{}, fmt.Errorf("%w: chunk page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 
 	// A policy may hide arbitrary chunks, so scan canonical pages one record at

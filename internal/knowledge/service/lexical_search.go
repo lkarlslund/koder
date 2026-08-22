@@ -228,7 +228,7 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 		return LexicalSearchRequest{}, nil, err
 	}
 	if request.Limit < 0 || request.Limit > maxLexicalSearchLimit {
-		return LexicalSearchRequest{}, nil, fmt.Errorf("lexical search limit must be between 0 and %d", maxLexicalSearchLimit)
+		return LexicalSearchRequest{}, nil, fmt.Errorf("%w: lexical search limit must be between 0 and %d", knowledge.ErrInvalidRecord, maxLexicalSearchLimit)
 	}
 	if request.Limit == 0 {
 		request.Limit = defaultLexicalSearchLimit
@@ -247,7 +247,7 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 	request.EntryStates = slices.Compact(request.EntryStates)
 	for _, state := range request.EntryStates {
 		if state == knowledge.EntryStateUnspecified || !state.IsAEntryState() {
-			return LexicalSearchRequest{}, nil, fmt.Errorf("invalid lexical search entry state %q", state)
+			return LexicalSearchRequest{}, nil, fmt.Errorf("%w: invalid lexical search entry state %q", knowledge.ErrInvalidRecord, state)
 		}
 	}
 	if !request.IncludeSuperseded {
@@ -263,7 +263,7 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 	request.ChunkStates = slices.Compact(request.ChunkStates)
 	for _, state := range request.ChunkStates {
 		if state == knowledge.ChunkStateUnspecified || !state.IsAChunkState() {
-			return LexicalSearchRequest{}, nil, fmt.Errorf("invalid lexical search chunk state %q", state)
+			return LexicalSearchRequest{}, nil, fmt.Errorf("%w: invalid lexical search chunk state %q", knowledge.ErrInvalidRecord, state)
 		}
 	}
 	request.Scopes = slices.Clone(request.Scopes)
@@ -284,7 +284,7 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 	request.ScopeKinds = slices.Compact(request.ScopeKinds)
 	for _, scopeKind := range request.ScopeKinds {
 		if scopeKind == knowledge.ScopeKindUnspecified || !scopeKind.IsAScopeKind() {
-			return LexicalSearchRequest{}, nil, fmt.Errorf("invalid lexical search scope kind %q", scopeKind)
+			return LexicalSearchRequest{}, nil, fmt.Errorf("%w: invalid lexical search scope kind %q", knowledge.ErrInvalidRecord, scopeKind)
 		}
 	}
 	if request.IncludeInvalid {

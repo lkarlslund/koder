@@ -61,7 +61,7 @@ func normalizeGraphExpansionOptions(options GraphExpansionOptions) (GraphExpansi
 	options.Kinds = slices.Compact(options.Kinds)
 	for _, kind := range options.Kinds {
 		if kind == knowledge.LinkKindUnspecified || !kind.IsALinkKind() {
-			return GraphExpansionOptions{}, fmt.Errorf("invalid search graph expansion link kind %q", kind)
+			return GraphExpansionOptions{}, fmt.Errorf("%w: invalid search graph expansion link kind %q", knowledge.ErrInvalidRecord, kind)
 		}
 	}
 	if options.MaxRoots <= 0 {
@@ -75,7 +75,7 @@ func normalizeGraphExpansionOptions(options GraphExpansionOptions) (GraphExpansi
 	}
 	if options.MaxRoots > maxGraphExpansionRoots || options.MaxConnections > maxGraphExpansionConnections || options.MaxEntries > maxGraphExpansionEntries {
 		return GraphExpansionOptions{}, fmt.Errorf(
-			"search graph expansion limits exceed roots=%d connections=%d entries=%d",
+			"%w: search graph expansion limits exceed roots=%d connections=%d entries=%d", knowledge.ErrInvalidRecord,
 			maxGraphExpansionRoots, maxGraphExpansionConnections, maxGraphExpansionEntries,
 		)
 	}

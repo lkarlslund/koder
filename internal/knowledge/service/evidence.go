@@ -119,7 +119,7 @@ func (s *Service) EntryEvidence(ctx context.Context, request EntryEvidenceReques
 		request.Limit = 50
 	}
 	if request.Limit > 200 {
-		return EvidencePage{}, fmt.Errorf("evidence page limit must not exceed 200")
+		return EvidencePage{}, fmt.Errorf("%w: evidence page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 	record, err := s.Get(ctx, knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(request.EntryID)})
 	if err != nil {

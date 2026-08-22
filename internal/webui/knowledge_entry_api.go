@@ -120,6 +120,9 @@ func (s *Server) handleKnowledgeEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getKnowledgeEntry(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, entryID knowledge.EntryID) {
+	if !s.requireNoKnowledgeQuery(w, r, requestID) {
+		return
+	}
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindEntry, ID: string(entryID)}
 	record, err := service.Get(ctx, reference)
 	if err != nil {

@@ -91,7 +91,7 @@ func EntryLexicalPostings(entry knowledge.Entry) []LexicalPosting {
 // Callers may supply individual terms or natural-language fragments.
 func NormalizeLexicalPostingRequest(request LexicalPostingRequest) (LexicalPostingRequest, error) {
 	if request.Limit < 0 || request.Limit > maxLexicalPostingLimit {
-		return LexicalPostingRequest{}, fmt.Errorf("lexical posting limit must be between 0 and %d", maxLexicalPostingLimit)
+		return LexicalPostingRequest{}, fmt.Errorf("%w: lexical posting limit must be between 0 and %d", knowledge.ErrInvalidRecord, maxLexicalPostingLimit)
 	}
 	if request.Limit == 0 {
 		request.Limit = defaultLexicalPostingLimit
@@ -101,17 +101,17 @@ func NormalizeLexicalPostingRequest(request LexicalPostingRequest) (LexicalPosti
 	for _, value := range request.Terms {
 		totalBytes += len(value)
 		if totalBytes > maxLexicalPostingInput {
-			return LexicalPostingRequest{}, fmt.Errorf("lexical posting terms exceed %d input bytes", maxLexicalPostingInput)
+			return LexicalPostingRequest{}, fmt.Errorf("%w: lexical posting terms exceed %d input bytes", knowledge.ErrInvalidRecord, maxLexicalPostingInput)
 		}
 		terms = append(terms, knowledge.LexicalTerms(value)...)
 	}
 	slices.Sort(terms)
 	terms = slices.Compact(terms)
 	if len(terms) == 0 {
-		return LexicalPostingRequest{}, fmt.Errorf("at least one lexical posting term is required")
+		return LexicalPostingRequest{}, fmt.Errorf("%w: at least one lexical posting term is required", knowledge.ErrInvalidRecord)
 	}
 	if len(terms) > maxLexicalPostingTerms {
-		return LexicalPostingRequest{}, fmt.Errorf("lexical posting request exceeds %d normalized terms", maxLexicalPostingTerms)
+		return LexicalPostingRequest{}, fmt.Errorf("%w: lexical posting request exceeds %d normalized terms", knowledge.ErrInvalidRecord, maxLexicalPostingTerms)
 	}
 	request.Terms = terms
 	return request, nil

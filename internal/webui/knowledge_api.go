@@ -132,6 +132,9 @@ func (s *Server) handleKnowledgeChunk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getKnowledgeChunk(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, chunkID string) {
+	if !s.requireNoKnowledgeQuery(w, r, requestID) {
+		return
+	}
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: chunkID}
 	record, err := service.Get(ctx, reference)
 	if err != nil {
@@ -387,6 +390,9 @@ func chunkServiceContent(content knowledgeapi.ChunkContent) knowledgeService.Chu
 }
 
 func decodeKnowledgeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	if r.URL.RawQuery != "" {
+		return fmt.Errorf("request query parameters are not supported")
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -400,6 +406,14 @@ func decodeKnowledgeJSON(w http.ResponseWriter, r *http.Request, target any) err
 		return err
 	}
 	return nil
+}
+
+func (s *Server) requireNoKnowledgeQuery(w http.ResponseWriter, r *http.Request, requestID string) bool {
+	if r.URL.RawQuery == "" {
+		return true
+	}
+	s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+	return false
 }
 
 func (s *Server) writeKnowledgeChunk(w http.ResponseWriter, requestID string, status int, chunk knowledge.Chunk, classification *knowledge.ClassificationResult) {

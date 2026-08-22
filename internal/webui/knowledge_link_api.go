@@ -78,6 +78,9 @@ func (s *Server) handleKnowledgeLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getKnowledgeLink(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, linkID knowledge.LinkID) {
+	if !s.requireNoKnowledgeQuery(w, r, requestID) {
+		return
+	}
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindLink, ID: string(linkID)}
 	record, err := service.Get(ctx, reference)
 	if err != nil {

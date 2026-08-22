@@ -68,7 +68,7 @@ func PaginateRevisions(records []CanonicalRecord, request RevisionListRequest) (
 		request.Limit = 50
 	}
 	if request.Limit > 200 {
-		return RevisionPage{}, fmt.Errorf("revision page limit must not exceed 200")
+		return RevisionPage{}, fmt.Errorf("%w: revision page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 	binding, err := revisionCursorBinding(request.Object)
 	if err != nil {

@@ -108,13 +108,13 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	switch request.Sort {
 	case EntrySortTitle, EntrySortCreatedAt, EntrySortUpdatedAt, EntrySortLastUsedAt, EntrySortReviewAfter:
 	default:
-		return EntryListRequest{}, fmt.Errorf("invalid entry sort %q", request.Sort)
+		return EntryListRequest{}, fmt.Errorf("%w: invalid entry sort %q", knowledge.ErrInvalidRecord, request.Sort)
 	}
 	if request.Limit <= 0 {
 		request.Limit = 50
 	}
 	if request.Limit > 200 {
-		return EntryListRequest{}, fmt.Errorf("entry page limit must not exceed 200")
+		return EntryListRequest{}, fmt.Errorf("%w: entry page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 	request.Filter.ChunkIDs = slices.Clone(request.Filter.ChunkIDs)
 	slices.Sort(request.Filter.ChunkIDs)
@@ -152,12 +152,12 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	request.Filter.StaleAt = normalizeFilterTime(request.Filter.StaleAt)
 	for _, kind := range request.Filter.Kinds {
 		if kind == knowledge.EntryKindUnspecified || !kind.IsAEntryKind() {
-			return EntryListRequest{}, fmt.Errorf("invalid entry kind filter")
+			return EntryListRequest{}, fmt.Errorf("%w: invalid entry kind filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	for _, state := range request.Filter.States {
 		if state == knowledge.EntryStateUnspecified || !state.IsAEntryState() {
-			return EntryListRequest{}, fmt.Errorf("invalid entry state filter")
+			return EntryListRequest{}, fmt.Errorf("%w: invalid entry state filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	for _, scope := range request.Filter.Scopes {
@@ -167,7 +167,7 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	}
 	for _, scope := range request.Filter.ScopeKinds {
 		if scope == knowledge.ScopeKindUnspecified || !scope.IsAScopeKind() {
-			return EntryListRequest{}, fmt.Errorf("invalid entry scope filter")
+			return EntryListRequest{}, fmt.Errorf("%w: invalid entry scope filter", knowledge.ErrInvalidRecord)
 		}
 	}
 	return request, nil

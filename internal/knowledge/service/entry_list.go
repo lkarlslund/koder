@@ -33,7 +33,7 @@ func (s *Service) ListEntries(ctx context.Context, request knowledgeStore.EntryL
 		limit = 50
 	}
 	if limit > 200 {
-		return knowledgeStore.EntryPage{}, fmt.Errorf("entry page limit must not exceed 200")
+		return knowledgeStore.EntryPage{}, fmt.Errorf("%w: entry page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
 	scan := request
 	scan.Limit = 1
