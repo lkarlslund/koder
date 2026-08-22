@@ -22,11 +22,11 @@ const (
 // CanonicalRecord is one validated record delivered by a consistent store scan. Exactly
 // one typed pointer is populated and matches Kind.
 type CanonicalRecord struct {
-	Kind     RecordKind
-	Chunk    *knowledge.Chunk
-	Entry    *knowledge.Entry
-	Link     *knowledge.Link
-	Evidence *knowledge.Evidence
+	Kind     RecordKind          `json:"kind"`
+	Chunk    *knowledge.Chunk    `json:"chunk,omitempty"`
+	Entry    *knowledge.Entry    `json:"entry,omitempty"`
+	Link     *knowledge.Link     `json:"link,omitempty"`
+	Evidence *knowledge.Evidence `json:"evidence,omitempty"`
 }
 
 func (r CanonicalRecord) ID() string {
@@ -109,11 +109,17 @@ type IndexRebuildStatus struct {
 	LastError        string    `json:"last_error,omitempty"`
 }
 
-// MaintenanceStore is implemented by backends that support consistent canonical scans
-// and rebuilding private derived indexes from canonical truth.
-type MaintenanceStore interface {
+// CanonicalScanStore is the minimum backend-neutral source contract for integrity and
+// migration snapshots.
+type CanonicalScanStore interface {
 	Store
 	ScanCanonical(context.Context, func(CanonicalRecord) error) (ScanStats, error)
+}
+
+// MaintenanceStore is implemented by backends that can also rebuild private derived
+// indexes from canonical truth.
+type MaintenanceStore interface {
+	CanonicalScanStore
 	RebuildIndexes(context.Context) error
 	IndexRebuildStatus(context.Context) (IndexRebuildStatus, error)
 }

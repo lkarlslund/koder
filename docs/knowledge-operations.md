@@ -65,3 +65,42 @@ systemctl --user start koder.service
 Do not rename Pebble directories manually. A successful rollback also retains the database
 it replaced, so both directions remain recoverable until an operator deliberately removes
 old checkpoints.
+
+## Migrate between storage backends
+
+Backups preserve Pebble exactly. Migration archives instead contain backend-neutral
+canonical records, complete chunk/entry/link revision histories, and package assets. Use a
+migration archive when moving Knowledge into a new data directory or a future replacement
+backend.
+
+Export is offline and refuses to overwrite an existing archive. Koder installations contain
+the private `About me` chunk by default, so a complete export normally requires the explicit
+personal-data acknowledgement:
+
+```sh
+systemctl --user stop koder.service
+koder knowledge migrate export --include-personal /srv/backups/knowledge-migration.gz
+systemctl --user start koder.service
+```
+
+The output includes a SHA-256 digest, compressed byte size, and content-free counts. Store
+the archive as private data. `--json` provides the same result for automation.
+
+Import requires a genuinely empty target Knowledge store and explicit confirmation. It
+validates the gzip/JSON envelope, exact schema, every canonical record, complete contiguous
+revision histories, asset digests, references, dependencies, and derived counts before one
+atomic transaction makes anything visible:
+
+```sh
+koder --data-dir /srv/koder-new knowledge migrate import \
+  --confirm --include-personal /srv/backups/knowledge-migration.gz
+```
+
+The target remains unchanged if validation or any write fails. Import refuses a non-empty
+target instead of merging or replacing data; use package import for deliberate content-level
+merges and the backup/restore commands for exact Pebble recovery.
+
+Migration excludes backend metadata and derived indexes because the target rebuilds those
+from canonical truth. It also excludes transient operation state, retrieval-usage signals,
+and saved graph-explorer layouts. Those are not canonical Knowledge and must never make a
+replacement backend understand Pebble-private records.

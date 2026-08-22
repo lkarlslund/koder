@@ -118,6 +118,32 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	return nil
 }
 
+func (tx *transaction) Empty(ctx context.Context) (bool, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return false, err
+	}
+	for _, prefix := range [][]byte{canonicalPrefix, revisionsPrefix, packageAssetPrefix, entryUsagePrefix, usageEventPrefix} {
+		lower, upper := prefixBounds(prefix)
+		iter, err := tx.reader.NewIter(&cockroachpebble.IterOptions{LowerBound: lower, UpperBound: upper})
+		if err != nil {
+			return false, fmt.Errorf("inspect empty knowledge transaction: %w", err)
+		}
+		nonEmpty := iter.First()
+		iterErr := iter.Error()
+		closeErr := iter.Close()
+		if iterErr != nil {
+			return false, fmt.Errorf("inspect empty knowledge transaction: %w", iterErr)
+		}
+		if closeErr != nil {
+			return false, fmt.Errorf("close empty knowledge iterator: %w", closeErr)
+		}
+		if nonEmpty {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 const maxRebuildJournalMutations = 100000
 
 func (s *Store) appendRebuildMutations(mutations []indexMutation) {

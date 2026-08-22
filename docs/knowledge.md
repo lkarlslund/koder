@@ -43,10 +43,11 @@ Planned package responsibilities:
 | Package | Owns | May import |
 | --- | --- | --- |
 | `internal/knowledge` | Canonical types, enums, validation, normalization, classification contracts | Standard library and general-purpose text/ID packages |
-| `internal/knowledge/store` | Domain-facing transaction, query, cursor, health, checkpoint, and migration interfaces | `internal/knowledge` |
+| `internal/knowledge/store` | Domain-facing transaction, query, cursor, health, checkpoint, and backend-neutral canonical migration interfaces | `internal/knowledge` |
 | `internal/knowledge/store/memory` | Deterministic in-memory implementation for contracts and service tests | Domain and store contracts |
 | `internal/knowledge/store/pebble` | Private keys, records, indexes, batches, generations, and Pebble lifecycle | Domain/store contracts and Pebble |
-| `internal/knowledge/kpackage` | Deterministic, backend-neutral `.kknowledge` serialization, integrity inventory, and signature envelopes | Canonical Knowledge domain only |
+| `internal/knowledge/kpackage` | Deterministic, backend-neutral per-chunk `.kknowledge` serialization, integrity inventory, and signature envelopes | Canonical Knowledge domain only |
+| `internal/knowledge/migrationarchive` | Deterministic whole-store canonical snapshot envelope for offline backend replacement | Canonical Knowledge and store contracts |
 | `internal/knowledge/service` | Authorization, policy, normalization, classification, transactions, search, audit decisions, import/export orchestration | Domain and store/classifier contracts |
 | `internal/tools/knowledgetool` | Model-facing multi-action schema and adaptation to service operations | Knowledge service and generic tool contracts |
 | `internal/knowledgeapi` | Authenticated HTTP/event DTOs, limits, ETags, and error envelopes | Knowledge service and Web/API infrastructure |

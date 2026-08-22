@@ -158,6 +158,16 @@ func (s *Store) Health(ctx context.Context) (knowledgeStore.Health, error) {
 	}, nil
 }
 
+func (tx *transaction) Empty(ctx context.Context) (bool, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return false, err
+	}
+	return len(tx.data.chunks) == 0 && len(tx.data.entries) == 0 && len(tx.data.links) == 0 &&
+		len(tx.data.evidence) == 0 && len(tx.data.assets) == 0 && len(tx.data.chunkHistory) == 0 &&
+		len(tx.data.entryHistory) == 0 && len(tx.data.linkHistory) == 0 && len(tx.data.usage) == 0 &&
+		len(tx.data.usageEvents) == 0, nil
+}
+
 func (s *Store) ListChunks(ctx context.Context, request knowledgeStore.ChunkListRequest) (knowledgeStore.ChunkPage, error) {
 	if err := ctx.Err(); err != nil {
 		return knowledgeStore.ChunkPage{}, err

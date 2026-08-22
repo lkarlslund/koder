@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/migrationarchive"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
 )
@@ -164,5 +167,114 @@ func TestWriteKnowledgeRestoreResultSupportsHumanAndMachineOutput(t *testing.T) 
 	}
 	if decoded.LivePath != "/live" || decoded.IndexGeneration != 7 {
 		t.Fatalf("JSON result = %#v", decoded)
+	}
+}
+
+func TestKnowledgeMigrationCommandHelpersRoundTripAndRefuseNonEmptyTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sourceStateDir := t.TempDir()
+	sourceStore, err := knowledgePebble.Open(sourceStateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: sourceStore,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "test:migration-command"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Migration command", Kind: knowledge.ChunkKindReference,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Visibility: knowledge.VisibilityPrivate,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sourceStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	destination := filepath.Join(t.TempDir(), "knowledge.migration.gz")
+	exported, resolved, err := createKnowledgeMigrationExport(ctx, sourceStateDir, destination, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != destination || exported.Stats.Chunks != 1 || exported.Stats.Revisions != 1 || exported.Size == 0 {
+		t.Fatalf("migration export = %q %#v", resolved, exported)
+	}
+	if _, _, err := createKnowledgeMigrationExport(ctx, sourceStateDir, destination, false); !errors.Is(err, knowledgeStore.ErrConflict) {
+		t.Fatalf("overwrite export error = %v, want ErrConflict", err)
+	}
+
+	targetStateDir := t.TempDir()
+	imported, source, err := importKnowledgeMigration(ctx, targetStateDir, destination, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source != destination || imported.Chunks != 1 || imported.Revisions != 1 {
+		t.Fatalf("migration import = %q %#v", source, imported)
+	}
+	targetStore, err := knowledgePebble.OpenExisting(targetStateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := targetStore.View(ctx, func(tx knowledgeStore.ReadTx) error {
+		chunk, err := tx.Chunk(ctx, created.Chunk.ID)
+		if err == nil && chunk.Title != created.Chunk.Title {
+			t.Fatalf("imported chunk = %#v", chunk)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := targetStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := importKnowledgeMigration(ctx, targetStateDir, destination, true, false); !errors.Is(err, knowledgeStore.ErrConflict) {
+		t.Fatalf("non-empty import error = %v, want ErrConflict", err)
+	}
+}
+
+func TestKnowledgeMigrationImportRequiresConfirmationAndPersonalConsent(t *testing.T) {
+	t.Parallel()
+	if _, _, err := importKnowledgeMigration(context.Background(), "unused", "unused", false, false); err == nil || !strings.Contains(err.Error(), "--confirm") {
+		t.Fatalf("unconfirmed import error = %v", err)
+	}
+	personal := knowledge.Chunk{ID: knowledgeService.PersonalMeChunkID, Kind: knowledge.ChunkKindPersonal, Scope: knowledge.Scope{Kind: knowledge.ScopeKindPersonal}}
+	if !migrationContainsPersonal(knowledgeStore.MigrationSnapshot{Records: []knowledgeStore.CanonicalRecord{{Kind: knowledgeStore.RecordKindChunk, Chunk: &personal}}}) {
+		t.Fatal("migrationContainsPersonal() = false")
+	}
+	ordinary := knowledge.Chunk{ID: "019f132e-4f3a-739a-9ab2-5198dcd19e67", Kind: knowledge.ChunkKindReference, Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}}
+	if migrationContainsPersonal(knowledgeStore.MigrationSnapshot{Records: []knowledgeStore.CanonicalRecord{{Kind: knowledgeStore.RecordKindChunk, Chunk: &ordinary}}}) {
+		t.Fatal("migrationContainsPersonal(ordinary) = true")
+	}
+}
+
+func TestWriteKnowledgeMigrationResultsSupportJSON(t *testing.T) {
+	t.Parallel()
+	stats := knowledgeStore.MigrationStats{ScanStats: knowledgeStore.ScanStats{Chunks: 2, Total: 2}, Revisions: 3, Assets: 4}
+	var exported bytes.Buffer
+	if err := writeKnowledgeMigrationExportResult(&exported, "/migration", migrationarchive.ExportResult{SHA256: "abc", Size: 12, Stats: stats}, true); err != nil {
+		t.Fatal(err)
+	}
+	var exportResult map[string]any
+	if err := json.Unmarshal(exported.Bytes(), &exportResult); err != nil {
+		t.Fatal(err)
+	}
+	if exportResult["path"] != "/migration" || exportResult["sha256"] != "abc" || exportResult["revisions"] != float64(3) {
+		t.Fatalf("export JSON = %#v", exportResult)
+	}
+	var imported bytes.Buffer
+	if err := writeKnowledgeMigrationImportResult(&imported, "/migration", stats, true); err != nil {
+		t.Fatal(err)
+	}
+	var importResult map[string]any
+	if err := json.Unmarshal(imported.Bytes(), &importResult); err != nil {
+		t.Fatal(err)
+	}
+	if importResult["path"] != "/migration" || importResult["assets"] != float64(4) {
+		t.Fatalf("import JSON = %#v", importResult)
 	}
 }

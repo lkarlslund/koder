@@ -44,6 +44,7 @@ type Health struct {
 // ReadTx provides a consistent canonical-record snapshot. A transaction is valid only
 // during its Store.View or Store.Update callback and must not escape that callback.
 type ReadTx interface {
+	Empty(context.Context) (bool, error)
 	Chunk(context.Context, knowledge.ChunkID) (knowledge.Chunk, error)
 	ChunkDeletionBlockers(context.Context, knowledge.ChunkID) (ChunkDeletionBlockers, error)
 	Entry(context.Context, knowledge.EntryID) (knowledge.Entry, error)
