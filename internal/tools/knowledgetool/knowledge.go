@@ -4,14 +4,22 @@ package knowledgetool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
+	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-const serviceKey = "knowledge"
+const (
+	serviceKey = "knowledge"
+	parameters = `{"type":"object","properties":{"action":{"type":"string","enum":["search","get","neighbors"]},"query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},"object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},"id":{"type":"string","description":"Knowledge UUID returned by search, get, or neighbors"},"chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},"include_invalid":{"type":"boolean","description":"Include entries outside their validity window"},"include_superseded":{"type":"boolean","description":"Include superseded claims"},"expand_graph":{"type":"boolean","description":"Expand search by one bounded relationship hop"},"direction":{"type":"string","enum":["incoming","outgoing","both"],"description":"Neighbor direction; defaults to both"},"link_kinds":{"type":"array","maxItems":10,"items":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]}},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string","description":"Opaque continuation cursor from the previous matching action"}},"required":["action"],"additionalProperties":false}`
+)
 
 // RuntimeService makes an available Knowledge service visible to a chat tool
 // runtime. A nil service intentionally contributes no capability.
@@ -25,12 +33,10 @@ func RuntimeService(service *knowledgeService.Service) map[string]any {
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
-		Description: "Search and maintain Koder's durable, linked knowledge.",
-		Usage:       "Choose one action. The actions offered at runtime depend on the current chat's authorization and available Knowledge service.",
-		Parameters:  `{"type":"object","properties":{"action":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
-		// Read and write actions enable model exposure incrementally. Keeping the
-		// registered shell private prevents a model from calling unfinished actions.
-		ExposeToLLM: false,
+		Description: "Search and inspect Koder's durable, linked knowledge.",
+		Usage:       "Use search for a small ranked set of durable facts or procedures. Search returns summaries and IDs, not full bodies; use get with an exact ID when the full object is needed. Use neighbors to inspect linked context. Follow next_cursor only when more results are necessary.",
+		Parameters:  parameters,
+		ExposeToLLM: true,
 	})
 }
 
@@ -38,25 +44,380 @@ type tool struct{}
 
 func (tool) ID() tools.ID             { return tools.Knowledge }
 func (tool) BypassesPermission() bool { return false }
+
+func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if _, err := requireService(runtime); err != nil {
+		return tools.ToolSpec{}, false
+	}
+	return spec, true
+}
+
 func (tool) Preview(req tools.Request) string {
-	return "Knowledge " + strings.TrimSpace(req.Args["action"])
+	action := strings.TrimSpace(req.Args["action"])
+	switch action {
+	case "search":
+		return "Search knowledge for " + strings.TrimSpace(req.Args["query"])
+	case "get", "neighbors":
+		return "Knowledge " + action + " " + strings.TrimSpace(req.Args["id"])
+	default:
+		return "Knowledge " + action
+	}
 }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	action := strings.TrimSpace(args["action"])
-	if action == "" {
+	switch action := strings.TrimSpace(args["action"]); action {
+	case "search":
+		return normalizeSearchArgs(args)
+	case "get":
+		return normalizeGetArgs(args)
+	case "neighbors":
+		return normalizeNeighborArgs(args)
+	case "":
 		return nil, errors.New("action is required")
+	default:
+		return nil, fmt.Errorf("unsupported knowledge action %q", action)
 	}
-	return map[string]string{"action": action}, nil
 }
 
-func (tool) Call(_ context.Context, options tools.Options) (tools.Result, error) {
-	if _, err := requireService(options.Runtime); err != nil {
+func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, error) {
+	service, err := requireService(options.Runtime)
+	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.Result{}, errors.New("knowledge actions are not available in this build")
+	var value any
+	switch options.Request.Args["action"] {
+	case "search":
+		value, err = callSearch(ctx, service, options.Request.Args)
+	case "get":
+		value, err = callGet(ctx, service, options.Request.Args)
+	case "neighbors":
+		value, err = callNeighbors(ctx, service, options.Request.Args)
+	default:
+		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
+	}
+	if err != nil {
+		return tools.Result{}, knowledgeService.ClassifyError(err)
+	}
+	return jsonResult(value)
 }
 
 func requireService(runtime tools.Runtime) (*knowledgeService.Service, error) {
 	return tools.RequireService[*knowledgeService.Service](runtime, serviceKey)
+}
+
+func normalizeSearchArgs(args map[string]string) (map[string]string, error) {
+	query := strings.TrimSpace(args["query"])
+	if query == "" {
+		return nil, errors.New("query is required for knowledge search")
+	}
+	if len(query) > 4<<10 {
+		return nil, errors.New("knowledge search query exceeds 4 KiB")
+	}
+	out := map[string]string{"action": "search", "query": query}
+	if err := normalizeLimit(args, out, 25); err != nil {
+		return nil, err
+	}
+	if err := normalizeCursor(args, out); err != nil {
+		return nil, err
+	}
+	for _, name := range []string{"include_invalid", "include_superseded", "expand_graph"} {
+		if err := normalizeBool(args, out, name); err != nil {
+			return nil, err
+		}
+	}
+	if raw := strings.TrimSpace(args["chunk_ids"]); raw != "" {
+		ids, err := decodeStringList(raw, "chunk_ids", 25)
+		if err != nil {
+			return nil, err
+		}
+		for _, chunkID := range ids {
+			if err := (knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: chunkID}).Validate(); err != nil {
+				return nil, fmt.Errorf("chunk_ids: %w", err)
+			}
+		}
+		encoded, err := encodeStringList(ids)
+		if err != nil {
+			return nil, err
+		}
+		out["chunk_ids"] = encoded
+	}
+	return out, nil
+}
+
+func normalizeGetArgs(args map[string]string) (map[string]string, error) {
+	kind, objectID, err := normalizeObject(args, true)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"action": "get", "object_kind": kind.String(), "id": objectID}, nil
+}
+
+func normalizeNeighborArgs(args map[string]string) (map[string]string, error) {
+	kind, objectID, err := normalizeObject(args, false)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{"action": "neighbors", "object_kind": kind.String(), "id": objectID}
+	direction := strings.TrimSpace(args["direction"])
+	if direction == "" {
+		direction = string(knowledgeStore.LinkDirectionBoth)
+	}
+	switch knowledgeStore.LinkDirection(direction) {
+	case knowledgeStore.LinkDirectionIncoming, knowledgeStore.LinkDirectionOutgoing, knowledgeStore.LinkDirectionBoth:
+		out["direction"] = direction
+	default:
+		return nil, fmt.Errorf("invalid neighbor direction %q", direction)
+	}
+	if err := normalizeLimit(args, out, 100); err != nil {
+		return nil, err
+	}
+	if err := normalizeCursor(args, out); err != nil {
+		return nil, err
+	}
+	if raw := strings.TrimSpace(args["link_kinds"]); raw != "" {
+		names, err := decodeStringList(raw, "link_kinds", 10)
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			kind, err := knowledge.LinkKindString(name)
+			if err != nil || kind == knowledge.LinkKindUnspecified {
+				return nil, fmt.Errorf("invalid link kind %q", name)
+			}
+		}
+		encoded, err := encodeStringList(names)
+		if err != nil {
+			return nil, err
+		}
+		out["link_kinds"] = encoded
+	}
+	return out, nil
+}
+
+func normalizeObject(args map[string]string, allowLink bool) (knowledge.ObjectKind, string, error) {
+	kind, err := knowledge.ObjectKindString(strings.TrimSpace(args["object_kind"]))
+	if err != nil || kind == knowledge.ObjectKindUnspecified {
+		return 0, "", errors.New("object_kind must be chunk, entry, or link")
+	}
+	if kind != knowledge.ObjectKindChunk && kind != knowledge.ObjectKindEntry && (!allowLink || kind != knowledge.ObjectKindLink) {
+		if allowLink {
+			return 0, "", errors.New("object_kind must be chunk, entry, or link")
+		}
+		return 0, "", errors.New("neighbors object_kind must be chunk or entry")
+	}
+	objectID := strings.TrimSpace(args["id"])
+	if err := (knowledge.ObjectRef{Kind: kind, ID: objectID}).Validate(); err != nil {
+		return 0, "", err
+	}
+	return kind, objectID, nil
+}
+
+func normalizeLimit(args, out map[string]string, maximum int) error {
+	raw := strings.TrimSpace(args["limit"])
+	if raw == "" {
+		return nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > maximum {
+		return fmt.Errorf("limit must be between 1 and %d", maximum)
+	}
+	out["limit"] = strconv.Itoa(limit)
+	return nil
+}
+
+func normalizeCursor(args, out map[string]string) error {
+	cursor := strings.TrimSpace(args["cursor"])
+	if len(cursor) > 16<<10 {
+		return errors.New("cursor exceeds 16 KiB")
+	}
+	if cursor != "" {
+		out["cursor"] = cursor
+	}
+	return nil
+}
+
+func normalizeBool(args, out map[string]string, name string) error {
+	raw := strings.TrimSpace(args[name])
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	out[name] = strconv.FormatBool(value)
+	return nil
+}
+
+func decodeStringList(raw, name string, maximum int) ([]string, error) {
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if len(values) > maximum {
+		return nil, fmt.Errorf("%s exceeds %d items", name, maximum)
+	}
+	for index := range values {
+		values[index] = strings.TrimSpace(values[index])
+		if values[index] == "" {
+			return nil, fmt.Errorf("%s contains an empty item", name)
+		}
+	}
+	return values, nil
+}
+
+func encodeStringList(values []string) (string, error) {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("encode string list: %w", err)
+	}
+	return string(data), nil
+}
+
+func callSearch(ctx context.Context, service *knowledgeService.Service, args map[string]string) (knowledgeService.LexicalSearchResult, error) {
+	request := knowledgeService.LexicalSearchRequest{
+		Query:             args["query"],
+		Limit:             intArg(args, "limit", 5),
+		Cursor:            args["cursor"],
+		IncludeInvalid:    boolArg(args, "include_invalid"),
+		IncludeSuperseded: boolArg(args, "include_superseded"),
+	}
+	if raw := args["chunk_ids"]; raw != "" {
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+			return knowledgeService.LexicalSearchResult{}, fmt.Errorf("decode normalized chunk_ids: %w", err)
+		}
+		for _, id := range ids {
+			request.ChunkIDs = append(request.ChunkIDs, knowledge.ChunkID(id))
+		}
+	}
+	if boolArg(args, "expand_graph") {
+		request.GraphExpansion = &knowledgeService.GraphExpansionOptions{}
+	}
+	return service.SearchLexical(ctx, request)
+}
+
+func callGet(ctx context.Context, service *knowledgeService.Service, args map[string]string) (recordResult, error) {
+	kind, err := knowledge.ObjectKindString(args["object_kind"])
+	if err != nil {
+		return recordResult{}, err
+	}
+	record, err := service.Get(ctx, knowledge.ObjectRef{Kind: kind, ID: args["id"]})
+	if err != nil {
+		return recordResult{}, err
+	}
+	return adaptRecord(record), nil
+}
+
+func callNeighbors(ctx context.Context, service *knowledgeService.Service, args map[string]string) (neighborPageResult, error) {
+	kind, err := knowledge.ObjectKindString(args["object_kind"])
+	if err != nil {
+		return neighborPageResult{}, err
+	}
+	request := knowledgeService.NeighborRequest{
+		Endpoint:  knowledge.ObjectRef{Kind: kind, ID: args["id"]},
+		Direction: knowledgeStore.LinkDirection(args["direction"]),
+		Limit:     intArg(args, "limit", 25),
+		Cursor:    args["cursor"],
+	}
+	if raw := args["link_kinds"]; raw != "" {
+		var names []string
+		if err := json.Unmarshal([]byte(raw), &names); err != nil {
+			return neighborPageResult{}, fmt.Errorf("decode normalized link_kinds: %w", err)
+		}
+		for _, name := range names {
+			kind, err := knowledge.LinkKindString(name)
+			if err != nil {
+				return neighborPageResult{}, err
+			}
+			request.Kinds = append(request.Kinds, kind)
+		}
+	}
+	page, err := service.Neighbors(ctx, request)
+	if err != nil {
+		return neighborPageResult{}, err
+	}
+	result := neighborPageResult{NextCursor: page.NextCursor, Neighbors: make([]neighborResult, 0, len(page.Neighbors))}
+	for _, neighbor := range page.Neighbors {
+		result.Neighbors = append(result.Neighbors, neighborResult{
+			Direction: neighbor.Direction, Link: neighbor.Link, Object: summarizeRecord(neighbor.Object),
+		})
+	}
+	return result, nil
+}
+
+type recordResult struct {
+	Kind  knowledgeStore.RecordKind `json:"kind"`
+	ID    string                    `json:"id"`
+	Chunk *knowledge.Chunk          `json:"chunk,omitempty"`
+	Entry *knowledge.Entry          `json:"entry,omitempty"`
+	Link  *knowledge.Link           `json:"link,omitempty"`
+}
+
+type recordSummary struct {
+	Kind         knowledgeStore.RecordKind `json:"kind"`
+	ID           string                    `json:"id"`
+	SemanticKind string                    `json:"semantic_kind"`
+	Title        string                    `json:"title"`
+	Summary      string                    `json:"summary,omitempty"`
+	Scope        knowledge.Scope           `json:"scope"`
+	State        string                    `json:"state"`
+}
+
+type neighborResult struct {
+	Direction knowledgeStore.LinkDirection `json:"direction"`
+	Link      knowledge.Link               `json:"link"`
+	Object    recordSummary                `json:"object"`
+}
+
+type neighborPageResult struct {
+	Neighbors  []neighborResult `json:"neighbors"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
+func adaptRecord(record knowledgeStore.CanonicalRecord) recordResult {
+	return recordResult{Kind: record.Kind, ID: record.ID(), Chunk: record.Chunk, Entry: record.Entry, Link: record.Link}
+}
+
+func summarizeRecord(record knowledgeStore.CanonicalRecord) recordSummary {
+	result := recordSummary{Kind: record.Kind, ID: record.ID()}
+	switch record.Kind {
+	case knowledgeStore.RecordKindChunk:
+		if record.Chunk != nil {
+			result.SemanticKind = record.Chunk.Kind.String()
+			result.Title = record.Chunk.Title
+			result.Summary = record.Chunk.Description
+			result.Scope = record.Chunk.Scope
+			result.State = record.Chunk.State.String()
+		}
+	case knowledgeStore.RecordKindEntry:
+		if record.Entry != nil {
+			result.SemanticKind = record.Entry.Kind.String()
+			result.Title = record.Entry.Title
+			result.Summary = record.Entry.Summary
+			result.Scope = record.Entry.Scope
+			result.State = record.Entry.State.String()
+		}
+	}
+	return result
+}
+
+func intArg(args map[string]string, name string, fallback int) int {
+	value, err := strconv.Atoi(args[name])
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func boolArg(args map[string]string, name string) bool {
+	return args[name] == "true"
+}
+
+func jsonResult(value any) (tools.Result, error) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return tools.Result{Output: string(data), Stored: value}, nil
 }

@@ -15,6 +15,7 @@ const (
 	ChunkPolicyLinkCreate  ChunkPolicyAction = "link_create"
 	ChunkPolicyLinkUnlink  ChunkPolicyAction = "link_unlink"
 	ChunkPolicyLinkRestore ChunkPolicyAction = "link_restore"
+	ChunkPolicyRead        ChunkPolicyAction = "read"
 	ChunkPolicyTraverse    ChunkPolicyAction = "traverse"
 	ChunkPolicySearch      ChunkPolicyAction = "search"
 )

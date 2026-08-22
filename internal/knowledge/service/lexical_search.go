@@ -48,11 +48,28 @@ type LexicalSearchResult struct {
 
 type LexicalSearchMatch struct {
 	EntryID          knowledge.EntryID   `json:"entry_id"`
+	Document         SearchDocument      `json:"document"`
 	LexicalScore     float64             `json:"lexical_score"`
 	Terms            []LexicalTermScore  `json:"terms,omitempty"`
 	GraphConnections []GraphConnection   `json:"graph_connections,omitempty"`
 	Rank             SearchRank          `json:"rank"`
 	Reasons          []SearchMatchReason `json:"reasons"`
+}
+
+// SearchDocument is the bounded entry projection returned with a search hit.
+// Full Markdown bodies remain behind an explicit get operation.
+type SearchDocument struct {
+	ChunkID        knowledge.ChunkID            `json:"chunk_id"`
+	Kind           knowledge.EntryKind          `json:"kind"`
+	Title          string                       `json:"title"`
+	Summary        string                       `json:"summary,omitempty"`
+	Scope          knowledge.Scope              `json:"scope"`
+	State          knowledge.EntryState         `json:"state"`
+	Verification   knowledge.VerificationStatus `json:"verification"`
+	SupersededByID knowledge.EntryID            `json:"superseded_by_id,omitempty"`
+	ValidFrom      time.Time                    `json:"valid_from,omitzero"`
+	ValidUntil     time.Time                    `json:"valid_until,omitzero"`
+	ReviewAfter    time.Time                    `json:"review_after,omitzero"`
 }
 
 // SearchLexical applies authorization, exact scope, lifecycle, and temporal validity
@@ -165,6 +182,7 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 		}
 	}
 	pageMatches = addSearchMatchReasons(pageMatches)
+	pageMatches = addSearchDocuments(pageMatches, allowed)
 	warnings := searchWarnings(pageMatches, allowed, searchAsOf, expansion)
 	contradictions, contradictionTruncated, err := s.searchContradictions(ctx, pageMatches, allowed)
 	if err != nil {
@@ -178,6 +196,21 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 		Warnings: warnings, Contradictions: contradictions, AsOf: searchAsOf, NextCursor: nextCursor,
 		CorpusDocumentCount: uint64(len(entries)), MatchedDocumentCount: uint64(len(matched)),
 	}, nil
+}
+
+func addSearchDocuments(matches []LexicalSearchMatch, entries map[knowledge.EntryID]knowledge.Entry) []LexicalSearchMatch {
+	result := slices.Clone(matches)
+	for index, match := range result {
+		entry := entries[match.EntryID]
+		match.Document = SearchDocument{
+			ChunkID: entry.ChunkID, Kind: entry.Kind, Title: entry.Title, Summary: entry.Summary,
+			Scope: entry.Scope, State: entry.State, Verification: entry.Verification.Status,
+			SupersededByID: entry.SupersededByID, ValidFrom: entry.ValidFrom,
+			ValidUntil: entry.ValidUntil, ReviewAfter: entry.ReviewAfter,
+		}
+		result[index] = match
+	}
+	return result
 }
 
 func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (LexicalSearchRequest, []string, error) {
