@@ -23,6 +23,7 @@
   <script defer src="/assets/knowledge_graph_adapter.js"></script>
   <script defer src="/assets/knowledge_graph.js"></script>
   <script defer src="/assets/knowledge_graph_rendering.js"></script>
+  <script defer src="/assets/knowledge_graph_renderer.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
@@ -95,6 +96,7 @@
           <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
+          <div class="knowledge-graph-canvas" data-knowledge-graph-canvas aria-hidden="true"></div>
           <div class="knowledge-state-banner" data-knowledge-banner hidden></div>
           <div class="knowledge-graph-legend" data-knowledge-legend aria-label="Visible relationship types" hidden></div>
           <div class="knowledge-constellation" aria-hidden="true">

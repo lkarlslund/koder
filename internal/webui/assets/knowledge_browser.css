@@ -460,6 +460,22 @@ body {
   background-size: auto, auto, 2.6rem 2.6rem, 2.6rem 2.6rem, auto;
 }
 
+.knowledge-graph-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.knowledge-graph-stage[data-graph-state="ready"] .knowledge-graph-canvas,
+.knowledge-graph-stage[data-graph-state="truncated"] .knowledge-graph-canvas { opacity: 1; }
+
+.knowledge-graph-stage[data-graph-state="ready"] .knowledge-constellation,
+.knowledge-graph-stage[data-graph-state="ready"] .knowledge-graph-message,
+.knowledge-graph-stage[data-graph-state="truncated"] .knowledge-constellation,
+.knowledge-graph-stage[data-graph-state="truncated"] .knowledge-graph-message { display: none; }
+
 .knowledge-graph-legend {
   position: absolute;
   z-index: 5;

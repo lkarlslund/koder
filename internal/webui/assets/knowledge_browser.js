@@ -137,6 +137,13 @@
     return value.length > limit ? value.slice(0, Math.max(1, limit - 1)).trimEnd() + '…' : value;
   }
 
+  function graphSnapshotRequest(objectKind, id) {
+    objectKind = String(objectKind || '').trim().toLowerCase();
+    id = String(id || '').trim();
+    if (!['chunk', 'entry'].includes(objectKind) || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+    return {root: {kind: objectKind, id}, max_depth: 2, max_nodes: 200, max_edges: 400, time_limit_ms: 2500};
+  }
+
   function sanitizedMarkdownHTML(value, markedAPI, purifyAPI) {
     if (!markedAPI || typeof markedAPI.parse !== 'function' || !purifyAPI || typeof purifyAPI.sanitize !== 'function') return '';
     const rendered = markedAPI.parse(String(value || ''), {gfm: true, breaks: false});
@@ -154,9 +161,12 @@
   }
 
   class BrowserApp {
-    constructor(shell, client) {
+    constructor(shell, client, options) {
+      options = options || {};
       this.shell = shell;
       this.client = client;
+      this.graphAdapter = options.graphAdapter || null;
+      this.graphRenderer = options.graphRenderer || null;
       this.chunks = [];
       this.matches = [];
       this.page = null;
@@ -166,6 +176,7 @@
       this.chatSelection = chatSelectionFromSearch(globalThis.location && globalThis.location.search);
       this.inspectedObject = null;
       this.searchTimer = 0;
+      this.graphRefetchTimer = 0;
       this.refreshButton = shell.querySelector('[data-knowledge-retry]');
       this.searchForm = shell.querySelector('[data-knowledge-search-form]');
       this.searchInput = shell.querySelector('[data-knowledge-search]');
@@ -211,6 +222,15 @@
         this.refresh();
       };
       globalThis.addEventListener('popstate', this.onPopState);
+      if (this.graphAdapter) {
+        this.graphUnsubscribe = this.graphAdapter.subscribe(event => {
+          if (event.type !== 'refetch' || this.graphRefetchTimer) return;
+          this.graphRefetchTimer = setTimeout(() => {
+            this.graphRefetchTimer = 0;
+            this.loadGraphSelection();
+          }, 0);
+        });
+      }
       this.syncControls();
     }
 
@@ -330,6 +350,7 @@
         }
         if (this.loadMoreButton) this.loadMoreButton.hidden = !hasMore;
         this.loadSelection();
+        this.loadGraphSelection();
       } catch (error) {
         this.handleError(error);
       }
@@ -435,6 +456,7 @@
       const labelSource = this.resultMode === 'search' ? object && object.document && object.document.title : object && object.title;
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, object, label: plainTextLabel(labelSource || id)}}));
       this.loadSelection();
+      this.loadGraphSelection();
     }
 
     renderSelection() {
@@ -485,6 +507,51 @@
         const requestID = String(error && error.requestID || '');
         const message = String(error && error.message || 'Knowledge could not load this selection.');
         this.setInspectorMode('error', requestID ? message + ' Audit ID: ' + requestID : message);
+      }
+    }
+
+    setGraphState(state, detail) {
+      if (this.graphRenderer) this.graphRenderer.setState(state);
+      const status = this.shell.querySelector('[data-knowledge-status-label]');
+      const title = this.shell.querySelector('[data-knowledge-state-title]');
+      const message = this.shell.querySelector('[data-knowledge-state-detail]');
+      const labels = {
+        empty: ['Choose knowledge', 'Select a chunk or search result to draw its neighborhood.'],
+        loading: ['Loading graph', 'Reading a bounded, authorized neighborhood.'],
+        ready: ['Graph ready', detail || 'Knowledge neighborhood ready.'],
+        truncated: ['Partial graph', detail || 'The server bounded this neighborhood for safety.'],
+        stale: ['Refreshing graph', 'Knowledge changed; loading a consistent snapshot.'],
+        error: ['Graph unavailable', detail || 'This neighborhood could not be loaded.'],
+      };
+      const selected = labels[state] || labels.error;
+      if (status) status.textContent = selected[0];
+      if (title) title.textContent = selected[0];
+      if (message) message.textContent = selected[1];
+    }
+
+    async loadGraphSelection() {
+      if (!this.graphAdapter || !this.graphRenderer) return;
+      const request = graphSnapshotRequest(this.urlState.objectKind, this.urlState.id);
+      if (!request) {
+        this.client.cancel('graph');
+        this.graphRenderer.setSelection(null, null);
+        this.setGraphState('empty');
+        return;
+      }
+      this.setGraphState('loading');
+      try {
+        const response = await this.client.graphSnapshot(request, {channel: 'graph', timeoutMS: 10000});
+        this.graphAdapter.replaceSnapshot(response);
+        this.graphRenderer.setSelection('node', `${request.root.kind}:${request.root.id}`);
+        const counts = this.graphAdapter.counts();
+        const truncated = !!(response && response.page && response.page.truncated);
+        const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
+        this.setGraphState(truncated ? 'truncated' : 'ready', detail);
+      } catch (error) {
+        if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
+        const requestID = String(error && error.requestID || '');
+        const detail = String(error && error.message || 'This neighborhood could not be loaded.');
+        this.setGraphState(error && error.code === 'invalid_cursor' ? 'stale' : 'error', requestID ? `${detail} Audit ID: ${requestID}` : detail);
       }
     }
 
@@ -585,7 +652,11 @@
 
     destroy() {
       clearTimeout(this.searchTimer);
+      clearTimeout(this.graphRefetchTimer);
       globalThis.removeEventListener('popstate', this.onPopState);
+      if (this.graphUnsubscribe) this.graphUnsubscribe();
+      if (this.graphRenderer) this.graphRenderer.destroy();
+      if (this.graphAdapter) this.graphAdapter.destroy();
       this.client.cancelAll();
     }
   }
@@ -634,7 +705,19 @@
     }
     try {
       const client = globalThis.KoderKnowledgeAPI.fromPageConfig(globalThis.KODER_KNOWLEDGE_CONFIG || {});
-      const app = new BrowserApp(shell, client);
+      const runtime = {};
+      const canvas = shell.querySelector('[data-knowledge-graph-canvas]');
+      if (canvas && globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter &&
+          globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.Sigma) {
+        const graphStore = new globalThis.KoderKnowledgeGraph.Store();
+        runtime.graphAdapter = new globalThis.KoderKnowledgeGraphAdapter.Adapter(graphStore);
+        runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
+          store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
+          legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
+          SigmaAPI: globalThis.Sigma,
+        });
+      }
+      const app = new BrowserApp(shell, client, runtime);
       shell.__koderKnowledgeApp = app;
       app.refresh();
       return app;
@@ -646,5 +729,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, sanitizedMarkdownHTML, mount});
 });

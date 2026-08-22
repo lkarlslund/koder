@@ -44,6 +44,11 @@ assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&
 assert.strictEqual(browser.displayLabel('partially_verified'), 'Partially verified');
 assert.strictEqual(browser.plainTextLabel('**Safe** [label](https://example.com) <script>bad</script>'), 'Safe label bad');
 assert.strictEqual(browser.plainTextLabel('abcdefghijklmnopqrstuvwxyz', 8), 'abcdefg…');
+assert.deepStrictEqual(browser.graphSnapshotRequest('entry', 'entry-7'), {
+  root: {kind: 'entry', id: 'entry-7'}, max_depth: 2, max_nodes: 200, max_edges: 400, time_limit_ms: 2500,
+});
+assert.strictEqual(browser.graphSnapshotRequest('link', 'link-1'), null);
+assert.strictEqual(browser.graphSnapshotRequest('entry', '../secret'), null);
 let sanitizeOptions;
 const sanitized = browser.sanitizedMarkdownHTML('unsafe', {parse: () => '<script>bad</script><p>safe</p>'}, {
   sanitize: (html, options) => { sanitizeOptions = options; return html.replace('<script>bad</script>', ''); },
