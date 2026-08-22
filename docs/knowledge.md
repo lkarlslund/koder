@@ -388,6 +388,12 @@ Sensitive inferred attributes are not persisted automatically. Origin does not r
 evidence or verification: an explicit preference can be well evidenced by the user's
 statement while still being time-limited or later superseded.
 
+Every entry in the built-in `personal/me` chunk retains that exact personal scope and
+must declare one of these origins. An inferred entry carrying personal-sensitive,
+medical, legal, financial, physical-safety, or security-sensitive risk can exist only as
+a reviewable draft until it is replaced or explicitly confirmed; canonical validation
+enforces this even when a pluggable classifier returns `allow`.
+
 ## Combined examples
 
 ### Environment-specific procedure

@@ -132,3 +132,74 @@ func TestPersonalOriginCannotBeDowngraded(t *testing.T) {
 		t.Fatalf("downgrade changed canonical entry: %#v", got)
 	}
 }
+
+func TestPersonalMeEntriesCannotEscapeScopeOrOriginLabels(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	_, _ = service.EnsurePersonalChunk(ctx)
+
+	global := testEntryCandidate()
+	global.Scope = knowledge.Scope{Kind: knowledge.ScopeKindGlobal}
+	if _, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: PersonalMeChunkID, Entry: global}); !errors.Is(err, ErrPersonalOriginPolicy) {
+		t.Fatalf("CreateEntry(global in personal/me) error = %v, want ErrPersonalOriginPolicy", err)
+	}
+	unlabelled := testEntryCandidate()
+	if _, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: PersonalMeChunkID, Entry: unlabelled}); !errors.Is(err, ErrPersonalOriginPolicy) {
+		t.Fatalf("CreateEntry(unlabelled personal/me) error = %v, want ErrPersonalOriginPolicy", err)
+	}
+
+	explicit := testEntryCandidate()
+	explicit.PersonalOrigin = knowledge.PersonalOriginExplicit
+	created, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: PersonalMeChunkID, Entry: explicit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := EntryContentFrom(created.Entry)
+	content.Scope = knowledge.Scope{Kind: knowledge.ScopeKindGlobal}
+	content.PersonalOrigin = knowledge.PersonalOriginUnspecified
+	if _, err := service.UpdateEntry(ctx, UpdateEntryRequest{
+		EntryID: created.Entry.ID, ExpectedRevision: created.Entry.Revision.Number, Content: content,
+	}); !errors.Is(err, ErrPersonalOriginPolicy) {
+		t.Fatalf("UpdateEntry(personal/me scope escape) error = %v, want ErrPersonalOriginPolicy", err)
+	}
+}
+
+func TestSensitiveInferenceRemainsDraftEvenWhenClassifierAllowsIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	classifier := &recordingClassifier{result: knowledge.ClassificationResult{Decision: knowledge.ClassificationDecisionAllow}}
+	service := newTestService(t, store, classifier)
+	_, _ = service.EnsurePersonalChunk(ctx)
+
+	sensitive := testEntryCandidate()
+	sensitive.Title = "Possible medical preference"
+	sensitive.PersonalOrigin = knowledge.PersonalOriginInferred
+	sensitive.Confidence = 0.6
+	sensitive.Risk = []knowledge.RiskClass{knowledge.RiskClassMedical}
+	created, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: PersonalMeChunkID, Entry: sensitive})
+	if err != nil || created.Entry.State != knowledge.EntryStateDraft {
+		t.Fatalf("CreateEntry(classifier-allowed sensitive inference) = %#v, %v", created, err)
+	}
+
+	ordinary := testEntryCandidate()
+	ordinary.Title = "Possible color preference"
+	ordinary.PersonalOrigin = knowledge.PersonalOriginInferred
+	ordinary.Confidence = 0.6
+	active, err := service.CreateEntry(ctx, CreateEntryRequest{ChunkID: PersonalMeChunkID, Entry: ordinary})
+	if err != nil || active.Entry.State != knowledge.EntryStateActive {
+		t.Fatalf("CreateEntry(low-risk inference) = %#v, %v", active, err)
+	}
+	content := EntryContentFrom(active.Entry)
+	content.Risk = []knowledge.RiskClass{knowledge.RiskClassPersonalSensitive}
+	updated, err := service.UpdateEntry(ctx, UpdateEntryRequest{
+		EntryID: active.Entry.ID, ExpectedRevision: active.Entry.Revision.Number, Content: content,
+	})
+	if err != nil || updated.Entry.State != knowledge.EntryStateDraft {
+		t.Fatalf("UpdateEntry(add sensitive risk) = %#v, %v", updated, err)
+	}
+}

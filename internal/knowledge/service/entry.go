@@ -80,9 +80,8 @@ func (s *Service) CreateEntry(ctx context.Context, request CreateEntryRequest) (
 		if candidate.Scope.Kind == knowledge.ScopeKindUnspecified {
 			candidate.Scope = chunk.Scope
 		}
-		if candidate.Scope.Kind == knowledge.ScopeKindPersonal && candidate.PersonalOrigin == knowledge.PersonalOriginInferred &&
-			classification.Decision == knowledge.ClassificationDecisionReview {
-			candidate.State = knowledge.EntryStateDraft
+		if err := applyPersonalEntryCreatePolicy(&candidate, chunk, classification); err != nil {
+			return err
 		}
 		if err := validateEvidenceReferences(ctx, tx, candidate.EvidenceIDs, candidate.Verification.EvidenceIDs); err != nil {
 			return err

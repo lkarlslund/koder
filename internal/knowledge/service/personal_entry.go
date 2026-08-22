@@ -11,7 +11,31 @@ import (
 
 var ErrPersonalOriginPolicy = errors.New("personal knowledge origin policy violation")
 
-func applyPersonalEntryUpdatePolicy(next *knowledge.Entry, current knowledge.Entry, classification knowledge.ClassificationResult) error {
+func applyPersonalEntryCreatePolicy(candidate *knowledge.Entry, chunk knowledge.Chunk, classification knowledge.ClassificationResult) error {
+	if chunk.ID == PersonalMeChunkID {
+		if candidate.Scope != chunk.Scope {
+			return fmt.Errorf("%w: personal/me entries must retain the personal/me scope", ErrPersonalOriginPolicy)
+		}
+		if candidate.PersonalOrigin == knowledge.PersonalOriginUnspecified {
+			return fmt.Errorf("%w: personal/me entries require an explicit, observed, or inferred origin", ErrPersonalOriginPolicy)
+		}
+	}
+	if candidate.Scope.Kind == knowledge.ScopeKindPersonal && candidate.PersonalOrigin == knowledge.PersonalOriginInferred &&
+		(classification.Decision == knowledge.ClassificationDecisionReview || candidate.IsSensitiveInference()) {
+		candidate.State = knowledge.EntryStateDraft
+	}
+	return nil
+}
+
+func applyPersonalEntryUpdatePolicy(next *knowledge.Entry, current knowledge.Entry, chunk knowledge.Chunk, classification knowledge.ClassificationResult) error {
+	if chunk.ID == PersonalMeChunkID {
+		if next.Scope != chunk.Scope {
+			return fmt.Errorf("%w: personal/me entries must retain the personal/me scope", ErrPersonalOriginPolicy)
+		}
+		if next.PersonalOrigin == knowledge.PersonalOriginUnspecified {
+			return fmt.Errorf("%w: personal/me entries require an explicit, observed, or inferred origin", ErrPersonalOriginPolicy)
+		}
+	}
 	if current.Scope.Kind == knowledge.ScopeKindPersonal {
 		switch current.PersonalOrigin {
 		case knowledge.PersonalOriginExplicit:
@@ -31,7 +55,7 @@ func applyPersonalEntryUpdatePolicy(next *knowledge.Entry, current knowledge.Ent
 		}
 		return nil
 	}
-	if classification.Decision == knowledge.ClassificationDecisionReview {
+	if classification.Decision == knowledge.ClassificationDecisionReview || next.IsSensitiveInference() {
 		next.State = knowledge.EntryStateDraft
 	}
 	return nil

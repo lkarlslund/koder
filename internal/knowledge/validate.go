@@ -311,6 +311,9 @@ func (e Entry) Validate() error {
 	if e.PersonalOrigin == PersonalOriginInferred && (e.Confidence <= 0 || e.Confidence >= 1) {
 		return invalid("confidence", "inferred personal knowledge requires explicit uncertainty between 0 and 1")
 	}
+	if e.IsSensitiveInference() && e.State == EntryStateActive {
+		return invalid("state", "sensitive inferred personal knowledge must remain a reviewable draft")
+	}
 	if err := e.Revision.Validate(); err != nil {
 		return err
 	}

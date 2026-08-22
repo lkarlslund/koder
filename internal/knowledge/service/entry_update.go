@@ -102,7 +102,7 @@ func (s *Service) UpdateEntry(ctx context.Context, request UpdateEntryRequest) (
 			return fmt.Errorf("%w: restore chunk %s before editing entries", ErrParentChunkArchived, chunk.ID)
 		}
 		next := applyEntryContent(current, candidate)
-		if err := applyPersonalEntryUpdatePolicy(&next, current, classification); err != nil {
+		if err := applyPersonalEntryUpdatePolicy(&next, current, chunk, classification); err != nil {
 			return err
 		}
 		if entryContentEqual(next, current) {

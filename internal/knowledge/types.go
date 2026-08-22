@@ -142,6 +142,22 @@ type Entry struct {
 	LastUsedAt     time.Time      `json:"last_used_at,omitzero"`
 }
 
+// IsSensitiveInference reports whether an unconfirmed personal inference carries a
+// risk class that requires it to remain review-only rather than active knowledge.
+func (e Entry) IsSensitiveInference() bool {
+	if e.Scope.Kind != ScopeKindPersonal || e.PersonalOrigin != PersonalOriginInferred {
+		return false
+	}
+	for _, risk := range e.Risk {
+		switch risk {
+		case RiskClassPersonalSensitive, RiskClassMedical, RiskClassLegal, RiskClassFinancial,
+			RiskClassPhysicalSafety, RiskClassSecuritySensitive:
+			return true
+		}
+	}
+	return false
+}
+
 // ObjectRef identifies a knowledge graph endpoint or revision owner.
 type ObjectRef struct {
 	Kind ObjectKind `json:"kind"`

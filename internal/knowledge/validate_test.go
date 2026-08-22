@@ -464,6 +464,35 @@ func TestPersonalOriginStructuralPolicy(t *testing.T) {
 	}
 }
 
+func TestSensitiveInferredPersonalKnowledgeCannotBeActive(t *testing.T) {
+	t.Parallel()
+	for _, risk := range []RiskClass{
+		RiskClassPersonalSensitive, RiskClassMedical, RiskClassLegal, RiskClassFinancial,
+		RiskClassPhysicalSafety, RiskClassSecuritySensitive,
+	} {
+		entry := validEntry()
+		entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+		entry.PersonalOrigin = PersonalOriginInferred
+		entry.Confidence = 0.6
+		entry.Risk = []RiskClass{risk}
+		if !entry.IsSensitiveInference() {
+			t.Fatalf("IsSensitiveInference(%s) = false", risk)
+		}
+		expectInvalid(t, entry.Validate())
+		entry.State = EntryStateDraft
+		if err := entry.Validate(); err != nil {
+			t.Fatalf("draft sensitive inference with risk %s rejected: %v", risk, err)
+		}
+	}
+	ordinary := validEntry()
+	ordinary.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+	ordinary.PersonalOrigin = PersonalOriginInferred
+	ordinary.Confidence = 0.6
+	if ordinary.IsSensitiveInference() {
+		t.Fatal("risk-free personal inference marked sensitive")
+	}
+}
+
 func TestUnknownEnumValuesAreRejected(t *testing.T) {
 	t.Parallel()
 	tests := map[string]func() error{
