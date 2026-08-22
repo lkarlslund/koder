@@ -177,3 +177,11 @@ func NormalizeEntry(value Entry) (Entry, error) {
 	value.Applicability.Locales = locales
 	return value, nil
 }
+
+// NormalizeLink canonicalizes user-facing relationship text without changing endpoint
+// direction or typed identity.
+func NormalizeLink(value Link) Link {
+	value.Label = NormalizeTitle(value.Label)
+	value.Notes = strings.TrimSpace(value.Notes)
+	return value
+}
