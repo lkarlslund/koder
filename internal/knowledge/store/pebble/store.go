@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	cockroachpebble "github.com/cockroachdb/pebble"
 
@@ -22,6 +23,7 @@ type Store struct {
 	mu     sync.RWMutex
 	db     *cockroachpebble.DB
 	dir    string
+	meta   metadata
 	closed bool
 }
 
@@ -39,7 +41,12 @@ func Open(stateDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open knowledge pebble: %w", err)
 	}
-	return &Store{db: db, dir: dir}, nil
+	meta, err := initializeMetadata(db, time.Now())
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{db: db, dir: dir, meta: meta}, nil
 }
 
 // Health reports this independent backend's current lifecycle state.
@@ -50,9 +57,11 @@ func (s *Store) Health(ctx context.Context) (knowledgeStore.Health, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return knowledgeStore.Health{
-		Backend: "pebble",
-		Path:    s.dir,
-		Open:    !s.closed,
+		Backend:         backendName,
+		Path:            s.dir,
+		Open:            !s.closed,
+		SchemaVersion:   s.meta.SchemaVersion,
+		IndexGeneration: s.meta.IndexGeneration,
 	}, nil
 }
 

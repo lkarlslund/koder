@@ -20,6 +20,8 @@ var (
 	ErrReadOnly = errors.New("knowledge store is read-only")
 	// ErrUnsupported indicates that an optional backend operation is not implemented.
 	ErrUnsupported = errors.New("knowledge store operation unsupported")
+	// ErrIncompatible indicates that durable data uses an unsupported schema or encoding.
+	ErrIncompatible = errors.New("knowledge store format incompatible")
 )
 
 // Health is backend-neutral operational state. LastError contains a sanitized summary and
