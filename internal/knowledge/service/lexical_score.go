@@ -85,12 +85,18 @@ func ScoreLexicalMatches(postings []knowledgeStore.LexicalPosting, documentCount
 		result := LexicalScoredEntry{EntryID: entryID, Terms: make([]LexicalTermScore, 0, len(terms))}
 		for term, posting := range terms {
 			weightedFrequency := weightedLexicalFrequency(posting.Frequencies, weights)
+			if math.IsNaN(weightedFrequency) || math.IsInf(weightedFrequency, 0) {
+				return nil, fmt.Errorf("lexical weighted frequency is not finite")
+			}
 			if weightedFrequency == 0 {
 				continue
 			}
 			df := documentFrequency[term]
 			inverseFrequency := math.Log1p((float64(documentCount) - float64(df) + 0.5) / (float64(df) + 0.5))
 			score := inverseFrequency * math.Log1p(weightedFrequency)
+			if math.IsNaN(score) || math.IsInf(score, 0) {
+				return nil, fmt.Errorf("lexical score is not finite")
+			}
 			result.Score += score
 			result.Terms = append(result.Terms, LexicalTermScore{
 				Term: term, Score: score, InverseFrequency: inverseFrequency,

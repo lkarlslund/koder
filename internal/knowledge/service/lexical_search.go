@@ -45,6 +45,7 @@ type LexicalSearchMatch struct {
 	LexicalScore     float64            `json:"lexical_score"`
 	Terms            []LexicalTermScore `json:"terms,omitempty"`
 	GraphConnections []GraphConnection  `json:"graph_connections,omitempty"`
+	Rank             SearchRank         `json:"rank"`
 }
 
 // SearchLexical applies authorization, exact scope, lifecycle, and temporal validity
@@ -105,6 +106,10 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 		if err != nil {
 			return LexicalSearchResult{}, err
 		}
+	}
+	matches, err = s.rankSearchMatches(ctx, matches, allowed, request.Scopes, s.now().UTC().Round(0))
+	if err != nil {
+		return LexicalSearchResult{}, err
 	}
 	if len(matches) > request.Limit {
 		matches = matches[:request.Limit]

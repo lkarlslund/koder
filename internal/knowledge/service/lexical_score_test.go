@@ -83,4 +83,11 @@ func TestScoreLexicalMatchesRejectsInconsistentStatisticsAndWeights(t *testing.T
 			t.Errorf("ScoreLexicalMatches(%#v) unexpectedly succeeded", test)
 		}
 	}
+	overflow := posting
+	overflow.Frequencies.Title = 2
+	if _, err := ScoreLexicalMatches([]knowledgeStore.LexicalPosting{overflow}, 1,
+		[]knowledgeStore.LexicalDocumentFrequency{{Term: "linux", Count: 1}},
+		LexicalFieldWeights{Title: math.MaxFloat64}); err == nil {
+		t.Fatal("ScoreLexicalMatches(overflow) unexpectedly succeeded")
+	}
 }

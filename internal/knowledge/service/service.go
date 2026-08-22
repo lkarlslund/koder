@@ -27,6 +27,7 @@ type Config struct {
 	Actor       ActorSource
 	Now         func() time.Time
 	NewID       IDSource
+	RankSignals RankingSignalSource
 }
 
 type Service struct {
@@ -36,6 +37,7 @@ type Service struct {
 	actor       ActorSource
 	now         func() time.Time
 	newID       IDSource
+	rankSignals RankingSignalSource
 }
 
 func New(cfg Config) (*Service, error) {
@@ -54,9 +56,12 @@ func New(cfg Config) (*Service, error) {
 	if cfg.NewID == nil {
 		cfg.NewID = id.New
 	}
+	if cfg.RankSignals == nil {
+		cfg.RankSignals = NoRankingSignals{}
+	}
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, actor: cfg.Actor,
-		now: cfg.Now, newID: cfg.NewID,
+		now: cfg.Now, newID: cfg.NewID, rankSignals: cfg.RankSignals,
 	}, nil
 }
 
