@@ -46,6 +46,7 @@ for (const key of store.graph.nodes()) {
 }
 assert.strictEqual(FakeSigma.instance.settings.defaultEdgeType, 'arrow');
 assert.strictEqual(FakeSigma.instance.settings.allowInvalidContainer, true);
+assert.strictEqual(FakeSigma.instance.settings.enableEdgeEvents, true);
 assert.strictEqual(FakeResizeObserver.instance.observed, container);
 const interactions = [];
 renderer.subscribe(event => interactions.push([event.type, event.detail && event.detail.key]));
@@ -54,6 +55,15 @@ FakeSigma.instance.emit('clickEdge', {edge: fixture.ids.requires});
 FakeSigma.instance.emit('clickStage', {});
 assert.deepStrictEqual(interactions, [
   ['node', `entry:${fixture.ids.partition}`], ['edge', fixture.ids.requires], ['background', null],
+]);
+FakeSigma.instance.emit('enterNode', {node: `entry:${fixture.ids.partition}`});
+assert.strictEqual(FakeSigma.instance.settings.nodeReducer(`entry:${fixture.ids.partition}`, store.graph.getNodeAttributes(`entry:${fixture.ids.partition}`)).knowledgeStyle.hovered, true);
+FakeSigma.instance.emit('leaveNode', {node: `entry:${fixture.ids.partition}`});
+FakeSigma.instance.emit('enterEdge', {edge: fixture.ids.requires});
+assert.strictEqual(FakeSigma.instance.settings.edgeReducer(fixture.ids.requires, store.graph.getEdgeAttributes(fixture.ids.requires)).knowledgeStyle.hovered, true);
+FakeSigma.instance.emit('leaveEdge', {edge: fixture.ids.requires});
+assert.deepStrictEqual(interactions.slice(3), [
+  ['hover', `entry:${fixture.ids.partition}`], ['hover', null], ['hover', fixture.ids.requires], ['hover', null],
 ]);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);

@@ -49,6 +49,7 @@
       this.frame = 0;
       this.destroyed = false;
       this.selection = null;
+      this.hover = null;
 
       provisionalPositions(this.store.graph);
       const Sigma = sigmaClass(this.SigmaAPI);
@@ -56,14 +57,16 @@
       const settings = {
         // Responsive tabs deliberately make this container 0x0 while the inspector is
         // visible. Sigma must remain attached and resize when the graph pane returns.
-        allowInvalidContainer: true, renderLabels: true, renderEdgeLabels: false, zIndex: true,
+        allowInvalidContainer: true, renderLabels: true, renderEdgeLabels: false, enableEdgeEvents: true, zIndex: true,
         labelDensity: 0.12, labelGridCellSize: 90, labelRenderedSizeThreshold: 7,
         minCameraRatio: 0.04, maxCameraRatio: 25,
         nodeReducer: (key, attributes) => this.rendering.styledNodeAttributes(attributes, {
           selected: !!this.selection && this.selection.kind === 'node' && this.selection.key === key,
+          hovered: !!this.hover && this.hover.kind === 'node' && this.hover.key === key,
         }),
         edgeReducer: (key, attributes) => this.rendering.styledEdgeAttributes(attributes, {
           selected: !!this.selection && this.selection.kind === 'edge' && this.selection.key === key,
+          hovered: !!this.hover && this.hover.kind === 'edge' && this.hover.key === key,
         }),
       };
       if (programs.EdgeArrowProgram && programs.EdgeLineProgram) {
@@ -75,6 +78,10 @@
         clickNode: event => this.emit('node', {key: String(event && event.node || '')}),
         clickEdge: event => this.emit('edge', {key: String(event && event.edge || '')}),
         clickStage: () => this.emit('background', null),
+        enterNode: event => this.setHover('node', event && event.node),
+        leaveNode: event => this.clearHover('node', event && event.node),
+        enterEdge: event => this.setHover('edge', event && event.edge),
+        leaveEdge: event => this.clearHover('edge', event && event.edge),
       };
       if (typeof this.sigma.on === 'function') {
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.on(name, handler);
@@ -147,6 +154,21 @@
       this.scheduleRefresh(false);
     }
 
+    setHover(kind, key) {
+      key = String(key || '');
+      if (!key) return;
+      this.hover = {kind, key};
+      this.emit('hover', this.hover);
+      this.scheduleRefresh(false);
+    }
+
+    clearHover(kind, key) {
+      if (!this.hover || this.hover.kind !== kind || this.hover.key !== String(key || '')) return;
+      this.hover = null;
+      this.emit('hover', null);
+      this.scheduleRefresh(false);
+    }
+
     setState(state) {
       state = String(state || 'empty');
       if (this.stage && this.stage.dataset) this.stage.dataset.graphState = state;
@@ -165,6 +187,7 @@
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.off(name, handler);
       }
       this.listeners.clear();
+      this.hover = null;
       if (this.resizeObserver) this.resizeObserver.disconnect();
       if (this.sigma && typeof this.sigma.kill === 'function') this.sigma.kill();
       if (this.legend) {
