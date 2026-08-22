@@ -1,0 +1,204 @@
+package store
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/lkarlslund/koder/internal/knowledge"
+)
+
+type ChunkSort string
+
+const (
+	ChunkSortTitle      ChunkSort = "title"
+	ChunkSortCreatedAt  ChunkSort = "created_at"
+	ChunkSortUpdatedAt  ChunkSort = "updated_at"
+	ChunkSortLastUsedAt ChunkSort = "last_used_at"
+)
+
+type ChunkFilter struct {
+	Kinds      []knowledge.ChunkKind
+	States     []knowledge.ChunkState
+	ScopeKinds []knowledge.ScopeKind
+	Tags       []string
+	Locale     string
+}
+
+type ChunkListRequest struct {
+	Filter     ChunkFilter
+	Sort       ChunkSort
+	Descending bool
+	Limit      int
+	Cursor     string
+}
+
+type ChunkPage struct {
+	Chunks     []knowledge.Chunk
+	NextCursor string
+}
+
+// PaginateChunks applies the backend-neutral list contract to one consistent canonical
+// snapshot. Backends may replace the scan with equivalent derived indexes.
+func PaginateChunks(chunks []knowledge.Chunk, request ChunkListRequest, generation uint64) (ChunkPage, error) {
+	request, err := normalizeChunkListRequest(request)
+	if err != nil {
+		return ChunkPage{}, err
+	}
+	binding, err := chunkCursorBinding(request, generation)
+	if err != nil {
+		return ChunkPage{}, err
+	}
+	filtered := make([]knowledge.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunkMatchesFilter(chunk, request.Filter) {
+			filtered = append(filtered, chunk)
+		}
+	}
+	slices.SortFunc(filtered, func(left, right knowledge.Chunk) int {
+		order := strings.Compare(chunkSortValue(left, request.Sort), chunkSortValue(right, request.Sort))
+		if order == 0 {
+			order = strings.Compare(string(left.ID), string(right.ID))
+		}
+		if request.Descending {
+			return -order
+		}
+		return order
+	})
+	start := 0
+	if request.Cursor != "" {
+		position, err := DecodeCursor(request.Cursor, binding)
+		if err != nil {
+			return ChunkPage{}, err
+		}
+		start = len(filtered)
+		for index, chunk := range filtered {
+			if chunkAfterPosition(chunk, request, position) {
+				start = index
+				break
+			}
+		}
+	}
+	end := min(start+request.Limit, len(filtered))
+	page := ChunkPage{Chunks: slices.Clone(filtered[start:end])}
+	if end < len(filtered) && end > start {
+		last := filtered[end-1]
+		page.NextCursor, err = EncodeCursor(binding, CursorPosition{SortValue: chunkSortValue(last, request.Sort), ObjectID: string(last.ID)})
+		if err != nil {
+			return ChunkPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, error) {
+	if request.Sort == "" {
+		request.Sort = ChunkSortUpdatedAt
+		request.Descending = true
+	}
+	switch request.Sort {
+	case ChunkSortTitle, ChunkSortCreatedAt, ChunkSortUpdatedAt, ChunkSortLastUsedAt:
+	default:
+		return ChunkListRequest{}, fmt.Errorf("invalid chunk sort %q", request.Sort)
+	}
+	if request.Limit <= 0 {
+		request.Limit = 50
+	}
+	if request.Limit > 200 {
+		return ChunkListRequest{}, fmt.Errorf("chunk page limit must not exceed 200")
+	}
+	request.Filter.Tags = knowledge.NormalizeTags(request.Filter.Tags)
+	locale, err := knowledge.NormalizeLocale(request.Filter.Locale)
+	if err != nil {
+		return ChunkListRequest{}, err
+	}
+	request.Filter.Locale = locale
+	slices.Sort(request.Filter.Kinds)
+	request.Filter.Kinds = slices.Compact(request.Filter.Kinds)
+	slices.Sort(request.Filter.States)
+	request.Filter.States = slices.Compact(request.Filter.States)
+	slices.Sort(request.Filter.ScopeKinds)
+	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
+	for _, kind := range request.Filter.Kinds {
+		if kind == knowledge.ChunkKindUnspecified || !kind.IsAChunkKind() {
+			return ChunkListRequest{}, fmt.Errorf("invalid chunk kind filter")
+		}
+	}
+	for _, state := range request.Filter.States {
+		if state == knowledge.ChunkStateUnspecified || !state.IsAChunkState() {
+			return ChunkListRequest{}, fmt.Errorf("invalid chunk state filter")
+		}
+	}
+	for _, scope := range request.Filter.ScopeKinds {
+		if scope == knowledge.ScopeKindUnspecified || !scope.IsAScopeKind() {
+			return ChunkListRequest{}, fmt.Errorf("invalid chunk scope filter")
+		}
+	}
+	return request, nil
+}
+
+func chunkCursorBinding(request ChunkListRequest, generation uint64) (CursorBinding, error) {
+	encoded, err := json.Marshal(request.Filter)
+	if err != nil {
+		return CursorBinding{}, err
+	}
+	digest := sha256.Sum256(encoded)
+	return CursorBinding{
+		Index: "chunks-by-" + string(request.Sort), IndexGeneration: generation,
+		QueryFingerprint: hex.EncodeToString(digest[:]), SortField: string(request.Sort), Descending: request.Descending,
+	}, nil
+}
+
+func chunkMatchesFilter(chunk knowledge.Chunk, filter ChunkFilter) bool {
+	return containsOrEmpty(filter.Kinds, chunk.Kind) && containsOrEmpty(filter.States, chunk.State) &&
+		containsOrEmpty(filter.ScopeKinds, chunk.Scope.Kind) && (filter.Locale == "" || chunk.Locale == filter.Locale) &&
+		containsAll(chunk.Tags, filter.Tags)
+}
+
+func containsOrEmpty[T comparable](values []T, value T) bool {
+	return len(values) == 0 || slices.Contains(values, value)
+}
+
+func containsAll(values, required []string) bool {
+	for _, value := range required {
+		if !slices.Contains(values, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func chunkSortValue(chunk knowledge.Chunk, sort ChunkSort) string {
+	switch sort {
+	case ChunkSortTitle:
+		return chunk.Title
+	case ChunkSortCreatedAt:
+		return formatSortTime(chunk.CreatedAt)
+	case ChunkSortLastUsedAt:
+		return formatSortTime(chunk.LastUsedAt)
+	default:
+		return formatSortTime(chunk.UpdatedAt)
+	}
+}
+
+func formatSortTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func chunkAfterPosition(chunk knowledge.Chunk, request ChunkListRequest, position CursorPosition) bool {
+	order := strings.Compare(chunkSortValue(chunk, request.Sort), position.SortValue)
+	if order == 0 {
+		order = strings.Compare(string(chunk.ID), position.ObjectID)
+	}
+	if request.Descending {
+		order = -order
+	}
+	return order > 0
+}

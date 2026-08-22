@@ -130,6 +130,22 @@ func (s *Store) Health(ctx context.Context) (knowledgeStore.Health, error) {
 	}, nil
 }
 
+func (s *Store) ListChunks(ctx context.Context, request knowledgeStore.ChunkListRequest) (knowledgeStore.ChunkPage, error) {
+	if err := ctx.Err(); err != nil {
+		return knowledgeStore.ChunkPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return knowledgeStore.ChunkPage{}, knowledgeStore.ErrClosed
+	}
+	chunks := make([]knowledge.Chunk, 0, len(s.data.chunks))
+	for _, chunk := range s.data.chunks {
+		chunks = append(chunks, cloneChunk(chunk))
+	}
+	return knowledgeStore.PaginateChunks(chunks, request, s.indexGeneration)
+}
+
 // Checkpoint is deliberately unsupported because the memory backend has no durable files.
 func (s *Store) Checkpoint(ctx context.Context, _ string) error {
 	if err := ctx.Err(); err != nil {
