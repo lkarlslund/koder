@@ -23,11 +23,27 @@
       this.cancelSchedule = options.cancelSchedule || (handle => globalThis.cancelAnimationFrame(handle));
       this.workerFactory = options.workerFactory === null ? null : options.workerFactory ||
         (typeof globalThis.Worker === 'function' ? () => new globalThis.Worker('/assets/knowledge_layout_worker.js') : null);
+      this.setTimer = options.setTimer || globalThis.setTimeout.bind(globalThis);
+      this.clearTimer = options.clearTimer || globalThis.clearTimeout.bind(globalThis);
+      this.debounceMS = Math.max(0, Number(options.debounceMS) || 120);
       this.listeners = new Set();
       this.generation = 0;
       this.handle = 0;
       this.running = false;
       this.destroyed = false;
+    }
+
+    request(options) {
+      if (this.destroyed) throw new Error('Knowledge layout is destroyed');
+      if (this.pendingTimer) this.clearTimer(this.pendingTimer);
+      this.pendingOptions = {...(options || {})};
+      this.pendingTimer = this.setTimer(() => {
+        this.pendingTimer = 0;
+        const pending = this.pendingOptions;
+        this.pendingOptions = null;
+        this.start(pending);
+      }, Math.max(0, Number(options && options.debounceMS) || this.debounceMS));
+      return this.pendingTimer;
     }
 
     subscribe(listener) {
@@ -177,14 +193,18 @@
     }
 
     stop(reason) {
-      if (!this.running && !this.handle && !this.worker) return false;
+      const wasPending = !!this.pendingTimer;
+      if (this.pendingTimer) this.clearTimer(this.pendingTimer);
+      this.pendingTimer = 0;
+      this.pendingOptions = null;
+      if (!this.running && !this.handle && !this.worker) return wasPending;
       if (this.handle) this.cancelSchedule(this.handle);
       this.handle = 0;
       this.finishWorker();
       const wasRunning = this.running;
       this.running = false;
       if (wasRunning) this.emit('stopped', {reason: String(reason || 'canceled')});
-      return wasRunning;
+      return wasRunning || wasPending;
     }
 
     destroy() {

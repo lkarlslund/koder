@@ -579,7 +579,7 @@
         const truncated = !!(response && response.page && response.page.truncated);
         const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
         this.setGraphState(truncated ? 'truncated' : 'ready', detail);
-        if (this.graphLayout) this.graphLayout.start();
+        if (this.graphLayout) this.graphLayout.request();
         else if (this.graphViewport) this.graphViewport.fit({animate: false});
       } catch (error) {
         if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;

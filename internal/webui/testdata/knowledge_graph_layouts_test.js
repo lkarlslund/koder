@@ -69,6 +69,36 @@ assert.strictEqual(worker.terminated, true);
 assert.strictEqual(graph.getNodeAttribute('one', 'x'), 12);
 assert.strictEqual(graph.getNodeAttribute('two', 'x'), 1);
 assert.deepStrictEqual(workerEvents.map(event => event.phase), ['start', 'progress', 'ready']);
+const staleGeneration = workerController.start({iterations: 20});
+const staleWorker = worker;
+const replacementGeneration = workerController.start({iterations: 20});
+assert.strictEqual(staleWorker.terminated, true);
+staleWorker.send({type: 'ready', generation: staleGeneration, completed: 20, total: 20, positions: {one: {x: 999, y: 999}}});
+assert.strictEqual(graph.getNodeAttribute('one', 'x'), 12);
+worker.send({type: 'ready', generation: replacementGeneration, completed: 20, total: 20, positions: {one: {x: 15, y: 9}}});
+assert.strictEqual(graph.getNodeAttribute('one', 'x'), 15);
 workerController.start({iterations: 20});
 assert.strictEqual(workerController.stop('selection_changed'), true);
 assert.strictEqual(worker.terminated, true);
+
+const timerGraph = new graphology.MultiDirectedGraph();
+timerGraph.addNode('only', {x: 0, y: 0});
+const timers = [];
+const clearedTimers = [];
+const timerEvents = [];
+const timerController = new layoutAPI.ForceAtlasController({
+  graph: timerGraph, layouts: {forceAtlas2() {}}, workerFactory: null,
+  setTimer(callback, delay) { timers.push({callback, delay}); return timers.length; },
+  clearTimer(handle) { clearedTimers.push(handle); }, debounceMS: 90,
+});
+timerController.subscribe(event => timerEvents.push(event));
+timerController.request({iterations: 3});
+timerController.request({iterations: 7});
+assert.deepStrictEqual(clearedTimers, [1]);
+assert.strictEqual(timers[1].delay, 90);
+timers[1].callback();
+assert.deepStrictEqual(timerEvents.map(event => [event.phase, event.total]), [['start', 7], ['ready', 7]]);
+timerController.request({iterations: 9});
+assert.strictEqual(timerController.stop('selection_changed'), true);
+assert(clearedTimers.includes(3));
+timerController.destroy();
