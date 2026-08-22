@@ -52,6 +52,14 @@ type ParsedPackage struct {
 	manifestBytes []byte
 	files         map[string][]byte
 	paths         []string
+	metadata      map[string]zipMetadata
+}
+
+type zipMetadata struct {
+	method       uint16
+	modifiedDate uint16
+	modifiedTime uint16
+	hasExtra     bool
 }
 
 func (p ParsedPackage) ManifestBytes() []byte {
@@ -99,6 +107,7 @@ func Parse(reader io.ReaderAt, size int64, limits ParseLimits) (ParsedPackage, e
 	}
 
 	files := make(map[string][]byte, len(archive.File))
+	metadata := make(map[string]zipMetadata, len(archive.File))
 	paths := make([]string, 0, len(archive.File))
 	seen := make(map[string]string, len(archive.File))
 	var total int64
@@ -145,6 +154,7 @@ func Parse(reader io.ReaderAt, size int64, limits ParseLimits) (ParsedPackage, e
 		}
 		total += int64(len(data))
 		files[file.Name] = data
+		metadata[file.Name] = zipMetadata{method: file.Method, modifiedDate: file.ModifiedDate, modifiedTime: file.ModifiedTime, hasExtra: len(file.Extra) != 0}
 		paths = append(paths, file.Name)
 	}
 
@@ -160,7 +170,7 @@ func Parse(reader io.ReaderAt, size int64, limits ParseLimits) (ParsedPackage, e
 	if err := requireJSONEOF(decoder); err != nil {
 		return ParsedPackage{}, fmt.Errorf("%w: manifest.json: %v", ErrInvalidArchive, err)
 	}
-	return ParsedPackage{Manifest: manifest, manifestBytes: slices.Clone(manifestBytes), files: files, paths: paths}, nil
+	return ParsedPackage{Manifest: manifest, manifestBytes: slices.Clone(manifestBytes), files: files, paths: paths, metadata: metadata}, nil
 }
 
 func normalizeParseLimits(value ParseLimits) (ParseLimits, error) {

@@ -22,10 +22,11 @@ import (
 )
 
 var (
-	uuidV7Pattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
-	buildPattern   = regexp.MustCompile(`^r[0-9]+$`)
-	tokenPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/+~-]*$`)
+	uuidV7Pattern       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	versionPattern      = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	buildPattern        = regexp.MustCompile(`^r[0-9]+$`)
+	runtimeBuildPattern = regexp.MustCompile(`^r[0-9]+(?:-local(?:-dirty)?)?$`)
+	tokenPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/+~-]*$`)
 )
 
 type payload struct {

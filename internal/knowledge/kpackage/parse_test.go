@@ -183,6 +183,8 @@ type testZIPEntry struct {
 	method uint16
 	mode   os.FileMode
 	flags  uint16
+	date   uint16
+	clock  uint16
 }
 
 func manifestEntry() []testZIPEntry {
@@ -198,7 +200,7 @@ func makeTestZIP(t testing.TB, entries []testZIPEntry) []byte {
 	var output bytes.Buffer
 	archive := zip.NewWriter(&output)
 	for _, item := range entries {
-		header := &zip.FileHeader{Name: item.name, Method: item.method, Flags: item.flags}
+		header := &zip.FileHeader{Name: item.name, Method: item.method, Flags: item.flags, ModifiedDate: item.date, ModifiedTime: item.clock}
 		if item.mode != 0 {
 			header.SetMode(item.mode)
 		}

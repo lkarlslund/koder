@@ -110,7 +110,7 @@ func TestExportOptionallySignsManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validateManifestSchema(t, manifestData)
+	assertManifestSchema(t, manifestData)
 	archive, err := zip.NewReader(bytes.NewReader(first.Bytes()), int64(first.Len()))
 	if err != nil {
 		t.Fatal(err)

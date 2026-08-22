@@ -41,7 +41,8 @@ same sanitization used for locally authored Knowledge.
 - `sha256` is the lowercase hexadecimal SHA-256 of the exact uncompressed file bytes.
 - ZIP entries are ordered `manifest.json`, then payload paths in bytewise order. Exporters
   encode the package `created_at` instant in the ZIP's UTC DOS timestamp, rounded down to
-  its two-second resolution, and do not add platform extras.
+  its two-second resolution. Entries are regular files stored without compression and do
+  not add platform extras.
 
 These rules make the logical package deterministic. KG-1102 defines and tests the exact
 ZIP encoding used by Koder's exporter.

@@ -1,4 +1,4 @@
-package knowledgepackage_test
+package knowledgepackagev1_test
 
 import (
 	"bufio"
@@ -15,6 +15,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgepackagev1 "github.com/lkarlslund/koder/protocol/knowledge/package/v1"
 )
 
 type exampleManifest struct {
@@ -40,6 +41,19 @@ type exampleManifest struct {
 		Size   int64  `json:"size"`
 		SHA256 string `json:"sha256"`
 	} `json:"files"`
+}
+
+func TestEmbeddedManifestSchemaMatchesPublishedFileAndIsCopied(t *testing.T) {
+	t.Parallel()
+	want := readPackageTestFile(t, "manifest.schema.json")
+	got := knowledgepackagev1.ManifestSchema()
+	if !bytes.Equal(got, want) {
+		t.Fatal("embedded manifest schema differs from the published file")
+	}
+	got[0] ^= 0xff
+	if bytes.Equal(got, knowledgepackagev1.ManifestSchema()) {
+		t.Fatal("ManifestSchema returned mutable embedded storage")
+	}
 }
 
 func TestCanonicalPackageExample(t *testing.T) {

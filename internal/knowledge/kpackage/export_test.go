@@ -81,7 +81,7 @@ func TestExportMatchesCanonicalExampleAndIsDeterministic(t *testing.T) {
 			t.Errorf("exported %s does not match canonical example\ngot:\n%s\nwant:\n%s", file.Name, got, want)
 		}
 	}
-	validateManifestSchema(t, readZIPFile(t, reader.File[0]))
+	assertManifestSchema(t, readZIPFile(t, reader.File[0]))
 }
 
 func TestExportSortsAssetsAndFeaturesAndInventoriesExactBytes(t *testing.T) {
@@ -266,7 +266,7 @@ func readZIPFile(t *testing.T, file *zip.File) []byte {
 	return data
 }
 
-func validateManifestSchema(t *testing.T, manifest []byte) {
+func assertManifestSchema(t *testing.T, manifest []byte) {
 	t.Helper()
 	path := filepath.Join("..", "..", "..", "protocol", "knowledge", "package", "v1", "manifest.schema.json")
 	schemaData := readExportFixture(t, path)
