@@ -83,6 +83,13 @@ memory and Pebble implementations. Service tests use the memory store and fake
 classifier/clock/actor sources. Pebble-specific tests cover encoding, atomicity, restart,
 locking, migration, and failure behavior without leaking those concerns upward.
 
+The memory backend is also the replacement-backend proof: a complete canonical snapshot
+exported from Pebble is imported into memory, compared exactly, and queried through the
+normal Knowledge service. This validates the replacement boundary without exposing a
+non-durable backend as a runtime configuration choice. Pebble remains the production
+default until a durable alternative passes the full store contracts and operational
+requirements.
+
 API, tool, import, and browser tests share the canonical JSON fixtures under
 `protocol/knowledge/v1/testdata`. Transport adapters may add envelopes, but canonical
 objects and enum meanings remain owned by `internal/knowledge`.

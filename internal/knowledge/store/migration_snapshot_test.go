@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
 	"github.com/lkarlslund/koder/internal/knowledge/store/pebble"
@@ -69,6 +70,40 @@ func TestMigrationSnapshotMovesExactCanonicalStateAcrossBackends(t *testing.T) {
 				t.Fatalf("second import error = %v, want ErrConflict", err)
 			}
 		})
+	}
+}
+
+func TestMemoryReplacementBackendServesMigratedPebbleKnowledge(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	source := openMigrationPebble(t)
+	seedMigrationStore(t, source)
+	snapshot, _, err := knowledgeStore.ExportMigrationSnapshot(ctx, source.(knowledgeStore.MaintenanceStore))
+	if err != nil {
+		t.Fatalf("ExportMigrationSnapshot() error = %v", err)
+	}
+
+	replacement := openMigrationMemory(t)
+	if _, err := knowledgeStore.ImportMigrationSnapshot(ctx, replacement, snapshot); err != nil {
+		t.Fatalf("ImportMigrationSnapshot() error = %v", err)
+	}
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: replacement,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{
+			Kind: knowledge.ActorKindSystem,
+			ID:   "system:replacement-contract",
+		}),
+		Now: func() time.Time { return migrationTime.Add(3 * time.Hour) },
+	})
+	if err != nil {
+		t.Fatalf("New(replacement backend) error = %v", err)
+	}
+	result, err := service.SearchLexical(ctx, knowledgeService.LexicalSearchRequest{Query: "backend-neutral content"})
+	if err != nil {
+		t.Fatalf("SearchLexical(replacement backend) error = %v", err)
+	}
+	if len(result.Matches) != 1 || result.Matches[0].EntryID != migrationEntryID || result.Matches[0].Document.Title != "Portable fact" {
+		t.Fatalf("SearchLexical(replacement backend) = %#v", result)
 	}
 }
 
