@@ -24,6 +24,9 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[0].options.headers.get('Authorization'), 'Bearer secret');
   assert.strictEqual(requests[0].options.credentials, 'same-origin');
   assert.strictEqual(client.generation('chunks'), 1);
+
+  await client.getLink('link-1', {channel: 'link'});
+  assert.strictEqual(requests[1].url, '/api/knowledge/v1/links/link-1');
 }
 
 async function testNewGenerationCancelsStaleRequest() {

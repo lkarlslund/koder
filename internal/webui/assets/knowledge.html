@@ -17,6 +17,8 @@
   <script defer src="/assets/vendor/graphology/graphology.umd.min.js"></script>
   <script defer src="/assets/vendor/knowledge-layouts/knowledge-layouts.min.js"></script>
   <script defer src="/assets/vendor/sigma/sigma.min.js"></script>
+  <script defer src="/assets/vendor/marked/marked.umd.js"></script>
+  <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
   <script defer src="/assets/knowledge_api_client.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
@@ -114,11 +116,26 @@
             <h1 id="knowledge-inspector-title">Inspector</h1>
           </div>
         </header>
-        <div class="knowledge-pane-empty">
+        <div class="knowledge-pane-empty" data-knowledge-inspector-empty>
           <span class="knowledge-empty-icon"><i class="bi bi-bezier2" aria-hidden="true"></i></span>
           <strong>No selection</strong>
           <span>Select a chunk, entry, or relationship to inspect its content, evidence, and history.</span>
         </div>
+        <div class="knowledge-inspector-loading" data-knowledge-inspector-loading hidden>
+          <span class="spinner-border spinner-border-sm text-info" aria-hidden="true"></span>
+          <span>Loading selection</span>
+        </div>
+        <div class="knowledge-inspector-error" data-knowledge-inspector-error hidden role="alert"></div>
+        <article class="knowledge-inspector-content" data-knowledge-inspector-content hidden>
+          <header>
+            <span class="knowledge-eyebrow" data-knowledge-inspector-kind>Knowledge</span>
+            <h2 data-knowledge-inspector-title></h2>
+            <p data-knowledge-inspector-summary hidden></p>
+          </header>
+          <div class="knowledge-inspector-badges" data-knowledge-inspector-badges></div>
+          <dl class="knowledge-inspector-meta" data-knowledge-inspector-meta></dl>
+          <section class="knowledge-inspector-markdown markdown-body" data-knowledge-inspector-markdown hidden></section>
+        </article>
       </aside>
     </main>
 

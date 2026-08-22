@@ -37,3 +37,13 @@ assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&
   query: '', kind: '', scopeKind: '', state: '', tag: '', objectKind: '', id: '',
 });
 assert.strictEqual(browser.displayLabel('partially_verified'), 'Partially verified');
+assert.strictEqual(browser.plainTextLabel('**Safe** [label](https://example.com) <script>bad</script>'), 'Safe label bad');
+assert.strictEqual(browser.plainTextLabel('abcdefghijklmnopqrstuvwxyz', 8), 'abcdefg…');
+let sanitizeOptions;
+const sanitized = browser.sanitizedMarkdownHTML('unsafe', {parse: () => '<script>bad</script><p>safe</p>'}, {
+  sanitize: (html, options) => { sanitizeOptions = options; return html.replace('<script>bad</script>', ''); },
+});
+assert.strictEqual(sanitized, '<p>safe</p>');
+assert(sanitizeOptions.FORBID_TAGS.includes('script'));
+assert(sanitizeOptions.FORBID_TAGS.includes('iframe'));
+assert(sanitizeOptions.FORBID_ATTR.includes('style'));

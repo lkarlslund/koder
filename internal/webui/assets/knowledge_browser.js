@@ -119,6 +119,34 @@
     return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
   }
 
+  function plainTextLabel(value, limit) {
+    value = String(value || '')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/[`*_~#>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    limit = Math.max(1, Number(limit) || 120);
+    return value.length > limit ? value.slice(0, Math.max(1, limit - 1)).trimEnd() + '…' : value;
+  }
+
+  function sanitizedMarkdownHTML(value, markedAPI, purifyAPI) {
+    if (!markedAPI || typeof markedAPI.parse !== 'function' || !purifyAPI || typeof purifyAPI.sanitize !== 'function') return '';
+    const rendered = markedAPI.parse(String(value || ''), {gfm: true, breaks: false});
+    return purifyAPI.sanitize(rendered, {
+      USE_PROFILES: {html: true},
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'math'],
+      FORBID_ATTR: ['style', 'srcset'],
+    });
+  }
+
+  function formatTimestamp(value) {
+    const date = new Date(String(value || ''));
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+  }
+
   class BrowserApp {
     constructor(shell, client) {
       this.shell = shell;
@@ -137,6 +165,18 @@
       this.resultList = shell.querySelector('[data-knowledge-results]');
       this.loadMoreButton = shell.querySelector('[data-knowledge-load-more]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
+      this.inspector = {
+        empty: shell.querySelector('[data-knowledge-inspector-empty]'),
+        loading: shell.querySelector('[data-knowledge-inspector-loading]'),
+        error: shell.querySelector('[data-knowledge-inspector-error]'),
+        content: shell.querySelector('[data-knowledge-inspector-content]'),
+        kind: shell.querySelector('[data-knowledge-inspector-kind]'),
+        title: shell.querySelector('[data-knowledge-inspector-title]'),
+        summary: shell.querySelector('[data-knowledge-inspector-summary]'),
+        badges: shell.querySelector('[data-knowledge-inspector-badges]'),
+        meta: shell.querySelector('[data-knowledge-inspector-meta]'),
+        markdown: shell.querySelector('[data-knowledge-inspector-markdown]'),
+      };
       if (this.refreshButton) this.refreshButton.addEventListener('click', () => this.refresh());
       if (this.searchForm) this.searchForm.addEventListener('submit', event => {
         event.preventDefault();
@@ -278,6 +318,7 @@
           this.setState('ready', {count: items.length, countLabel: noun, hasMore, sourceDetail});
         }
         if (this.loadMoreButton) this.loadMoreButton.hidden = !hasMore;
+        this.loadSelection();
       } catch (error) {
         this.handleError(error);
       }
@@ -380,7 +421,9 @@
     selectObject(objectKind, id, object) {
       this.writeURLState({...this.urlState, objectKind, id}, false);
       this.renderSelection();
-      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, object}}));
+      const labelSource = this.resultMode === 'search' ? object && object.document && object.document.title : object && object.title;
+      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, object, label: plainTextLabel(labelSource || id)}}));
+      this.loadSelection();
     }
 
     renderSelection() {
@@ -390,6 +433,112 @@
         card.classList.toggle('is-selected', selected);
         card.setAttribute('aria-pressed', selected ? 'true' : 'false');
       }
+    }
+
+    setInspectorMode(mode, message) {
+      for (const [name, element] of Object.entries(this.inspector)) {
+        if (!['empty', 'loading', 'error', 'content'].includes(name) || !element) continue;
+        element.hidden = name !== mode;
+      }
+      if (mode === 'error' && this.inspector.error) this.inspector.error.textContent = String(message || 'Knowledge could not load this selection.');
+    }
+
+    async loadSelection() {
+      const objectKind = this.urlState.objectKind;
+      const id = this.urlState.id;
+      if (!objectKind || !id) {
+        this.client.cancel('inspector');
+        this.setInspectorMode('empty');
+        return;
+      }
+      if (!['chunk', 'entry', 'link'].includes(objectKind)) {
+        this.setInspectorMode('error', 'This object type does not yet have a direct inspector endpoint.');
+        return;
+      }
+      this.setInspectorMode('loading');
+      try {
+        let response;
+        if (objectKind === 'chunk') response = await this.client.getChunk(id, {channel: 'inspector'});
+        else if (objectKind === 'entry') response = await this.client.getEntry(id, {channel: 'inspector'});
+        else response = await this.client.getLink(id, {channel: 'inspector'});
+        if (this.urlState.objectKind !== objectKind || this.urlState.id !== id) return;
+        const record = response && response[objectKind];
+        if (!record) throw new Error('Knowledge returned no selected object.');
+        this.renderInspector(objectKind, record);
+      } catch (error) {
+        if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not load this selection.');
+        this.setInspectorMode('error', requestID ? message + ' Audit ID: ' + requestID : message);
+      }
+    }
+
+    renderInspector(objectKind, record) {
+      const title = objectKind === 'link'
+        ? String(record.label || displayLabel(record.kind) + ' relationship')
+        : String(record.title || record.id || 'Untitled knowledge');
+      const summary = objectKind === 'entry' ? String(record.summary || '') : '';
+      const markdown = objectKind === 'entry' ? String(record.body || '')
+        : objectKind === 'chunk' ? String(record.description || '') : String(record.notes || '');
+      if (this.inspector.kind) this.inspector.kind.textContent = displayLabel(objectKind) + (record.kind ? ' · ' + displayLabel(record.kind) : '');
+      if (this.inspector.title) this.inspector.title.textContent = title;
+      if (this.inspector.summary) {
+        this.inspector.summary.hidden = !summary;
+        this.inspector.summary.textContent = summary;
+      }
+      if (this.inspector.badges) {
+        this.inspector.badges.replaceChildren();
+        const badges = [record.state, record.scope && record.scope.kind, record.visibility, record.verification && record.verification.status];
+        for (const value of badges) {
+          if (!value) continue;
+          const badge = this.shell.ownerDocument.createElement('span');
+          badge.textContent = displayLabel(value);
+          this.inspector.badges.appendChild(badge);
+        }
+      }
+      if (this.inspector.meta) {
+        this.inspector.meta.replaceChildren();
+        const revision = record.revision || {};
+        const rows = [
+          ['ID', record.id],
+          ['Updated', formatTimestamp(record.updated_at || revision.created_at)],
+          ['Revision', revision.number],
+          ['Author', revision.actor && [revision.actor.kind, revision.actor.id].filter(Boolean).join(': ')],
+        ];
+        if (objectKind === 'entry') rows.push(['Chunk', record.chunk_id]);
+        if (objectKind === 'link') {
+          rows.push(['From', record.source && record.source.kind + ': ' + record.source.id]);
+          rows.push(['To', record.target && record.target.kind + ': ' + record.target.id]);
+        }
+        for (const [name, value] of rows) {
+          if (value === undefined || value === null || value === '') continue;
+          const term = this.shell.ownerDocument.createElement('dt');
+          const description = this.shell.ownerDocument.createElement('dd');
+          term.textContent = name;
+          description.textContent = String(value);
+          this.inspector.meta.append(term, description);
+        }
+      }
+      if (this.inspector.markdown) {
+        this.inspector.markdown.hidden = !markdown;
+        this.inspector.markdown.replaceChildren();
+        if (markdown) {
+          const html = sanitizedMarkdownHTML(markdown, globalThis.marked, globalThis.DOMPurify);
+          if (html) {
+            this.inspector.markdown.innerHTML = html;
+            for (const link of this.inspector.markdown.querySelectorAll('a[href]')) {
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+            }
+          } else {
+            this.inspector.markdown.textContent = markdown;
+          }
+        }
+      }
+      this.setInspectorMode('content');
+      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
+        detail: {objectKind, id: String(record.id || ''), record, label: plainTextLabel(title)}
+      }));
     }
 
     destroy() {
@@ -431,6 +580,9 @@
         selectPane(target, {focus: true});
       });
     }
+    shell.addEventListener('koder:knowledge-selection', () => {
+      if (globalThis.matchMedia && globalThis.matchMedia('(max-width: 980px)').matches) selectPane('inspector');
+    });
     selectPane(shell.dataset.mobilePane);
     if (!globalThis.KoderKnowledgeAPI) {
       const unavailable = new BrowserApp(shell, {cancelAll() {}});
@@ -452,5 +604,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, sanitizedMarkdownHTML, mount});
 });
