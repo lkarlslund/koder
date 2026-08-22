@@ -363,17 +363,8 @@ func (l Link) Validate() error {
 	if err := validateUUIDv7("id", string(l.ID)); err != nil {
 		return err
 	}
-	if err := validateEndpoint("source", l.Source); err != nil {
+	if err := ValidateRelationshipShape(l.Kind, l.Source, l.Target); err != nil {
 		return err
-	}
-	if err := validateEndpoint("target", l.Target); err != nil {
-		return err
-	}
-	if l.Source == l.Target {
-		return invalid("target", "must differ from source")
-	}
-	if l.Kind == LinkKindUnspecified || !l.Kind.IsALinkKind() {
-		return invalid("kind", "is not a known link kind")
 	}
 	if err := validateEvidenceIDs("evidence_ids", l.EvidenceIDs); err != nil {
 		return err

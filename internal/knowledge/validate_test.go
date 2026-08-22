@@ -343,6 +343,9 @@ func TestEveryEnumValueIsValidated(t *testing.T) {
 	for _, value := range []LinkKind{LinkKindRelatedTo, LinkKindPartOf, LinkKindRequires, LinkKindAlternativeTo, LinkKindAppliesTo, LinkKindSupersedes, LinkKindContradicts, LinkKindCausedBy, LinkKindSupportedBy, LinkKindDerivedFrom} {
 		link := validLink()
 		link.Kind = value
+		if value == LinkKindPartOf {
+			link.Target = ObjectRef{Kind: ObjectKindChunk, ID: string(testOtherChunk)}
+		}
 		if err := link.Validate(); err != nil {
 			t.Errorf("LinkKind %v rejected: %v", value, err)
 		}

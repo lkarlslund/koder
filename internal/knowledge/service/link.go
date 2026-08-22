@@ -35,6 +35,9 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 		return CreateLinkResult{Classification: classification}, err
 	}
 	candidate = knowledge.NormalizeLink(candidate)
+	if err := knowledge.ValidateRelationshipShape(candidate.Kind, candidate.Source, candidate.Target); err != nil {
+		return CreateLinkResult{}, err
+	}
 	result := CreateLinkResult{Classification: classification}
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		sourceChunk, err := resolveLinkEndpoint(ctx, tx, candidate.Source)
