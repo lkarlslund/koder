@@ -16,6 +16,7 @@ const (
 	ChunkPolicyLinkUnlink  ChunkPolicyAction = "link_unlink"
 	ChunkPolicyLinkRestore ChunkPolicyAction = "link_restore"
 	ChunkPolicyTraverse    ChunkPolicyAction = "traverse"
+	ChunkPolicySearch      ChunkPolicyAction = "search"
 )
 
 var (
