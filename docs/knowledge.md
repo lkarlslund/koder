@@ -431,6 +431,14 @@ claims a record so concurrent workers cannot inspect it twice. Extractors return
 safe candidate count to the queue; candidate payload storage remains behind the extractor
 boundary. Failures retain a bounded machine code, never the provider error text.
 
+Optional model drafting sits behind that extractor interface. The adapter receives only
+the requested, bounded turn items after local secret findings are replaced with
+`[REDACTED]`. Every request includes a strict JSON Schema, and Koder independently decodes
+with unknown-field rejection, validates action/target shape, UUIDs, source references,
+scope, personal origin, uncertainty, risk, timestamps, Markdown, and size limits, then
+classifies the draft again. The candidate sink is called only after the entire response
+passes; malformed, fabricated, or prohibited output produces no partial candidate writes.
+
 ## Combined examples
 
 ### Environment-specific procedure
