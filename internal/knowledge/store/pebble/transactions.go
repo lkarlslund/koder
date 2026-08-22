@@ -327,6 +327,11 @@ func readRecord[T canonicalRecord](reader recordReader, key []byte, kind, id str
 		return zero, fmt.Errorf("read %s %s: %w", kind, id, err)
 	}
 	defer func() { _ = closer.Close() }()
+	return decodeRecord[T](data, kind, id)
+}
+
+func decodeRecord[T canonicalRecord](data []byte, kind, id string) (T, error) {
+	var zero T
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var value T

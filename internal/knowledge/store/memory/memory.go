@@ -15,9 +15,11 @@ import (
 
 // Store owns an isolated in-memory canonical record set.
 type Store struct {
-	mu     sync.RWMutex
-	closed bool
-	data   data
+	mu              sync.RWMutex
+	closed          bool
+	data            data
+	indexGeneration uint64
+	rebuildStatus   knowledgeStore.IndexRebuildStatus
 }
 
 type data struct {
@@ -38,7 +40,11 @@ var _ knowledgeStore.WriteTx = (*transaction)(nil)
 
 // New returns an empty, open in-memory store.
 func New() *Store {
-	return &Store{data: newData()}
+	return &Store{
+		data:            newData(),
+		indexGeneration: 1,
+		rebuildStatus:   knowledgeStore.IndexRebuildStatus{ActiveGeneration: 1},
+	}
 }
 
 func newData() data {
@@ -117,9 +123,10 @@ func (s *Store) Health(ctx context.Context) (knowledgeStore.Health, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return knowledgeStore.Health{
-		Backend:       "memory",
-		Open:          !s.closed,
-		SchemaVersion: 1,
+		Backend:         "memory",
+		Open:            !s.closed,
+		SchemaVersion:   1,
+		IndexGeneration: s.indexGeneration,
 	}, nil
 }
 

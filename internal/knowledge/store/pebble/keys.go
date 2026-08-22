@@ -19,10 +19,24 @@ var (
 	storeMetadataKey = []byte(keyFormatPrefix + "meta/store")
 	canonicalPrefix  = []byte(keyFormatPrefix + "record/")
 	revisionsPrefix  = []byte(keyFormatPrefix + "revision/")
+	indexesPrefix    = []byte(keyFormatPrefix + "index/")
 )
 
 func metadataKey() []byte {
 	return append([]byte(nil), storeMetadataKey...)
+}
+
+func indexGenerationPrefix(generation uint64) []byte {
+	key := append([]byte(nil), indexesPrefix...)
+	key = binary.BigEndian.AppendUint64(key, generation)
+	return append(key, '/')
+}
+
+func indexKey(generation uint64, name string, suffix []byte) []byte {
+	key := indexGenerationPrefix(generation)
+	key = append(key, name...)
+	key = append(key, '/')
+	return append(key, suffix...)
 }
 
 func chunkKey(id string) []byte {
