@@ -113,6 +113,12 @@
     return browserStateFromSearch(searchForBrowserState('', value));
   }
 
+  function browserStatesEqual(left, right) {
+    left = normalizedBrowserState(left);
+    right = normalizedBrowserState(right);
+    return Object.keys(left).every(key => left[key] === right[key]);
+  }
+
   function graphPreferenceObject(value) {
     value = value && typeof value === 'object' ? value : {};
     const kind = String(value.kind || '').trim().toLowerCase();
@@ -670,12 +676,14 @@
       }
       this.savedPreferences = loadLocalPreferences(this.preferenceStorage);
       const explicitBrowserState = browserSearchHasState(search);
-      this.urlState = explicitBrowserState || !this.savedPreferences ? browserStateFromSearch(search) : this.savedPreferences.browser;
-      this.graphRoot = explicitBrowserState
+      const requestedBrowserState = browserStateFromSearch(search);
+      const restoreSavedView = !!this.savedPreferences && (!explicitBrowserState || browserStatesEqual(requestedBrowserState, this.savedPreferences.browser));
+      this.urlState = explicitBrowserState || !this.savedPreferences ? requestedBrowserState : this.savedPreferences.browser;
+      this.graphRoot = !restoreSavedView
         ? graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id})
         : (this.savedPreferences && this.savedPreferences.graph.root) || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
-      this.graphFrontier = explicitBrowserState || !this.savedPreferences ? [] : [...this.savedPreferences.graph.frontier];
-      this.restoredGraphPreferences = explicitBrowserState || !this.savedPreferences ? normalizeLocalPreferences({}).graph : this.savedPreferences.graph;
+      this.graphFrontier = restoreSavedView ? [...this.savedPreferences.graph.frontier] : [];
+      this.restoredGraphPreferences = restoreSavedView ? this.savedPreferences.graph : normalizeLocalPreferences({}).graph;
       this.preferenceTimer = 0;
       this.suppressPreferenceWrites = false;
       this.graphLoadGeneration = 0;
@@ -2792,5 +2800,5 @@
     }
   }
 
-  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, browserStatesEqual, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

@@ -44,6 +44,11 @@ assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&
 assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1'), false);
 assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1&kind='), true);
 assert.strictEqual(browser.browserSearchHasState('?object_kind=entry&id=entry-1'), true);
+assert.strictEqual(browser.browserStatesEqual(
+  {query: 'partition', scopeKind: 'project', objectKind: 'entry', id: 'entry-1'},
+  browser.browserStateFromSearch('?query=partition&scope_kind=project&object_kind=entry&id=entry-1'),
+), true);
+assert.strictEqual(browser.browserStatesEqual({query: 'partition'}, {query: 'different'}), false);
 const localPreferences = browser.normalizeLocalPreferences({
   version: 99,
   browser: {query: ' partition ', kind: 'reference', scopeKind: 'project', state: 'bad', objectKind: 'entry', id: 'entry-1'},
