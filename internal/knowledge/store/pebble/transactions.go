@@ -479,6 +479,13 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 	if err := tx.replaceEntryIndexes(ctx, &current, nil); err != nil {
 		return err
 	}
+	if err := tx.batch.Delete(entryUsageKey(id), nil); err != nil {
+		return fmt.Errorf("delete entry usage: %w", err)
+	}
+	eventLower, eventUpper := prefixBounds(entryUsageEventEntryPrefix(id))
+	if err := tx.batch.DeleteRange(eventLower, eventUpper, nil); err != nil {
+		return fmt.Errorf("delete entry usage events: %w", err)
+	}
 	tx.derivedDirty = true
 	return tx.deleteRevisioned(entryKey(string(id)), revisionPrefix(recordEntry, string(id)))
 }

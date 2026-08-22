@@ -4,6 +4,8 @@ package pebble
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/lkarlslund/koder/internal/knowledge"
 )
 
 const (
@@ -20,10 +22,24 @@ var (
 	canonicalPrefix  = []byte(keyFormatPrefix + "record/")
 	revisionsPrefix  = []byte(keyFormatPrefix + "revision/")
 	indexesPrefix    = []byte(keyFormatPrefix + "index/")
+	entryUsagePrefix = []byte(keyFormatPrefix + "usage/entry/")
+	usageEventPrefix = []byte(keyFormatPrefix + "usage-event/entry/")
 )
 
 func metadataKey() []byte {
 	return append([]byte(nil), storeMetadataKey...)
+}
+
+func entryUsageKey(id knowledge.EntryID) []byte {
+	return append(append([]byte(nil), entryUsagePrefix...), id...)
+}
+
+func entryUsageEventEntryPrefix(id knowledge.EntryID) []byte {
+	return append(append([]byte(nil), usageEventPrefix...), encodeIndexTuple(string(id))...)
+}
+
+func entryUsageEventKey(id knowledge.EntryID, eventID string) []byte {
+	return append(append([]byte(nil), usageEventPrefix...), encodeIndexTuple(string(id), eventID)...)
 }
 
 func indexGenerationPrefix(generation uint64) []byte {

@@ -14,9 +14,10 @@ import (
 )
 
 type RankingSignals struct {
-	ReuseCount         uint64 `json:"reuse_count"`
-	SuccessfulOutcomes uint64 `json:"successful_outcomes"`
-	FailedOutcomes     uint64 `json:"failed_outcomes"`
+	LastUsedAt         time.Time `json:"last_used_at"`
+	ReuseCount         uint64    `json:"reuse_count"`
+	SuccessfulOutcomes uint64    `json:"successful_outcomes"`
+	FailedOutcomes     uint64    `json:"failed_outcomes"`
 }
 
 type RankingSignalSource interface {
@@ -81,7 +82,7 @@ func (s *Service) rankSearchMatches(ctx context.Context, matches []LexicalSearch
 			Verification: verificationRank(entry.Verification.Status),
 			Freshness:    freshnessRank(entry, asOf),
 			Evidence:     evidenceRank(evidence[entry.ID]),
-			Reuse:        reuseRank(entry.LastUsedAt, signals[entry.ID].ReuseCount, asOf),
+			Reuse:        reuseRank(latestTime(entry.LastUsedAt, signals[entry.ID].LastUsedAt), signals[entry.ID].ReuseCount, asOf),
 			Outcomes:     outcomeRank(signals[entry.ID]),
 		}
 		rank.Total = rank.Lexical + rank.Graph + rank.Scope + rank.Verification +
@@ -244,6 +245,13 @@ func reuseRank(lastUsedAt time.Time, count uint64, asOf time.Time) float64 {
 		}
 	}
 	return 0.10 * max(countScore, recency)
+}
+
+func latestTime(left, right time.Time) time.Time {
+	if right.After(left) {
+		return right
+	}
+	return left
 }
 
 func outcomeRank(signals RankingSignals) float64 {

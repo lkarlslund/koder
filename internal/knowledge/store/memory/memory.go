@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,8 @@ type data struct {
 	chunkHistory map[knowledge.ChunkID][]knowledge.Chunk
 	entryHistory map[knowledge.EntryID][]knowledge.Entry
 	linkHistory  map[knowledge.LinkID][]knowledge.Link
+	usage        map[knowledge.EntryID]knowledgeStore.EntryUsage
+	usageEvents  map[string]struct{}
 }
 
 type transaction struct {
@@ -62,6 +65,8 @@ func newData() data {
 		chunkHistory: make(map[knowledge.ChunkID][]knowledge.Chunk),
 		entryHistory: make(map[knowledge.EntryID][]knowledge.Entry),
 		linkHistory:  make(map[knowledge.LinkID][]knowledge.Link),
+		usage:        make(map[knowledge.EntryID]knowledgeStore.EntryUsage),
+		usageEvents:  make(map[string]struct{}),
 	}
 }
 
@@ -506,6 +511,13 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 	}
 	delete(tx.data.entries, id)
 	delete(tx.data.entryHistory, id)
+	delete(tx.data.usage, id)
+	prefix := string(id) + "\x00"
+	for event := range tx.data.usageEvents {
+		if strings.HasPrefix(event, prefix) {
+			delete(tx.data.usageEvents, event)
+		}
+	}
 	tx.derivedDirty = true
 	return nil
 }
@@ -587,6 +599,8 @@ func cloneData(source data) data {
 		chunkHistory: cloneHistoryMap(source.chunkHistory, cloneChunk),
 		entryHistory: cloneHistoryMap(source.entryHistory, cloneEntry),
 		linkHistory:  cloneHistoryMap(source.linkHistory, cloneLink),
+		usage:        cloneMap(source.usage, func(value knowledgeStore.EntryUsage) knowledgeStore.EntryUsage { return value }),
+		usageEvents:  cloneMap(source.usageEvents, func(value struct{}) struct{} { return value }),
 	}
 }
 

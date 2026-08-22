@@ -57,7 +57,11 @@ func New(cfg Config) (*Service, error) {
 		cfg.NewID = id.New
 	}
 	if cfg.RankSignals == nil {
-		cfg.RankSignals = NoRankingSignals{}
+		if usageStore, ok := cfg.Store.(knowledgeStore.UsageStore); ok {
+			cfg.RankSignals = usageRankingSignalSource{store: usageStore}
+		} else {
+			cfg.RankSignals = NoRankingSignals{}
+		}
 	}
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, actor: cfg.Actor,
