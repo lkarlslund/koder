@@ -57,7 +57,7 @@ type DraftModel interface {
 
 // CandidateSink atomically stores a completely validated set of drafts.
 type CandidateSink interface {
-	StoreCandidates(context.Context, knowledge.CurationRecordID, []CandidateDraft) error
+	StoreCandidates(context.Context, knowledge.CurationRecordID, []CandidateDraft) (uint32, error)
 }
 
 // EntryDraft contains only client-owned entry fields; canonical IDs, evidence records,
@@ -146,10 +146,14 @@ func (e *ModelExtractor) Extract(ctx context.Context, record knowledge.CurationR
 			return ExtractionResult{}, fmt.Errorf("candidate %d: %w", index, err)
 		}
 	}
-	if err := e.sink.StoreCandidates(ctx, record.ID, drafts); err != nil {
+	stored, err := e.sink.StoreCandidates(ctx, record.ID, drafts)
+	if err != nil {
 		return ExtractionResult{}, fmt.Errorf("store knowledge candidates: %w", err)
 	}
-	return ExtractionResult{CandidateCount: uint32(len(drafts))}, nil
+	if stored > uint32(len(drafts)) {
+		return ExtractionResult{}, fmt.Errorf("%w: candidate sink reported more drafts than it received", knowledge.ErrInvalidRecord)
+	}
+	return ExtractionResult{CandidateCount: stored}, nil
 }
 
 func cloneTurnMaterial(material TurnMaterial) TurnMaterial {

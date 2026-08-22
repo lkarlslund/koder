@@ -22,9 +22,9 @@ func (fn draftModelFunc) Draft(ctx context.Context, material TurnMaterial, schem
 	return fn(ctx, material, schema)
 }
 
-type candidateSinkFunc func(context.Context, knowledge.CurationRecordID, []CandidateDraft) error
+type candidateSinkFunc func(context.Context, knowledge.CurationRecordID, []CandidateDraft) (uint32, error)
 
-func (fn candidateSinkFunc) StoreCandidates(ctx context.Context, id knowledge.CurationRecordID, drafts []CandidateDraft) error {
+func (fn candidateSinkFunc) StoreCandidates(ctx context.Context, id knowledge.CurationRecordID, drafts []CandidateDraft) (uint32, error) {
 	return fn(ctx, id, drafts)
 }
 
@@ -66,12 +66,12 @@ func TestModelExtractorRedactsMaterialAndStoresStrictDraft(t *testing.T) {
 			modelMaterial, modelSchema = material, append(json.RawMessage(nil), schema...)
 			return validDraftResponse(), nil
 		}),
-		Sink: candidateSinkFunc(func(_ context.Context, id knowledge.CurationRecordID, drafts []CandidateDraft) error {
+		Sink: candidateSinkFunc(func(_ context.Context, id knowledge.CurationRecordID, drafts []CandidateDraft) (uint32, error) {
 			if id != "00000000-0000-7000-8000-000000000020" {
 				t.Fatalf("record ID = %s", id)
 			}
 			stored = append([]CandidateDraft(nil), drafts...)
-			return nil
+			return uint32(len(drafts)), nil
 		}),
 		Classifier: knowledge.RuleClassifier{},
 	})
@@ -115,8 +115,11 @@ func TestModelExtractorRejectsMalformedOrUnsafeDraftsBeforeSink(t *testing.T) {
 				Loader: turnLoaderFunc(func(_ context.Context, _ knowledge.CompletedTurnRef, ids []string) (TurnMaterial, error) {
 					return TurnMaterial{Items: []TurnItem{{ID: ids[0], Role: "user", Text: "Correction"}, {ID: ids[1], Role: "assistant", Text: "Done"}}}, nil
 				}),
-				Model:      draftModelFunc(func(context.Context, TurnMaterial, json.RawMessage) ([]byte, error) { return []byte(test.raw), nil }),
-				Sink:       candidateSinkFunc(func(context.Context, knowledge.CurationRecordID, []CandidateDraft) error { stored = true; return nil }),
+				Model: draftModelFunc(func(context.Context, TurnMaterial, json.RawMessage) ([]byte, error) { return []byte(test.raw), nil }),
+				Sink: candidateSinkFunc(func(_ context.Context, _ knowledge.CurationRecordID, drafts []CandidateDraft) (uint32, error) {
+					stored = true
+					return uint32(len(drafts)), nil
+				}),
 				Classifier: knowledge.RuleClassifier{},
 			})
 			if err != nil {
@@ -142,9 +145,9 @@ func TestModelExtractorAllowsValidatedEmptyCandidateSet(t *testing.T) {
 		Model: draftModelFunc(func(context.Context, TurnMaterial, json.RawMessage) ([]byte, error) {
 			return []byte(`{"candidates":[]}`), nil
 		}),
-		Sink: candidateSinkFunc(func(_ context.Context, _ knowledge.CurationRecordID, drafts []CandidateDraft) error {
+		Sink: candidateSinkFunc(func(_ context.Context, _ knowledge.CurationRecordID, drafts []CandidateDraft) (uint32, error) {
 			stored = len(drafts)
-			return nil
+			return uint32(len(drafts)), nil
 		}),
 		Classifier: knowledge.RuleClassifier{},
 	})

@@ -439,6 +439,13 @@ scope, personal origin, uncertainty, risk, timestamps, Markdown, and size limits
 classifies the draft again. The candidate sink is called only after the entire response
 passes; malformed, fabricated, or prohibited output produces no partial candidate writes.
 
+Before storage, normalized entry content is fingerprinted and compared with authorized
+active and superseded entries in the target chunk. Exact no-ops and duplicates within the
+same model batch are suppressed; a mutation draft must also name an existing active or
+superseded target in that chunk. Action, prose reason, and model confidence cannot make
+identical content appear new. The sink reports the post-deduplication count back to the
+queue, so a fully duplicated batch becomes `no_candidates`.
+
 ## Combined examples
 
 ### Environment-specific procedure
