@@ -21,10 +21,12 @@ const (
 	parameters = `{
   "type":"object",
   "properties":{
-    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete"]},
+    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","verify"]},
     "query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},
     "object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},
     "id":{"type":"string","description":"Knowledge UUID returned by a prior action"},
+    "chunk_id":{"type":"string","description":"Owning chunk UUID for a new entry"},
+    "replacement_entry_id":{"type":"string","description":"Existing active entry that replaces the superseded entry"},
     "chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},
     "include_invalid":{"type":"boolean","description":"Include entries outside their validity window"},
     "include_superseded":{"type":"boolean","description":"Include superseded claims"},
@@ -63,6 +65,40 @@ const (
         "min_koder_version":{"type":"string"},"review_after":{"type":"string","format":"date-time"}
       },
       "additionalProperties":false
+    },
+    "entry":{
+      "type":"object",
+      "properties":{
+        "kind":{"type":"string","enum":["fact","procedure","concept","warning","preference","decision","reference"]},
+        "title":{"type":"string"},"summary":{"type":"string"},"body":{"type":"string"},
+        "aliases":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "tags":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "scope":{"type":"object","properties":{"kind":{"type":"string","enum":["global","personal","project","session","environment"]},"selector":{"type":"string"}},"required":["kind"],"additionalProperties":false},
+        "applicability":{"type":"object","properties":{
+          "operating_systems":{"type":"array","maxItems":50,"items":{"type":"string"}},
+          "architectures":{"type":"array","maxItems":50,"items":{"type":"string"}},
+          "software":{"type":"array","maxItems":50,"items":{"type":"object","properties":{"name":{"type":"string"},"version_range":{"type":"string"}},"required":["name"],"additionalProperties":false}},
+          "locales":{"type":"array","maxItems":50,"items":{"type":"string"}},
+          "conditions":{"type":"array","maxItems":100,"items":{"type":"string"}}
+        },"additionalProperties":false},
+        "risk":{"type":"array","maxItems":6,"items":{"type":"string","enum":["personal_sensitive","medical","legal","financial","physical_safety","security_sensitive"]}},
+        "confidence":{"type":"number","minimum":0,"maximum":1},
+        "valid_from":{"type":"string","format":"date-time"},"valid_until":{"type":"string","format":"date-time"},
+        "observed_at":{"type":"string","format":"date-time"},"review_after":{"type":"string","format":"date-time"},
+        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "personal_origin":{"type":"string","enum":["explicit","observed","inferred"]}
+      },
+      "additionalProperties":false
+    },
+    "verification":{
+      "type":"object",
+      "properties":{
+        "status":{"type":"string","enum":["unverified","partially_verified","verified","disputed"]},
+        "method":{"type":"string"},
+        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}}
+      },
+      "required":["status"],
+      "additionalProperties":false
     }
   },
   "required":["action"],
@@ -83,7 +119,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
 		Description: "Search, inspect, and maintain Koder's durable, linked knowledge.",
-		Usage:       "Use search for a small ranked set of durable facts or procedures. Search returns summaries and IDs, not full bodies; use get with an exact ID when the full object is needed. Use neighbors to inspect linked context. Use chunk_list/chunk_get before lifecycle changes. chunk_update is a patch and requires the current expected_revision. Archive is reversible. Delete is permanent, requires an archived chunk plus confirmed=true, and cascade=true may remove its entries, links, and owned evidence; use deletion only when explicitly intended. Follow next_cursor only when more results are necessary.",
+		Usage:       "Search existing knowledge before web research when durable or environment-specific knowledge may apply. Search returns a small ranked set of summaries and IDs; use get for the full body and neighbors for linked context. Persist only durable lessons, record applicability, and use verify with existing evidence for assessed claims. Correct a claim with entry_update or entry_supersede instead of silently adding a conflict. Create/update objects are patches where documented and mutations require the current expected_revision. Archive is reversible. Delete is permanent, requires archive plus confirmed=true, and chunk cascade deletion may remove dependent graph data. Never store secrets; use fresh authoritative evidence for high-risk knowledge.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -114,6 +150,12 @@ func (tool) Preview(req tools.Request) string {
 		return "Create knowledge chunk"
 	case "chunk_get", "chunk_update", "chunk_archive", "chunk_restore", "chunk_delete":
 		return "Knowledge " + strings.TrimPrefix(action, "chunk_") + " chunk " + strings.TrimSpace(req.Args["id"])
+	case "entry_create":
+		return "Create knowledge entry"
+	case "entry_update", "entry_supersede", "entry_archive", "entry_restore", "entry_delete":
+		return "Knowledge " + strings.TrimPrefix(action, "entry_") + " entry " + strings.TrimSpace(req.Args["id"])
+	case "verify":
+		return "Verify knowledge entry " + strings.TrimSpace(req.Args["id"])
 	default:
 		return "Knowledge " + action
 	}
@@ -139,6 +181,18 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return normalizeChunkLifecycleArgs(args, action)
 	case "chunk_delete":
 		return normalizeChunkDeleteArgs(args)
+	case "entry_create":
+		return normalizeEntryCreateArgs(args)
+	case "entry_update":
+		return normalizeEntryUpdateArgs(args)
+	case "entry_supersede":
+		return normalizeEntrySupersedeArgs(args)
+	case "entry_archive", "entry_restore":
+		return normalizeEntryLifecycleArgs(args, action)
+	case "entry_delete":
+		return normalizeEntryDeleteArgs(args)
+	case "verify":
+		return normalizeVerifyArgs(args)
 	case "":
 		return nil, errors.New("action is required")
 	default:
@@ -180,6 +234,18 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 		value, err = callChunkLifecycle(ctx, service, options.Request.Args)
 	case "chunk_delete":
 		value, err = callChunkDelete(ctx, service, options.Request.Args)
+	case "entry_create":
+		value, err = callEntryCreate(ctx, service, options.Request.Args)
+	case "entry_update":
+		value, err = callEntryUpdate(ctx, service, options.Request.Args)
+	case "entry_supersede":
+		value, err = callEntrySupersede(ctx, service, options.Request.Args)
+	case "entry_archive", "entry_restore":
+		value, err = callEntryLifecycle(ctx, service, options.Request.Args)
+	case "entry_delete":
+		value, err = callEntryDelete(ctx, service, options.Request.Args)
+	case "verify":
+		value, err = callVerify(ctx, service, options.Request.Args)
 	default:
 		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
 	}
