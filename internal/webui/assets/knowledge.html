@@ -184,11 +184,20 @@
           </section>
           <footer class="knowledge-inspector-actions">
             <div class="knowledge-chunk-actions" data-knowledge-chunk-actions hidden>
+              <button type="button" class="btn btn-sm btn-info" data-knowledge-entry-create><i class="bi bi-plus-lg" aria-hidden="true"></i> New entry</button>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-chunk-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
               <button type="button" class="btn btn-sm btn-outline-warning" data-knowledge-chunk-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
               <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-chunk-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
               <button type="button" class="btn btn-sm btn-outline-danger" data-knowledge-chunk-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
               <span data-knowledge-chunk-mutation-status role="status"></span>
+            </div>
+            <div class="knowledge-entry-actions" data-knowledge-entry-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-entry-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-primary" data-knowledge-entry-supersede><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Supersede</button>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-knowledge-entry-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-entry-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-knowledge-entry-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
+              <span data-knowledge-entry-mutation-status role="status"></span>
             </div>
             <div class="knowledge-expand-actions" data-knowledge-expand-actions hidden>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>
@@ -238,6 +247,60 @@
         </div>
         <div class="knowledge-editor-error" data-knowledge-chunk-form-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-chunk-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-chunk-submit>Save chunk</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="knowledge-editor-dialog" data-knowledge-entry-dialog aria-labelledby="knowledge-entry-dialog-title">
+      <form method="dialog" data-knowledge-entry-form>
+        <header>
+          <div><span class="knowledge-eyebrow">Knowledge entry</span><h2 id="knowledge-entry-dialog-title" data-knowledge-entry-dialog-title>Create entry</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-entry-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="knowledge-editor-fields">
+          <label class="is-wide"><span>Chunk</span><input name="chunk_id" readonly required></label>
+          <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
+          <label><span>Type</span><select name="kind" required><option value="fact">Fact</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="warning">Warning</option><option value="preference">Preference</option><option value="decision">Decision</option><option value="reference">Reference</option></select></label>
+          <label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" placeholder="0–1"></label>
+          <label class="is-wide"><span>Summary</span><textarea name="summary" maxlength="4000" rows="2"></textarea></label>
+          <label class="is-wide"><span>Body (Markdown)</span><textarea name="body" maxlength="64000" rows="9"></textarea></label>
+          <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+          <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+          <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
+          <details class="is-wide">
+            <summary>Applicability and lifecycle</summary>
+            <div class="knowledge-editor-fields">
+              <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Operating systems</span><input name="operating_systems" maxlength="2000" placeholder="Linux, Android"></label>
+              <label class="is-wide"><span>Architectures</span><input name="architectures" maxlength="1000" placeholder="amd64, arm64"></label>
+              <label class="is-wide"><span>Software</span><input name="software" maxlength="3000" placeholder="Go|&gt;=1.24, Pebble"></label>
+              <label class="is-wide"><span>Locales</span><input name="locales" maxlength="1000" placeholder="en-DK, da-DK"></label>
+              <label class="is-wide"><span>Conditions</span><input name="conditions" maxlength="3000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Risk classes</span><input name="risk" maxlength="1000" placeholder="medical, security_sensitive"></label>
+              <label><span>Valid from</span><input name="valid_from" type="datetime-local"></label>
+              <label><span>Valid until</span><input name="valid_until" type="datetime-local"></label>
+              <label><span>Observed at</span><input name="observed_at" type="datetime-local"></label>
+              <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
+              <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+              <label><span>Personal origin</span><select name="personal_origin"><option value="">Not personal</option><option value="explicit">Explicit</option><option value="observed">Observed</option><option value="inferred">Inferred</option></select></label>
+            </div>
+          </details>
+          <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
+        </div>
+        <div class="knowledge-editor-error" data-knowledge-entry-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-entry-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-entry-submit>Create entry</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="knowledge-editor-dialog knowledge-compact-dialog" data-knowledge-supersede-dialog aria-labelledby="knowledge-supersede-dialog-title">
+      <form method="dialog" data-knowledge-supersede-form>
+        <header><div><span class="knowledge-eyebrow">Entry lifecycle</span><h2 id="knowledge-supersede-dialog-title">Supersede entry</h2></div><button type="button" class="knowledge-icon-button" data-knowledge-supersede-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
+        <div class="knowledge-editor-fields">
+          <p class="knowledge-dialog-explanation is-wide">Choose an existing active entry in the same chunk. The current entry remains in history but normal lookup will prefer its replacement.</p>
+          <label class="is-wide"><span>Replacement entry</span><select name="replacement_entry_id" required></select></label>
+          <label class="is-wide"><span>Reason</span><input name="reason" maxlength="1000" placeholder="Why this knowledge was replaced"></label>
+        </div>
+        <div class="knowledge-editor-error" data-knowledge-supersede-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-supersede-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-primary" data-knowledge-supersede-submit>Supersede</button></footer>
       </form>
     </dialog>
 

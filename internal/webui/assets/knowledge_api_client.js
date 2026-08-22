@@ -184,6 +184,15 @@
     deleteChunk(id, body, options) { return this.request('/chunks/' + encodeID(id), {...options, method: 'DELETE', body}); }
     listEntries(query, options) { return this.request('/entries', {...options, query}); }
     getEntry(id, options) { return this.request('/entries/' + encodeID(id), options); }
+    createEntry(body, options) { return this.request('/entries', {...options, method: 'POST', body}); }
+    updateEntry(id, body, options) { return this.request('/entries/' + encodeID(id), {...options, method: 'PUT', body}); }
+    entryLifecycle(id, action, body, options) {
+      action = String(action || '');
+      if (!['archive', 'restore'].includes(action)) throw new TypeError('Knowledge entry lifecycle action is invalid');
+      return this.request('/entries/' + encodeID(id) + '/' + action, {...options, method: 'POST', body});
+    }
+    supersedeEntry(id, body, options) { return this.request('/entries/' + encodeID(id) + '/supersede', {...options, method: 'POST', body}); }
+    deleteEntry(id, body, options) { return this.request('/entries/' + encodeID(id), {...options, method: 'DELETE', body}); }
     entryEvidence(id, query, options) { return this.request('/entries/' + encodeID(id) + '/evidence', {...options, query}); }
     getLink(id, options) { return this.request('/links/' + encodeID(id), options); }
     search(body, options) { return this.request('/search', {...options, method: 'POST', body}); }

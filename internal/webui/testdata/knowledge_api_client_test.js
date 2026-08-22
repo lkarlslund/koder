@@ -42,11 +42,23 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[6].options.method, 'DELETE');
   assert.throws(() => client.chunkLifecycle('chunk-1', 'erase', {}), /invalid/);
 
+  await client.createEntry({chunk_id: 'chunk-1', entry: {title: 'Entry'}}, {channel: 'entry-create'});
+  assert.strictEqual(requests[7].url, '/api/knowledge/v1/entries');
+  await client.updateEntry('entry-1', {expected_revision: 1, entry: {title: 'Entry'}}, {channel: 'entry-update'});
+  assert.strictEqual(requests[8].options.method, 'PUT');
+  await client.entryLifecycle('entry-1', 'archive', {expected_revision: 2}, {channel: 'entry-lifecycle'});
+  assert.strictEqual(requests[9].url, '/api/knowledge/v1/entries/entry-1/archive');
+  await client.supersedeEntry('entry-1', {replacement_entry_id: 'entry-2', expected_revision: 3}, {channel: 'entry-supersede'});
+  assert.strictEqual(requests[10].url, '/api/knowledge/v1/entries/entry-1/supersede');
+  await client.deleteEntry('entry-1', {expected_revision: 4, confirmed: true}, {channel: 'entry-delete'});
+  assert.strictEqual(requests[11].options.method, 'DELETE');
+  assert.throws(() => client.entryLifecycle('entry-1', 'erase', {}), /invalid/);
+
   const selection = {session_id: 'session-1', chat_id: 'chat-2', object: {kind: 'entry', id: 'entry-3'}};
   await client.sendToChat(selection, {channel: 'send'});
-  assert.strictEqual(requests[7].url, '/api/knowledge/v1/chat-context');
-  assert.strictEqual(requests[7].options.method, 'POST');
-  assert.deepStrictEqual(JSON.parse(requests[7].options.body), selection);
+  assert.strictEqual(requests[12].url, '/api/knowledge/v1/chat-context');
+  assert.strictEqual(requests[12].options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(requests[12].options.body), selection);
 }
 
 async function testNewGenerationCancelsStaleRequest() {

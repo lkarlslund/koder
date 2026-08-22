@@ -41,6 +41,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`data-knowledge-inspector-empty`, `data-knowledge-inspector-content`, `data-knowledge-inspector-markdown`,
 		`data-knowledge-inspector-warnings`, `data-knowledge-inspector-applicability`, `data-knowledge-inspector-evidence`,
 		`data-knowledge-chunk-create`, `data-knowledge-chunk-edit`, `data-knowledge-chunk-dialog`, `data-knowledge-chunk-form`,
+		`data-knowledge-entry-create`, `data-knowledge-entry-edit`, `data-knowledge-entry-dialog`, `data-knowledge-entry-form`, `data-knowledge-supersede-dialog`,
 		`data-knowledge-expand-actions`, `data-knowledge-expand-incoming`, `data-knowledge-expand-outgoing`, `data-knowledge-expand-status`,
 		`data-knowledge-send-chat`, `data-knowledge-send-status`,
 		`/assets/vendor/marked/marked.umd.js`, `/assets/vendor/dompurify/purify.min.js`,

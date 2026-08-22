@@ -79,6 +79,17 @@ assert.deepStrictEqual(browser.chunkContentFromValues({
 });
 assert.throws(() => browser.chunkContentFromValues({title: 'Scoped', kind: 'project', visibility: 'private', scope_kind: 'project'}), /selector/);
 assert.strictEqual(browser.chunkEditorValues({scope: {kind: 'personal', selector: 'me'}, tags: ['one', 'two']}).tags, 'one, two');
+assert.deepStrictEqual(browser.entryContentFromValues({
+  title: 'Use sfdisk', kind: 'procedure', scope_kind: 'project', scope_selector: 'koder', confidence: '0.8',
+  operating_systems: 'Linux', software: 'sfdisk|>=2.39, util-linux', evidence_ids: 'evidence-1', valid_from: '2026-01-01T10:00',
+}), {
+  title: 'Use sfdisk', kind: 'procedure', scope: {kind: 'project', selector: 'koder'}, confidence: 0.8,
+  applicability: {operating_systems: ['Linux'], software: [{name: 'sfdisk', version_range: '>=2.39'}, {name: 'util-linux'}]},
+  evidence_ids: ['evidence-1'], valid_from: new Date('2026-01-01T10:00').toISOString(),
+});
+assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', confidence: '2'}), /confidence/);
+assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', valid_from: '2026-02-01T00:00', valid_until: '2026-01-01T00:00'}), /later/);
+assert.strictEqual(browser.entryEditorValues({chunk_id: 'chunk-1', applicability: {software: [{name: 'Go', version_range: '>=1.24'}]}}).software, 'Go|>=1.24');
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};

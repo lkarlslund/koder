@@ -276,6 +276,86 @@
     };
   }
 
+  function localDateTimeValue(value) {
+    const date = new Date(String(value || ''));
+    if (Number.isNaN(date.getTime())) return '';
+    const offset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  }
+
+  function entryContentFromValues(values) {
+    values = values || {};
+    const required = name => {
+      const value = String(values[name] || '').trim();
+      if (!value) throw new TypeError(`Entry ${name.replaceAll('_', ' ')} is required.`);
+      return value;
+    };
+    const scopeKind = required('scope_kind');
+    const scopeSelector = String(values.scope_selector || '').trim();
+    if (scopeKind !== 'global' && !scopeSelector) throw new TypeError('Entry scope selector is required outside global scope.');
+    const content = {kind: required('kind'), title: required('title'), scope: {kind: scopeKind}};
+    if (scopeSelector) content.scope.selector = scopeSelector;
+    for (const name of ['summary', 'body']) {
+      const value = String(values[name] || '').trim();
+      if (value) content[name] = value;
+    }
+    for (const name of ['aliases', 'tags', 'risk', 'evidence_ids']) {
+      const list = commaValues(values[name]);
+      if (list.length) content[name] = list;
+    }
+    const confidenceText = String(values.confidence || '').trim();
+    if (confidenceText) {
+      const confidence = Number(confidenceText);
+      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new TypeError('Entry confidence must be between 0 and 1.');
+      content.confidence = confidence;
+    }
+    const applicability = {};
+    for (const name of ['operating_systems', 'architectures', 'locales', 'conditions']) {
+      const list = commaValues(values[name]);
+      if (list.length) applicability[name] = list;
+    }
+    const software = commaValues(values.software).map(value => {
+      const [name, ...range] = value.split('|');
+      if (!name.trim()) throw new TypeError('Entry software names cannot be empty.');
+      const item = {name: name.trim()};
+      if (range.length && range.join('|').trim()) item.version_range = range.join('|').trim();
+      return item;
+    });
+    if (software.length) applicability.software = software;
+    if (Object.keys(applicability).length) content.applicability = applicability;
+    const dates = {};
+    for (const name of ['valid_from', 'valid_until', 'observed_at', 'review_after']) {
+      const value = String(values[name] || '').trim();
+      if (!value) continue;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) throw new TypeError(`Entry ${name.replaceAll('_', ' ')} is invalid.`);
+      dates[name] = date;
+      content[name] = date.toISOString();
+    }
+    if (dates.valid_from && dates.valid_until && dates.valid_from >= dates.valid_until) throw new TypeError('Entry valid until must be later than valid from.');
+    const origin = String(values.personal_origin || '').trim();
+    if (origin) content.personal_origin = origin;
+    return content;
+  }
+
+  function entryEditorValues(record, chunk) {
+    record = record || {};
+    chunk = chunk || {};
+    const applicability = record.applicability || {};
+    const scope = record.scope || chunk.scope || {kind: 'global'};
+    return {
+      chunk_id: record.chunk_id || chunk.id || '', title: record.title || '', kind: record.kind || 'fact',
+      confidence: record.confidence > 0 || (record.confidence === 0 && record.personal_origin === 'inferred') ? String(record.confidence) : '',
+      summary: record.summary || '', body: record.body || '', scope_kind: scope.kind || 'global', scope_selector: scope.selector || '',
+      aliases: (record.aliases || []).join(', '), tags: (record.tags || []).join(', '), risk: (record.risk || []).join(', '),
+      operating_systems: (applicability.operating_systems || []).join(', '), architectures: (applicability.architectures || []).join(', '),
+      software: (applicability.software || []).map(item => item.version_range ? `${item.name}|${item.version_range}` : item.name).join(', '),
+      locales: (applicability.locales || []).join(', '), conditions: (applicability.conditions || []).join(', '),
+      valid_from: localDateTimeValue(record.valid_from), valid_until: localDateTimeValue(record.valid_until), observed_at: localDateTimeValue(record.observed_at),
+      review_after: localDateTimeValue(record.review_after), evidence_ids: (record.evidence_ids || []).join(', '), personal_origin: record.personal_origin || '', review_approved: false,
+    };
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -366,6 +446,23 @@
       this.chunkRestoreButton = shell.querySelector('[data-knowledge-chunk-restore]');
       this.chunkDeleteButton = shell.querySelector('[data-knowledge-chunk-delete]');
       this.chunkMutationStatus = shell.querySelector('[data-knowledge-chunk-mutation-status]');
+      this.entryCreateButton = shell.querySelector('[data-knowledge-entry-create]');
+      this.entryDialog = shell.querySelector('[data-knowledge-entry-dialog]');
+      this.entryForm = shell.querySelector('[data-knowledge-entry-form]');
+      this.entryDialogTitle = shell.querySelector('[data-knowledge-entry-dialog-title]');
+      this.entryFormError = shell.querySelector('[data-knowledge-entry-form-error]');
+      this.entrySubmitButton = shell.querySelector('[data-knowledge-entry-submit]');
+      this.entryActions = shell.querySelector('[data-knowledge-entry-actions]');
+      this.entryEditButton = shell.querySelector('[data-knowledge-entry-edit]');
+      this.entrySupersedeButton = shell.querySelector('[data-knowledge-entry-supersede]');
+      this.entryArchiveButton = shell.querySelector('[data-knowledge-entry-archive]');
+      this.entryRestoreButton = shell.querySelector('[data-knowledge-entry-restore]');
+      this.entryDeleteButton = shell.querySelector('[data-knowledge-entry-delete]');
+      this.entryMutationStatus = shell.querySelector('[data-knowledge-entry-mutation-status]');
+      this.supersedeDialog = shell.querySelector('[data-knowledge-supersede-dialog]');
+      this.supersedeForm = shell.querySelector('[data-knowledge-supersede-form]');
+      this.supersedeError = shell.querySelector('[data-knowledge-supersede-error]');
+      this.supersedeSubmitButton = shell.querySelector('[data-knowledge-supersede-submit]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -443,6 +540,18 @@
       if (this.chunkForm) this.chunkForm.addEventListener('submit', event => { event.preventDefault(); this.saveChunkEditor(); });
       const scopeInput = this.chunkForm && this.chunkForm.elements.namedItem('scope_kind');
       if (scopeInput) scopeInput.addEventListener('change', () => this.syncChunkScopeField());
+      if (this.entryCreateButton) this.entryCreateButton.addEventListener('click', () => this.openEntryEditor(null, this.inspectedRecord));
+      if (this.entryEditButton) this.entryEditButton.addEventListener('click', () => this.openEntryEditor(this.inspectedRecord));
+      if (this.entrySupersedeButton) this.entrySupersedeButton.addEventListener('click', () => this.openSupersedeEditor());
+      if (this.entryArchiveButton) this.entryArchiveButton.addEventListener('click', () => this.changeEntryLifecycle('archive'));
+      if (this.entryRestoreButton) this.entryRestoreButton.addEventListener('click', () => this.changeEntryLifecycle('restore'));
+      if (this.entryDeleteButton) this.entryDeleteButton.addEventListener('click', () => this.deleteInspectedEntry());
+      for (const button of shell.querySelectorAll('[data-knowledge-entry-cancel]')) button.addEventListener('click', () => this.closeEntryEditor());
+      if (this.entryForm) this.entryForm.addEventListener('submit', event => { event.preventDefault(); this.saveEntryEditor(); });
+      const entryScopeInput = this.entryForm && this.entryForm.elements.namedItem('scope_kind');
+      if (entryScopeInput) entryScopeInput.addEventListener('change', () => this.syncEntryScopeField());
+      for (const button of shell.querySelectorAll('[data-knowledge-supersede-cancel]')) button.addEventListener('click', () => this.closeSupersedeEditor());
+      if (this.supersedeForm) this.supersedeForm.addEventListener('submit', event => { event.preventDefault(); this.saveSupersedeEditor(); });
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -954,6 +1063,7 @@
         if (this.inspector.sendButton) this.inspector.sendButton.disabled = true;
         if (this.graphExpandActions) this.graphExpandActions.hidden = true;
         if (this.chunkActions) this.chunkActions.hidden = true;
+        if (this.entryActions) this.entryActions.hidden = true;
       }
     }
 
@@ -1126,7 +1236,19 @@
       if (this.chunkArchiveButton) this.chunkArchiveButton.hidden = !chunkSelected || archivedChunk;
       if (this.chunkRestoreButton) this.chunkRestoreButton.hidden = !archivedChunk;
       if (this.chunkDeleteButton) this.chunkDeleteButton.hidden = !archivedChunk;
+      if (this.entryCreateButton) this.entryCreateButton.disabled = !chunkSelected || record.state === 'archived';
       if (this.chunkMutationStatus) this.chunkMutationStatus.textContent = '';
+      const entrySelected = objectKind === 'entry';
+      const archivedEntry = entrySelected && record.state === 'archived';
+      const supersededEntry = entrySelected && record.state === 'superseded';
+      const activeEntry = entrySelected && record.state === 'active';
+      if (this.entryActions) this.entryActions.hidden = !entrySelected;
+      if (this.entryEditButton) this.entryEditButton.hidden = !entrySelected || archivedEntry || supersededEntry;
+      if (this.entrySupersedeButton) this.entrySupersedeButton.hidden = !activeEntry;
+      if (this.entryArchiveButton) this.entryArchiveButton.hidden = !entrySelected || archivedEntry || supersededEntry;
+      if (this.entryRestoreButton) this.entryRestoreButton.hidden = !archivedEntry;
+      if (this.entryDeleteButton) this.entryDeleteButton.hidden = !archivedEntry;
+      if (this.entryMutationStatus) this.entryMutationStatus.textContent = '';
       this.setInspectorMode('content');
       this.loadInspectorSupport(objectKind, record);
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
@@ -1344,6 +1466,185 @@
       }
     }
 
+    openEntryEditor(record, chunk) {
+      if (!this.entryDialog || !this.entryForm) return false;
+      this.entryEditorRecord = record && record.id ? record : null;
+      this.entryEditorChunk = this.entryEditorRecord ? null : chunk && chunk.id ? chunk : null;
+      const values = entryEditorValues(this.entryEditorRecord, this.entryEditorChunk);
+      if (!values.chunk_id) return false;
+      for (const [name, value] of Object.entries(values)) {
+        const input = this.entryForm.elements.namedItem(name);
+        if (!input) continue;
+        if (input.type === 'checkbox') input.checked = !!value;
+        else input.value = value;
+      }
+      if (this.entryDialogTitle) this.entryDialogTitle.textContent = this.entryEditorRecord ? 'Edit entry' : 'Create entry';
+      if (this.entrySubmitButton) this.entrySubmitButton.textContent = this.entryEditorRecord ? 'Save changes' : 'Create entry';
+      if (this.entryFormError) { this.entryFormError.hidden = true; this.entryFormError.textContent = ''; }
+      this.syncEntryScopeField();
+      if (typeof this.entryDialog.showModal === 'function') this.entryDialog.showModal();
+      else this.entryDialog.setAttribute('open', '');
+      const title = this.entryForm.elements.namedItem('title');
+      if (title) title.focus();
+      return true;
+    }
+
+    closeEntryEditor() {
+      if (!this.entryDialog) return;
+      if (typeof this.entryDialog.close === 'function') this.entryDialog.close();
+      else this.entryDialog.removeAttribute('open');
+      this.entryEditorRecord = null;
+      this.entryEditorChunk = null;
+    }
+
+    syncEntryScopeField() {
+      if (!this.entryForm) return;
+      const kind = this.entryForm.elements.namedItem('scope_kind');
+      const selector = this.entryForm.elements.namedItem('scope_selector');
+      if (!kind || !selector) return;
+      selector.required = kind.value !== 'global';
+      selector.disabled = kind.value === 'global';
+      if (selector.disabled) selector.value = '';
+    }
+
+    async saveEntryEditor() {
+      if (!this.entryForm || !this.client) return false;
+      if (this.entryFormError) { this.entryFormError.hidden = true; this.entryFormError.textContent = ''; }
+      const values = Object.fromEntries(new FormData(this.entryForm).entries());
+      values.review_approved = !!this.entryForm.elements.namedItem('review_approved').checked;
+      let content;
+      try { content = entryContentFromValues(values); }
+      catch (error) {
+        if (this.entryFormError) { this.entryFormError.hidden = false; this.entryFormError.textContent = String(error && error.message || error); }
+        return false;
+      }
+      if (this.entrySubmitButton) this.entrySubmitButton.disabled = true;
+      try {
+        const existing = this.entryEditorRecord;
+        const response = existing
+          ? await this.client.updateEntry(existing.id, {entry: content, expected_revision: existing.revision.number, reason: 'Edited in Knowledge explorer', review_approved: values.review_approved}, {channel: 'entry-mutation'})
+          : await this.client.createEntry({chunk_id: String(values.chunk_id), entry: content, review_approved: values.review_approved}, {channel: 'entry-mutation'});
+        const entry = response && response.entry;
+        this.closeEntryEditor();
+        if (entry) {
+          this.writeURLState({...this.urlState, objectKind: 'entry', id: entry.id}, false);
+          await this.refresh();
+        }
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not save this entry.');
+        if (this.entryFormError) { this.entryFormError.hidden = false; this.entryFormError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        if (this.entrySubmitButton) this.entrySubmitButton.disabled = false;
+      }
+    }
+
+    async openSupersedeEditor() {
+      const entry = this.inspectedRecord;
+      if (!entry || entry.state !== 'active' || !this.supersedeDialog || !this.supersedeForm) return false;
+      this.supersedeEntryRecord = entry;
+      const select = this.supersedeForm.elements.namedItem('replacement_entry_id');
+      select.replaceChildren();
+      select.disabled = true;
+      if (this.supersedeSubmitButton) this.supersedeSubmitButton.disabled = true;
+      if (this.supersedeError) { this.supersedeError.hidden = true; this.supersedeError.textContent = ''; }
+      if (typeof this.supersedeDialog.showModal === 'function') this.supersedeDialog.showModal();
+      else this.supersedeDialog.setAttribute('open', '');
+      try {
+        const response = await this.client.listEntries({chunk_id: entry.chunk_id, state: 'active', limit: 200}, {channel: 'entry-supersede-options'});
+        if (!this.supersedeEntryRecord || this.supersedeEntryRecord.id !== entry.id) return false;
+        const entries = (Array.isArray(response && response.entries) ? response.entries : []).filter(item => item.id !== entry.id);
+        for (const replacement of entries) {
+          const option = this.shell.ownerDocument.createElement('option');
+          option.value = replacement.id;
+          option.textContent = `${replacement.title} · ${replacement.id}`;
+          select.appendChild(option);
+        }
+        select.disabled = !entries.length;
+        if (this.supersedeSubmitButton) this.supersedeSubmitButton.disabled = !entries.length;
+        if (!entries.length && this.supersedeError) {
+          this.supersedeError.hidden = false;
+          this.supersedeError.textContent = 'Create another active entry in this chunk before superseding this one.';
+        } else if (response && response.page && response.page.next_cursor && this.supersedeError) {
+          this.supersedeError.hidden = false;
+          this.supersedeError.textContent = 'Showing the first 200 active replacement candidates.';
+        }
+        return entries.length > 0;
+      } catch (error) {
+        if (error && ['canceled', 'stale_response'].includes(error.code)) return false;
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Replacement entries could not be loaded.');
+        if (this.supersedeError) { this.supersedeError.hidden = false; this.supersedeError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      }
+    }
+
+    closeSupersedeEditor() {
+      if (this.client && typeof this.client.cancel === 'function') this.client.cancel('entry-supersede-options');
+      if (this.supersedeDialog) {
+        if (typeof this.supersedeDialog.close === 'function') this.supersedeDialog.close();
+        else this.supersedeDialog.removeAttribute('open');
+      }
+      this.supersedeEntryRecord = null;
+    }
+
+    async saveSupersedeEditor() {
+      const entry = this.supersedeEntryRecord;
+      if (!entry || !this.supersedeForm) return false;
+      const values = Object.fromEntries(new FormData(this.supersedeForm).entries());
+      if (!values.replacement_entry_id) return false;
+      if (this.supersedeSubmitButton) this.supersedeSubmitButton.disabled = true;
+      const success = await this.runEntryMutation(() => this.client.supersedeEntry(entry.id, {
+        replacement_entry_id: values.replacement_entry_id, expected_revision: entry.revision.number,
+        reason: String(values.reason || '').trim() || 'Superseded in Knowledge explorer',
+      }, {channel: 'entry-mutation'}), 'supersede');
+      if (success) this.closeSupersedeEditor();
+      else if (this.supersedeSubmitButton) this.supersedeSubmitButton.disabled = false;
+      return success;
+    }
+
+    async changeEntryLifecycle(action) {
+      const entry = this.inspectedRecord;
+      if (!entry || !this.inspectedObject || this.inspectedObject.kind !== 'entry') return false;
+      const verb = action === 'archive' ? 'archive' : 'restore';
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`${verb === 'archive' ? 'Archive' : 'Restore'} “${entry.title}”?`)) return false;
+      return this.runEntryMutation(() => this.client.entryLifecycle(entry.id, action, {
+        expected_revision: entry.revision.number, reason: `${verb === 'archive' ? 'Archived' : 'Restored'} in Knowledge explorer`,
+      }, {channel: 'entry-mutation'}), action);
+    }
+
+    async deleteInspectedEntry() {
+      const entry = this.inspectedRecord;
+      if (!entry || entry.state !== 'archived' || !this.inspectedObject || this.inspectedObject.kind !== 'entry') return false;
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete “${entry.title}”? This erases it and cannot be undone.`)) return false;
+      return this.runEntryMutation(() => this.client.deleteEntry(entry.id, {
+        expected_revision: entry.revision.number, confirmed: true,
+      }, {channel: 'entry-mutation'}), 'delete', entry.chunk_id);
+    }
+
+    async runEntryMutation(operation, action, parentChunkID) {
+      const buttons = [this.entryEditButton, this.entrySupersedeButton, this.entryArchiveButton, this.entryRestoreButton, this.entryDeleteButton];
+      for (const button of buttons) if (button) button.disabled = true;
+      if (this.entryMutationStatus) this.entryMutationStatus.textContent = `${displayLabel(action)} in progress…`;
+      try {
+        const response = await operation();
+        if (action === 'delete') this.writeURLState({...this.urlState, objectKind: parentChunkID ? 'chunk' : '', id: parentChunkID || ''}, false);
+        else if (response && response.entry) this.writeURLState({...this.urlState, objectKind: 'entry', id: response.entry.id}, false);
+        await this.refresh();
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not change this entry.');
+        const status = this.supersedeDialog && this.supersedeDialog.open ? this.supersedeError : this.entryMutationStatus;
+        if (status) { status.hidden = false; status.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        for (const button of buttons) if (button) button.disabled = false;
+      }
+    }
+
     async expandGraph(direction, selection) {
       const selected = graphObjectForSelection(selection) || this.inspectedObject;
       const request = selected && graphExpansionRequest(selected.kind, selected.id, direction);
@@ -1527,5 +1828,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
