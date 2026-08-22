@@ -20,6 +20,11 @@
 
   function validatePatchShape(patch) {
     if (!patch || patch.patchVersion !== PATCH_VERSION) throw new TypeError('Knowledge graph patch version is invalid');
+    if (!Number.isSafeInteger(Number(patch.generation)) || Number(patch.generation) < 1) throw new TypeError('Knowledge graph patch generation is invalid');
+    if (!patch.checkpoint || !String(patch.checkpoint.streamID || '') ||
+        !Number.isSafeInteger(Number(patch.checkpoint.sequence)) || Number(patch.checkpoint.sequence) < 0) {
+      throw new TypeError('Knowledge graph patch checkpoint is invalid');
+    }
     for (const field of ['upsertNodes', 'removeNodeKeys', 'upsertEdges', 'removeEdgeKeys']) {
       if (!Array.isArray(patch[field])) throw new TypeError(`Knowledge graph patch ${field} must be an array`);
     }
@@ -50,6 +55,7 @@
       this.destroyed = false;
       this.generation = 0;
       this.checkpoint = null;
+      this.refetchRequired = false;
     }
 
     subscribe(listener) {
@@ -59,8 +65,8 @@
       return () => this.listeners.delete(listener);
     }
 
-    emit(detail) {
-      const event = Object.freeze({type: 'change', detail, store: this});
+    emit(type, detail) {
+      const event = Object.freeze({type, detail, store: this});
       for (const listener of [...this.listeners]) listener(event);
     }
 
@@ -80,6 +86,8 @@
       uniquePatchKeys(patch.upsertEdges, 'upsertEdges');
       uniquePatchKeys(patch.removeEdgeKeys, 'removeEdgeKeys');
       this.preflight(patch, replace);
+      const decision = this.assessOrder(patch, replace);
+      if (decision) return decision;
 
       const before = this.counts();
       if (replace) this.graph.clear();
@@ -94,12 +102,69 @@
 
       this.generation = Number(patch.generation);
       this.checkpoint = Object.freeze({...patch.checkpoint});
+      this.refetchRequired = false;
       const after = this.counts();
       const detail = Object.freeze({
-        mode: replace ? 'replace' : 'apply', patch, before, after,
+        action: 'applied', mode: replace ? 'replace' : 'apply', patch, before, after,
         generation: this.generation, checkpoint: this.checkpoint,
       });
-      this.emit(detail);
+      this.emit('change', detail);
+      return detail;
+    }
+
+    assessOrder(patch, replace) {
+      const generation = Number(patch.generation);
+      const next = patch.checkpoint;
+      const current = this.checkpoint;
+      if (replace) {
+        if (this.generation && generation < this.generation) return this.decision('ignored', 'stale_generation', patch);
+        if (current && generation === this.generation && next.streamID === current.streamID && next.sequence < current.sequence) {
+          return this.decision('ignored', 'stale_snapshot', patch);
+        }
+        return null;
+      }
+      if (this.refetchRequired) return this.decision('refetch', 'refetch_pending', patch);
+      if (!current || !this.generation) return this.decision('refetch', 'snapshot_required', patch);
+      if (generation < this.generation) return this.decision('ignored', 'stale_generation', patch);
+      if (generation > this.generation) return this.decision('refetch', 'generation_changed', patch);
+      if (next.streamID !== current.streamID) return this.decision('refetch', 'stream_changed', patch);
+      if (next.sequence <= current.sequence) return this.decision('ignored', 'stale_patch', patch);
+      if (next.sequence !== current.sequence + 1) return this.decision('refetch', 'checkpoint_gap', patch);
+      const revisionGap = this.revisionGap(patch);
+      return revisionGap ? this.decision('refetch', revisionGap, patch) : null;
+    }
+
+    revisionGap(patch) {
+      for (const node of patch.upsertNodes) {
+        if (!this.graph.hasNode(node.key)) continue;
+        const reason = this.compareRevision('node', node.key, this.graph.getNodeAttributes(node.key), node.attributes);
+        if (reason) return reason;
+      }
+      for (const edge of patch.upsertEdges) {
+        if (!this.graph.hasEdge(edge.key)) continue;
+        const reason = this.compareRevision('edge', edge.key, this.graph.getEdgeAttributes(edge.key), edge.attributes);
+        if (reason) return reason;
+      }
+      return '';
+    }
+
+    compareRevision(kind, key, current, next) {
+      const currentNumber = Number(current && current.revision);
+      const nextNumber = Number(next && next.revision);
+      if (!Number.isSafeInteger(currentNumber) || !Number.isSafeInteger(nextNumber)) return `${kind}_revision_invalid`;
+      if (nextNumber < currentNumber) return `${kind}_revision_stale`;
+      if (nextNumber === currentNumber && String(next.revisionID || '') !== String(current.revisionID || '')) return `${kind}_revision_conflict`;
+      if (nextNumber > currentNumber + 1) return `${kind}_revision_gap`;
+      return '';
+    }
+
+    decision(action, reason, patch) {
+      if (action === 'refetch') this.refetchRequired = true;
+      const detail = Object.freeze({
+        action, reason, patch, generation: this.generation,
+        checkpoint: this.checkpoint, counts: this.counts(),
+      });
+      this.emit(action, detail);
       return detail;
     }
 
@@ -178,6 +243,7 @@
       this.listeners.clear();
       this.generation = 0;
       this.checkpoint = null;
+      this.refetchRequired = false;
       this.destroyed = true;
     }
   }

@@ -136,7 +136,11 @@
       this.assertActive();
       const patch = snapshotToPatch(snapshot);
       this.emit('beforechange', {mode: 'replace', patch});
-      this.target.replace(patch);
+      const result = this.target.replace(patch);
+      if (result && result.action && result.action !== 'applied') {
+        this.emit(result.action, result);
+        return patch;
+      }
       this.selection = null;
       this.emit('change', {mode: 'replace', patch, counts: this.counts()});
       return patch;
@@ -146,7 +150,11 @@
       this.assertActive();
       validatePatch(patch);
       this.emit('beforechange', {mode: 'apply', patch});
-      this.target.apply(patch);
+      const result = this.target.apply(patch);
+      if (result && result.action && result.action !== 'applied') {
+        this.emit(result.action, result);
+        return patch;
+      }
       if (this.selection && !this.has(this.selection.kind, this.selection.key)) this.selection = null;
       this.emit('change', {mode: 'apply', patch, counts: this.counts()});
       return patch;

@@ -8,7 +8,7 @@ const fixture = require('./knowledge_graph_fixtures.js');
 const store = new graphAPI.Store();
 const adapter = new adapterAPI.Adapter(store);
 const batches = [];
-store.subscribe(event => batches.push(event.detail));
+store.subscribe(event => batches.push([event.type, event.detail]));
 
 adapter.replaceSnapshot(fixture.apiSnapshot);
 assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 1});
@@ -16,7 +16,8 @@ assert.strictEqual(store.graph.type, 'directed');
 assert.strictEqual(store.graph.multi, true);
 assert.strictEqual(store.graph.hasDirectedEdge(fixture.ids.requires), true);
 assert.strictEqual(batches.length, 1);
-assert.strictEqual(batches[0].mode, 'replace');
+assert.strictEqual(batches[0][0], 'change');
+assert.strictEqual(batches[0][1].mode, 'replace');
 
 const formatKey = `entry:${fixture.ids.format}`;
 store.graph.setNodeAttribute(formatKey, 'x', 17);
@@ -43,8 +44,32 @@ assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 0});
 assert.strictEqual(store.checkpoint.sequence, 43);
 assert.strictEqual(batches.length, 4);
 
+const stale = store.apply({...fixture.incrementalPatches[2], generation: 6, checkpoint: {streamID: 'knowledge-fixture-stream', sequence: 44}});
+assert.deepStrictEqual([stale.action, stale.reason], ['ignored', 'stale_generation']);
+assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 0});
+const gap = store.apply({...fixture.incrementalPatches[2], checkpoint: {streamID: 'knowledge-fixture-stream', sequence: 45}});
+assert.deepStrictEqual([gap.action, gap.reason], ['refetch', 'checkpoint_gap']);
+assert.strictEqual(store.refetchRequired, true);
+const pending = store.apply({...fixture.incrementalPatches[2], checkpoint: {streamID: 'knowledge-fixture-stream', sequence: 44}});
+assert.deepStrictEqual([pending.action, pending.reason], ['refetch', 'refetch_pending']);
+
+const freshSnapshot = {
+  ...fixture.apiSnapshot, checkpoint: {stream_id: 'knowledge-fixture-stream', sequence: 46},
+};
+adapter.replaceSnapshot(freshSnapshot);
+assert.strictEqual(store.refetchRequired, false);
+const revisionGap = store.apply({
+  ...fixture.incrementalPatches[1], checkpoint: {streamID: 'knowledge-fixture-stream', sequence: 47},
+  upsertNodes: [{
+    ...fixture.snapshotPatch.upsertNodes[0],
+    attributes: {...fixture.snapshotPatch.upsertNodes[0].attributes, revision: 3, revisionID: 'revision-gap'},
+  }],
+});
+assert.deepStrictEqual([revisionGap.action, revisionGap.reason], ['refetch', 'node_revision_gap']);
+assert.strictEqual(store.node(`chunk:${fixture.ids.chunk}`).attributes.revision, 1);
+
 store.graph.addNode('temporary', {title: 'discard me'});
-adapter.replaceSnapshot(fixture.apiSnapshot);
+adapter.replaceSnapshot({...fixture.apiSnapshot, checkpoint: {stream_id: 'knowledge-fixture-stream', sequence: 48}});
 assert.strictEqual(store.hasNode('temporary'), false);
 assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 1});
 adapter.destroy();
