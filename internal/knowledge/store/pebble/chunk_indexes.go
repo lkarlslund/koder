@@ -13,6 +13,7 @@ const (
 	chunkKindIndex        = "chunk-kind"
 	chunkScopeIndex       = "chunk-scope"
 	chunkTagIndex         = "chunk-tag"
+	chunkAliasIndex       = "chunk-alias"
 	chunkLocaleIndex      = "chunk-locale"
 	chunkStateIndex       = "chunk-state"
 	chunkTitleIndex       = "chunk-title"
@@ -46,6 +47,13 @@ func defaultIndexDefinitions() []indexDefinition {
 				return entries, nil
 			},
 		},
+		chunkMultiIndex(chunkAliasIndex, func(chunk knowledge.Chunk) []string {
+			aliases := make([]string, 0, len(chunk.Aliases))
+			for _, alias := range chunk.Aliases {
+				aliases = append(aliases, knowledge.NormalizeComparisonKey(alias))
+			}
+			return aliases
+		}),
 		chunkSingleIndex(chunkLocaleIndex, func(chunk knowledge.Chunk) []string {
 			return []string{chunk.Locale}
 		}),
@@ -53,7 +61,7 @@ func defaultIndexDefinitions() []indexDefinition {
 			return []string{chunk.State.String()}
 		}),
 		chunkSingleIndex(chunkTitleIndex, func(chunk knowledge.Chunk) []string {
-			return []string{chunk.Title}
+			return []string{knowledge.NormalizeComparisonKey(chunk.Title)}
 		}),
 		chunkSingleIndex(chunkCreatedAtIndex, func(chunk knowledge.Chunk) []string {
 			return []string{indexTime(chunk.CreatedAt)}
@@ -71,6 +79,26 @@ func defaultIndexDefinitions() []indexDefinition {
 	definitions = append(definitions, defaultEntryIndexDefinitions()...)
 	definitions = append(definitions, defaultLinkIndexDefinitions()...)
 	return append(definitions, defaultEvidenceIndexDefinitions()...)
+}
+
+func chunkMultiIndex(name string, values func(knowledge.Chunk) []string) indexDefinition {
+	return indexDefinition{
+		name: name,
+		build: func(ctx context.Context, record knowledgeStore.CanonicalRecord) ([]indexEntry, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if record.Kind != knowledgeStore.RecordKindChunk {
+				return nil, nil
+			}
+			items := values(*record.Chunk)
+			entries := make([]indexEntry, 0, len(items))
+			for _, item := range items {
+				entries = append(entries, chunkIndexEntry(record.Chunk.ID, item))
+			}
+			return entries, nil
+		},
+	}
 }
 
 func chunkSingleIndex(name string, components func(knowledge.Chunk) []string) indexDefinition {
