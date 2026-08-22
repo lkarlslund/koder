@@ -205,6 +205,9 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	if candidate.Visibility == knowledge.VisibilityUnspecified {
 		candidate.Visibility = knowledge.VisibilityPrivate
 	}
+	if err := validateHighRiskChunkPolicy(candidate); err != nil {
+		return CreateChunkResult{}, err
+	}
 	actor, err := s.actor(ctx)
 	if err != nil {
 		return CreateChunkResult{}, fmt.Errorf("resolve knowledge actor: %w", err)

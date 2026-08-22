@@ -153,6 +153,10 @@ func TestStageImportRequiresReviewAndRejectsPreviewBlockers(t *testing.T) {
 	t.Cleanup(func() { _ = backend.Close() })
 	service := newImportTestService(t, backend, func() time.Time { return serviceTime }, 0x200)
 	pkg.Manifest.Chunk.Risk = []knowledge.RiskClass{knowledge.RiskClassMedical}
+	pkg.Manifest.Chunk.Locale = "en-DK"
+	pkg.Manifest.Chunk.Domain = "medicine"
+	pkg.Manifest.Chunk.SourcePolicy = "Require current authoritative medical sources."
+	pkg.Manifest.Chunk.ReviewAfter = serviceTime.AddDate(0, 1, 0)
 	stage, err := service.StageImport(context.Background(), StageImportRequest{Package: pkg})
 	if !errors.Is(err, ErrReviewRequired) || stage.Preview.Classification.Decision != knowledge.ClassificationDecisionReview {
 		t.Fatalf("StageImport(review) = %#v, %v", stage, err)

@@ -102,6 +102,9 @@ func (s *Service) UpdateChunk(ctx context.Context, request UpdateChunkRequest) (
 		if err := validatePersonalMeMutation(current, next); err != nil {
 			return err
 		}
+		if err := validateHighRiskChunkPolicy(next); err != nil {
+			return err
+		}
 		if err := s.authorizeChunk(ctx, actor, ChunkPolicyUpdate, next); err != nil {
 			return err
 		}

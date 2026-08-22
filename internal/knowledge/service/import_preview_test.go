@@ -235,6 +235,10 @@ func TestPreviewImportRequiresReviewAndRejectsSecrets(t *testing.T) {
 
 	reviewPackage := previewPackage("01a02b00-0000-7000-8000-000000000001", "Medical notes")
 	reviewPackage.Manifest.Chunk.Risk = []knowledge.RiskClass{knowledge.RiskClassMedical}
+	reviewPackage.Manifest.Chunk.Locale = "en-DK"
+	reviewPackage.Manifest.Chunk.Domain = "medicine"
+	reviewPackage.Manifest.Chunk.SourcePolicy = "Require current authoritative medical sources."
+	reviewPackage.Manifest.Chunk.ReviewAfter = serviceTime.AddDate(0, 1, 0)
 	preview, err := service.PreviewImport(context.Background(), reviewPackage)
 	if err != nil || !preview.ReviewRequired || preview.ReadyToStage || preview.Summary.Blockers != 0 {
 		t.Fatalf("PreviewImport(review) = %#v, %v", preview, err)

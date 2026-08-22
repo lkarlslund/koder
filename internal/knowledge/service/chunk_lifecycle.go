@@ -91,6 +91,9 @@ func (s *Service) changeChunkState(ctx context.Context, request ChunkLifecycleRe
 		}
 		next := current
 		next.State = target
+		if err := validateHighRiskChunkPolicy(next); err != nil {
+			return err
+		}
 		next.UpdatedAt = now
 		next.Revision = knowledge.Revision{
 			Number: current.Revision.Number + 1,

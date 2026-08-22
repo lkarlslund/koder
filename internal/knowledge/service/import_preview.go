@@ -112,6 +112,9 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 		return ImportPreview{}, err
 	}
 	incomingChunk := packageChunk(pkg.Manifest)
+	if err := validateHighRiskChunkPolicy(incomingChunk); err != nil {
+		return preview, err
+	}
 	importedEntries := make(map[knowledge.EntryID]struct{}, len(pkg.Entries))
 	for _, entry := range pkg.Entries {
 		importedEntries[entry.ID] = struct{}{}

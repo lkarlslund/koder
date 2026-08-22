@@ -311,6 +311,9 @@ func (s *Service) activateImportTransaction(
 	}
 	incomingChunk := packageChunk(pkg.Manifest)
 	incomingChunk.DependencyIDs = dependencies
+	if err := validateHighRiskChunkPolicy(incomingChunk); err != nil {
+		return activatedRecords{}, err
+	}
 	chunkImpact, ok := expectedImportImpact(expected, knowledgeStore.RecordKindChunk, string(incomingChunk.ID))
 	if !ok {
 		return activatedRecords{}, fmt.Errorf("%w: chunk %s was not previewed", ErrImportStageStale, incomingChunk.ID)
