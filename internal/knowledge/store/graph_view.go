@@ -39,14 +39,15 @@ type GraphViewExpansion struct {
 }
 
 type GraphViewState struct {
-	Browser     GraphViewBrowserState `json:"browser"`
-	MobilePane  string                `json:"mobile_pane,omitempty"`
-	Root        *knowledge.ObjectRef  `json:"root,omitempty"`
-	HiddenNodes []string              `json:"hidden_nodes,omitempty"`
-	HiddenEdges []string              `json:"hidden_edges,omitempty"`
-	PinnedNodes []GraphViewPin        `json:"pinned_nodes,omitempty"`
-	Frontier    []GraphViewExpansion  `json:"frontier,omitempty"`
-	Layout      string                `json:"layout,omitempty"`
+	Browser      GraphViewBrowserState `json:"browser"`
+	MobilePane   string                `json:"mobile_pane,omitempty"`
+	Presentation string                `json:"presentation,omitempty"`
+	Root         *knowledge.ObjectRef  `json:"root,omitempty"`
+	HiddenNodes  []string              `json:"hidden_nodes,omitempty"`
+	HiddenEdges  []string              `json:"hidden_edges,omitempty"`
+	PinnedNodes  []GraphViewPin        `json:"pinned_nodes,omitempty"`
+	Frontier     []GraphViewExpansion  `json:"frontier,omitempty"`
+	Layout       string                `json:"layout,omitempty"`
 }
 
 // SavedGraphView is user-owned explorer state. It is deliberately not canonical

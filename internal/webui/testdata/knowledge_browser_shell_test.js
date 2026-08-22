@@ -67,7 +67,7 @@ assert.deepStrictEqual(localPreferences, {
   browser: {query: 'partition', kind: 'reference', scopeKind: 'project', state: '', tag: '', objectKind: 'entry', id: 'entry-1'},
   mobilePane: 'inspector',
   graph: {
-    root: {kind: 'chunk', id: 'chunk-1'}, hiddenNodes: ['entry:entry-1'], hiddenEdges: ['link-1'],
+    root: {kind: 'chunk', id: 'chunk-1'}, presentation: 'canvas', hiddenNodes: ['entry:entry-1'], hiddenEdges: ['link-1'],
     pinnedNodes: [{key: 'entry:entry-1', x: 1.5, y: -2}],
     frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}],
   },
@@ -77,6 +77,7 @@ assert.deepStrictEqual(serverViewState.browser, {
   query: 'partition', kind: 'reference', scope_kind: 'project', state: '', tag: '', object_kind: 'entry', id: 'entry-1',
 });
 assert.deepStrictEqual(serverViewState.root, {kind: 'chunk', id: 'chunk-1'});
+assert.strictEqual(serverViewState.presentation, 'canvas');
 assert.strictEqual(serverViewState.layout, 'force_atlas2');
 const restoredNamedView = browser.preferencesFromGraphViewState(serverViewState, 'view-1');
 assert.strictEqual(restoredNamedView.savedViewID, 'view-1');

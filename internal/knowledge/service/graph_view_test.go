@@ -26,7 +26,7 @@ func TestGraphViewLifecycleIsOwnerScopedAndRevisioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateGraphView() error = %v", err)
 	}
-	if created.Name != "Disk tools" || created.Revision != 1 || created.State.Layout != "force_atlas2" || created.State.MobilePane != "graph" {
+	if created.Name != "Disk tools" || created.Revision != 1 || created.State.Layout != "force_atlas2" || created.State.MobilePane != "graph" || created.State.Presentation != "canvas" {
 		t.Fatalf("CreateGraphView() = %#v", created)
 	}
 	listed, err := service.ListGraphViews(context.Background())

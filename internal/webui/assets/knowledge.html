@@ -27,6 +27,7 @@
   <script defer src="/assets/knowledge_graph_viewport.js"></script>
   <script defer src="/assets/knowledge_graph_layouts.js"></script>
   <script defer src="/assets/knowledge_graph_interactions.js"></script>
+  <script defer src="/assets/knowledge_graph_table.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
@@ -115,6 +116,7 @@
             <button type="button" class="knowledge-icon-button" data-knowledge-view-reveal title="Reveal hidden graph items" disabled><i class="bi bi-eye" aria-hidden="true"></i><span class="visually-hidden">Reveal hidden graph items</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-view-undo title="Undo local graph view change" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i><span class="visually-hidden">Undo local graph view change</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-preferences-reset title="Reset local explorer preferences"><i class="bi bi-eraser" aria-hidden="true"></i><span class="visually-hidden">Reset local explorer preferences</span></button>
+            <button type="button" class="knowledge-icon-button" data-knowledge-graph-table-toggle title="Show accessible graph table" aria-pressed="false"><i class="bi bi-table" aria-hidden="true"></i><span class="visually-hidden" data-knowledge-graph-table-toggle-label>Show accessible graph table</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-graph-center title="Center selected node"><i class="bi bi-crosshair" aria-hidden="true"></i><span class="visually-hidden">Center selected node</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-graph-fit title="Fit graph to view"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i><span class="visually-hidden">Fit graph to view</span></button>
           </div>
@@ -122,6 +124,16 @@
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
           <div class="knowledge-graph-canvas" data-knowledge-graph-canvas tabindex="0" role="application" aria-label="Knowledge graph. Press Shift+F10 for actions on the selected item."></div>
           <div class="knowledge-selection-box" data-knowledge-selection-box hidden aria-hidden="true"></div>
+          <section class="knowledge-graph-table" data-knowledge-graph-table aria-label="Knowledge graph table" hidden>
+            <div class="knowledge-graph-table-summary" data-knowledge-graph-table-summary role="status">No graph objects loaded.</div>
+            <div class="knowledge-graph-table-viewport" data-knowledge-graph-table-viewport tabindex="0">
+              <table aria-label="Visible knowledge graph objects" aria-rowcount="1" data-knowledge-graph-table-element>
+                <caption class="visually-hidden">A keyboard-operable, windowed table of the nodes and relationships visible in the Knowledge graph.</caption>
+                <thead><tr><th scope="col">Select</th><th scope="col">Object</th><th scope="col">Details</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead>
+                <tbody data-knowledge-graph-table-body></tbody>
+              </table>
+            </div>
+          </section>
           <div class="knowledge-graph-context-menu" data-knowledge-context-menu role="menu" aria-label="Graph item actions" hidden>
             <div class="knowledge-context-heading" data-knowledge-context-heading></div>
             <button type="button" role="menuitem" data-knowledge-context-action="inspect"><i class="bi bi-info-circle" aria-hidden="true"></i><span>Inspect</span><kbd>Enter</kbd></button>

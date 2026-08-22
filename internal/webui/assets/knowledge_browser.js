@@ -170,6 +170,7 @@
       mobilePane: normalizePane(value.mobilePane),
       graph: Object.freeze({
         root: graphPreferenceObject(graph.root),
+        presentation: String(graph.presentation || '').trim().toLowerCase() === 'table' ? 'table' : 'canvas',
         hiddenNodes: uniqueBounded(graph.hiddenNodes, 1000, item => graphPreferenceKey(item, true)),
         hiddenEdges: uniqueBounded(graph.hiddenEdges, 2000, item => graphPreferenceKey(item, false)),
         pinnedNodes,
@@ -210,6 +211,7 @@
       },
       mobile_pane: preferences.mobilePane,
       root: preferences.graph.root,
+      presentation: preferences.graph.presentation,
       hidden_nodes: preferences.graph.hiddenNodes,
       hidden_edges: preferences.graph.hiddenEdges,
       pinned_nodes: preferences.graph.pinnedNodes,
@@ -229,7 +231,7 @@
       },
       mobilePane: value.mobile_pane,
       graph: {
-        root: value.root, hiddenNodes: value.hidden_nodes, hiddenEdges: value.hidden_edges,
+        root: value.root, presentation: value.presentation, hiddenNodes: value.hidden_nodes, hiddenEdges: value.hidden_edges,
         pinnedNodes: value.pinned_nodes, frontier: value.frontier,
       },
     });
@@ -699,6 +701,7 @@
       this.graphViewport = options.graphViewport || null;
       this.graphLayout = options.graphLayout || null;
       this.graphView = options.graphView || null;
+      this.graphTable = options.graphTable || null;
       this.chunks = [];
       this.matches = [];
       this.page = null;
@@ -719,6 +722,7 @@
         : (this.savedPreferences && this.savedPreferences.graph.root) || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
       this.graphFrontier = restoreSavedView ? [...this.savedPreferences.graph.frontier] : [];
       this.restoredGraphPreferences = restoreSavedView ? this.savedPreferences.graph : normalizeLocalPreferences({}).graph;
+      this.graphPresentation = this.graphRenderer ? this.restoredGraphPreferences.presentation : 'table';
       this.activeSavedViewID = restoreSavedView ? this.savedPreferences.savedViewID : '';
       this.savedViews = [];
       this.preferenceTimer = 0;
@@ -750,6 +754,8 @@
       this.graphRevealButton = shell.querySelector('[data-knowledge-view-reveal]');
       this.graphUndoButton = shell.querySelector('[data-knowledge-view-undo]');
       this.preferencesResetButton = shell.querySelector('[data-knowledge-preferences-reset]');
+      this.graphTableToggle = shell.querySelector('[data-knowledge-graph-table-toggle]');
+      this.graphTableToggleLabel = shell.querySelector('[data-knowledge-graph-table-toggle-label]');
       this.savedViewSelect = shell.querySelector('[data-knowledge-saved-view]');
       this.savedViewCreateButton = shell.querySelector('[data-knowledge-saved-view-create]');
       this.savedViewUpdateButton = shell.querySelector('[data-knowledge-saved-view-update]');
@@ -878,6 +884,7 @@
       if (this.graphRevealButton) this.graphRevealButton.addEventListener('click', () => this.applyGraphViewAction('reveal'));
       if (this.graphUndoButton) this.graphUndoButton.addEventListener('click', () => this.applyGraphViewAction('undo'));
       if (this.preferencesResetButton) this.preferencesResetButton.addEventListener('click', () => this.resetLocalPreferences());
+      if (this.graphTableToggle) this.graphTableToggle.addEventListener('click', () => this.setGraphPresentation(this.graphPresentation === 'table' ? 'canvas' : 'table'));
       if (this.savedViewSelect) this.savedViewSelect.addEventListener('change', () => this.loadNamedGraphView(this.savedViewSelect.value));
       if (this.savedViewCreateButton) this.savedViewCreateButton.addEventListener('click', () => this.openSavedViewEditor());
       if (this.savedViewUpdateButton) this.savedViewUpdateButton.addEventListener('click', () => this.openSavedViewEditor(this.activeSavedViewID));
@@ -960,6 +967,7 @@
       if (this.graphAdapter) {
         this.graphUnsubscribe = this.graphAdapter.subscribe(event => {
           if (event.type === 'selection') this.syncGraphSelection(event.detail);
+          if (event.type === 'change' && this.graphTable) this.graphTable.refresh();
           if (event.type === 'refetch' && !this.graphRefetchTimer) {
             this.graphRefetchTimer = setTimeout(() => {
               this.graphRefetchTimer = 0;
@@ -972,6 +980,7 @@
         this.graphViewUnsubscribe = this.graphView.subscribe(() => {
           if (this.graphRenderer) this.graphRenderer.scheduleRefresh(false);
           this.updateGraphViewControls();
+          if (this.graphTable) this.graphTable.refresh();
           this.schedulePreferenceSave();
         });
       }
@@ -1017,10 +1026,14 @@
           }
         });
       }
+      if (this.graphTable) {
+        this.graphTableUnsubscribe = this.graphTable.subscribe(event => this.runGraphTableAction(event));
+      }
       this.onPageHide = () => this.flushPreferenceSave();
       globalThis.addEventListener('pagehide', this.onPageHide);
       this.syncControls();
       this.updateGraphViewControls();
+      this.setGraphPresentation(this.graphPresentation, {save: false});
     }
 
     setState(state, options) {
@@ -1109,7 +1122,7 @@
         savedViewID: this.activeSavedViewID,
         browser: this.urlState,
         mobilePane: this.shell.dataset.mobilePane,
-        graph: {root: this.graphRoot, hiddenNodes, hiddenEdges, pinnedNodes, frontier: this.graphFrontier},
+        graph: {root: this.graphRoot, presentation: this.graphPresentation, hiddenNodes, hiddenEdges, pinnedNodes, frontier: this.graphFrontier},
       });
     }
 
@@ -1148,6 +1161,7 @@
       const graph = this.graph();
       if (this.graphView) this.graphView.reset();
       if (graph) graph.updateEachNodeAttributes((key, attributes) => ({...attributes, pinned: false}), {attributes: ['pinned']});
+      this.setGraphPresentation(this.graphRenderer ? 'canvas' : 'table', {save: false});
       this.urlState = browserStateFromSearch('');
       const search = searchForBrowserState(globalThis.location && globalThis.location.search, this.urlState);
       globalThis.history.replaceState(null, '', globalThis.location.pathname + search);
@@ -1170,6 +1184,48 @@
         tab.tabIndex = selected ? 0 : -1;
       }
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-pane', {detail: {pane}}));
+    }
+
+    setGraphPresentation(value, options) {
+      value = String(value || '').trim().toLowerCase();
+      if (value !== 'table' && value !== 'canvas') value = 'canvas';
+      if (value === 'canvas' && !this.graphRenderer) value = 'table';
+      this.graphPresentation = value;
+      const stage = this.shell.querySelector('#knowledge-graph');
+      if (stage) stage.dataset.presentation = value;
+      const table = this.shell.querySelector('[data-knowledge-graph-table]');
+      if (table) table.hidden = value !== 'table';
+      if (this.graphCanvas) this.graphCanvas.setAttribute('aria-hidden', value === 'table' ? 'true' : 'false');
+      if (this.graphTableToggle) {
+        const showingTable = value === 'table';
+        const label = showingTable ? 'Show visual graph canvas' : 'Show accessible graph table';
+        this.graphTableToggle.setAttribute('aria-pressed', showingTable ? 'true' : 'false');
+        this.graphTableToggle.title = label;
+        if (this.graphTableToggleLabel) this.graphTableToggleLabel.textContent = label;
+      }
+      if (this.graphCenterButton) this.graphCenterButton.disabled = value === 'table' || !this.graphViewport;
+      if (this.graphFitButton) this.graphFitButton.disabled = value === 'table' || !this.graphViewport;
+      if (value === 'table' && this.graphTable) this.graphTable.refresh();
+      if (value === 'canvas' && this.graphViewport) setTimeout(() => this.graphViewport && this.graphViewport.fit({animate: false}), 0);
+      if (!options || options.save !== false) this.schedulePreferenceSave();
+      return value;
+    }
+
+    runGraphTableAction(event) {
+      const item = event && event.item;
+      const action = String(event && event.action || '');
+      if (!item || !['node', 'edge'].includes(item.kind)) return false;
+      if (action === 'select') return this.selectGraphObject(item.kind, item.key, {additive: true});
+      if (action === 'inspect') return this.selectGraphObject(item.kind, item.key);
+      if (action === 'incoming' || action === 'outgoing') {
+        this.selectGraphObject(item.kind, item.key);
+        return this.expandGraph(action, item);
+      }
+      if (action === 'hide') {
+        this.selectGraphObject(item.kind, item.key);
+        return this.applyGraphViewAction('hide');
+      }
+      return false;
     }
 
     savedViewRecord(id) {
@@ -1233,11 +1289,13 @@
       this.activeSavedViewID = String(view.id);
       this.urlState = preferences.browser;
       this.graphRoot = preferences.graph.root;
+      this.graphPresentation = this.graphRenderer ? preferences.graph.presentation : 'table';
       this.graphFrontier = [...preferences.graph.frontier];
       this.restoredGraphPreferences = preferences.graph;
       const search = searchForBrowserState(globalThis.location && globalThis.location.search, this.urlState);
       globalThis.history.pushState(null, '', globalThis.location.pathname + search);
       this.setMobilePane(preferences.mobilePane);
+      this.setGraphPresentation(this.graphPresentation, {save: false});
       this.syncControls();
       saveLocalPreferences(this.preferenceStorage, preferences);
       this.renderSavedGraphViews();
@@ -1535,6 +1593,7 @@
       const items = Array.isArray(snapshot.items) ? snapshot.items : [];
       const relationReady = items.length === 2 && items.every(item => item.kind === 'node' && graphObjectForSelection(item));
       if (this.graphRenderer) this.graphRenderer.setSelections(items);
+      if (this.graphTable) this.graphTable.setSelection(items);
       if (this.graphSelectionCount) {
         this.graphSelectionCount.hidden = items.length < 2;
         this.graphSelectionCount.textContent = items.length < 2 ? '' : `${items.length} selected`;
@@ -1750,6 +1809,8 @@
 
     setGraphState(state, detail) {
       if (this.graphRenderer) this.graphRenderer.setState(state);
+      const stage = this.shell.querySelector('#knowledge-graph');
+      if (stage) stage.dataset.graphState = state;
       const status = this.shell.querySelector('[data-knowledge-status-label]');
       const title = this.shell.querySelector('[data-knowledge-state-title]');
       const message = this.shell.querySelector('[data-knowledge-state-detail]');
@@ -1768,7 +1829,7 @@
     }
 
     async loadGraphSelection() {
-      if (!this.graphAdapter || !this.graphRenderer) return;
+      if (!this.graphAdapter) return;
       const generation = ++this.graphLoadGeneration;
       this.client.cancel('graph-restore');
       const root = this.graphRoot || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
@@ -1776,7 +1837,8 @@
       if (!request) {
         this.client.cancel('graph');
         if (this.graphLayout) this.graphLayout.stop('selection_cleared');
-        this.graphRenderer.setSelection(null, null);
+        if (this.graphRenderer) this.graphRenderer.setSelection(null, null);
+        if (this.graphTable) this.graphTable.refresh();
         this.setGraphState('empty');
         return;
       }
@@ -2899,9 +2961,11 @@
       if (this.graphInteractionUnsubscribe) this.graphInteractionUnsubscribe();
       if (this.graphLayoutUnsubscribe) this.graphLayoutUnsubscribe();
       if (this.graphViewUnsubscribe) this.graphViewUnsubscribe();
+      if (this.graphTableUnsubscribe) this.graphTableUnsubscribe();
       if (this.graphLayout) this.graphLayout.destroy();
       if (this.graphViewport) this.graphViewport.destroy();
       if (this.graphRenderer) this.graphRenderer.destroy();
+      if (this.graphTable) this.graphTable.destroy();
       if (this.graphView) this.graphView.destroy();
       if (this.graphAdapter) this.graphAdapter.destroy();
       this.client.cancelAll();
@@ -2969,37 +3033,47 @@
           fallback.hidden = false;
           const detail = fallback.querySelector('[data-knowledge-graph-fallback-detail]');
           if (detail) detail.textContent = environment.reason === 'reduced_motion'
-            ? 'Reduced motion is enabled. Browse Knowledge and Inspector without the animated canvas.'
-            : 'WebGL is unavailable. Browse the same knowledge through Knowledge and Inspector.';
+            ? 'Reduced motion is enabled. The accessible graph table is active instead of the animated canvas.'
+            : 'WebGL is unavailable. The accessible graph table provides the same graph objects and actions.';
         }
       }
-      if (canvas && globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter &&
-          environment.available && globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
+      if (globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter) {
         const graphStore = new globalThis.KoderKnowledgeGraph.Store();
         runtime.graphAdapter = new globalThis.KoderKnowledgeGraphAdapter.Adapter(graphStore);
         if (globalThis.KoderKnowledgeGraphInteractions) {
           runtime.graphView = new globalThis.KoderKnowledgeGraphInteractions.LocalViewHistory({graph: graphStore.graph});
         }
-        runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
-          store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
-          legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
-          selectionBox: shell.querySelector('[data-knowledge-selection-box]'), SigmaAPI: globalThis.Sigma, debug: graphDebug,
-        });
-        runtime.graphViewport = new globalThis.KoderKnowledgeGraphViewport.Viewport({
-          renderer: runtime.graphRenderer.sigma, container: canvas,
-          getInsets: () => {
-            const style = globalThis.getComputedStyle(canvas);
-            const read = name => Number.parseFloat(style.getPropertyValue(name)) || 0;
-            return {
-              top: read('--knowledge-viewport-inset-top'), right: read('--knowledge-viewport-inset-right'),
-              bottom: read('--knowledge-viewport-inset-bottom'), left: read('--knowledge-viewport-inset-left'),
-            };
-          },
-        });
-        if (globalThis.KoderKnowledgeGraphLayout && globalThis.KoderKnowledgeLayouts) {
-          runtime.graphLayout = new globalThis.KoderKnowledgeGraphLayout.ForceAtlasController({
-            graph: graphStore.graph, layouts: globalThis.KoderKnowledgeLayouts, debug: graphDebug,
+        const tableContainer = shell.querySelector('[data-knowledge-graph-table]');
+        const tableViewport = shell.querySelector('[data-knowledge-graph-table-viewport]');
+        const tableBody = shell.querySelector('[data-knowledge-graph-table-body]');
+        if (globalThis.KoderKnowledgeGraphTable && tableContainer && tableViewport && tableBody) {
+          runtime.graphTable = new globalThis.KoderKnowledgeGraphTable.GraphTable({
+            graph: graphStore.graph, container: tableContainer, viewport: tableViewport, body: tableBody,
+            table: shell.querySelector('[data-knowledge-graph-table-element]'), summary: shell.querySelector('[data-knowledge-graph-table-summary]'),
           });
+        }
+        if (canvas && environment.available && globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
+          runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
+            store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
+            legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
+            selectionBox: shell.querySelector('[data-knowledge-selection-box]'), SigmaAPI: globalThis.Sigma, debug: graphDebug,
+          });
+          runtime.graphViewport = new globalThis.KoderKnowledgeGraphViewport.Viewport({
+            renderer: runtime.graphRenderer.sigma, container: canvas,
+            getInsets: () => {
+              const style = globalThis.getComputedStyle(canvas);
+              const read = name => Number.parseFloat(style.getPropertyValue(name)) || 0;
+              return {
+                top: read('--knowledge-viewport-inset-top'), right: read('--knowledge-viewport-inset-right'),
+                bottom: read('--knowledge-viewport-inset-bottom'), left: read('--knowledge-viewport-inset-left'),
+              };
+            },
+          });
+          if (globalThis.KoderKnowledgeGraphLayout && globalThis.KoderKnowledgeLayouts) {
+            runtime.graphLayout = new globalThis.KoderKnowledgeGraphLayout.ForceAtlasController({
+              graph: graphStore.graph, layouts: globalThis.KoderKnowledgeLayouts, debug: graphDebug,
+            });
+          }
         }
       }
       const app = new BrowserApp(shell, client, runtime);

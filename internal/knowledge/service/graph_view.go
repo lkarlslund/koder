@@ -143,7 +143,7 @@ func normalizeGraphViewInput(name string, state knowledgeStore.GraphViewState) (
 		!oneOf(state.Browser.ScopeKind, "", "global", "personal", "project", "session", "environment") ||
 		!oneOf(state.Browser.State, "", "draft", "archived") ||
 		!oneOf(state.Browser.ObjectKind, "", "chunk", "entry", "link", "evidence") ||
-		!oneOf(state.MobilePane, "", "sources", "graph", "inspector") || !oneOf(state.Layout, "", "force_atlas2") {
+		!oneOf(state.MobilePane, "", "sources", "graph", "inspector") || !oneOf(state.Presentation, "", "canvas", "table") || !oneOf(state.Layout, "", "force_atlas2") {
 		return "", state, fmt.Errorf("%w: graph view contains an unsupported option", knowledge.ErrInvalidRecord)
 	}
 	if (state.Browser.ObjectKind == "") != (state.Browser.ID == "") {
@@ -197,6 +197,9 @@ func normalizeGraphViewInput(name string, state knowledgeStore.GraphViewState) (
 	}
 	if state.MobilePane == "" {
 		state.MobilePane = "graph"
+	}
+	if state.Presentation == "" {
+		state.Presentation = "canvas"
 	}
 	return name, state, nil
 }
