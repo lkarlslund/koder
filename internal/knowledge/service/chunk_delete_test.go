@@ -57,9 +57,24 @@ func TestDeleteChunkRejectsNonEmptyChunk(t *testing.T) {
 			Number: 1, ID: "01a01688-fc5d-7f7d-8bb8-de244977f8a2",
 			Actor: knowledge.Actor{Kind: knowledge.ActorKindUser, ID: "user:test"}, CreatedAt: serviceTime,
 		},
-		CreatedAt: serviceTime, UpdatedAt: serviceTime, Counts: knowledge.ChunkCounts{Entries: 1},
+		CreatedAt: serviceTime, UpdatedAt: serviceTime,
 	}
-	if err := store.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, chunk, 0) }); err != nil {
+	entry := knowledge.Entry{
+		ID: "01a01688-fc5d-7f7d-8bb8-de244977f8a3", ChunkID: chunk.ID,
+		Kind: knowledge.EntryKindFact, Title: "Child", Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+		Verification: knowledge.Verification{Status: knowledge.VerificationStatusUnverified}, State: knowledge.EntryStateActive,
+		Revision: knowledge.Revision{
+			Number: 1, ID: "01a01688-fc5d-7f7d-8bb8-de244977f8a4",
+			Actor: knowledge.Actor{Kind: knowledge.ActorKindUser, ID: "user:test"}, CreatedAt: serviceTime,
+		},
+		CreatedAt: serviceTime, UpdatedAt: serviceTime,
+	}
+	if err := store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutChunk(ctx, chunk, 0); err != nil {
+			return err
+		}
+		return tx.PutEntry(ctx, entry, 0)
+	}); err != nil {
 		t.Fatalf("seed non-empty chunk: %v", err)
 	}
 	service := newTestService(t, store, nil)

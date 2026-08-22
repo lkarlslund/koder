@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 )
@@ -60,6 +61,7 @@ type ReadTx interface {
 type WriteTx interface {
 	ReadTx
 	PutChunk(context.Context, knowledge.Chunk, uint64) error
+	TouchChunk(context.Context, knowledge.ChunkID, time.Time) error
 	DeleteChunk(context.Context, knowledge.ChunkID, uint64) error
 	PutEntry(context.Context, knowledge.Entry, uint64) error
 	DeleteEntry(context.Context, knowledge.EntryID, uint64) error

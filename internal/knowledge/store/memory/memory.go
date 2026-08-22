@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
@@ -30,9 +31,10 @@ type data struct {
 }
 
 type transaction struct {
-	data     *data
-	active   bool
-	writable bool
+	data         *data
+	active       bool
+	writable     bool
+	derivedDirty bool
 }
 
 var _ knowledgeStore.Store = (*Store)(nil)
@@ -110,6 +112,11 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if tx.derivedDirty {
+		if err := reconcileChunkCounts(ctx, &working); err != nil {
+			return err
+		}
 	}
 	s.data = working
 	return nil
@@ -259,7 +266,77 @@ func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expe
 	if err := revisioncheck.CheckPut("chunk", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = tx.derivedDirty || !exists || value.Counts != current.Counts
 	tx.data.chunks[value.ID] = cloneChunk(value)
+	return nil
+}
+
+func (tx *transaction) TouchChunk(ctx context.Context, id knowledge.ChunkID, usedAt time.Time) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	if usedAt.IsZero() {
+		return fmt.Errorf("%w: last_used_at is required", knowledge.ErrInvalidRecord)
+	}
+	_, offset := usedAt.Zone()
+	if offset != 0 {
+		return fmt.Errorf("%w: last_used_at must be normalized to UTC", knowledge.ErrInvalidRecord)
+	}
+	current, exists := tx.data.chunks[id]
+	if !exists {
+		return fmt.Errorf("%w: chunk %s", knowledgeStore.ErrNotFound, id)
+	}
+	if usedAt.Before(current.CreatedAt) {
+		return fmt.Errorf("%w: last_used_at must not precede created_at", knowledge.ErrInvalidRecord)
+	}
+	if !usedAt.After(current.LastUsedAt) {
+		return nil
+	}
+	current.LastUsedAt = usedAt
+	if err := current.Validate(); err != nil {
+		return err
+	}
+	tx.data.chunks[id] = cloneChunk(current)
+	return nil
+}
+
+func reconcileChunkCounts(ctx context.Context, data *data) error {
+	chunks := make([]knowledge.Chunk, 0, len(data.chunks))
+	for _, item := range data.chunks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		chunks = append(chunks, item)
+	}
+	entries := make([]knowledge.Entry, 0, len(data.entries))
+	for _, item := range data.entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entries = append(entries, item)
+	}
+	links := make([]knowledge.Link, 0, len(data.links))
+	for _, item := range data.links {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		links = append(links, item)
+	}
+	evidence := make([]knowledge.Evidence, 0, len(data.evidence))
+	for _, item := range data.evidence {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		evidence = append(evidence, item)
+	}
+	counts := knowledgeStore.DeriveChunkCounts(chunks, entries, links, evidence)
+	for id, value := range data.chunks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		value.Counts = counts[id]
+		data.chunks[id] = value
+	}
 	return nil
 }
 
@@ -272,6 +349,7 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 		return err
 	}
 	delete(tx.data.chunks, id)
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -287,6 +365,7 @@ func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expe
 		return err
 	}
 	tx.data.entries[value.ID] = cloneEntry(value)
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -299,6 +378,7 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 		return err
 	}
 	delete(tx.data.entries, id)
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -314,6 +394,7 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 		return err
 	}
 	tx.data.links[value.ID] = cloneLink(value)
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -326,6 +407,7 @@ func (tx *transaction) DeleteLink(ctx context.Context, id knowledge.LinkID, expe
 		return err
 	}
 	delete(tx.data.links, id)
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -340,6 +422,7 @@ func (tx *transaction) PutEvidence(ctx context.Context, value knowledge.Evidence
 		return fmt.Errorf("%w: evidence %s already exists", knowledgeStore.ErrConflict, value.ID)
 	}
 	tx.data.evidence[value.ID] = value
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -351,6 +434,7 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 		return fmt.Errorf("%w: evidence %s", knowledgeStore.ErrNotFound, id)
 	}
 	delete(tx.data.evidence, id)
+	tx.derivedDirty = true
 	return nil
 }
 

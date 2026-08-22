@@ -287,6 +287,89 @@ func TestChunkDeletionBlockersSeeCanonicalRecordsAndPendingWrites(t *testing.T) 
 	}
 }
 
+func TestDerivedChunkCountsAndLastUsedProjectionStayOutOfContentRevision(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	entry := txEntry()
+	entry.EvidenceIDs = []knowledge.EvidenceID{txEvidenceID}
+	link := txLink()
+	link.EvidenceIDs = []knowledge.EvidenceID{txEvidenceID}
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutChunk(ctx, txChunk(1), 0); err != nil {
+			return err
+		}
+		if err := tx.PutEntry(ctx, entry, 0); err != nil {
+			return err
+		}
+		if err := tx.PutLink(ctx, link, 0); err != nil {
+			return err
+		}
+		return tx.PutEvidence(ctx, txEvidence())
+	}); err != nil {
+		t.Fatalf("seed graph: %v", err)
+	}
+	assertChunkProjection := func(wantCounts knowledge.ChunkCounts, wantUsed time.Time) {
+		t.Helper()
+		if err := s.View(ctx, func(tx knowledgeStore.ReadTx) error {
+			chunk, err := tx.Chunk(ctx, txChunkID)
+			if err != nil {
+				return err
+			}
+			if chunk.Counts != wantCounts || !chunk.LastUsedAt.Equal(wantUsed) || chunk.Revision.Number != 1 || !chunk.UpdatedAt.Equal(txTime) {
+				t.Errorf("chunk projection = %#v", chunk)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("read chunk projection: %v", err)
+		}
+	}
+	assertChunkProjection(knowledge.ChunkCounts{Entries: 1, Links: 1, Evidence: 1}, time.Time{})
+
+	usedAt := txTime.Add(10 * time.Minute)
+	before := txChunk(1)
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.TouchChunk(ctx, txChunkID, usedAt) }); err != nil {
+		t.Fatalf("TouchChunk() error = %v", err)
+	}
+	after := before
+	after.Counts = knowledge.ChunkCounts{Entries: 1, Links: 1, Evidence: 1}
+	after.LastUsedAt = usedAt
+	assertIndexPresence(t, s, chunkLastUsedAtIndex, chunkIndexEntry(before.ID, indexTime(before.LastUsedAt)).Suffix, false)
+	assertIndexPresence(t, s, chunkLastUsedAtIndex, chunkIndexEntry(after.ID, indexTime(after.LastUsedAt)).Suffix, true)
+	assertChunkProjection(after.Counts, usedAt)
+
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.DeleteLink(ctx, link.ID, 1); err != nil {
+			return err
+		}
+		if err := tx.DeleteEntry(ctx, entry.ID, 1); err != nil {
+			return err
+		}
+		return tx.DeleteEvidence(ctx, txEvidenceID)
+	}); err != nil {
+		t.Fatalf("remove graph: %v", err)
+	}
+	assertChunkProjection(knowledge.ChunkCounts{}, usedAt)
+}
+
+func assertIndexPresence(t *testing.T, s *Store, name string, suffix []byte, want bool) {
+	t.Helper()
+	_, closer, err := s.db.Get(indexKey(s.meta.IndexGeneration, name, suffix))
+	if want && err != nil {
+		t.Fatalf("index %s missing: %v", name, err)
+	}
+	if err == nil {
+		_ = closer.Close()
+	}
+	if !want && !errors.Is(err, cockroachpebble.ErrNotFound) {
+		t.Fatalf("obsolete index %s error = %v, want ErrNotFound", name, err)
+	}
+}
+
 func TestTransactionExpiresAfterCallbackAndStoreClose(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

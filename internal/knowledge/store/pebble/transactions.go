@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	cockroachpebble "github.com/cockroachdb/pebble"
 
@@ -27,6 +28,7 @@ type transaction struct {
 	writable        bool
 	indexGeneration uint64
 	indexes         []indexDefinition
+	derivedDirty    bool
 }
 
 var _ knowledgeStore.Store = (*Store)(nil)
@@ -89,7 +91,13 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	}
 	err = func() error {
 		defer func() { tx.active = false }()
-		return fn(tx)
+		if err := fn(tx); err != nil {
+			return err
+		}
+		if tx.derivedDirty {
+			return tx.reconcileChunkCounts(ctx)
+		}
+		return nil
 	}()
 	if err != nil {
 		return err
@@ -185,10 +193,90 @@ func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expe
 	if err := revision.CheckPut("chunk", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = tx.derivedDirty || !exists || value.Counts != current.Counts
 	if err := tx.replaceChunkIndexes(ctx, optionalChunk(current, exists), &value); err != nil {
 		return err
 	}
 	return tx.putRevisioned(chunkKey(string(value.ID)), revisionKey(recordChunk, string(value.ID), value.Revision.Number), value)
+}
+
+func (tx *transaction) TouchChunk(ctx context.Context, id knowledge.ChunkID, usedAt time.Time) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	if usedAt.IsZero() {
+		return fmt.Errorf("%w: last_used_at is required", knowledge.ErrInvalidRecord)
+	}
+	_, offset := usedAt.Zone()
+	if offset != 0 {
+		return fmt.Errorf("%w: last_used_at must be normalized to UTC", knowledge.ErrInvalidRecord)
+	}
+	current, err := tx.Chunk(ctx, id)
+	if err != nil {
+		return err
+	}
+	if usedAt.Before(current.CreatedAt) {
+		return fmt.Errorf("%w: last_used_at must not precede created_at", knowledge.ErrInvalidRecord)
+	}
+	if !usedAt.After(current.LastUsedAt) {
+		return nil
+	}
+	next := current
+	next.LastUsedAt = usedAt
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	if err := tx.replaceChunkIndexes(ctx, &current, &next); err != nil {
+		return err
+	}
+	return tx.putChunkProjection(next)
+}
+
+func (tx *transaction) reconcileChunkCounts(ctx context.Context) error {
+	var chunks []knowledge.Chunk
+	var entries []knowledge.Entry
+	var links []knowledge.Link
+	var evidence []knowledge.Evidence
+	if _, err := scanCanonical(ctx, tx.reader, func(record knowledgeStore.CanonicalRecord) error {
+		switch record.Kind {
+		case knowledgeStore.RecordKindChunk:
+			chunks = append(chunks, *record.Chunk)
+		case knowledgeStore.RecordKindEntry:
+			entries = append(entries, *record.Entry)
+		case knowledgeStore.RecordKindLink:
+			links = append(links, *record.Link)
+		case knowledgeStore.RecordKindEvidence:
+			evidence = append(evidence, *record.Evidence)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	counts := knowledgeStore.DeriveChunkCounts(chunks, entries, links, evidence)
+	for _, chunk := range chunks {
+		if chunk.Counts == counts[chunk.ID] {
+			continue
+		}
+		chunk.Counts = counts[chunk.ID]
+		if err := chunk.Validate(); err != nil {
+			return err
+		}
+		if err := tx.putChunkProjection(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *transaction) putChunkProjection(value knowledge.Chunk) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode chunk projection %s: %w", value.ID, err)
+	}
+	if err := tx.batch.Set(chunkKey(string(value.ID)), encoded, nil); err != nil {
+		return fmt.Errorf("put chunk projection %s: %w", value.ID, err)
+	}
+	return nil
 }
 
 func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, expectedRevision uint64) error {
@@ -205,6 +293,7 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 	if err := tx.replaceChunkIndexes(ctx, &current, nil); err != nil {
 		return err
 	}
+	tx.derivedDirty = true
 	return tx.deleteRevisioned(chunkKey(string(id)), revisionPrefix(recordChunk, string(id)))
 }
 
@@ -259,6 +348,7 @@ func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expe
 	if err := revision.CheckPut("entry", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = true
 	return tx.putRevisioned(entryKey(string(value.ID)), revisionKey(recordEntry, string(value.ID), value.Revision.Number), value)
 }
 
@@ -273,6 +363,7 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 	if err := revision.CheckDelete("entry", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = true
 	return tx.deleteRevisioned(entryKey(string(id)), revisionPrefix(recordEntry, string(id)))
 }
 
@@ -290,6 +381,7 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 	if err := revision.CheckPut("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = true
 	return tx.putRevisioned(linkKey(string(value.ID)), revisionKey(recordLink, string(value.ID), value.Revision.Number), value)
 }
 
@@ -304,6 +396,7 @@ func (tx *transaction) DeleteLink(ctx context.Context, id knowledge.LinkID, expe
 	if err := revision.CheckDelete("link", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	tx.derivedDirty = true
 	return tx.deleteRevisioned(linkKey(string(id)), revisionPrefix(recordLink, string(id)))
 }
 
@@ -328,6 +421,7 @@ func (tx *transaction) PutEvidence(ctx context.Context, value knowledge.Evidence
 	if err := tx.batch.Set(evidenceKey(string(value.ID)), encoded, nil); err != nil {
 		return fmt.Errorf("put evidence %s: %w", value.ID, err)
 	}
+	tx.derivedDirty = true
 	return nil
 }
 
@@ -341,6 +435,7 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 	if err := tx.batch.Delete(evidenceKey(string(id)), nil); err != nil {
 		return fmt.Errorf("delete evidence %s: %w", id, err)
 	}
+	tx.derivedDirty = true
 	return nil
 }
 
