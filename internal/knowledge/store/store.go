@@ -22,6 +22,10 @@ var (
 	ErrUnsupported = errors.New("knowledge store operation unsupported")
 	// ErrIncompatible indicates that durable data uses an unsupported schema or encoding.
 	ErrIncompatible = errors.New("knowledge store format incompatible")
+	// ErrInvalidCursor indicates that a cursor is malformed or belongs to a different query.
+	ErrInvalidCursor = errors.New("invalid knowledge cursor")
+	// ErrStaleCursor indicates that the cursor's derived index generation was retired.
+	ErrStaleCursor = errors.New("stale knowledge cursor")
 )
 
 // Health is backend-neutral operational state. LastError contains a sanitized summary and
