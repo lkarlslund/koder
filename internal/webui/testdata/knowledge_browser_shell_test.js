@@ -49,6 +49,8 @@ assert.deepStrictEqual(browser.graphSnapshotRequest('entry', 'entry-7'), {
 });
 assert.strictEqual(browser.graphSnapshotRequest('link', 'link-1'), null);
 assert.strictEqual(browser.graphSnapshotRequest('entry', '../secret'), null);
+assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
+assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 let sanitizeOptions;
 const sanitized = browser.sanitizedMarkdownHTML('unsafe', {parse: () => '<script>bad</script><p>safe</p>'}, {
   sanitize: (html, options) => { sanitizeOptions = options; return html.replace('<script>bad</script>', ''); },

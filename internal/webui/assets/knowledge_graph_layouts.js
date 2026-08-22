@@ -26,6 +26,10 @@
       this.setTimer = options.setTimer || globalThis.setTimeout.bind(globalThis);
       this.clearTimer = options.clearTimer || globalThis.clearTimeout.bind(globalThis);
       this.debounceMS = Math.max(0, Number(options.debounceMS) || 120);
+      this.now = options.now || (() => globalThis.performance.now());
+      this.debug = !!options.debug;
+      this.logger = options.logger || globalThis.console;
+      this.metrics = {runs: 0, completed: 0, canceled: 0, errors: 0, lastDurationMS: 0, lastNodeCount: 0, lastEdgeCount: 0};
       this.listeners = new Set();
       this.generation = 0;
       this.handle = 0;
@@ -53,8 +57,25 @@
     }
 
     emit(phase, detail) {
-      const event = Object.freeze({phase, generation: this.generation, ...(detail || {})});
+      if (phase === 'ready') {
+        this.metrics.completed++;
+        this.metrics.lastDurationMS = Math.max(0, this.now() - this.startedAt);
+      } else if (phase === 'error') {
+        this.metrics.errors++;
+        this.metrics.lastDurationMS = Math.max(0, this.now() - this.startedAt);
+      }
+      const event = Object.freeze({
+        phase, generation: this.generation, ...(detail || {}),
+        durationMS: phase === 'ready' || phase === 'error' ? this.metrics.lastDurationMS : undefined,
+      });
       for (const listener of [...this.listeners]) listener(event);
+      if (this.debug && this.logger && typeof this.logger.debug === 'function') {
+        this.logger.debug('[Koder Knowledge layout]', {
+          phase, generation: this.generation, completed: event.completed || 0, total: event.total || 0,
+          stage: event.stage || '', duration_ms: event.durationMS || 0,
+          nodes: this.graph.order, edges: this.graph.size,
+        });
+      }
       return event;
     }
 
@@ -63,6 +84,10 @@
       options = options || {};
       this.stop('replaced');
       this.generation++;
+      this.startedAt = this.now();
+      this.metrics.runs++;
+      this.metrics.lastNodeCount = this.graph.order;
+      this.metrics.lastEdgeCount = this.graph.size;
       const token = this.generation;
       const total = Math.max(1, Math.min(1000, Number(options.iterations) || 120));
       const batch = Math.max(1, Math.min(50, Number(options.batchIterations) || 10));
@@ -203,9 +228,14 @@
       this.finishWorker();
       const wasRunning = this.running;
       this.running = false;
-      if (wasRunning) this.emit('stopped', {reason: String(reason || 'canceled')});
+      if (wasRunning) {
+        this.metrics.canceled++;
+        this.emit('stopped', {reason: String(reason || 'canceled')});
+      }
       return wasRunning || wasPending;
     }
+
+    getMetrics() { return Object.freeze({...this.metrics}); }
 
     destroy() {
       if (this.destroyed) return;

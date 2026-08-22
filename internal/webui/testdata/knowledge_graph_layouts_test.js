@@ -35,6 +35,8 @@ while (controller.running) queue.shift()();
 assert.deepStrictEqual(events.map(event => event.phase), ['start', 'progress', 'progress', 'progress', 'ready']);
 assert.strictEqual(events.at(-2).stage, 'overlap');
 assert.strictEqual(events.at(-1).completed, 5);
+assert.strictEqual(controller.getMetrics().runs, 1);
+assert.strictEqual(controller.getMetrics().completed, 1);
 assert.deepStrictEqual(graph.getNodeAttributes('one'), {x: 8, y: -4, objectKind: 'chunk'});
 assert.deepStrictEqual(graph.getNodeAttributes('two'), {x: 1, y: 1, pinned: true});
 
@@ -42,6 +44,7 @@ controller.start({iterations: 4, batchIterations: 1});
 assert.strictEqual(controller.stop('selection_changed'), true);
 assert.strictEqual(events.at(-1).phase, 'stopped');
 assert.strictEqual(events.at(-1).reason, 'selection_changed');
+assert.strictEqual(controller.getMetrics().canceled, 1);
 assert(canceled.length > 0);
 assert.strictEqual(layoutAPI.layoutNodeSize({objectKind: 'entry', semanticKind: 'warning'}), 1.3);
 assert.strictEqual(layoutAPI.layoutNodeSize({objectKind: 'entry', semanticKind: 'fact'}), 1);

@@ -41,6 +41,10 @@
       this.requestFrame = options.requestAnimationFrame || globalThis.requestAnimationFrame.bind(globalThis);
       this.cancelFrame = options.cancelAnimationFrame || globalThis.cancelAnimationFrame.bind(globalThis);
       this.ResizeObserver = options.ResizeObserver || globalThis.ResizeObserver;
+      this.now = options.now || (() => globalThis.performance.now());
+      this.debug = !!options.debug;
+      this.logger = options.logger || globalThis.console;
+      this.metrics = {refreshes: 0, resizes: 0, lastRefreshMS: 0, maxRefreshMS: 0};
       this.frame = 0;
       this.destroyed = false;
       this.selection = null;
@@ -98,9 +102,23 @@
       this.frame = this.requestFrame(() => {
         this.frame = 0;
         if (this.destroyed) return;
-        if (this.needsResize && typeof this.sigma.resize === 'function') this.sigma.resize();
+        const started = this.now();
+        if (this.needsResize && typeof this.sigma.resize === 'function') {
+          this.sigma.resize();
+          this.metrics.resizes++;
+        }
         this.needsResize = false;
         if (typeof this.sigma.refresh === 'function') this.sigma.refresh();
+        const duration = Math.max(0, this.now() - started);
+        this.metrics.refreshes++;
+        this.metrics.lastRefreshMS = duration;
+        this.metrics.maxRefreshMS = Math.max(this.metrics.maxRefreshMS, duration);
+        if (this.debug && this.logger && typeof this.logger.debug === 'function') {
+          this.logger.debug('[Koder Knowledge render]', {
+            duration_ms: duration, nodes: this.store.graph.order, edges: this.store.graph.size,
+            resized: this.metrics.resizes,
+          });
+        }
       });
     }
 
@@ -114,6 +132,8 @@
       if (this.stage && this.stage.dataset) this.stage.dataset.graphState = state;
       if (this.stage && typeof this.stage.setAttribute === 'function') this.stage.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
     }
+
+    getMetrics() { return Object.freeze({...this.metrics, nodes: this.store.graph.order, edges: this.store.graph.size}); }
 
     destroy() {
       if (this.destroyed) return;

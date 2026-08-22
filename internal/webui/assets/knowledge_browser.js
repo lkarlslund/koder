@@ -144,6 +144,10 @@
     return {root: {kind: objectKind, id}, max_depth: 2, max_nodes: 200, max_edges: 400, time_limit_ms: 2500};
   }
 
+  function graphDebugEnabled(search) {
+    try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
+  }
+
   function sanitizedMarkdownHTML(value, markedAPI, purifyAPI) {
     if (!markedAPI || typeof markedAPI.parse !== 'function' || !purifyAPI || typeof purifyAPI.sanitize !== 'function') return '';
     const rendered = markedAPI.parse(String(value || ''), {gfm: true, breaks: false});
@@ -746,6 +750,7 @@
       const client = globalThis.KoderKnowledgeAPI.fromPageConfig(globalThis.KODER_KNOWLEDGE_CONFIG || {});
       const runtime = {};
       const canvas = shell.querySelector('[data-knowledge-graph-canvas]');
+      const graphDebug = graphDebugEnabled(globalThis.location && globalThis.location.search);
       if (canvas && globalThis.KoderKnowledgeGraph && globalThis.KoderKnowledgeGraphAdapter &&
           globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
         const graphStore = new globalThis.KoderKnowledgeGraph.Store();
@@ -753,7 +758,7 @@
         runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
           store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
           legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
-          SigmaAPI: globalThis.Sigma,
+          SigmaAPI: globalThis.Sigma, debug: graphDebug,
         });
         runtime.graphViewport = new globalThis.KoderKnowledgeGraphViewport.Viewport({
           renderer: runtime.graphRenderer.sigma, container: canvas,
@@ -768,7 +773,7 @@
         });
         if (globalThis.KoderKnowledgeGraphLayout && globalThis.KoderKnowledgeLayouts) {
           runtime.graphLayout = new globalThis.KoderKnowledgeGraphLayout.ForceAtlasController({
-            graph: graphStore.graph, layouts: globalThis.KoderKnowledgeLayouts,
+            graph: graphStore.graph, layouts: globalThis.KoderKnowledgeLayouts, debug: graphDebug,
           });
         }
       }
@@ -784,5 +789,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphDebugEnabled, sanitizedMarkdownHTML, mount});
 });

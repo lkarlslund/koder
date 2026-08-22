@@ -24,6 +24,7 @@ const adapter = new adapterAPI.Adapter(store);
 adapter.replaceSnapshot(fixture.apiSnapshot);
 let scheduled;
 let canceled = 0;
+let clock = 10;
 const stage = {dataset: {}, setAttribute(name, value) { this[name] = value; }};
 const container = {parentElement: stage};
 const renderer = new rendererAPI.Renderer({
@@ -32,6 +33,7 @@ const renderer = new rendererAPI.Renderer({
   ResizeObserver: FakeResizeObserver,
   requestAnimationFrame(callback) { scheduled = callback; return 7; },
   cancelAnimationFrame(id) { canceled = id; },
+  now() { clock += 2; return clock; },
 });
 
 for (const key of store.graph.nodes()) {
@@ -45,6 +47,7 @@ assert.strictEqual(FakeResizeObserver.instance.observed, container);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);
 assert.strictEqual(FakeSigma.instance.refreshCount, 1);
+assert.deepStrictEqual(renderer.getMetrics(), {refreshes: 1, resizes: 1, lastRefreshMS: 2, maxRefreshMS: 2, nodes: 3, edges: 1});
 
 const node = FakeSigma.instance.settings.nodeReducer(`entry:${fixture.ids.partition}`, store.graph.getNodeAttributes(`entry:${fixture.ids.partition}`));
 assert.strictEqual(node.label, 'Partition a disk with sfdisk');
