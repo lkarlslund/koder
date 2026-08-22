@@ -14,8 +14,9 @@ import (
 type OperationalAction string
 
 const (
-	OperationalStatusRead   OperationalAction = "status_read"
-	OperationalIndexRebuild OperationalAction = "index_rebuild"
+	OperationalStatusRead    OperationalAction = "status_read"
+	OperationalIntegrityScan OperationalAction = "integrity_scan"
+	OperationalIndexRebuild  OperationalAction = "index_rebuild"
 )
 
 var ErrOperationalPolicyDenied = errors.New("knowledge operational policy denied operation")
