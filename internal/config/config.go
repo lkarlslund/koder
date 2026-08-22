@@ -52,6 +52,14 @@ type Store struct {
 	Backend string `toml:"backend"`
 }
 
+// Knowledge controls the independent durable-knowledge subsystem. Enabled=false skips
+// opening it. Required=true turns an open failure into a process startup failure instead
+// of degrading Koder without Knowledge.
+type Knowledge struct {
+	Enabled  bool `toml:"enabled"`
+	Required bool `toml:"required"`
+}
+
 type Thinking struct {
 	CavemanEnabled     bool   `toml:"caveman_enabled"`
 	CavemanProviderID  string `toml:"caveman_provider_id"`
@@ -165,6 +173,7 @@ type Config struct {
 	Access           accesssettings.Settings `toml:"access"`
 	GlobalMounts     []accesssettings.Mount  `toml:"global_mounts"`
 	Store            Store                   `toml:"store"`
+	Knowledge        Knowledge               `toml:"knowledge"`
 	UI               UI                      `toml:"ui"`
 	Voice            Voice                   `toml:"voice"`
 	Thinking         Thinking                `toml:"thinking"`
@@ -281,6 +290,9 @@ func LoadWithOptions(opts LoadOptions) (Config, error) {
 	if !strings.Contains(string(data), "[codex]") {
 		cfg.Codex = Default().Codex
 	}
+	if !strings.Contains(string(data), "[knowledge]") {
+		cfg.Knowledge = Default().Knowledge
+	}
 	cfg.configDir = paths.configDir
 	cfg.stateDir = paths.stateDir
 	cfg.cacheDir = paths.cacheDir
@@ -343,6 +355,7 @@ func Default() Config {
 		Store: Store{
 			Backend: "pebble",
 		},
+		Knowledge: Knowledge{Enabled: true},
 		UI: UI{
 			Theme:        "dark",
 			AutoContinue: true,
@@ -426,6 +439,9 @@ func (c *Config) applyDefaults() {
 	c.GlobalMounts = accesssettings.NormalizeMounts(c.GlobalMounts)
 	if c.Store.Backend == "" {
 		c.Store.Backend = def.Store.Backend
+	}
+	if c.Knowledge.Required {
+		c.Knowledge.Enabled = true
 	}
 	if c.Permissions.Profiles == nil {
 		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)

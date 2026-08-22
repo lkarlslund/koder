@@ -122,9 +122,14 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	knowledge := openDefaultKnowledgeStore(cfg.StateDir())
+	knowledge, err := openConfiguredDefaultKnowledgeStore(cfg.StateDir(), cfg.Knowledge)
+	if err != nil {
+		return err
+	}
 	if knowledge.OpenError != nil {
 		slog.Warn("knowledge store unavailable; continuing without Knowledge", "error", knowledge.OpenError)
+	} else if !knowledge.Enabled {
+		slog.Info("knowledge store disabled")
 	} else {
 		slog.Info("knowledge store opened")
 	}

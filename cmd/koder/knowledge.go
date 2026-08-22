@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/lkarlslund/koder/internal/config"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
 )
@@ -15,6 +16,8 @@ type knowledgeStoreOpener func(string) (knowledgeStore.Store, error)
 type optionalKnowledgeStore struct {
 	Store     knowledgeStore.Store
 	OpenError error
+	Enabled   bool
+	Required  bool
 }
 
 func openOptionalKnowledgeStore(stateDir string, open knowledgeStoreOpener) optionalKnowledgeStore {
@@ -33,6 +36,25 @@ func openOptionalKnowledgeStore(stateDir string, open knowledgeStoreOpener) opti
 
 func openDefaultKnowledgeStore(stateDir string) optionalKnowledgeStore {
 	return openOptionalKnowledgeStore(stateDir, func(stateDir string) (knowledgeStore.Store, error) {
+		return knowledgePebble.Open(stateDir)
+	})
+}
+
+func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open knowledgeStoreOpener) (optionalKnowledgeStore, error) {
+	if !cfg.Enabled && !cfg.Required {
+		return optionalKnowledgeStore{}, nil
+	}
+	subsystem := openOptionalKnowledgeStore(stateDir, open)
+	subsystem.Enabled = true
+	subsystem.Required = cfg.Required
+	if subsystem.OpenError != nil && cfg.Required {
+		return subsystem, fmt.Errorf("required knowledge store unavailable: %w", subsystem.OpenError)
+	}
+	return subsystem, nil
+}
+
+func openConfiguredDefaultKnowledgeStore(stateDir string, cfg config.Knowledge) (optionalKnowledgeStore, error) {
+	return openConfiguredKnowledgeStore(stateDir, cfg, func(stateDir string) (knowledgeStore.Store, error) {
 		return knowledgePebble.Open(stateDir)
 	})
 }

@@ -63,6 +63,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Store.Backend != "pebble" {
 		t.Fatalf("unexpected store backend: %s", cfg.Store.Backend)
 	}
+	if !cfg.Knowledge.Enabled || cfg.Knowledge.Required {
+		t.Fatalf("knowledge should default to enabled but optional: %#v", cfg.Knowledge)
+	}
 	if !cfg.UI.AutoContinue {
 		t.Fatal("expected auto continue enabled by default")
 	}
@@ -89,6 +92,61 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(temp, "koder", "config.toml")); err != nil {
 		t.Fatalf("expected config file: %v", err)
+	}
+}
+
+func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Knowledge.Required = true
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Knowledge.Enabled || !loaded.Knowledge.Required {
+		t.Fatalf("knowledge configuration did not round-trip: %#v", loaded.Knowledge)
+	}
+}
+
+func TestLegacyConfigurationEnablesOptionalKnowledge(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	configDir := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("[store]\nbackend = 'pebble'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Knowledge.Enabled || cfg.Knowledge.Required {
+		t.Fatalf("legacy config knowledge policy = %#v", cfg.Knowledge)
+	}
+}
+
+func TestRequiredKnowledgeCannotBeDisabled(t *testing.T) {
+	cfg := Default()
+	cfg.Knowledge.Enabled = false
+	cfg.Knowledge.Required = true
+	cfg.applyDefaults()
+	if !cfg.Knowledge.Enabled {
+		t.Fatalf("required knowledge remained disabled: %#v", cfg.Knowledge)
 	}
 }
 
