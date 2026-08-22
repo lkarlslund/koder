@@ -197,6 +197,7 @@
       this.graphRenderer = options.graphRenderer || null;
       this.graphViewport = options.graphViewport || null;
       this.graphLayout = options.graphLayout || null;
+      this.graphView = options.graphView || null;
       this.chunks = [];
       this.matches = [];
       this.page = null;
@@ -220,6 +221,10 @@
       this.graphExpandIncoming = shell.querySelector('[data-knowledge-expand-incoming]');
       this.graphExpandOutgoing = shell.querySelector('[data-knowledge-expand-outgoing]');
       this.graphExpandStatus = shell.querySelector('[data-knowledge-expand-status]');
+      this.graphHideButton = shell.querySelector('[data-knowledge-view-hide]');
+      this.graphIsolateButton = shell.querySelector('[data-knowledge-view-isolate]');
+      this.graphRevealButton = shell.querySelector('[data-knowledge-view-reveal]');
+      this.graphUndoButton = shell.querySelector('[data-knowledge-view-undo]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -259,6 +264,10 @@
       });
       if (this.graphExpandIncoming) this.graphExpandIncoming.addEventListener('click', () => this.expandGraph('incoming'));
       if (this.graphExpandOutgoing) this.graphExpandOutgoing.addEventListener('click', () => this.expandGraph('outgoing'));
+      if (this.graphHideButton) this.graphHideButton.addEventListener('click', () => this.applyGraphViewAction('hide'));
+      if (this.graphIsolateButton) this.graphIsolateButton.addEventListener('click', () => this.applyGraphViewAction('isolate'));
+      if (this.graphRevealButton) this.graphRevealButton.addEventListener('click', () => this.applyGraphViewAction('reveal'));
+      if (this.graphUndoButton) this.graphUndoButton.addEventListener('click', () => this.applyGraphViewAction('undo'));
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -281,6 +290,12 @@
               this.loadGraphSelection();
             }, 0);
           }
+        });
+      }
+      if (this.graphView) {
+        this.graphViewUnsubscribe = this.graphView.subscribe(() => {
+          if (this.graphRenderer) this.graphRenderer.scheduleRefresh(false);
+          this.updateGraphViewControls();
         });
       }
       if (this.graphLayout) {
@@ -313,6 +328,7 @@
         });
       }
       this.syncControls();
+      this.updateGraphViewControls();
     }
 
     setState(state, options) {
@@ -594,6 +610,34 @@
         this.graphSelectionCount.hidden = items.length < 2;
         this.graphSelectionCount.textContent = items.length < 2 ? '' : `${items.length} selected`;
       }
+      this.updateGraphViewControls();
+    }
+
+    updateGraphViewControls() {
+      const selection = this.graphAdapter ? this.graphAdapter.selectionSnapshot().items : [];
+      const state = this.graphView ? this.graphView.state() : {hidden: 0, canUndo: false};
+      if (this.graphHideButton) this.graphHideButton.disabled = !this.graphView || !selection.length;
+      if (this.graphIsolateButton) this.graphIsolateButton.disabled = !this.graphView || !selection.length;
+      if (this.graphRevealButton) this.graphRevealButton.disabled = !this.graphView || !state.hidden;
+      if (this.graphUndoButton) this.graphUndoButton.disabled = !this.graphView || !state.canUndo;
+    }
+
+    applyGraphViewAction(action) {
+      if (!this.graphView) return false;
+      const items = this.graphAdapter ? this.graphAdapter.selectionSnapshot().items : [];
+      let changed = false;
+      if (action === 'hide') changed = this.graphView.hide(items);
+      if (action === 'isolate') changed = this.graphView.isolate(items);
+      if (action === 'reveal') changed = this.graphView.reveal();
+      if (action === 'undo') changed = this.graphView.undo();
+      if (!changed) return false;
+      if (action === 'hide' && this.graphAdapter) this.graphAdapter.clearSelection();
+      const status = this.shell.querySelector('[data-knowledge-status-label]');
+      if (status) {
+        const labels = {hide: 'Selection hidden locally', isolate: 'Selection isolated locally', reveal: 'Hidden items revealed', undo: 'Local view change undone'};
+        status.textContent = labels[action] || 'Graph view updated';
+      }
+      return true;
     }
 
     clearGraphSelection() {
@@ -690,6 +734,7 @@
       try {
         const response = await this.client.graphSnapshot(request, {channel: 'graph', timeoutMS: 10000});
         this.graphAdapter.replaceSnapshot(response);
+        if (this.graphView) this.graphView.reset();
         const rootKey = `${request.root.kind}:${request.root.id}`;
         this.graphAdapter.select('node', rootKey);
         const counts = this.graphAdapter.counts();
@@ -849,9 +894,11 @@
       if (this.graphUnsubscribe) this.graphUnsubscribe();
       if (this.graphInteractionUnsubscribe) this.graphInteractionUnsubscribe();
       if (this.graphLayoutUnsubscribe) this.graphLayoutUnsubscribe();
+      if (this.graphViewUnsubscribe) this.graphViewUnsubscribe();
       if (this.graphLayout) this.graphLayout.destroy();
       if (this.graphViewport) this.graphViewport.destroy();
       if (this.graphRenderer) this.graphRenderer.destroy();
+      if (this.graphView) this.graphView.destroy();
       if (this.graphAdapter) this.graphAdapter.destroy();
       this.client.cancelAll();
     }
@@ -923,6 +970,9 @@
           environment.available && globalThis.KoderKnowledgeGraphRendering && globalThis.KoderKnowledgeGraphRenderer && globalThis.KoderKnowledgeGraphViewport && globalThis.Sigma) {
         const graphStore = new globalThis.KoderKnowledgeGraph.Store();
         runtime.graphAdapter = new globalThis.KoderKnowledgeGraphAdapter.Adapter(graphStore);
+        if (globalThis.KoderKnowledgeGraphInteractions) {
+          runtime.graphView = new globalThis.KoderKnowledgeGraphInteractions.LocalViewHistory({graph: graphStore.graph});
+        }
         runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
           store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
           legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,

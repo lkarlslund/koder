@@ -34,6 +34,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`id="knowledge-browser"`, `id="knowledge-graph"`, "Koder Knowledge",
 		`data-knowledge-state-title`, `data-knowledge-state-detail`, `data-knowledge-retry`, `data-knowledge-banner`,
 		`data-knowledge-graph-canvas`, `data-knowledge-selection-box`, `data-knowledge-selection-count`, `data-knowledge-graph-fallback`, `data-knowledge-graph-fallback-detail`, `data-knowledge-legend`, `data-knowledge-graph-center`, `data-knowledge-graph-fit`,
+		`data-knowledge-view-hide`, `data-knowledge-view-isolate`, `data-knowledge-view-reveal`, `data-knowledge-view-undo`,
 		`data-knowledge-search-form`, `data-knowledge-search`, `data-knowledge-filter="kind"`, `data-knowledge-filter="scope_kind"`,
 		`data-knowledge-results`, `data-knowledge-load-more`,
 		`data-knowledge-inspector-empty`, `data-knowledge-inspector-content`, `data-knowledge-inspector-markdown`,
@@ -41,7 +42,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`data-knowledge-send-chat`, `data-knowledge-send-status`,
 		`/assets/vendor/marked/marked.umd.js`, `/assets/vendor/dompurify/purify.min.js`,
 		`data-knowledge-pane="sources"`, `data-knowledge-pane="graph"`, `data-knowledge-pane="inspector"`, `data-knowledge-return`,
-		`/assets/knowledge_browser.css`, `/assets/knowledge_api_client.js`, `/assets/knowledge_graph_adapter.js`, `/assets/knowledge_graph.js`, `/assets/knowledge_graph_rendering.js`, `/assets/knowledge_graph_renderer.js`, `/assets/knowledge_graph_viewport.js`, `/assets/knowledge_graph_layouts.js`, `/assets/knowledge_browser.js`,
+		`/assets/knowledge_browser.css`, `/assets/knowledge_api_client.js`, `/assets/knowledge_graph_adapter.js`, `/assets/knowledge_graph.js`, `/assets/knowledge_graph_rendering.js`, `/assets/knowledge_graph_renderer.js`, `/assets/knowledge_graph_viewport.js`, `/assets/knowledge_graph_layouts.js`, `/assets/knowledge_graph_interactions.js`, `/assets/knowledge_browser.js`,
 		`/assets/vendor/graphology/graphology.umd.min.js`,
 		`/assets/vendor/knowledge-layouts/knowledge-layouts.min.js`,
 		`/assets/vendor/sigma/sigma.min.js`, currentAssetHash,
@@ -92,7 +93,7 @@ func TestMainWebUIExposesKnowledgeExplorerEntry(t *testing.T) {
 }
 
 func TestKnowledgeExplorerResponsiveShellAssetsAreEmbedded(t *testing.T) {
-	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_api_client.js", "assets/knowledge_graph_adapter.js", "assets/knowledge_graph.js", "assets/knowledge_graph_rendering.js", "assets/knowledge_graph_renderer.js", "assets/knowledge_graph_viewport.js", "assets/knowledge_graph_layouts.js", "assets/knowledge_layout_worker.js", "assets/knowledge_browser.js"} {
+	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_api_client.js", "assets/knowledge_graph_adapter.js", "assets/knowledge_graph.js", "assets/knowledge_graph_rendering.js", "assets/knowledge_graph_renderer.js", "assets/knowledge_graph_viewport.js", "assets/knowledge_graph_layouts.js", "assets/knowledge_graph_interactions.js", "assets/knowledge_layout_worker.js", "assets/knowledge_browser.js"} {
 		data, err := webAssets.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read embedded Knowledge shell asset %q: %v", path, err)

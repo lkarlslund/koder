@@ -70,10 +70,12 @@
         nodeReducer: (key, attributes) => this.rendering.styledNodeAttributes(attributes, {
           selected: this.selectionKeys.has(`node:${key}`),
           hovered: !!this.hover && this.hover.kind === 'node' && this.hover.key === key,
+          hidden: !!attributes.hidden,
         }),
         edgeReducer: (key, attributes) => this.rendering.styledEdgeAttributes(attributes, {
           selected: this.selectionKeys.has(`edge:${key}`),
           hovered: !!this.hover && this.hover.kind === 'edge' && this.hover.key === key,
+          hidden: !!attributes.hidden || this.store.graph.getNodeAttribute(this.store.graph.source(key), 'hidden') || this.store.graph.getNodeAttribute(this.store.graph.target(key), 'hidden'),
         }),
       };
       if (programs.EdgeArrowProgram && programs.EdgeLineProgram) {
