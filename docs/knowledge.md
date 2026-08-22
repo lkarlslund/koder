@@ -404,6 +404,27 @@ The explorer presents `personal/me` as a dedicated editor: its scope is locked, 
 is required in the main form rather than hidden as advanced metadata, and observed or
 inferred choices explain their evidence and review consequences.
 
+## Background curation contracts
+
+Curation starts from a sealed user/assistant turn boundary, identified by session, chat,
+user-item, and assistant-item IDs plus the assistant seal time. Cheap provider-independent
+signals schedule inspection; they do not authorize a knowledge write:
+
+| Signal | Meaning |
+| --- | --- |
+| `failed_then_succeeded` | A failed approach was followed by a successful fallback |
+| `researched_then_succeeded` | Research was followed by a successful outcome |
+| `user_correction` | The user corrected a claim or instruction |
+| `repeated_workaround` | A workaround appears durable enough to compare across turns |
+| `contradicting_evidence` | New evidence may contradict existing knowledge |
+| `explicit_personal_preference` | The user directly stated a durable preference |
+
+The queue record contains only turn/item references, signal kinds, confidence used for
+scheduling, lifecycle, safe counts, and a machine error class. It does not copy transcript
+text or provider error details. Its lifecycle is `queued` -> `processing` -> one of
+`no_candidates`, `candidates_ready`, or `failed`. Candidate extraction and subsequent
+policy checks remain separate stages; signal confidence is never permission to persist.
+
 ## Combined examples
 
 ### Environment-specific procedure

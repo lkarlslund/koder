@@ -1,6 +1,6 @@
 package knowledge
 
-//go:generate go tool enumer -type=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind -trimprefix=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind -transform=snake -json -text -values -output=enums_enumer.go
+//go:generate go tool enumer -type=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind,CurationSignalKind,CurationState -trimprefix=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind,CurationSignalKind,CurationState -transform=snake -json -text -values -output=enums_enumer.go
 
 // ChunkKind identifies the purpose and default policy of a knowledge chunk.
 type ChunkKind uint8
@@ -206,4 +206,30 @@ const (
 	FindingKindPhysicalSafety
 	FindingKindSecuritySensitive
 	FindingKindBiometric
+)
+
+// CurationSignalKind identifies a durable-learning pattern observed in one sealed turn.
+// A signal only schedules inspection; it is not itself canonical knowledge.
+type CurationSignalKind uint8
+
+const (
+	CurationSignalKindUnspecified CurationSignalKind = iota
+	CurationSignalKindFailedThenSucceeded
+	CurationSignalKindResearchedThenSucceeded
+	CurationSignalKindUserCorrection
+	CurationSignalKindRepeatedWorkaround
+	CurationSignalKindContradictingEvidence
+	CurationSignalKindExplicitPersonalPreference
+)
+
+// CurationState tracks provider-independent processing of one completed turn.
+type CurationState uint8
+
+const (
+	CurationStateUnspecified CurationState = iota
+	CurationStateQueued
+	CurationStateProcessing
+	CurationStateNoCandidates
+	CurationStateCandidatesReady
+	CurationStateFailed
 )
