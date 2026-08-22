@@ -145,7 +145,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
 		Description: "Search, inspect, and maintain Koder's durable, linked knowledge.",
-		Usage:       "Search existing knowledge before web research when durable or environment-specific knowledge may apply. Search returns a small ranked set of summaries and IDs; use get for the full current body, neighbors for linked context, and history for compact revision summaries. Persist only durable lessons, record applicability, and use verify with existing evidence for assessed claims. Correct a claim with entry_update or entry_supersede instead of silently adding a conflict. Use link with relationship to create a relationship, unlink to archive it, and link with an archived link id plus expected_revision to restore it. Create/update objects are patches where documented and mutations require the current expected_revision. Archive is reversible. Delete is permanent, requires archive plus confirmed=true, and chunk cascade deletion may remove dependent graph data. Never store secrets; use fresh authoritative evidence for high-risk knowledge.",
+		Usage:       "Choose only fields used by the selected action. Search returns compact summaries and IDs; use get for the full current body, neighbors for linked context, and history for compact revision summaries. Mutations require the current expected_revision where shown. Archive and unlink are reversible. Permanent deletion requires archive plus confirmed=true; chunk cascade deletion may remove dependent graph data.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -179,7 +179,7 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	actions, scopes := strings.Join(offer.Actions, ", "), strings.Join(scopeKindStrings(offer.ScopeKinds), ", ")
 	policyDescription := " Runtime policy permits actions: " + actions + "; permitted scopes: " + scopes + "."
 	spec.Description += policyDescription
-	spec.Usage += policyDescription
+	spec.Usage += " " + toolGuidance(offer) + policyDescription
 	return spec, true
 }
 

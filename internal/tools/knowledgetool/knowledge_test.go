@@ -57,6 +57,14 @@ func TestKnowledgeToolDefinitionRequiresServiceAndOffersReadActions(t *testing.T
 	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors,chunk_list,chunk_get,chunk_create,chunk_update,chunk_archive,chunk_restore,chunk_delete,entry_create,entry_update,entry_supersede,entry_archive,entry_restore,entry_delete,link,unlink,verify,history" {
 		t.Fatalf("knowledge actions = %q", got)
 	}
+	for _, guidance := range []string{
+		"Durable learning:", "Contradictions and corrections:", "Verification:",
+		"High-risk knowledge:", "Personal knowledge:", "Secrets: never persist",
+	} {
+		if !strings.Contains(definition.Function.Description, guidance) {
+			t.Fatalf("Knowledge definition is missing %q guidance: %s", guidance, definition.Function.Description)
+		}
+	}
 }
 
 func TestKnowledgeToolRequiresRuntimeService(t *testing.T) {
@@ -110,6 +118,14 @@ func TestKnowledgeToolDefinitionFiltersActionsAndScopesFromPolicy(t *testing.T) 
 	}
 	if !strings.Contains(definition.Function.Description, "actions: get, history") || !strings.Contains(definition.Function.Description, "scopes: project") {
 		t.Fatalf("runtime policy description = %q", definition.Function.Description)
+	}
+	if !strings.Contains(definition.Function.Description, "Retrieval:") || !strings.Contains(definition.Function.Description, "Secrets: never persist") {
+		t.Fatalf("read-only guidance = %q", definition.Function.Description)
+	}
+	for _, withheld := range []string{"Durable learning:", "High-risk knowledge:", "Personal knowledge:"} {
+		if strings.Contains(definition.Function.Description, withheld) {
+			t.Fatalf("read-only offer included write guidance %q: %s", withheld, definition.Function.Description)
+		}
 	}
 
 	_, err = call(context.Background(), runtimeFor(service), map[string]string{"action": "search", "query": "linux"})
