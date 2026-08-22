@@ -151,6 +151,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 	}()
 
 	engine := agent.New(cfg, st, recorder, mcpManager)
+	engine.SetKnowledgeService(knowledge.Service)
 	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)
 }
 

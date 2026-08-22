@@ -120,6 +120,7 @@ const (
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
+	ToolKindKnowledge           ToolKind = "knowledge"
 	ToolKindMCP                 ToolKind = "mcp"
 	ToolKindBrowserStatus       ToolKind = "browser_status"
 	ToolKindBrowserTabs         ToolKind = "browser_tabs"
@@ -246,6 +247,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,
+	ToolKindKnowledge,
 	ToolKindMCP,
 	ToolKindBrowserStatus, ToolKindBrowserTabs, ToolKindBrowserNavigation, ToolKindBrowserPage,
 	ToolKindBrowserInteract, ToolKindBrowserCapture, ToolKindBrowserNetwork,

@@ -15,6 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -25,6 +26,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
+	"github.com/lkarlslund/koder/internal/tools/knowledgetool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -41,6 +43,7 @@ type Runtime struct {
 	managedSkillsDir string
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
+	knowledge        *knowledgeService.Service
 }
 
 type Config struct {
@@ -86,6 +89,14 @@ func (r *Runtime) SetPhoneDeviceControl(control phonedevice.Control) {
 func (r *Runtime) SetVoiceSessionControl(control sessiontool.Control) {
 	if r != nil {
 		r.voiceSessions = control
+	}
+}
+
+// SetKnowledgeService changes the process-wide durable Knowledge capability.
+// Nil removes the capability from subsequent tool runtime snapshots.
+func (r *Runtime) SetKnowledgeService(service *knowledgeService.Service) {
+	if r != nil {
+		r.knowledge = service
 	}
 }
 
@@ -163,6 +174,12 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services[key] = service
 	}
 	for key, service := range phonetool.RuntimeService(r.phoneDevice) {
+		if runtime.Services == nil {
+			runtime.Services = map[string]any{}
+		}
+		runtime.Services[key] = service
+	}
+	for key, service := range knowledgetool.RuntimeService(r.knowledge) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

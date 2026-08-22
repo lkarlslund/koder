@@ -84,6 +84,7 @@ const (
 	Skill               ID = domain.ToolKindSkill
 	WebFetch            ID = domain.ToolKindWebFetch
 	WebSearch           ID = domain.ToolKindWebSearch
+	Knowledge           ID = domain.ToolKindKnowledge
 	MCP                 ID = domain.ToolKindMCP
 	BrowserStatus       ID = domain.ToolKindBrowserStatus
 	BrowserTabs         ID = domain.ToolKindBrowserTabs

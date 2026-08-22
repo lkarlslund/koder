@@ -30,6 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
@@ -84,6 +85,15 @@ func (e *Engine) SetVoiceSessionControl(control sessiontool.Control) {
 func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
 	if e != nil && e.toolsRuntime != nil {
 		e.toolsRuntime.SetPhoneDeviceControl(control)
+	}
+}
+
+// SetKnowledgeService exposes the optional process-wide Knowledge service to
+// chat tool runtimes. Passing nil keeps Knowledge unavailable without affecting
+// normal chat operation.
+func (e *Engine) SetKnowledgeService(service *knowledgeService.Service) {
+	if e != nil && e.toolsRuntime != nil {
+		e.toolsRuntime.SetKnowledgeService(service)
 	}
 }
 
