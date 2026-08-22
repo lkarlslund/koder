@@ -348,6 +348,9 @@ func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expe
 	if err := revision.CheckPut("entry", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.replaceEntryIndexes(ctx, optionalEntry(current, exists), &value); err != nil {
+		return err
+	}
 	tx.derivedDirty = true
 	return tx.putRevisioned(entryKey(string(value.ID)), revisionKey(recordEntry, string(value.ID), value.Revision.Number), value)
 }
@@ -363,8 +366,48 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 	if err := revision.CheckDelete("entry", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.replaceEntryIndexes(ctx, &current, nil); err != nil {
+		return err
+	}
 	tx.derivedDirty = true
 	return tx.deleteRevisioned(entryKey(string(id)), revisionPrefix(recordEntry, string(id)))
+}
+
+func optionalEntry(entry knowledge.Entry, exists bool) *knowledge.Entry {
+	if !exists {
+		return nil
+	}
+	return &entry
+}
+
+func (tx *transaction) replaceEntryIndexes(ctx context.Context, old, next *knowledge.Entry) error {
+	if old != nil {
+		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *old)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, entry := range values {
+				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, entry.Suffix), nil); err != nil {
+					return fmt.Errorf("delete knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	if next != nil {
+		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *next)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, entry := range values {
+				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, entry.Suffix), entry.Value, nil); err != nil {
+					return fmt.Errorf("put knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expectedRevision uint64) error {

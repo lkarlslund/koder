@@ -22,7 +22,7 @@ const (
 )
 
 func defaultIndexDefinitions() []indexDefinition {
-	return []indexDefinition{
+	definitions := []indexDefinition{
 		chunkSingleIndex(chunkKindIndex, func(chunk knowledge.Chunk) []string {
 			return []string{chunk.Kind.String()}
 		}),
@@ -64,6 +64,7 @@ func defaultIndexDefinitions() []indexDefinition {
 			return []string{indexTime(chunk.LastUsedAt)}
 		}),
 	}
+	return append(definitions, defaultEntryIndexDefinitions()...)
 }
 
 func chunkSingleIndex(name string, components func(knowledge.Chunk) []string) indexDefinition {

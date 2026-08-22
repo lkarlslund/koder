@@ -16,7 +16,9 @@ func NormalizeTitle(value string) string {
 	return strings.Join(strings.Fields(norm.NFC.String(value)), " ")
 }
 
-func comparisonKey(value string) string {
+// NormalizeComparisonKey creates a canonical case-insensitive key for exact title and
+// alias lookup. It is not tokenization; use LexicalTerms for full-text search.
+func NormalizeComparisonKey(value string) string {
 	value = norm.NFKC.String(value)
 	value = cases.Fold().String(value)
 	return strings.Join(strings.Fields(value), " ")
@@ -25,12 +27,12 @@ func comparisonKey(value string) string {
 // NormalizeAliases canonicalizes aliases, removes empty/title-equivalent values, and
 // deduplicates them case-insensitively while preserving first-seen display order.
 func NormalizeAliases(title string, values []string) []string {
-	titleKey := comparisonKey(NormalizeTitle(title))
+	titleKey := NormalizeComparisonKey(NormalizeTitle(title))
 	seen := make(map[string]struct{}, len(values))
 	output := make([]string, 0, len(values))
 	for _, value := range values {
 		alias := NormalizeTitle(value)
-		key := comparisonKey(alias)
+		key := NormalizeComparisonKey(alias)
 		if key == "" || key == titleKey {
 			continue
 		}
