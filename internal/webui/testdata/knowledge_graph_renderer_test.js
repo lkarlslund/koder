@@ -13,6 +13,12 @@ assert.deepStrictEqual(rendererAPI.pointerLocation({event: {x: 17, y: 23}}), {x:
 class FakeSigma {
   constructor(graph, container, settings) {
     this.graph = graph; this.container = container; this.settings = settings;
+    this.indexedNodes = new Set(graph.nodes());
+    graph.on('cleared', () => this.indexedNodes.clear());
+    graph.on('nodeDropped', event => this.indexedNodes.delete(event.key));
+    graph.on('nodeAttributesUpdated', event => {
+      if (!this.indexedNodes.has(event.key)) throw new Error(`partial repaint before indexing ${event.key}`);
+    });
     this.camera = {disable() { this.disabled = true; }, enable() { this.disabled = false; }};
     this.mouse = new FakeMouseCaptor(); FakeSigma.instance = this;
   }
@@ -30,7 +36,7 @@ class FakeSigma {
   getMouseCaptor() { return this.mouse; }
   getCamera() { return this.camera; }
   resize() { this.resizeCount = (this.resizeCount || 0) + 1; }
-  refresh() { this.refreshCount = (this.refreshCount || 0) + 1; }
+  refresh() { this.indexedNodes = new Set(this.graph.nodes()); this.refreshCount = (this.refreshCount || 0) + 1; }
   kill() { this.killed = true; }
 }
 class FakeMouseCaptor {
@@ -68,6 +74,13 @@ const renderer = new rendererAPI.Renderer({
   cancelAnimationFrame(id) { canceled = id; },
   now() { clock += 2; return clock; },
 });
+
+// Replacing a live graph must fully index the new nodes synchronously. Otherwise
+// the visibility and layout attribute updates that follow make Sigma reject a
+// partial repaint for nodes that do not have render-program slots yet.
+adapter.replaceSnapshot(fixture.apiSnapshot);
+assert.strictEqual(FakeSigma.instance.refreshCount, 1);
+assert.strictEqual(FakeSigma.instance.indexedNodes.size, store.graph.order);
 
 for (const key of store.graph.nodes()) {
   const attributes = store.graph.getNodeAttributes(key);
@@ -135,8 +148,8 @@ assert.strictEqual(store.graph.getNodeAttribute(`entry:${fixture.ids.partition}`
 assert.strictEqual(pinEvents[1].pinned, false);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);
-assert.strictEqual(FakeSigma.instance.refreshCount, 1);
-assert.deepStrictEqual(renderer.getMetrics(), {refreshes: 1, resizes: 1, lastRefreshMS: 2, maxRefreshMS: 2, nodes: 3, edges: 1});
+assert.strictEqual(FakeSigma.instance.refreshCount, 2);
+assert.deepStrictEqual(renderer.getMetrics(), {refreshes: 2, resizes: 1, lastRefreshMS: 2, maxRefreshMS: 2, nodes: 3, edges: 1});
 
 const node = FakeSigma.instance.settings.nodeReducer(`entry:${fixture.ids.partition}`, store.graph.getNodeAttributes(`entry:${fixture.ids.partition}`));
 assert.strictEqual(node.label, 'Partition a disk with sfdisk');

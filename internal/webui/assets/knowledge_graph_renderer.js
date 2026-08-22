@@ -159,7 +159,12 @@
       if (event.type === 'change') {
         provisionalPositions(this.store.graph);
         this.updateLegend();
-        this.scheduleRefresh(false);
+        // Store replacement clears and repopulates the same Graphology instance.
+        // Sigma defers rebuilding its render-program indices, but local visibility
+        // restoration and layout may update attributes before the next animation
+        // frame (especially in a background tab). Force one complete repaint now
+        // so later partial repaints always address indexed nodes and edges.
+        this.refreshNow(false);
       }
       if (event.type === 'refetch') this.setState('stale');
     }
@@ -187,25 +192,34 @@
       if (this.frame) return;
       this.frame = this.requestFrame(() => {
         this.frame = 0;
-        if (this.destroyed) return;
-        const started = this.now();
-        if (this.needsResize && typeof this.sigma.resize === 'function') {
-          this.sigma.resize();
-          this.metrics.resizes++;
-        }
-        this.needsResize = false;
-        if (typeof this.sigma.refresh === 'function') this.sigma.refresh();
-        const duration = Math.max(0, this.now() - started);
-        this.metrics.refreshes++;
-        this.metrics.lastRefreshMS = duration;
-        this.metrics.maxRefreshMS = Math.max(this.metrics.maxRefreshMS, duration);
-        if (this.debug && this.logger && typeof this.logger.debug === 'function') {
-          this.logger.debug('[Koder Knowledge render]', {
-            duration_ms: duration, nodes: this.store.graph.order, edges: this.store.graph.size,
-            resized: this.metrics.resizes,
-          });
-        }
+        this.refreshNow(false);
       });
+    }
+
+    refreshNow(resize) {
+      if (this.destroyed) return;
+      this.needsResize = this.needsResize || !!resize;
+      if (this.frame) {
+        this.cancelFrame(this.frame);
+        this.frame = 0;
+      }
+      const started = this.now();
+      if (this.needsResize && typeof this.sigma.resize === 'function') {
+        this.sigma.resize();
+        this.metrics.resizes++;
+      }
+      this.needsResize = false;
+      if (typeof this.sigma.refresh === 'function') this.sigma.refresh();
+      const duration = Math.max(0, this.now() - started);
+      this.metrics.refreshes++;
+      this.metrics.lastRefreshMS = duration;
+      this.metrics.maxRefreshMS = Math.max(this.metrics.maxRefreshMS, duration);
+      if (this.debug && this.logger && typeof this.logger.debug === 'function') {
+        this.logger.debug('[Koder Knowledge render]', {
+          duration_ms: duration, nodes: this.store.graph.order, edges: this.store.graph.size,
+          resized: this.metrics.resizes,
+        });
+      }
     }
 
     setSelection(kind, key) {
